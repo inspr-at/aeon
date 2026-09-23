@@ -33,6 +33,7 @@ scripts/             release checks
 7. **Never** read or print secrets, never touch other worktrees, never run destructive git (`reset --hard`, `clean -f`, `push --force`).
 8. When done: `pct` 100, a one-paragraph summary in `note`, and a final commit.
 9. **No reviews by other models.** Do not run cross-family or any other review gates per package, and never call other model CLIs (claude, codex, grok, cursor-agent) yourself. QA is consolidated per release by the coordinator (Markus, 2026-09-23).
+10. **Never touch classic Paimos.** Do not change the legacy platform (pm.barta.cm, the markus-barta/paimos repo, its deployment, config or data), and never build or run a cutover, read-only switch or redirect for it. Imports read from it through the API only. Cutover in any form needs Markus's explicit prior approval after his own testing of Aeon (Markus, 2026-09-23).
 
 ## Style
 
