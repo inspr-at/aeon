@@ -33,3 +33,90 @@ export async function getSession(): Promise<{ identity: Identity | null; devMode
   }
   return { identity: body as Identity, devMode }
 }
+
+// R1 wire types mirror api/openapi.yaml. All workspace HTTP calls stay here.
+export interface Kind {
+  id: string; slug: string; label: string; short_prefix: string; icon: string
+  allowed_child_kinds: string[] | null; field_schema: Record<string, unknown>
+}
+export interface WorkNode {
+  id: string; key: string; kind_id: string; title: string; body: string
+  fields: Record<string, unknown>; state: string; parent_id: string | null
+  position: string; created_at: string; updated_at: string; deleted_at?: string | null
+}
+export interface Page<T> { items: T[]; next_cursor: string | null }
+export interface TreeEntry { node: WorkNode; depth: number }
+export interface SearchHit { node: WorkNode; score: number }
+export type SortField = 'position' | 'updated_at' | 'created_at' | 'key' | 'title'
+export interface NodeFilters {
+  kind_id?: string; state?: string; parent_id?: string; include_descendants?: boolean
+}
+export interface NodeQuery extends NodeFilters {
+  sort?: SortField; direction?: 'asc' | 'desc'; cursor?: string; limit?: number
+}
+export interface ViewWrite {
+  name: string; filters: NodeFilters; sort: { field: SortField; direction: 'asc' | 'desc' }
+  columns: string[]; shared?: boolean
+}
+export interface SavedView extends ViewWrite {
+  id: string; owner_principal_id: string; shared: boolean; created_at: string; updated_at: string
+}
+export interface NodeCreate {
+  kind_id: string; title: string; body?: string; fields?: Record<string, unknown>
+  state?: string; parent_id?: string | null; before_id?: string | null
+}
+export type NodePatch = Partial<Pick<WorkNode, 'title' | 'body' | 'fields' | 'state'>>
+
+export class APIError extends Error {
+  readonly status: number
+  constructor(status: number, message: string) { super(message); this.status = status }
+}
+async function json<T>(path: string, method = 'GET', body?: unknown): Promise<T> {
+  const response = await api(path, {
+    method,
+    ...(body === undefined ? {} : { headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(body) }),
+  })
+  if (!response.ok) {
+    const data = await response.json().catch(() => ({}))
+    throw new APIError(response.status, typeof data?.error === 'string' ? data.error : `Request failed (${response.status})`)
+  }
+  return response.status === 204 ? undefined as T : response.json()
+}
+function query(values: object): string {
+  const params = new URLSearchParams()
+  for (const [key, value] of Object.entries(values)) {
+    if (value !== undefined && value !== '') params.set(key, String(value))
+  }
+  const encoded = params.toString()
+  return encoded ? `?${encoded}` : ''
+}
+const idPath = (id: string) => encodeURIComponent(id)
+export const getKinds = () => json<{ items: Kind[] }>('/kinds')
+export const getNodes = (params: NodeQuery = {}) => json<Page<WorkNode>>(`/nodes${query(params)}`)
+export const getTree = (params: { root_id?: string; cursor?: string; limit?: number } = {}) => json<Page<TreeEntry>>(`/nodes/tree${query(params)}`)
+export const getNode = (id: string) => json<WorkNode>(`/nodes/${idPath(id)}`)
+export const createNode = (body: NodeCreate) => json<WorkNode>('/nodes', 'POST', body)
+export const updateNode = (id: string, body: NodePatch) => json<WorkNode>(`/nodes/${idPath(id)}`, 'PATCH', body)
+export const moveNode = (id: string, parent_id: string | null, before_id?: string | null) => json<WorkNode>(`/nodes/${idPath(id)}/move`, 'POST', { parent_id, before_id })
+export const deleteNode = (id: string) => json<void>(`/nodes/${idPath(id)}`, 'DELETE')
+export const searchNodes = (q: string, params: { kind_id?: string; state?: string; cursor?: string; limit?: number } = {}) => json<Page<SearchHit>>(`/search${query({ q, ...params })}`)
+export const getViews = () => json<{ items: SavedView[] }>('/views')
+export const createView = (body: ViewWrite) => json<SavedView>('/views', 'POST', body)
+export const updateView = (id: string, body: Partial<ViewWrite>) => json<SavedView>(`/views/${idPath(id)}`, 'PATCH', body)
+export const deleteView = (id: string) => json<void>(`/views/${idPath(id)}`, 'DELETE')
+
+// EventSource owns Last-Event-ID and retries; close it when the workspace unmounts.
+// Named events do not reach onmessage. Keep this list aligned with R1 writers.
+export function subscribeWorkspace(changed: () => void, connection: (live: boolean) => void): () => void {
+  const stream = new EventSource('/api/events/stream')
+  stream.onopen = () => { connection(true); changed() }
+  stream.onerror = () => connection(false)
+  stream.onmessage = changed
+  for (const resource of ['node', 'kind', 'relation', 'view']) {
+    for (const action of ['created', 'updated', 'deleted', 'moved', 'restored']) {
+      stream.addEventListener(`${resource}.${action}`, changed)
+    }
+  }
+  stream.addEventListener('event.undone', changed)
+  return () => stream.close()
+}

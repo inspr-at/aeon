@@ -12,6 +12,9 @@ async function mockAPI(page: Page, options: { signedIn?: boolean; devMode?: bool
     const request = route.request()
     const path = new URL(request.url()).pathname
     calls.push({ path, method: request.method(), body: request.postData() })
+    if (path === '/api/kinds' || path === '/api/views') return route.fulfill({ json: { items: [] } })
+    if (path === '/api/nodes/tree') return route.fulfill({ json: { items: [], next_cursor: null } })
+    if (path === '/api/events/stream') return route.fulfill({ contentType: 'text/event-stream', body: ': heartbeat\n\n' })
     if (path === '/api/version') return route.fulfill({ json: { version: options.version ?? canonical, scheme: 'inspr-calendar-v2' } })
     if (path === '/api/me') {
       if (options.sessionFailure) return route.fulfill({ status: 503, json: { error: 'Unavailable' } })
@@ -59,7 +62,7 @@ for (const viewport of [{ width: 1280, height: 720 }, { width: 390, height: 844 
         await expect(page.locator('footer [data-version-view="pretty"]')).toBeVisible()
         await page.evaluate(() => document.fonts.ready)
         await noOverflow(page)
-        expect(await page.locator('header').evaluate(el => el.getBoundingClientRect().height)).toBe(64)
+        expect(await page.locator('.app-header').evaluate(el => el.getBoundingClientRect().height)).toBe(64)
         for (const control of await page.locator('button:visible, a:visible:not(.skip-link), input:visible, [role="button"]:visible').all()) {
           const bounds = await control.boundingBox()
           expect(bounds!.height).toBeGreaterThanOrEqual(44)
@@ -152,6 +155,7 @@ test('version uses Pretty mode, keyboard reveal, exact clipboard and one request
   await page.goto('/signin')
   const version = page.locator('footer').getByRole('button', { name: `Copy version ${canonical}` })
   await expect(version).toHaveAttribute('data-version-view', 'pretty')
+  await page.evaluate(() => document.fonts.ready)
   const before = await version.boundingBox()
   await version.focus()
   await expect(version).toHaveAttribute('data-version-view', 'technical')
