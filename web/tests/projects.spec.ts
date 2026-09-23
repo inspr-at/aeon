@@ -40,6 +40,8 @@ test('archived projects stay hidden until the Archived switch is on', async ({ p
 test('filtering highlights matches and an empty result offers to clear', async ({ page }) => {
   await mockWork(page, fixtures())
   await page.goto('/')
+  // The '/' shortcut is bound when the page mounts; press it once the list is there.
+  await expect(page.getByRole('list', { name: 'Projects' }).getByRole('link').first()).toBeVisible()
   await page.keyboard.press('/')
   await expect(page.getByLabel('Filter projects')).toBeFocused()
   await page.keyboard.type('fleet')
