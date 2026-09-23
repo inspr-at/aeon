@@ -6,6 +6,13 @@ import (
 	"context"
 	"errors"
 	"fmt"
+	"github.com/inspr-at/aeon/internal/embedding"
+	"github.com/inspr-at/aeon/internal/events"
+	"github.com/inspr-at/aeon/internal/imports"
+	"github.com/inspr-at/aeon/internal/nodes"
+	"github.com/inspr-at/aeon/internal/relations"
+	"github.com/inspr-at/aeon/internal/search"
+	"github.com/inspr-at/aeon/internal/views"
 	"io"
 	"io/fs"
 	"log/slog"
@@ -70,10 +77,27 @@ func serveListener(ctx context.Context, cfg config.Config, ln net.Listener) erro
 		_ = ln.Close()
 		return err
 	}
+	// R1: embeddings are optional; without AEON_EMBEDDING_URL search is lexical only.
+	embedProvider, err := embedding.FromEnv()
+	if err != nil {
+		_ = ln.Close()
+		return err
+	}
+	if embedProvider != nil {
+		go embedding.NewWorker(pool, embedProvider, embedding.Options{}).Run(ctx)
+	}
 	api := &httpapi.Server{
-		Pool:       pool,
-		Web:        webFS,
-		Modules:    []httpapi.Module{authMod},
+		Pool: pool,
+		Web:  webFS,
+		Modules: []httpapi.Module{
+			authMod,
+			nodes.New(pool, nodes.SQLWriter{}),
+			relations.New(pool),
+			events.New(pool),
+			search.New(pool, embedProvider),
+			views.New(pool),
+			imports.New(pool),
+		},
 		Middleware: []func(http.Handler) http.Handler{authMod.Middleware},
 	}
 	srv := &http.Server{
