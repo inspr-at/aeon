@@ -6,6 +6,9 @@ WORKDIR /src/web
 COPY web/package.json web/package-lock.json ./
 RUN npm ci
 COPY web/ ./
+# prebuild runs the release check, which reads ../scripts and ../version.json
+COPY scripts/ /src/scripts/
+COPY version.json /src/version.json
 RUN npm run build
 
 FROM golang:1.26 AS build
