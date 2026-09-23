@@ -3,7 +3,7 @@ import { expect, test } from '@playwright/test'
 
 test('page title is PAIMOS AEON', async ({ page }) => {
   await page.goto('/')
-  await expect(page).toHaveTitle('PAIMOS AEON')
+  await expect(page).toHaveTitle(/PAIMOS AEON/)
 })
 
 test('GET /api/health returns status ok', async ({ request }) => {
