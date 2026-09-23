@@ -23,9 +23,13 @@ import (
 	"github.com/inspr-at/aeon/internal/events"
 	"github.com/inspr-at/aeon/internal/imports"
 	"github.com/inspr-at/aeon/internal/inbox"
+	"github.com/inspr-at/aeon/internal/intake"
+	"github.com/inspr-at/aeon/internal/journey"
 	"github.com/inspr-at/aeon/internal/modelregistry"
 	"github.com/inspr-at/aeon/internal/nodes"
 	"github.com/inspr-at/aeon/internal/relations"
+	"github.com/inspr-at/aeon/internal/releases"
+	"github.com/inspr-at/aeon/internal/requirements"
 	"github.com/inspr-at/aeon/internal/search"
 	"github.com/inspr-at/aeon/internal/tenant"
 	"github.com/inspr-at/aeon/internal/views"
@@ -115,6 +119,11 @@ func serveListener(ctx context.Context, cfg config.Config, ln net.Listener) erro
 			approvals.New(pool),
 			modelregistry.New(pool),
 			agentaccounts.New(pool),
+			// R3: journey
+			journey.New(pool),
+			requirements.New(pool),
+			releases.New(pool),
+			intake.New(pool),
 		},
 		Middleware: []func(http.Handler) http.Handler{authMod.Middleware},
 	}

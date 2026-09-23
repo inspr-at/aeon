@@ -9,6 +9,8 @@ export const router = createRouter({
   history: createWebHistory(),
   routes: [
     { path: '/', component: HomeView, meta: { title: 'Workspace' } },
+    { path: '/projects/:projectId', component: () => import('./views/JourneyView.vue'), meta: { title: 'Journey' } },
+    { path: '/projects/:projectId/journey/:stage', component: () => import('./views/JourneyView.vue'), meta: { title: 'Journey' } },
     { path: '/agents', component: () => import('./views/AgentsView.vue'), meta: { title: 'Agents' } },
     { path: '/runs/:runId?', component: () => import('./views/RunsView.vue'), meta: { title: 'Sessions & runs' } },
     { path: '/approvals', component: () => import('./views/ApprovalsView.vue'), meta: { title: 'Approvals' } },
