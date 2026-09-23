@@ -1,0 +1,50 @@
+// Release checks for PAIMOS AEON (AEON-6).
+// 1. The vendored INSPR presentation bundle matches the checked-in pin literals. Expected values live in
+//    calendar-version-bundle-pin.json and are never derived from the candidate bytes; bundled JS is never executed here.
+// 2. version.json is the one authoritative version source and holds a valid inspr-calendar-v2 coordinate.
+import { createHash } from "node:crypto";
+import { lstatSync, readFileSync, readdirSync } from "node:fs";
+import { dirname, join, resolve } from "node:path";
+import { fileURLToPath } from "node:url";
+
+const root = resolve(dirname(fileURLToPath(import.meta.url)), "..");
+const sha = (bytes) => createHash("sha256").update(bytes).digest("hex");
+const FILES = ["auto-animate-license.js", "auto-animate.js", "display.json", "manifest.json", "package.json", "presentation.js", "schemes.json", "version-interaction.js", "version.js"];
+
+export function validCalendarVersion(v) {
+  const m = /^([1-9][0-9])(0[1-9]|1[0-2])(0[1-9]|[12][0-9]|3[01])([01][0-9]|2[0-3])([0-5][0-9])([0-5][0-9])\.0\.0$/.exec(v || "");
+  if (!m) return false;
+  const d = new Date(Date.UTC(2000 + +m[1], +m[2] - 1, +m[3]));
+  return d.getUTCMonth() + 1 === +m[2] && d.getUTCDate() === +m[3];
+}
+
+export function verifyRelease() {
+  const fail = (why) => { throw new Error(`release check: ${why}`); };
+  const pin = JSON.parse(readFileSync(join(root, "scripts/calendar-version-bundle-pin.json"), "utf8"));
+  if (pin.repository !== "inspr-at/inspr" || !/^[a-f0-9]{40}$/.test(pin.revision) || !/^[a-f0-9]{64}$/.test(pin.configSha256) || !/^[a-f0-9]{64}$/.test(pin.manifestSha256)) fail("invalid pin");
+  const dir = join(root, "web/src/vendor/calendar-version-display");
+  const have = readdirSync(dir).sort();
+  if (JSON.stringify(have) !== JSON.stringify(FILES)) fail(`bundle file set differs: ${have.join(", ")}`);
+  for (const f of FILES) if (!lstatSync(join(dir, f)).isFile()) fail(`${f} is not a regular file`);
+  const manifestBytes = readFileSync(join(dir, "manifest.json"));
+  if (sha(manifestBytes) !== pin.manifestSha256) fail("manifest digest differs from the pin");
+  const manifest = JSON.parse(manifestBytes);
+  if (manifest.repository !== pin.repository || manifest.revision !== pin.revision || manifest.expectedConfigSha256 !== pin.configSha256) fail("manifest does not name the pinned source");
+  const listed = manifest.files.map((x) => x.outputPath).sort();
+  if (JSON.stringify(listed) !== JSON.stringify(FILES.filter((f) => f !== "manifest.json"))) fail("manifest file list differs");
+  for (const x of manifest.files) { const b = readFileSync(join(dir, x.outputPath)); if (b.length !== x.size || sha(b) !== x.sha256) fail(`${x.outputPath} differs from the manifest`); }
+  if (sha(readFileSync(join(dir, "display.json"))) !== pin.configSha256) fail("display config differs from the pin");
+  const verPath = join(root, "version.json");
+  let exists = true; try { lstatSync(verPath); } catch { exists = false; }
+  if (!exists) { if (process.argv.includes("--release")) fail("version.json is required for a release"); return { version: "dev", scheme: "inspr-calendar-v2", bundle: `${pin.repository}@${pin.revision.slice(0, 7)}` }; }
+  const ver = JSON.parse(readFileSync(verPath, "utf8"));
+  if (ver.version_scheme !== "inspr-calendar-v2") fail(`unknown version scheme ${ver.version_scheme}`);
+  if (!validCalendarVersion(ver.version)) fail(`invalid calendar version ${ver.version}`);
+  if (!Number.isInteger(ver.release_sequence) || ver.release_sequence < 1 || !ver.release_channel) fail("release channel and sequence required");
+  return { version: ver.version, scheme: ver.version_scheme, sequence: ver.release_sequence, bundle: `${pin.repository}@${pin.revision.slice(0, 7)}` };
+}
+
+if (process.argv[1] === fileURLToPath(import.meta.url)) {
+  try { console.log(JSON.stringify(verifyRelease())); }
+  catch (e) { console.error(e.message); process.exitCode = 1; }
+}

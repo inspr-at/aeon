@@ -1,0 +1,46 @@
+openapi: 3.1.0
+info:
+  title: PAIMOS AEON API
+  version: dev
+  license:
+    name: AGPL-3.0-only
+servers:
+  - url: /api
+paths:
+  /health:
+    get:
+      summary: Liveness and database readiness
+      responses:
+        "200":
+          description: Healthy
+          content:
+            application/json:
+              schema:
+                type: object
+                required: [status, db]
+                properties:
+                  status: { type: string, enum: [ok] }
+                  db: { type: string, enum: [ok, down] }
+  /version:
+    get:
+      summary: Calendar version of this build
+      responses:
+        "200":
+          description: Version
+          content:
+            application/json:
+              schema:
+                type: object
+                required: [version, scheme]
+                properties:
+                  version: { type: string, description: "YYMMDDhhmmss.0.0 or dev" }
+                  scheme: { type: string, enum: [inspr-calendar-v2] }
+components:
+  securitySchemes:
+    session:
+      type: apiKey
+      in: cookie
+      name: aeon_session
+    agentKey:
+      type: http
+      scheme: bearer

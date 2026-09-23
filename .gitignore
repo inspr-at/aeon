@@ -1,0 +1,11 @@
+.agent-status.json
+/bin/
+/dist/
+/web/dist/
+/web/node_modules/
+/web/test-results/
+/web/playwright-report/
+.env
+*.env
+.DS_Store
+/tmp/
