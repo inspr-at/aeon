@@ -39,7 +39,8 @@ const (
 	reasonExpectsReply = "tell --expects-reply and --action-request open a classic obligation; Aeon inbox send has no held reply"
 )
 
-// unsupportedCompat is the table of doctrine invocations Aeon does not serve.
+// unsupportedCompat is the table of doctrine invocations RunMessaging does not serve.
+// The legacy Run entry point remains until the coordinator wires P5.4.
 // Args is what follows the program name. An empty Args row is a separate
 // binary and is not executed.
 var unsupportedCompat = []struct {
@@ -54,12 +55,7 @@ var unsupportedCompat = []struct {
 	{"baseline-batch report-built", []string{"baseline-batch", "report-built"}, reasonBaseline},
 	{"sync check", []string{"sync", "check"}, reasonSync},
 	{"paimos-agentd serve", nil, reasonAgentd},
-	{"tell harness:agent", []string{"tell", "codex:worker", "--project", "AEON", "--level", "simple", "-m", "hi"}, reasonHarnessAddress},
-	{"tell --expects-reply", []string{"tell", "00000000-0000-4000-8000-000000000001", "--project", "AEON", "--expects-reply", "-m", "hi"}, reasonExpectsReply},
-	{"listen --as harness:agent", []string{"listen", "--as", "codex:worker", "--project", "AEON"}, reasonListenAs},
 	{"listen --follow", []string{"listen", "--project", "AEON", "--follow"}, reasonListenFollow},
-	{"message target set classic", []string{"message", "target", "set", "--project", "AEON", "--address", "codex:worker", "--adapter", "codex", "--kind", "codex_thread"}, reasonClassicTarget},
-	{"message deliveries", []string{"message", "deliveries"}, reasonDeliveries},
 	{"knowledge external-system", []string{"knowledge", "create", "--type", "external-system", "--slug", "x", "--project", "AEON", "--title", "X"}, reasonKnowledgeKind},
 	{"knowledge related-project", []string{"knowledge", "get", "related-project", "x", "--project", "AEON"}, reasonKnowledgeKind},
 }
