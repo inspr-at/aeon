@@ -207,7 +207,10 @@ func (w PostgresWriter) Write(ctx context.Context, s Snapshot, tenantSlug string
 }
 
 func importUsers(ctx context.Context, tx pgx.Tx, tenantID string, s Snapshot) (string, map[int64]string, error) {
-	users := map[int64]string{}
+	users, err := storedUserRefs(ctx, tx, tenantID, s.SourceID)
+	if err != nil {
+		return "", nil, err
+	}
 	actor, err := ensureImportActor(ctx, tx, tenantID)
 	if err != nil {
 		return "", nil, err
@@ -218,9 +221,9 @@ func importUsers(ctx context.Context, tx pgx.Tx, tenantID string, s Snapshot) (s
 			return "", nil, errors.New("user missing id")
 		}
 		subject := s.SourceID + ":" + strconv.FormatInt(id, 10)
-		name := stringField(u, "username")
+		name := userDisplayName(u)
 		if name == "" {
-			return "", nil, fmt.Errorf("user %d missing username", id)
+			return "", nil, fmt.Errorf("user %d missing name", id)
 		}
 		var identityID, principalID string
 		var before []byte
@@ -229,6 +232,26 @@ func importUsers(ctx context.Context, tx pgx.Tx, tenantID string, s Snapshot) (s
 			WHERE i.issuer='paimos-classic' AND i.subject=$2`, tenantID, subject).Scan(&before)
 		if err != nil && !errors.Is(err, pgx.ErrNoRows) {
 			return "", nil, err
+		}
+		// A partial user payload must not replace an already mapped display name
+		// with a username merely because optional presentation fields are absent.
+		if len(before) > 0 && name == stringField(u, "username") {
+			var prior struct {
+				Principal struct {
+					Name string `json:"name"`
+				} `json:"principal"`
+				Identity struct {
+					DisplayName string `json:"display_name"`
+				} `json:"identity"`
+			}
+			if err := json.Unmarshal(before, &prior); err != nil {
+				return "", nil, err
+			}
+			if prior.Principal.Name != "" {
+				name = prior.Principal.Name
+			} else if prior.Identity.DisplayName != "" {
+				name = prior.Identity.DisplayName
+			}
 		}
 		createdAt := parseClassicTime(stringField(u, "created_at"))
 		if err := tx.QueryRow(ctx, `INSERT INTO identities(issuer,subject,email,display_name,created_at) VALUES('paimos-classic',$1,$2,$3,coalesce($4::timestamptz,now())) ON CONFLICT(issuer,subject) DO UPDATE SET email=EXCLUDED.email,display_name=EXCLUDED.display_name RETURNING id`, subject, nullString(stringField(u, "email")), name, createdAt).Scan(&identityID); err != nil {
@@ -244,7 +267,28 @@ func importUsers(ctx context.Context, tx pgx.Tx, tenantID string, s Snapshot) (s
 			WHERE i.id=$2::uuid`, tenantID, identityID).Scan(&after); err != nil {
 			return "", nil, err
 		}
-		if !bytes.Equal(before, after) {
+		changed := !bytes.Equal(before, after)
+		var snapshot Record
+		if err := json.Unmarshal(after, &snapshot); err != nil {
+			return "", nil, err
+		}
+		snapshot["classic"] = storedUser(u, s.SourceID)
+		after, err = json.Marshal(snapshot)
+		if err != nil {
+			return "", nil, err
+		}
+		// Include the latest retained user metadata in the idempotency check.
+		var previous []byte
+		err = tx.QueryRow(ctx, `SELECT after FROM events WHERE tenant_id=$1
+		 AND type IN ('import.user_created','import.user_updated')
+		 AND after->'principal'->>'id'=$2 ORDER BY id DESC LIMIT 1`, tenantID, principalID).Scan(&previous)
+		if err != nil && !errors.Is(err, pgx.ErrNoRows) {
+			return "", nil, err
+		}
+		var prev, next any
+		_ = json.Unmarshal(previous, &prev)
+		_ = json.Unmarshal(after, &next)
+		if changed || !reflect.DeepEqual(prev, next) {
 			typ := "import.user_updated"
 			if len(before) == 0 {
 				typ = "import.user_created"
@@ -278,9 +322,7 @@ func upsertNode(ctx context.Context, tx pgx.Tx, tenantID, sourceID, kindID, key,
 	if title == "" {
 		return "", false, false, errors.New("title is empty")
 	}
-	if state == "" {
-		state = "open"
-	}
+	state = canonicalState(state)
 	fields := mappedFields(original, refs, sourceID, project)
 	bodyJSON, err := jsonValue(fields)
 	if err != nil {

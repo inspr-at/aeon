@@ -367,6 +367,22 @@ func (m *Module) listNodes(ctx context.Context, tenantID string, q listQuery) (n
 	})
 	return page, err
 }
+
+// Native fields win, including an explicit null (unassignment). Classic IDs
+// are resolved only through this tenant's source-qualified identity mapping.
+const assigneeJoin = ` LEFT JOIN LATERAL (
+    SELECT person.id,person.name FROM principals person
+    LEFT JOIN identities identity ON identity.id=person.identity_id
+    WHERE person.tenant_id=n.tenant_id AND (
+        person.id::text = CASE
+            WHEN n.fields ? 'assignee' THEN coalesce(n.fields->'assignee'->>'id',n.fields->>'assignee')
+            WHEN n.fields ? 'assignee_id' THEN n.fields->>'assignee_id' END
+        OR (NOT (n.fields ? 'assignee' OR n.fields ? 'assignee_id')
+            AND identity.issuer='paimos-classic'
+            AND identity.subject=(n.fields->'classic'->>'source_id')||':'||(n.fields->'classic'->>'assignee_id'))
+    ) LIMIT 1
+) assignee ON true `
+
 func listFilterSQL(q listQuery) (string, []any) {
 	// One tenant transaction supplies RLS to every table in the CTE.
 	array := func(values []string) []string {
@@ -382,13 +398,13 @@ func listFilterSQL(q listQuery) (string, []any) {
             SELECT id FROM nodes WHERE tenant_id=current_setting('aeon.tenant_id')::uuid AND parent_id=s.id AND deleted_at IS NULL OFFSET 0
         ) c
     ), filtered AS (
-        SELECT n.id FROM nodes n JOIN node_kinds k ON k.id=n.kind_id AND k.tenant_id=n.tenant_id
+        SELECT n.id,assignee.id::text AS assignee_id FROM nodes n JOIN node_kinds k ON k.id=n.kind_id AND k.tenant_id=n.tenant_id ` + assigneeJoin + `
         WHERE n.deleted_at IS NULL
         AND ($1::uuid IS NULL OR n.kind_id=$1::uuid)
         AND (cardinality($2::text[])=0 OR k.slug=ANY($2::text[]) OR n.kind_id::text=ANY($2::text[]))
         AND (cardinality($3::text[])=0 OR n.state=ANY($3::text[]))
         AND (cardinality($4::text[])=0 OR coalesce(nullif(n.fields->>'priority',''),'none')=ANY($4::text[]))
-        AND (cardinality($5::text[])=0 OR coalesce(nullif(n.fields->>'assignee',''),'none')=ANY($5::text[]))
+        AND (cardinality($5::text[])=0 OR coalesce(assignee.id::text,'none')=ANY($5::text[]))
         AND ($6::text='' OR n.key ILIKE '%'||$6::text||'%' OR n.title ILIKE '%'||$6::text||'%')
         AND ($7::uuid IS NULL OR (n.id IN (SELECT id FROM scope) AND n.id<>$7::uuid))
         AND ($7::uuid IS NOT NULL OR NOT $8::bool OR (CASE WHEN $10::bool THEN n.id IN (SELECT id FROM scope) AND n.id<>$9::uuid ELSE n.parent_id IS NOT DISTINCT FROM $9::uuid END))
@@ -409,7 +425,7 @@ func listOrder(q listQuery) string {
 		case "key":
 			parts = append(parts, `regexp_replace(n.key,'-[0-9]+$','') `+dir, `substring(n.key from '-([0-9]+)$')::numeric `+dir)
 		case "state":
-			parts = append(parts, `CASE WHEN n.state IN ('new','backlog','in_progress','active','qa','accepted','done','cancelled','archived') THEN 0 ELSE 1 END ASC`, `CASE n.state WHEN 'new' THEN 0 WHEN 'backlog' THEN 1 WHEN 'in_progress' THEN 2 WHEN 'active' THEN 2 WHEN 'qa' THEN 3 WHEN 'accepted' THEN 4 WHEN 'done' THEN 5 WHEN 'cancelled' THEN 6 WHEN 'archived' THEN 7 ELSE 8 END `+dir, "n.state "+dir)
+			parts = append(parts, `CASE WHEN n.state IN ('new','backlog','in_progress','active','qa','accepted','delivered','done','cancelled','archived') THEN 0 ELSE 1 END ASC`, `CASE n.state WHEN 'new' THEN 0 WHEN 'backlog' THEN 1 WHEN 'in_progress' THEN 2 WHEN 'active' THEN 2 WHEN 'qa' THEN 3 WHEN 'accepted' THEN 4 WHEN 'delivered' THEN 5 WHEN 'done' THEN 6 WHEN 'cancelled' THEN 7 WHEN 'archived' THEN 8 ELSE 9 END `+dir, "n.state "+dir)
 		case "priority":
 			parts = append(parts, `CASE coalesce(nullif(n.fields->>'priority',''),'none') WHEN 'high' THEN 0 WHEN 'medium' THEN 1 WHEN 'low' THEN 2 WHEN 'none' THEN 3 ELSE 4 END `+dir, `coalesce(n.fields->>'priority','') `+dir)
 		case "kind":
@@ -425,12 +441,12 @@ func listSQL(q listQuery, anchor any) (string, []any) {
 	args = append(args, anchor, q.Limit+1)
 	sql := prefix + `, ordered AS (SELECT n.id,row_number() OVER (ORDER BY ` + listOrder(q) + `) AS rn FROM filtered f JOIN nodes n ON n.id=f.id JOIN node_kinds k ON k.id=n.kind_id),
     selected AS (SELECT id,rn FROM ordered WHERE rn>coalesce((SELECT rn FROM ordered WHERE id=$12::uuid),0) ORDER BY rn LIMIT $13)
-    SELECT ` + nodeCols + `,k.slug,k.label,nullif(n.fields->>'priority',''),p.id::text,p.name,
+    SELECT ` + nodeCols + `,k.slug,k.label,nullif(n.fields->>'priority',''),assignee.id::text,assignee.name,
            par.id::text,par.key,par.title,pk.slug,
            (SELECT count(*)::int FROM nodes c WHERE c.parent_id=n.id AND c.deleted_at IS NULL),
            project.id::text,project.key,project.title
     FROM selected s JOIN nodes n ON n.id=s.id JOIN node_kinds k ON k.id=n.kind_id
-    LEFT JOIN principals p ON p.tenant_id=n.tenant_id AND p.id::text=n.fields->>'assignee'
+    ` + assigneeJoin + `
     LEFT JOIN nodes par ON par.id=n.parent_id AND par.deleted_at IS NULL
     LEFT JOIN node_kinds pk ON pk.id=par.kind_id
     LEFT JOIN LATERAL (
@@ -448,7 +464,7 @@ func facetSQL(q listQuery) (string, []any) {
     SELECT 'state' AS name,n.state AS value FROM filtered f JOIN nodes n ON n.id=f.id
     UNION ALL SELECT 'kind',k.slug FROM filtered f JOIN nodes n ON n.id=f.id JOIN node_kinds k ON k.id=n.kind_id
     UNION ALL SELECT 'priority',coalesce(nullif(n.fields->>'priority',''),'none') FROM filtered f JOIN nodes n ON n.id=f.id
-    UNION ALL SELECT 'assignee',coalesce(nullif(n.fields->>'assignee',''),'none') FROM filtered f JOIN nodes n ON n.id=f.id
+    UNION ALL SELECT 'assignee',coalesce(f.assignee_id,'none') FROM filtered f
     ) SELECT name,value,count(*)::int FROM facet_values WHERE name=ANY($12::text[]) GROUP BY name,value`
 	return sql, append(args, q.FacetNames)
 }
@@ -623,6 +639,7 @@ type projectSummary struct {
 	Open         int       `json:"open"`
 	InProgress   int       `json:"in_progress"`
 	Done         int       `json:"done"`
+	Cancelled    int       `json:"cancelled"`
 	Total        int       `json:"total"`
 	LastActivity time.Time `json:"last_activity"`
 }
@@ -648,22 +665,24 @@ func (m *Module) handleListProjects(w http.ResponseWriter, r *http.Request) {
                 FROM nodes n JOIN node_kinds k ON k.id=n.kind_id AND k.tenant_id=n.tenant_id
                 WHERE n.tenant_id=current_setting('aeon.tenant_id')::uuid AND n.deleted_at IS NULL AND k.slug='project' AND ($1::bool OR n.state<>'archived')
             ), subtree AS (
-                SELECT p.id AS project_id,p.id AS node_id,n.parent_id,n.state,n.updated_at,0 AS depth
+                SELECT p.id AS project_id,p.id AS node_id,n.parent_id,n.state,n.updated_at,n.kind_id,0 AS depth
                 FROM projects p JOIN nodes n ON n.id=p.id
                 UNION ALL
-                SELECT s.project_id,c.id,c.parent_id,c.state,c.updated_at,s.depth+1
+                SELECT s.project_id,c.id,c.parent_id,c.state,c.updated_at,c.kind_id,s.depth+1
                 FROM subtree s CROSS JOIN LATERAL (
-                    SELECT id,parent_id,state,updated_at FROM nodes
+                    SELECT id,parent_id,state,updated_at,kind_id FROM nodes
                     WHERE tenant_id=current_setting('aeon.tenant_id')::uuid AND parent_id=s.node_id AND deleted_at IS NULL OFFSET 0
                 ) c
             )
             SELECT p.id::text,p.key,p.title,p.state,
-                count(*) FILTER (WHERE s.depth>0 AND s.state NOT IN ('in_progress','active','qa','accepted','delivered','done','cancelled','archived'))::int AS open,
-                count(*) FILTER (WHERE s.depth>0 AND s.state IN ('in_progress','active','qa'))::int AS in_progress,
-                count(*) FILTER (WHERE s.depth>0 AND s.state IN ('accepted','delivered','done','cancelled','archived'))::int AS done,
-                count(*) FILTER (WHERE s.depth>0)::int AS total,
+                count(*) FILTER (WHERE s.depth>0 AND k.slug IN ('ticket','task','epic') AND s.state IN ('new','backlog'))::int AS open,
+                count(*) FILTER (WHERE s.depth>0 AND k.slug IN ('ticket','task','epic') AND s.state IN ('in_progress','qa'))::int AS in_progress,
+                count(*) FILTER (WHERE s.depth>0 AND k.slug IN ('ticket','task','epic') AND s.state IN ('accepted','delivered','done'))::int AS done,
+                count(*) FILTER (WHERE s.depth>0 AND k.slug IN ('ticket','task','epic') AND s.state='cancelled')::int AS cancelled,
+                count(*) FILTER (WHERE s.depth>0 AND k.slug IN ('ticket','task','epic'))::int AS total,
                 max(s.updated_at) AS last_activity
             FROM projects p JOIN subtree s ON s.project_id=p.id
+            JOIN node_kinds k ON k.id=s.kind_id AND k.tenant_id=current_setting('aeon.tenant_id')::uuid
             GROUP BY p.id,p.key,p.title,p.state
             ORDER BY last_activity DESC,p.id`, includeArchived)
 		if err != nil {
@@ -671,7 +690,7 @@ func (m *Module) handleListProjects(w http.ResponseWriter, r *http.Request) {
 		}
 		for rows.Next() {
 			var item projectSummary
-			if err := rows.Scan(&item.ID, &item.Key, &item.Title, &item.State, &item.Open, &item.InProgress, &item.Done, &item.Total, &item.LastActivity); err != nil {
+			if err := rows.Scan(&item.ID, &item.Key, &item.Title, &item.State, &item.Open, &item.InProgress, &item.Done, &item.Cancelled, &item.Total, &item.LastActivity); err != nil {
 				rows.Close()
 				return err
 			}

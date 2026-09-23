@@ -40,13 +40,14 @@
 //     Comments, history and attachment metadata are retained verbatim in
 //     import events.
 //   - Users become classic identities and tenant principals. User id,
-//     username, email, role and created_at are used; user preferences stay
+//     username, display_name/name/first_name/last_name, email, role and created_at
+//     are used; user preferences stay
 //     skipped. Passwords, keys, sessions and TOTP secrets are never requested.
 //
 // Intentionally skipped: project active_issue_count, done_issue_count,
 // issue_count, open_issue_count, effective_rate_hourly, effective_rate_lp,
 // last_activity, node_depth and rate_inherited, all derived/computed values;
-// user fields status, nickname, first_name, last_name, avatar_path,
+// user fields status, nickname, avatar_path,
 // markdown_default, monospace_fields, recent_projects_limit,
 // internal_rate_hourly, show_alt_unit_table, show_alt_unit_detail, locale,
 // recent_timers_limit, timezone, preview_hover_delay,
@@ -96,4 +97,16 @@
 // The source ID combines the explicit instance name and a source URL digest;
 // records with the same classic key from a different source ID are rejected
 // in one tenant, while the same numeric ID remains independent in another.
+//
+// B3 repairs: future imports normalize known state spellings and persist safe
+// classic user presentation fields in import.user_* events. The durable mapping
+// remains identities(issuer=paimos-classic, subject=source_id:classic_user_id)
+// joined to a tenant principal; partial imports reuse it. Display names prefer
+// display_name/full_name/name, then first+last name, then username.
+// BackfillPrincipals(ctx, pool, tenantID) repairs missing native assignments and
+// recoverable display names from retained users, with one event per mutation.
+// The coordinator wires this operator action; no new HTTP module or plugin is
+// required. Old imports that retained only a username cannot reconstruct a full
+// name: a fresh user snapshot with a display name is needed. No live source is
+// contacted by the backfill. Migration 0531 normalizes existing states atomically.
 package importer

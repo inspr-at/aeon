@@ -339,7 +339,7 @@ paths:
         - {name: include_archived, in: query, schema: {type: boolean, default: false}}
       responses:
         '200':
-          description: Projects with subtree state counts and last activity
+          description: Projects with counts of live descendant ticket, task and epic nodes (including descendants below non-work kinds) and last activity. Open counts new/backlog, in_progress counts in_progress/qa, done counts done/delivered/accepted, and cancelled is separate. Total includes all work states.
           content:
             application/json:
               schema:
@@ -357,6 +357,7 @@ paths:
                         open: {type: integer}
                         in_progress: {type: integer}
                         done: {type: integer}
+                        cancelled: {type: integer}
                         total: {type: integer}
                         last_activity: {type: string, format: date-time}
         '400':
@@ -430,7 +431,17 @@ paths:
           $ref: '#/components/responses/Error'
     patch:
       operationId: updateNode
-      description: Key, kind, and parent are immutable here; use move for parent.
+      description: |
+        Key, kind, and parent are immutable here; use move for parent.
+        Optional optimistic concurrency compares If-Unmodified-Since to the exact
+        updated_at value while holding the node row lock in the write transaction.
+        A stale value returns 412 without changing the node or appending an event.
+        Omission preserves unconditional patch behavior.
+      parameters:
+        - name: If-Unmodified-Since
+          in: header
+          description: Exact RFC3339 timestamp from Node.updated_at, including fractional seconds. HTTP dates are also accepted and compared at full stored precision; prefer updated_at to avoid precision loss.
+          schema: {type: string}
       security: *auth
       requestBody:
         $ref: '#/components/requestBodies/NodePatch'
@@ -440,6 +451,8 @@ paths:
         '400':
           $ref: '#/components/responses/Error'
         '404':
+          $ref: '#/components/responses/Error'
+        '412':
           $ref: '#/components/responses/Error'
         '422':
           $ref: '#/components/responses/Error'
@@ -454,6 +467,83 @@ paths:
           $ref: '#/components/responses/Error'
         '409':
           $ref: '#/components/responses/Error'
+  /nodes/{nodeId}/activity:
+    parameters: [{$ref: '#/components/parameters/NodeId'}]
+    get:
+      operationId: listNodeActivity
+      summary: Merged comment and visible field-change timeline
+      description: Reverse chronological by (at, event ID). The opaque cursor binds tenant, node and event watermark. Imported snapshots with no visible changes are omitted; the first snapshot is a baseline. Comments retain their creation position after edits; deleted comments are omitted. Imported comments are read-only.
+      security: *auth
+      parameters:
+        - {name: limit, in: query, schema: {type: integer, minimum: 1, maximum: 200, default: 50}}
+        - {$ref: '#/components/parameters/Cursor'}
+      responses:
+        '200':
+          description: Activity page
+          content:
+            application/json:
+              schema:
+                type: object
+                required: [items, next_cursor]
+                properties:
+                  items: {type: array, items: {$ref: '#/components/schemas/ActivityItem'}}
+                  next_cursor: {type: [string, 'null']}
+        '400': {$ref: '#/components/responses/Error'}
+        '401': {$ref: '#/components/responses/Error'}
+        '404': {$ref: '#/components/responses/Error'}
+  /nodes/{nodeId}/comments:
+    parameters: [{$ref: '#/components/parameters/NodeId'}]
+    post:
+      operationId: createNodeComment
+      summary: Append a comment authored by the authenticated caller
+      security: *auth
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: {$ref: '#/components/schemas/CommentBody'}
+      responses:
+        '201':
+          description: Created comment; id is the creation event ID used for editing and deletion
+          content:
+            application/json:
+              schema: {$ref: '#/components/schemas/ActivityItem'}
+        '400': {$ref: '#/components/responses/Error'}
+        '401': {$ref: '#/components/responses/Error'}
+        '404': {$ref: '#/components/responses/Error'}
+  /nodes/{nodeId}/comments/{commentId}:
+    parameters:
+      - {$ref: '#/components/parameters/NodeId'}
+      - {name: commentId, in: path, required: true, schema: {type: string, pattern: '^[1-9][0-9]*$'}}
+    patch:
+      operationId: updateNodeComment
+      description: Append comment.updated for the author's own native comment strictly before 15 minutes from creation. The window does not reset on edit. Imported and deleted comments are not editable.
+      security: *auth
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: {$ref: '#/components/schemas/CommentBody'}
+      responses:
+        '200':
+          description: Updated comment at its original timeline position
+          content:
+            application/json:
+              schema: {$ref: '#/components/schemas/ActivityItem'}
+        '400': {$ref: '#/components/responses/Error'}
+        '401': {$ref: '#/components/responses/Error'}
+        '403': {$ref: '#/components/responses/Error'}
+        '404': {$ref: '#/components/responses/Error'}
+    delete:
+      operationId: deleteNodeComment
+      description: Append comment.deleted for the author's own native comment strictly before 15 minutes from creation. The immutable audit events remain; the comment leaves the timeline.
+      security: *auth
+      responses:
+        '204': {description: Deleted}
+        '400': {$ref: '#/components/responses/Error'}
+        '401': {$ref: '#/components/responses/Error'}
+        '403': {$ref: '#/components/responses/Error'}
+        '404': {$ref: '#/components/responses/Error'}
   /nodes/{nodeId}/move:
     parameters: [{$ref: '#/components/parameters/NodeId'}]
     post:
@@ -2306,6 +2396,36 @@ components:
             type: string
         field_schema:
           type: object
+    CommentBody:
+      type: object
+      additionalProperties: false
+      required: [body_markdown]
+      properties:
+        body_markdown: {type: string, minLength: 1, maxLength: 65536, description: Nonblank Markdown; at most 65536 UTF-8 bytes. Render safely on the client.}
+    ActivityItem:
+      type: object
+      required: [id, at, type, author]
+      properties:
+        id: {type: string, description: "Stable tenant-local event ID, represented as a decimal string"}
+        at: {type: string, format: date-time}
+        type: {type: string, enum: [comment, change, created]}
+        author:
+          type: object
+          required: [id, name]
+          properties:
+            id: {type: [string, 'null'], format: uuid, description: Null if no imported principal mapping exists}
+            name: {type: string}
+        body_markdown: {type: string, description: Present for comments only}
+        changes:
+          type: array
+          description: Present for changes only; assignees resolve to names when mapped, parent values are source IDs or native UUIDs.
+          items:
+            type: object
+            required: [field, from, to]
+            properties:
+              field: {type: string, enum: [status, priority, assignee, title, parent]}
+              from: {type: [string, 'null']}
+              to: {type: [string, 'null']}
     Node:
       type: object
       required: [id, key, kind_id, title, body, fields, state, parent_id, position, created_at, updated_at]

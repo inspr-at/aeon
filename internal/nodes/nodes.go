@@ -104,7 +104,23 @@ func (m *Module) handleUpdateNode(w http.ResponseWriter, r *http.Request) {
 		writeErr(w, err)
 		return
 	}
-	node, err := m.updateNode(r.Context(), p, id, raw)
+	var expected *time.Time
+	if value, present := r.Header["If-Unmodified-Since"]; present {
+		if len(value) != 1 {
+			writeErr(w, badRequest("invalid If-Unmodified-Since"))
+			return
+		}
+		at, err := time.Parse(time.RFC3339Nano, value[0])
+		if err != nil {
+			at, err = http.ParseTime(value[0])
+		}
+		if err != nil {
+			writeErr(w, badRequest("invalid If-Unmodified-Since"))
+			return
+		}
+		expected = &at
+	}
+	node, err := m.updateNode(r.Context(), p, id, raw, expected)
 	if err != nil {
 		writeErr(w, err)
 		return
@@ -269,7 +285,7 @@ func (m *Module) createNode(ctx context.Context, p tenant.Principal, in nodeCrea
 	return node, err
 }
 
-func (m *Module) updateNode(ctx context.Context, p tenant.Principal, id string, raw map[string]json.RawMessage) (nodeJSON, error) {
+func (m *Module) updateNode(ctx context.Context, p tenant.Principal, id string, raw map[string]json.RawMessage, expected *time.Time) (nodeJSON, error) {
 	if len(raw) == 0 {
 		return nodeJSON{}, badRequest("patch is empty")
 	}
@@ -292,7 +308,12 @@ func (m *Module) updateNode(ctx context.Context, p tenant.Principal, id string, 
 		if err != nil {
 			return err
 		}
-		sets := []string{"updated_at = now()"}
+		// Compare after SELECT FOR UPDATE, so competing patches cannot both
+		// consume the same timestamp. Advance even on equal clock readings.
+		if expected != nil && !current.UpdatedAt.Equal(*expected) {
+			return &httpError{status: http.StatusPreconditionFailed, msg: "node has changed"}
+		}
+		sets := []string{"updated_at = greatest(clock_timestamp(), updated_at + interval '1 microsecond')"}
 		args := []any{}
 		add := func(v any) string {
 			args = append(args, v)
