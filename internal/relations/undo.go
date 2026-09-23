@@ -1,0 +1,78 @@
+// SPDX-License-Identifier: AGPL-3.0-only
+
+package relations
+
+import (
+	"context"
+	"encoding/json"
+	"errors"
+
+	"github.com/inspr-at/aeon/internal/events"
+	"github.com/inspr-at/aeon/internal/tenant"
+	"github.com/jackc/pgx/v5"
+)
+
+// UndoOption registers the reversible relation operations on events.New.
+func UndoOption() events.Option {
+	return events.WithUndoHandlers(map[string]events.UndoFunc{
+		"relation.created": undoCreated,
+		"relation.deleted": undoDeleted,
+	})
+}
+
+func decodeSnapshot(b json.RawMessage) (Relation, error) {
+	var v Relation
+	if json.Unmarshal(b, &v) != nil {
+		return v, events.ErrConflict
+	}
+	id, idOK := uuid(v.ID)
+	source, sourceOK := uuid(v.SourceNodeID)
+	target, targetOK := uuid(v.TargetNodeID)
+	if !idOK || !sourceOK || !targetOK || source == target || !validType(v.Type) || v.CreatedAt.IsZero() || (v.Type == "relates" && source > target) {
+		return v, events.ErrConflict
+	}
+	v.ID, v.SourceNodeID, v.TargetNodeID = id, source, target
+	return v, nil
+}
+
+func undoCreated(ctx context.Context, tx pgx.Tx, p tenant.Principal, e events.Event) (events.Change, error) {
+	original, err := decodeSnapshot(e.After)
+	if err != nil {
+		return events.Change{}, err
+	}
+	current, err := scanRelation(tx.QueryRow(ctx, `SELECT id::text,source_node_id::text,target_node_id::text,type,created_at
+  FROM node_relations WHERE tenant_id=$1 AND id=$2 FOR UPDATE`, p.TenantID, original.ID))
+	if errors.Is(err, pgx.ErrNoRows) {
+		return events.Change{}, events.ErrConflict
+	}
+	if err != nil {
+		return events.Change{}, err
+	}
+	if current.SourceNodeID != original.SourceNodeID || current.TargetNodeID != original.TargetNodeID || current.Type != original.Type || !current.CreatedAt.Equal(original.CreatedAt) {
+		return events.Change{}, events.ErrConflict
+	}
+	if _, err := tx.Exec(ctx, `DELETE FROM node_relations WHERE tenant_id=$1 AND id=$2`, p.TenantID, current.ID); err != nil {
+		return events.Change{}, err
+	}
+	return events.Change{NodeID: &current.SourceNodeID, Type: "relation.undone", Before: current}, nil
+}
+
+func undoDeleted(ctx context.Context, tx pgx.Tx, p tenant.Principal, e events.Event) (events.Change, error) {
+	original, err := decodeSnapshot(e.Before)
+	if err != nil {
+		return events.Change{}, err
+	}
+	if err := lockNodes(ctx, tx, p, original.SourceNodeID, original.TargetNodeID); err != nil {
+		if errors.Is(err, events.ErrNotFound) {
+			return events.Change{}, events.ErrConflict
+		}
+		return events.Change{}, err
+	}
+	restored, err := scanRelation(tx.QueryRow(ctx, `INSERT INTO node_relations(tenant_id,id,source_node_id,target_node_id,type,created_at)
+  VALUES($1,$2,$3,$4,$5,$6) RETURNING id::text,source_node_id::text,target_node_id::text,type,created_at`,
+		p.TenantID, original.ID, original.SourceNodeID, original.TargetNodeID, original.Type, original.CreatedAt))
+	if err != nil {
+		return events.Change{}, err
+	}
+	return events.Change{NodeID: &restored.SourceNodeID, Type: "relation.undone", After: restored}, nil
+}
