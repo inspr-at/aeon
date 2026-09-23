@@ -1,0 +1,311 @@
+// SPDX-License-Identifier: AGPL-3.0-only
+package importer
+
+import (
+	"context"
+	"crypto/sha256"
+	"encoding/json"
+	"errors"
+	"fmt"
+	"io"
+	"net/http"
+	"net/url"
+	"os"
+	"strconv"
+	"strings"
+	"time"
+)
+
+// Record is an API object. Raw fields are retained so new classic fields are
+// reported rather than silently discarded.
+type Record map[string]any
+
+type Project struct {
+	Record Record
+	Issues []Record
+}
+
+type Snapshot struct {
+	SourceID string
+	Users    []Record
+	Projects []Project
+	Orphans  []Record
+	Details  map[int64]Details
+}
+
+type Details struct{ Relations, Comments, History, Attachments []Record }
+
+// Source is deliberately read-only. The client below only sends GET requests.
+type Source interface {
+	Read(context.Context, string) (Snapshot, error)
+}
+
+type HTTPSource struct {
+	base   *url.URL
+	key    string
+	client *http.Client
+}
+
+// NewHTTPSource reads the bearer token once from a path. Errors never contain
+// the key, response body, URL userinfo, or the file's contents.
+func NewHTTPSource(rawURL, keyFile string, client *http.Client) (*HTTPSource, error) {
+	u, err := url.Parse(rawURL)
+	if err != nil || (u.Scheme != "https" && u.Scheme != "http") || u.Host == "" || u.User != nil || u.RawQuery != "" || u.Fragment != "" {
+		return nil, errors.New("source-url must be an absolute HTTP(S) URL without credentials, query, or fragment")
+	}
+	b, err := os.ReadFile(keyFile)
+	if err != nil {
+		return nil, fmt.Errorf("read api-key-file: %w", err)
+	}
+	key := strings.TrimSpace(string(b))
+	if key == "" || strings.ContainsAny(key, "\r\n") {
+		return nil, errors.New("api-key-file must contain one nonempty key")
+	}
+	if client == nil {
+		client = &http.Client{Timeout: 30 * time.Second}
+	}
+	copyClient := *client
+	copyClient.CheckRedirect = func(*http.Request, []*http.Request) error { return http.ErrUseLastResponse }
+	return &HTTPSource{base: u, key: key, client: &copyClient}, nil
+}
+
+func (s *HTTPSource) get(ctx context.Context, path string, out any) error {
+	u := *s.base
+	parts := strings.SplitN(path, "?", 2)
+	u.Path = strings.TrimSuffix(u.Path, "/") + "/api" + parts[0]
+	if len(parts) == 2 {
+		u.RawQuery = parts[1]
+	}
+	u.RawPath = ""
+	req, err := http.NewRequestWithContext(ctx, http.MethodGet, u.String(), nil)
+	if err != nil {
+		return fmt.Errorf("source request: %w", err)
+	}
+	req.Header.Set("Authorization", "Bearer "+s.key)
+	req.Header.Set("Accept", "application/json")
+	resp, err := s.client.Do(req)
+	if err != nil {
+		return errors.New("source GET failed")
+	}
+	defer resp.Body.Close()
+	if resp.StatusCode != http.StatusOK {
+		return fmt.Errorf("source GET returned HTTP %d", resp.StatusCode)
+	}
+	dec := json.NewDecoder(io.LimitReader(resp.Body, 64<<20))
+	dec.UseNumber()
+	if err := dec.Decode(out); err != nil {
+		return fmt.Errorf("decode source JSON: %w", err)
+	}
+	return nil
+}
+
+func (s *HTTPSource) Read(ctx context.Context, projectKey string) (Snapshot, error) {
+	snap := Snapshot{Details: map[int64]Details{}}
+	origin := sha256.Sum256([]byte(s.base.String()))
+	snap.SourceID = fmt.Sprintf("%x", origin[:12])
+	var projects []Record
+	if err := s.get(ctx, "/projects?status=all", &projects); err != nil {
+		return snap, err
+	}
+	var deletedProjects []Record
+	if err := s.get(ctx, "/projects?status=deleted", &deletedProjects); err != nil {
+		return snap, err
+	}
+	projects = append(projects, deletedProjects...)
+	var users []Record
+	if err := s.get(ctx, "/users", &users); err != nil {
+		return snap, err
+	}
+	var deletedUsers []Record
+	if err := s.get(ctx, "/users?status=deleted", &deletedUsers); err != nil {
+		return snap, err
+	}
+	snap.Users = append(users, deletedUsers...)
+	for _, p := range projects {
+		if projectKey != "" && stringField(p, "key") != projectKey {
+			continue
+		}
+		id, ok := intField(p, "id")
+		if !ok {
+			return snap, errors.New("project missing id")
+		}
+		var issues []Record
+		if err := s.get(ctx, "/projects/"+strconv.FormatInt(id, 10)+"/issues", &issues); err != nil {
+			return snap, err
+		}
+		var knowledge []Record
+		if err := s.get(ctx, "/projects/"+strconv.FormatInt(id, 10)+"/knowledge", &knowledge); err != nil {
+			return snap, err
+		}
+		seen := map[int64]bool{}
+		for _, i := range issues {
+			if id, ok := intField(i, "id"); ok {
+				seen[id] = true
+			}
+		}
+		for _, k := range knowledge {
+			kid, ok := intField(k, "id")
+			if !ok {
+				return snap, errors.New("knowledge missing id")
+			}
+			if seen[kid] {
+				continue
+			}
+			var full Record
+			if err := s.get(ctx, "/issues/"+strconv.FormatInt(kid, 10), &full); err != nil {
+				return snap, err
+			}
+			// Knowledge API has slug/body/metadata, issue API has preserved issue_key.
+			for name, value := range k {
+				if name != "id" {
+					full[name] = value
+				}
+			}
+			issues = append(issues, full)
+			seen[kid] = true
+		}
+		snap.Projects = append(snap.Projects, Project{Record: p, Issues: issues})
+	}
+	if projectKey != "" && len(snap.Projects) == 0 {
+		return snap, fmt.Errorf("project %q not found", projectKey)
+	}
+	if projectKey == "" {
+		known := map[int64]bool{}
+		byProject := map[int64]int{}
+		for n, p := range snap.Projects {
+			pid, _ := intField(p.Record, "id")
+			byProject[pid] = n
+			for _, issue := range p.Issues {
+				iid, _ := intField(issue, "id")
+				known[iid] = true
+			}
+		}
+		// The global list is paginated and includes orphan sprint issues.
+		for offset := 0; ; offset += 100 {
+			var page struct {
+				Issues  []Record `json:"issues"`
+				HasMore bool     `json:"has_more"`
+			}
+			if err := s.get(ctx, "/issues?limit=100&offset="+strconv.Itoa(offset), &page); err != nil {
+				return snap, err
+			}
+			for _, issue := range page.Issues {
+				iid, ok := intField(issue, "id")
+				if !ok {
+					return snap, errors.New("global issue missing id")
+				}
+				if known[iid] {
+					continue
+				}
+				known[iid] = true
+				if pid, ok := intField(issue, "project_id"); ok {
+					if n, found := byProject[pid]; found {
+						snap.Projects[n].Issues = append(snap.Projects[n].Issues, issue)
+						continue
+					}
+				}
+				snap.Orphans = append(snap.Orphans, issue)
+			}
+			if !page.HasMore {
+				break
+			}
+			if len(page.Issues) == 0 {
+				return snap, errors.New("global issues page has_more with no records")
+			}
+		}
+		var trash []Record
+		if err := s.get(ctx, "/issues/trash", &trash); err != nil {
+			return snap, err
+		}
+		for _, issue := range trash {
+			iid, ok := intField(issue, "id")
+			if !ok {
+				return snap, errors.New("trash issue missing id")
+			}
+			if known[iid] {
+				continue
+			}
+			known[iid] = true
+			if pid, ok := intField(issue, "project_id"); ok {
+				if n, found := byProject[pid]; found {
+					snap.Projects[n].Issues = append(snap.Projects[n].Issues, issue)
+					continue
+				}
+			}
+			snap.Orphans = append(snap.Orphans, issue)
+		}
+	} else {
+		var trash []Record
+		if err := s.get(ctx, "/issues/trash", &trash); err != nil {
+			return snap, err
+		}
+		pid, _ := intField(snap.Projects[0].Record, "id")
+		known := map[int64]bool{}
+		for _, issue := range snap.Projects[0].Issues {
+			iid, _ := intField(issue, "id")
+			known[iid] = true
+		}
+		for _, issue := range trash {
+			parentID, ok := intField(issue, "project_id")
+			if !ok || parentID != pid {
+				continue
+			}
+			iid, ok := intField(issue, "id")
+			if !ok {
+				return snap, errors.New("trash issue missing id")
+			}
+			if !known[iid] {
+				snap.Projects[0].Issues = append(snap.Projects[0].Issues, issue)
+				known[iid] = true
+			}
+		}
+	}
+	for _, p := range snap.Projects {
+		for _, issue := range p.Issues {
+			if err := s.readDetails(ctx, issue, snap.Details); err != nil {
+				return snap, err
+			}
+		}
+	}
+	for _, issue := range snap.Orphans {
+		if err := s.readDetails(ctx, issue, snap.Details); err != nil {
+			return snap, err
+		}
+	}
+	return snap, nil
+}
+
+func (s *HTTPSource) readDetails(ctx context.Context, issue Record, details map[int64]Details) error {
+	iid, ok := intField(issue, "id")
+	if !ok {
+		return errors.New("issue missing id")
+	}
+	base := "/issues/" + strconv.FormatInt(iid, 10)
+	d := Details{}
+	for _, part := range []struct {
+		suffix string
+		to     *[]Record
+	}{{"/relations", &d.Relations}, {"/comments", &d.Comments}, {"/history", &d.History}, {"/attachments", &d.Attachments}} {
+		if err := s.get(ctx, base+part.suffix, part.to); err != nil {
+			return err
+		}
+	}
+	details[iid] = d
+	return nil
+}
+
+func stringField(r Record, k string) string { s, _ := r[k].(string); return s }
+func intField(r Record, k string) (int64, bool) {
+	switch v := r[k].(type) {
+	case json.Number:
+		n, e := v.Int64()
+		return n, e == nil
+	case float64:
+		return int64(v), v == float64(int64(v))
+	case int64:
+		return v, true
+	case int:
+		return int64(v), true
+	}
+	return 0, false
+}

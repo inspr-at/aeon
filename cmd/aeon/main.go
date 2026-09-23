@@ -12,7 +12,7 @@ import (
 
 func main() {
 	if len(os.Args) < 2 {
-		fmt.Fprintln(os.Stderr, "usage: aeon <serve|version>")
+		fmt.Fprintln(os.Stderr, "usage: aeon <serve|import paimos|version>")
 		os.Exit(2)
 	}
 	switch os.Args[1] {
@@ -21,6 +21,15 @@ func main() {
 	case "serve":
 		if err := serve(); err != nil {
 			fmt.Fprintln(os.Stderr, "serve:", err)
+			os.Exit(1)
+		}
+	case "import":
+		if len(os.Args) < 3 || os.Args[2] != "paimos" {
+			fmt.Fprintln(os.Stderr, "usage: aeon import paimos --source-url URL --api-key-file FILE --tenant SLUG [--project KEY] [--dry-run]")
+			os.Exit(2)
+		}
+		if err := importPaimos(os.Args[3:], os.Stdout); err != nil {
+			fmt.Fprintln(os.Stderr, "import:", err)
 			os.Exit(1)
 		}
 	default:
