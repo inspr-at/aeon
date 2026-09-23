@@ -25,9 +25,20 @@
 //     its original issue key. Orphan sprints become root nodes. Trash issues
 //     are fetched, and deleted_at is retained in fields.classic.deleted_at.
 //   - Relations become native parent, blocks, relates, duplicates and cites
-//     links where possible. Every relation, including unsupported types and
-//     out-of-scope targets, is retained in an import.relation event. Comments,
-//     history and attachment metadata are retained verbatim in import events.
+//     links where possible. related, follows_from, impacts, applies_to_memory
+//     and groups become relates. depends_on becomes blocks with the dependency
+//     blocking the dependent. blocks keeps source as the blocker. A release
+//     row is release membership: the classic container is the release and the
+//     other end is the member issue (either column order is accepted when the
+//     node kinds show which end is the release). Membership registers that
+//     release on journey_releases for its project and, when the member is a
+//     ticket, sets journey_tickets.release_node_id. It does not choose
+//     journey_projects.current_release_node_id and does not invent a released
+//     state. The classic type stays on the import.relation payload as
+//     record.type and classic_type. Every relation, including unsupported
+//     types and out-of-scope targets, is retained in an import.relation event.
+//     Comments, history and attachment metadata are retained verbatim in
+//     import events.
 //   - Users become classic identities and tenant principals. User id,
 //     username, email, role and created_at are used; user preferences stay
 //     skipped. Passwords, keys, sessions and TOTP secrets are never requested.
@@ -58,4 +69,18 @@
 // Reruns update nodes only when imported content changes and deduplicate
 // auxiliary events. Native writes are serialized per tenant and source with a
 // transaction advisory lock and use events.Append inside db.InTenant.
+//
+// BackfillRelations replays import.relation events already stored for one
+// tenant and applies the mapping above. It is the function the coordinator
+// calls from cmd/aeon; this package does not register a command.
+//
+//	aeon import backfill-relations --tenant SLUG
+//
+// Resolve SLUG to tenants.id, open the pool with db.Open, then:
+//
+//	report, err := importer.BackfillRelations(ctx, pool, tenantID)
+//	json.NewEncoder(stdout).Encode(report)
+//
+// report.Writes is the number of projection rows inserted or updated.
+// A second successful call returns Writes == 0 and appends no events.
 package importer
