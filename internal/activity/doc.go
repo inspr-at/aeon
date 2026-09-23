@@ -19,7 +19,9 @@
 // Imported creation uses the source creation time rather than ingestion time.
 // Re-imported comment revisions retain their first event ID and position.
 // Classic authors resolve through paimos-classic identities and tenant-local
-// principals; missing mappings preserve the source author name with a null ID.
+// principals, resolving linked aliases to the target ID and display name.
+// Native comment writes use the canonical person and preserve ownership of
+// older comments through the same link. Missing mappings preserve the source author name with a null ID.
 // Assignees resolve to principal names; parent values retain source IDs/native
 // UUIDs. Markdown remains unrendered and consumers must render it safely.
 //

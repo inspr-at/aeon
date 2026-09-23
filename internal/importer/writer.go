@@ -233,32 +233,12 @@ func importUsers(ctx context.Context, tx pgx.Tx, tenantID string, s Snapshot) (s
 		if err != nil && !errors.Is(err, pgx.ErrNoRows) {
 			return "", nil, err
 		}
-		// A partial user payload must not replace an already mapped display name
-		// with a username merely because optional presentation fields are absent.
-		if len(before) > 0 && name == stringField(u, "username") {
-			var prior struct {
-				Principal struct {
-					Name string `json:"name"`
-				} `json:"principal"`
-				Identity struct {
-					DisplayName string `json:"display_name"`
-				} `json:"identity"`
-			}
-			if err := json.Unmarshal(before, &prior); err != nil {
-				return "", nil, err
-			}
-			if prior.Principal.Name != "" {
-				name = prior.Principal.Name
-			} else if prior.Identity.DisplayName != "" {
-				name = prior.Identity.DisplayName
-			}
-		}
 		createdAt := parseClassicTime(stringField(u, "created_at"))
-		if err := tx.QueryRow(ctx, `INSERT INTO identities(issuer,subject,email,display_name,created_at) VALUES('paimos-classic',$1,$2,$3,coalesce($4::timestamptz,now())) ON CONFLICT(issuer,subject) DO UPDATE SET email=EXCLUDED.email,display_name=EXCLUDED.display_name RETURNING id`, subject, nullString(stringField(u, "email")), name, createdAt).Scan(&identityID); err != nil {
+		if err := tx.QueryRow(ctx, `INSERT INTO identities(issuer,subject,email,display_name,created_at) VALUES('paimos-classic',$1,$2,$3,coalesce($4::timestamptz,now())) ON CONFLICT(issuer,subject) DO UPDATE SET email=coalesce(EXCLUDED.email,identities.email),display_name=EXCLUDED.display_name RETURNING id`, subject, nullString(stringField(u, "email")), name, createdAt).Scan(&identityID); err != nil {
 			return "", nil, err
 		}
 		roles := []string{stringField(u, "role")}
-		if err := tx.QueryRow(ctx, `INSERT INTO principals(tenant_id,kind,identity_id,name,roles,created_at) VALUES($1,'person',$2,$3,$4,coalesce($5::timestamptz,now())) ON CONFLICT(tenant_id,identity_id) WHERE identity_id IS NOT NULL DO UPDATE SET name=EXCLUDED.name,roles=EXCLUDED.roles RETURNING id`, tenantID, identityID, name, roles, createdAt).Scan(&principalID); err != nil {
+		if err := tx.QueryRow(ctx, `INSERT INTO principals(tenant_id,kind,identity_id,name,roles,created_at,email) VALUES($1,'person',$2,$3,$4,coalesce($5::timestamptz,now()),$6) ON CONFLICT(tenant_id,identity_id) WHERE identity_id IS NOT NULL DO UPDATE SET name=EXCLUDED.name,roles=EXCLUDED.roles,email=coalesce(EXCLUDED.email,principals.email) RETURNING id`, tenantID, identityID, name, roles, createdAt, nullString(stringField(u, "email"))).Scan(&principalID); err != nil {
 			return "", nil, err
 		}
 		var after []byte
@@ -298,6 +278,9 @@ func importUsers(ctx context.Context, tx pgx.Tx, tenantID string, s Snapshot) (s
 			}); err != nil {
 				return "", nil, err
 			}
+		}
+		if err := tx.QueryRow(ctx, `SELECT coalesce(linked_to,id)::text FROM principals WHERE tenant_id=$1 AND id=$2`, tenantID, principalID).Scan(&principalID); err != nil {
+			return "", nil, err
 		}
 		users[id] = principalID
 	}

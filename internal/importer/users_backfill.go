@@ -13,7 +13,7 @@ import (
 	"github.com/jackc/pgx/v5/pgxpool"
 )
 
-// BackfillPrincipals repairs names and missing native assignments from stored
+// BackfillPrincipals restores classic usernames, emails and missing native assignments from stored
 // classic users/identities, without contacting classic. The coordinator can
 // invoke this once per tenant after migration; replays append no events.
 // Explicit native assignments (including null) and custom names are preserved.
@@ -26,7 +26,7 @@ func BackfillPrincipals(ctx context.Context, pool *pgxpool.Pool, tenantID string
 		if _, err := tx.Exec(ctx, `SELECT pg_advisory_xact_lock(hashtextextended($1,42))`, tenantID+":principal-backfill"); err != nil {
 			return err
 		}
-		rows, err := tx.Query(ctx, `SELECT p.id::text,p.name,i.display_name,u.after->'classic',u.after->'principal'->>'name',to_jsonb(p)
+		rows, err := tx.Query(ctx, `SELECT p.id::text,p.name,i.display_name,p.email,i.email,u.after->'classic',u.after->'principal'->>'name',to_jsonb(p)
    FROM principals p JOIN identities i ON i.id=p.identity_id
    LEFT JOIN LATERAL (SELECT after FROM events WHERE tenant_id=p.tenant_id
     AND type IN ('import.user_created','import.user_updated')
@@ -38,12 +38,13 @@ func BackfillPrincipals(ctx context.Context, pool *pgxpool.Pool, tenantID string
 		type person struct {
 			id, name              string
 			display, importedName *string
+			email, identityEmail  *string
 			classic, before       []byte
 		}
 		people := []person{}
 		for rows.Next() {
 			var p person
-			if err := rows.Scan(&p.id, &p.name, &p.display, &p.classic, &p.importedName, &p.before); err != nil {
+			if err := rows.Scan(&p.id, &p.name, &p.display, &p.email, &p.identityEmail, &p.classic, &p.importedName, &p.before); err != nil {
 				rows.Close()
 				return err
 			}
@@ -69,31 +70,43 @@ func BackfillPrincipals(ctx context.Context, pool *pgxpool.Pool, tenantID string
 					return err
 				}
 			}
-			name := userDisplayName(classic)
+			name := p.name
 			username := stringField(classic, "username")
-			if name == "" && p.display != nil {
-				name = *p.display
+			if username != "" && (p.name == username || p.name == userFullName(classic) || (p.importedName != nil && p.name == *p.importedName) || (p.display != nil && p.name == *p.display)) {
+				name = username
 			}
-			if username == "" && p.importedName != nil {
-				username = *p.importedName
+			email := p.email
+			if email == nil && p.identityEmail != nil {
+				email = p.identityEmail
 			}
-			if name == "" || name == p.name || username == "" || p.name != username {
+			if email == nil {
+				if value := stringField(classic, "email"); value != "" {
+					email = &value
+				}
+			}
+			sameEmail := (email == nil && p.email == nil) || (email != nil && p.email != nil && *email == *p.email)
+			if name == p.name && sameEmail {
 				continue
 			}
 			if err := ensureActor(); err != nil {
 				return err
 			}
 			var after []byte
-			if err := tx.QueryRow(ctx, `UPDATE principals SET name=$3 WHERE tenant_id=$1 AND id=$2 RETURNING to_jsonb(principals)`, tenantID, p.id, name).Scan(&after); err != nil {
+			if err := tx.QueryRow(ctx, `UPDATE principals SET name=$3,email=$4 WHERE tenant_id=$1 AND id=$2 RETURNING to_jsonb(principals)`, tenantID, p.id, name, email).Scan(&after); err != nil {
 				return err
 			}
 			if _, err := events.Append(ctx, tx, tenant.Principal{TenantID: tenantID, ID: actor}, events.Change{Type: "principal.updated", Before: json.RawMessage(p.before), After: json.RawMessage(after)}); err != nil {
 				return err
 			}
 			report.Writes++
-			report.Counts["names"]++
+			if name != p.name {
+				report.Counts["names"]++
+			}
+			if !sameEmail {
+				report.Counts["emails"]++
+			}
 		}
-		rows, err = tx.Query(ctx, `SELECT n.id::text,p.id::text,to_jsonb(n) FROM nodes n
+		rows, err = tx.Query(ctx, `SELECT n.id::text,coalesce(p.linked_to,p.id)::text,to_jsonb(n) FROM nodes n
    JOIN identities i ON i.issuer='paimos-classic' AND i.subject=(n.fields->'classic'->>'source_id')||':'||(n.fields->'classic'->>'assignee_id')
    JOIN principals p ON p.identity_id=i.id AND p.tenant_id=n.tenant_id
    WHERE n.tenant_id=$1 AND NOT (n.fields ? 'assignee' OR n.fields ? 'assignee_id')
