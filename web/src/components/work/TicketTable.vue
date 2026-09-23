@@ -524,6 +524,9 @@ td.c-title { position: relative; overflow: hidden; }
 /* The parent chip steps out entirely while row actions show, so it is never clipped. */
 @media (hover: hover) { .ticket-row:hover .parent-chip { opacity: 0; } }
 .ticket-row.cursor .parent-chip, td.c-title:focus-within .parent-chip { opacity: 0; }
+/* Rows with epic progress keep the numbers readable: room is made for the actions. */
+@media (hover: hover) { .ticket-row:hover .title-cell:has(.epic-progress) { -webkit-mask-image: none !important; mask-image: none !important; padding-right: 58px; } }
+.ticket-row.cursor .title-cell:has(.epic-progress), td.c-title:focus-within .title-cell:has(.epic-progress) { -webkit-mask-image: none !important; mask-image: none !important; padding-right: 58px; }
 .ticket-row:hover .title-cell, .ticket-row.cursor .title-cell, td.c-title:focus-within .title-cell {
   -webkit-mask-image: linear-gradient(to left, transparent 56px, #000 84px); mask-image: linear-gradient(to left, transparent 56px, #000 84px);
 }

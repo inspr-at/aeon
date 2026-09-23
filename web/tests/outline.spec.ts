@@ -175,6 +175,40 @@ test('a drag onto an epic does not move a ticket that changed elsewhere', async 
   expect(calls.filter(call => call.path.endsWith('/move'))).toHaveLength(0)
 })
 
+test('docked, the toolbar keeps a labelled Closed toggle and epic counts stay readable on hover', async ({ page }) => {
+  await page.setViewportSize({ width: 1280, height: 800 })
+  const calls = await mockWork(page, tree())
+  await page.goto('/p/PHAROS/PHAROS-14?view=outline')
+  const pill = page.getByRole('button', { name: 'Hide closed tickets' })
+  await expect(pill).toBeVisible()
+  await expect(pill).toHaveText('Closed')
+  await expect(pill).toHaveAttribute('aria-pressed', 'true')
+  await expect(page.getByRole('radio', { name: 'Outline view' })).toHaveAttribute('data-tip', /tree/)
+  const toolbar = (await page.getByRole('toolbar', { name: 'Ticket list controls' }).boundingBox())!
+  expect(toolbar.height).toBeLessThan(60)
+  await row(page, 'PHAROS-10').hover()
+  const count = row(page, 'PHAROS-10').locator('.epic-progress .mono')
+  const actions = (await row(page, 'PHAROS-10').locator('.row-actions').boundingBox())!
+  const numbers = (await count.boundingBox())!
+  expect(numbers.x + numbers.width).toBeLessThanOrEqual(actions.x)
+  await pill.click()
+  await expect(page).toHaveURL(/closed=1/)
+  await expect(page.getByRole('button', { name: 'Hide closed tickets' })).toHaveAttribute('aria-pressed', 'false')
+  void calls
+})
+
+test('moves send the precondition and treat a 412 as a conflict', async ({ page }) => {
+  await mockWork(page, tree())
+  // The backend answers 412 once its atomic move precondition sees a newer copy.
+  const sent: string[] = []
+  await page.route('**/api/nodes/*/move', route => { sent.push(route.request().headers()['if-unmodified-since'] ?? ''); return route.fulfill({ status: 412, json: { error: 'node has changed' } }) })
+  await page.goto('/p/PHAROS?view=outline')
+  await row(page, 'PHAROS-14').dragTo(row(page, 'PHAROS-10'))
+  await expect(page.getByText('PHAROS-14 was changed elsewhere, so it was not moved.')).toBeVisible()
+  expect(sent).toEqual([ago(12)])
+  await expect(row(page, 'PHAROS-14')).toHaveAttribute('aria-level', '1')
+})
+
 test('Expand all and Collapse all from the Display menu', async ({ page }) => {
   await mockWork(page, tree())
   await page.goto('/p/PHAROS?view=outline&closed=1')

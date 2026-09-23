@@ -24,19 +24,23 @@ export function asListItem(node: WorkNode, kind: Kind, parent: ListParent | null
 export type SaveResult = 'ok' | 'conflict' | 'error'
 
 // Move a ticket under another parent (an epic, or the project for "No epic").
-// The move endpoint takes no If-Unmodified-Since, so the ticket is re-read first
-// and a newer copy stops the move; the row then shows that newer copy.
+// The move carries If-Unmodified-Since, and a 412 means a newer copy exists. Until
+// the move endpoint enforces it, the ticket is also re-read first; either way a
+// newer copy stops the move and the row shows it.
 export async function guardedMove(item: ListItem, parent: ListParent, after?: (item: ListItem, fromParentId: string | null) => void): Promise<SaveResult> {
   const from = item.parent
   const fromParentId = item.parent_id
+  const conflict = (latest: WorkNode) => {
+    Object.assign(item, { title: latest.title, body: latest.body, fields: latest.fields, state: latest.state, updated_at: latest.updated_at, parent_id: latest.parent_id })
+    toast(`${item.key} was changed elsewhere, so it was not moved. The newer version is shown.`, { tone: 'error' })
+    return 'conflict' as const
+  }
   try {
     const latest = await getNode(item.id)
-    if (latest.updated_at !== item.updated_at) {
-      Object.assign(item, { title: latest.title, body: latest.body, fields: latest.fields, state: latest.state, updated_at: latest.updated_at, parent_id: latest.parent_id })
-      toast(`${item.key} was changed elsewhere, so it was not moved. The newer version is shown.`, { tone: 'error' })
-      return 'conflict'
-    }
-    const node = await moveNode(item.id, parent.id, null)
+    if (latest.updated_at !== item.updated_at) return conflict(latest)
+    let node: WorkNode
+    try { node = await moveNode(item.id, parent.id, null, { ifUnmodifiedSince: item.updated_at }) }
+    catch (e) { if (e instanceof APIError && e.status === 412) return conflict(await getNode(item.id)); throw e }
     Object.assign(item, { parent_id: node.parent_id, updated_at: node.updated_at, parent })
     after?.(item, fromParentId)
     const where = parent.kind_slug === 'project' ? 'out of its epic' : `to ${parent.key} ${parent.title}`

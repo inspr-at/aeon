@@ -5,7 +5,7 @@ export type IconName =
   | 'sun' | 'moon' | 'user' | 'chevron' | 'chevron-right' | 'chevron-left' | 'chevron-up' | 'arrow' | 'arrow-up' | 'arrow-down'
   | 'logout' | 'tree' | 'compass' | 'search' | 'list' | 'plus' | 'close' | 'edit' | 'copy' | 'external' | 'filter' | 'check'
   | 'rows-comfortable' | 'rows-compact' | 'keyboard' | 'epic' | 'ticket' | 'task' | 'alert' | 'refresh' | 'sliders' | 'enter'
-  | 'inbox' | 'folder' | 'layers' | 'archive' | 'clock' | 'expand' | 'collapse' | 'more' | 'link' | 'trash' | 'agent' | 'outline' | 'expand-all' | 'collapse-all' | 'arrow-left'
+  | 'inbox' | 'folder' | 'layers' | 'archive' | 'clock' | 'expand' | 'collapse' | 'more' | 'link' | 'trash' | 'agent' | 'outline' | 'expand-all' | 'collapse-all' | 'arrow-left' | 'eye' | 'eye-off'
 </script>
 <script setup lang="ts">
 withDefaults(defineProps<{ name: IconName; size?: number }>(), { size: 16 })
@@ -21,6 +21,8 @@ withDefaults(defineProps<{ name: IconName; size?: number }>(), { size: 16 })
     <path v-else-if="name === 'chevron-left'" d="m9.7 4.5-3.5 3.5 3.5 3.5" />
     <path v-else-if="name === 'chevron-up'" d="m4.5 9.7 3.5-3.5 3.5 3.5" />
     <path v-else-if="name === 'arrow'" d="M2.8 8h10.4M9.2 4l4 4-4 4" />
+    <template v-else-if="name === 'eye'"><path d="M1.6 8s2.4-4.6 6.4-4.6S14.4 8 14.4 8s-2.4 4.6-6.4 4.6S1.6 8 1.6 8Z" /><circle cx="8" cy="8" r="1.9" /></template>
+    <template v-else-if="name === 'eye-off'"><path d="M6.2 3.7A6.5 6.5 0 0 1 8 3.4c4 0 6.4 4.6 6.4 4.6a11 11 0 0 1-1.7 2.2M4.3 4.7A10.6 10.6 0 0 0 1.6 8s2.4 4.6 6.4 4.6c1 0 1.9-.3 2.7-.7M6.7 6.6a1.9 1.9 0 0 0 2.7 2.7M2.4 2.4l11.2 11.2" /></template>
     <path v-else-if="name === 'arrow-left'" d="M13.2 8H2.8M6.8 4l-4 4 4 4" />
     <path v-else-if="name === 'arrow-up'" d="M8 13.2V2.8M4 6.8l4-4 4 4" />
     <path v-else-if="name === 'arrow-down'" d="M8 2.8v10.4M4 9.2l4 4 4-4" />

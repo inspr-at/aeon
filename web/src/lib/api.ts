@@ -99,7 +99,9 @@ export const createNode = (body: NodeCreate) => json<WorkNode>('/nodes', 'POST',
 // ifUnmodifiedSince is the node's updated_at as read; a newer server copy answers 412.
 export const updateNode = (id: string, body: NodePatch, options: { ifUnmodifiedSince?: string } = {}) =>
   json<WorkNode>(`/nodes/${idPath(id)}`, 'PATCH', body, options.ifUnmodifiedSince ? { 'If-Unmodified-Since': options.ifUnmodifiedSince } : {})
-export const moveNode = (id: string, parent_id: string | null, before_id?: string | null) => json<WorkNode>(`/nodes/${idPath(id)}/move`, 'POST', { parent_id, before_id })
+// ifUnmodifiedSince: sent ahead of the backend's atomic move precondition (412 on a newer copy).
+export const moveNode = (id: string, parent_id: string | null, before_id?: string | null, options: { ifUnmodifiedSince?: string } = {}) =>
+  json<WorkNode>(`/nodes/${idPath(id)}/move`, 'POST', { parent_id, before_id }, options.ifUnmodifiedSince ? { 'If-Unmodified-Since': options.ifUnmodifiedSince } : {})
 export const deleteNode = (id: string) => json<void>(`/nodes/${idPath(id)}`, 'DELETE')
 export const searchNodes = (q: string, params: { kind_id?: string; state?: string; cursor?: string; limit?: number } = {}) => json<Page<SearchHit>>(`/search${query({ q, ...params })}`)
 // B1 list and project-summary wire types (api/openapi.yaml NodeListItem, listProjects).
