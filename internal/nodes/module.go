@@ -42,6 +42,7 @@ func (m *Module) Mount(mux *http.ServeMux) {
 	mux.HandleFunc("DELETE /api/kinds/{kindId}", m.handleDeleteKind)
 
 	mux.HandleFunc("GET /api/nodes", m.handleListNodes)
+	mux.HandleFunc("GET /api/projects", m.handleListProjects)
 	mux.HandleFunc("POST /api/nodes", m.handleCreateNode)
 	mux.HandleFunc("GET /api/nodes/tree", m.handleTree)
 	mux.HandleFunc("GET /api/nodes/{nodeId}", m.handleGetNode)
