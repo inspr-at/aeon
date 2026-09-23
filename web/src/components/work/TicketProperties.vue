@@ -1,6 +1,6 @@
 <!-- SPDX-License-Identifier: AGPL-3.0-only -->
 <script setup lang="ts">
-import { computed } from 'vue'
+import { computed, ref } from 'vue'
 import type { ListItem } from '../../lib/api'
 import { absoluteTime, kindLabel, priorityLabel, relativeTime, statusMeta } from '../../lib/work'
 import AppIcon from '../AppIcon.vue'
@@ -35,10 +35,18 @@ const release = computed(() => {
 })
 const epicParent = computed(() => props.item.parent && props.item.parent.kind_slug !== 'project' ? props.item.parent : null)
 const target = (event: Event) => event.currentTarget as HTMLElement
+// The phone chip row scrolls sideways; its fades show which way there is more.
+const scrolledX = ref(0)
+const atEnd = ref(false)
+function onScroll(event: Event) {
+  const el = event.currentTarget as HTMLElement
+  scrolledX.value = el.scrollLeft
+  atEnd.value = el.scrollLeft + el.clientWidth >= el.scrollWidth - 4
+}
 </script>
 
 <template>
-  <dl class="props" :class="layout">
+  <dl class="props" :class="[layout, { scrolled: scrolledX > 4, 'at-end': atEnd }]" @scroll.passive="onScroll">
     <div class="prop">
       <dt>Status</dt>
       <dd><button type="button" class="prop-btn" :disabled="!editable" aria-haspopup="menu" aria-keyshortcuts="s" :aria-label="`Status: ${statusMeta(item.state).label}. Change status`" @click="emit('status', target($event))"><StatusIcon :state="item.state" />{{ statusMeta(item.state).label }}<AppIcon v-if="editable" name="chevron" :size="12" class="chev" /></button></dd>
@@ -106,11 +114,19 @@ const target = (event: Event) => event.currentTarget as HTMLElement
 @media (max-width: 720px) {
   .props.row {
     flex-wrap: nowrap; overflow-x: auto; margin: 14px -18px 0; padding: 2px 18px 4px; scrollbar-width: none; scroll-padding-inline: 18px;
-    -webkit-mask-image: linear-gradient(to right, transparent 0, #000 16px, #000 calc(100% - 36px), transparent);
-    mask-image: linear-gradient(to right, transparent 0, #000 16px, #000 calc(100% - 36px), transparent);
+    -webkit-mask-image: linear-gradient(to right, #000 0, #000 calc(100% - 72px), rgba(0, 0, 0, .15) calc(100% - 14px), transparent);
+    mask-image: linear-gradient(to right, #000 0, #000 calc(100% - 72px), rgba(0, 0, 0, .15) calc(100% - 14px), transparent);
   }
-  /* A trailing spacer so the last chip can scroll clear of the fade. */
-  .props.row::after { content: ''; flex: 0 0 24px; }
+  /* Once scrolled, the start fades too; a trailing spacer lets the last chip clear the fade. */
+  .props.row.scrolled {
+    -webkit-mask-image: linear-gradient(to right, transparent, rgba(0, 0, 0, .15) 14px, #000 56px, #000 calc(100% - 72px), rgba(0, 0, 0, .15) calc(100% - 14px), transparent);
+    mask-image: linear-gradient(to right, transparent, rgba(0, 0, 0, .15) 14px, #000 56px, #000 calc(100% - 72px), rgba(0, 0, 0, .15) calc(100% - 14px), transparent);
+  }
+  .props.row.at-end {
+    -webkit-mask-image: linear-gradient(to right, transparent, rgba(0, 0, 0, .15) 14px, #000 56px);
+    mask-image: linear-gradient(to right, transparent, rgba(0, 0, 0, .15) 14px, #000 56px);
+  }
+  .props.row::after { content: ''; flex: 0 0 40px; }
   .props.row::-webkit-scrollbar { display: none; }
   .props.row .prop { flex-shrink: 0; }
   .row .prop-btn, .row .prop-static { height: 34px; }

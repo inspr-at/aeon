@@ -22,6 +22,31 @@ export function asListItem(node: WorkNode, kind: Kind, parent: ListParent | null
 }
 
 export type SaveResult = 'ok' | 'conflict' | 'error'
+
+// Move a ticket under another parent (an epic, or the project for "No epic").
+// The move endpoint takes no If-Unmodified-Since, so the ticket is re-read first
+// and a newer copy stops the move; the row then shows that newer copy.
+export async function guardedMove(item: ListItem, parent: ListParent, after?: (item: ListItem, fromParentId: string | null) => void): Promise<SaveResult> {
+  const from = item.parent
+  const fromParentId = item.parent_id
+  try {
+    const latest = await getNode(item.id)
+    if (latest.updated_at !== item.updated_at) {
+      Object.assign(item, { title: latest.title, body: latest.body, fields: latest.fields, state: latest.state, updated_at: latest.updated_at, parent_id: latest.parent_id })
+      toast(`${item.key} was changed elsewhere, so it was not moved. The newer version is shown.`, { tone: 'error' })
+      return 'conflict'
+    }
+    const node = await moveNode(item.id, parent.id, null)
+    Object.assign(item, { parent_id: node.parent_id, updated_at: node.updated_at, parent })
+    after?.(item, fromParentId)
+    const where = parent.kind_slug === 'project' ? 'out of its epic' : `to ${parent.key} ${parent.title}`
+    toast(`${item.key} moved ${where}`, from ? { action: { label: 'Undo', run: () => void guardedMove(item, from, after) } } : {})
+    return 'ok'
+  } catch (e) {
+    toast(`${item.key} could not be moved: ${message(e)}`, { tone: 'error' })
+    return 'error'
+  }
+}
 export interface RelatedNode { relation: Relation; label: string; node: { id: string; key: string; title: string; state: string } | null }
 
 // State and writes for one open ticket. Every write sends the ticket's
@@ -31,6 +56,7 @@ export function useTicket(item: Ref<ListItem | null>, context: {
   names: Map<string, string>
   onRemoved: (item: ListItem) => void
   onCreated: (item: ListItem) => void
+  onMoved: (item: ListItem, fromParent: string | null) => void
 }) {
   const loading = ref(false)
   const error = ref('')
@@ -162,12 +188,7 @@ export function useTicket(item: Ref<ListItem | null>, context: {
   async function moveTo(epic: { id: string; key: string; title: string }) {
     const target = item.value
     if (!target || target.parent?.id === epic.id) return
-    try {
-      const node = await moveNode(target.id, epic.id, null)
-      merge(target, node)
-      target.parent = { id: epic.id, key: epic.key, title: epic.title, kind_slug: 'epic' }
-      toast(`${target.key} moved to ${epic.key} ${epic.title}`)
-    } catch (e) { toast(`${target.key} could not be moved: ${message(e)}`, { tone: 'error' }) }
+    await guardedMove(target, { id: epic.id, key: epic.key, title: epic.title, kind_slug: 'epic' }, context.onMoved)
   }
 
   async function remove(): Promise<boolean> {

@@ -5,7 +5,7 @@ export type IconName =
   | 'sun' | 'moon' | 'user' | 'chevron' | 'chevron-right' | 'chevron-left' | 'chevron-up' | 'arrow' | 'arrow-up' | 'arrow-down'
   | 'logout' | 'tree' | 'compass' | 'search' | 'list' | 'plus' | 'close' | 'edit' | 'copy' | 'external' | 'filter' | 'check'
   | 'rows-comfortable' | 'rows-compact' | 'keyboard' | 'epic' | 'ticket' | 'task' | 'alert' | 'refresh' | 'sliders' | 'enter'
-  | 'inbox' | 'folder' | 'layers' | 'archive' | 'clock' | 'expand' | 'collapse' | 'more' | 'link' | 'trash' | 'agent'
+  | 'inbox' | 'folder' | 'layers' | 'archive' | 'clock' | 'expand' | 'collapse' | 'more' | 'link' | 'trash' | 'agent' | 'outline' | 'expand-all' | 'collapse-all' | 'arrow-left'
 </script>
 <script setup lang="ts">
 withDefaults(defineProps<{ name: IconName; size?: number }>(), { size: 16 })
@@ -21,6 +21,7 @@ withDefaults(defineProps<{ name: IconName; size?: number }>(), { size: 16 })
     <path v-else-if="name === 'chevron-left'" d="m9.7 4.5-3.5 3.5 3.5 3.5" />
     <path v-else-if="name === 'chevron-up'" d="m4.5 9.7 3.5-3.5 3.5 3.5" />
     <path v-else-if="name === 'arrow'" d="M2.8 8h10.4M9.2 4l4 4-4 4" />
+    <path v-else-if="name === 'arrow-left'" d="M13.2 8H2.8M6.8 4l-4 4 4 4" />
     <path v-else-if="name === 'arrow-up'" d="M8 13.2V2.8M4 6.8l4-4 4 4" />
     <path v-else-if="name === 'arrow-down'" d="M8 2.8v10.4M4 9.2l4 4 4-4" />
     <path v-else-if="name === 'logout'" d="M6 2.5H3.3a.8.8 0 0 0-.8.8v9.4c0 .4.4.8.8.8H6M10.2 5l3 3-3 3M5.8 8h7.4" />
@@ -52,6 +53,9 @@ withDefaults(defineProps<{ name: IconName; size?: number }>(), { size: 16 })
     <path v-else-if="name === 'collapse'" d="M13.4 2.6 9.4 6.6M9.4 3v3.6H13M2.6 13.4l4-4M6.6 13V9.4H3" />
     <template v-else-if="name === 'more'"><circle cx="3.4" cy="8" r="1.25" fill="currentColor" stroke="none" /><circle cx="8" cy="8" r="1.25" fill="currentColor" stroke="none" /><circle cx="12.6" cy="8" r="1.25" fill="currentColor" stroke="none" /></template>
     <path v-else-if="name === 'link'" d="M6.6 9.4 9.4 6.6M7.2 4.4l1.2-1.2a2.6 2.6 0 0 1 3.7 3.7l-1.2 1.2M8.8 11.6l-1.2 1.2a2.6 2.6 0 0 1-3.7-3.7l1.2-1.2" />
+    <path v-else-if="name === 'outline'" d="M2.4 3.2h7M4.2 3.2v9.4M4.2 7.9h9.4M4.2 12.6h9.4" />
+    <path v-else-if="name === 'expand-all'" d="m4.4 3.6 3.6 3.2 3.6-3.2M4.4 9.2 8 12.4l3.6-3.2" />
+    <path v-else-if="name === 'collapse-all'" d="m4.4 6.8 3.6-3.2 3.6 3.2M4.4 12.4 8 9.2l3.6 3.2" />
     <template v-else-if="name === 'agent'"><rect x="2.6" y="5" width="10.8" height="8.2" rx="2.4" /><path d="M8 5V2.6M6 9h.01M10 9h.01M1 8.4v2M15 8.4v2" /><circle cx="8" cy="2.2" r=".6" fill="currentColor" stroke="none" /></template>
     <path v-else-if="name === 'trash'" d="M2.8 4.2h10.4M6.2 4.2V2.8h3.6v1.4M4.2 4.2l.7 8.6c.1.7.6 1.2 1.3 1.2h3.6c.7 0 1.2-.5 1.3-1.2l.7-8.6M6.8 7v4.2M9.2 7v4.2" />
     <template v-else-if="name === 'clock'"><circle cx="8" cy="8" r="6.2" /><path d="M8 4.6V8l2.2 1.4" /></template>

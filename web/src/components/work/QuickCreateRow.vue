@@ -14,9 +14,9 @@ import StatusMenu from './StatusMenu.vue'
 
 // "New ticket" at the top of the table: type a title, Tab through type,
 // status, priority and epic, Enter creates and the row stays for the next one.
-const props = defineProps<{ projectId: string; knownStates: string[]; showAssignee: boolean; create: (draft: QuickDraft) => Promise<boolean> }>()
+const props = defineProps<{ projectId: string; knownStates: string[]; showAssignee: boolean; create: (draft: QuickDraft) => Promise<boolean>; initialEpic?: { id: string; key: string; title: string } | null; indent?: number }>()
 const emit = defineEmits<{ close: [] }>()
-const draft = reactive<QuickDraft>({ title: '', kind: 'ticket', state: 'new', priority: '', epic: null })
+const draft = reactive<QuickDraft>({ title: '', kind: 'ticket', state: 'new', priority: '', epic: props.initialEpic ?? null })
 const busy = ref(false)
 const input = ref<HTMLInputElement>()
 const menu = ref<{ kind: 'type' | 'status' | 'priority' | 'epic'; anchor: HTMLElement } | null>(null)
@@ -44,11 +44,11 @@ defineExpose({ focus: () => input.value?.focus(), isDirty: () => !!draft.title.t
 </script>
 
 <template>
-  <tr class="create-row" @keydown="keydown">
+  <tr class="create-row" :class="{ nested: !!initialEpic }" @keydown="keydown">
     <td class="c-key"><div class="cell"><span class="new-badge">New</span></div></td>
     <td class="c-title">
-      <div class="cell create-title">
-        <input ref="input" v-model="draft.title" class="create-input" :placeholder="`${kindLabel(draft.kind)} title`" aria-label="New ticket title" :disabled="busy" />
+      <div class="cell create-title" :style="indent ? { paddingLeft: `${indent}px` } : undefined">
+        <input ref="input" v-model="draft.title" class="create-input" :placeholder="initialEpic ? `${kindLabel(draft.kind)} in ${initialEpic.key}` : `${kindLabel(draft.kind)} title`" aria-label="New ticket title" :disabled="busy" />
         <button type="button" class="create-chip" aria-haspopup="menu" :aria-label="`Type: ${kindLabel(draft.kind)}`" @click="open('type', $event)">
           <AppIcon :name="draft.kind === 'epic' ? 'epic' : draft.kind === 'task' ? 'task' : 'ticket'" :size="12" :class="['kind', draft.kind]" />{{ kindLabel(draft.kind) }}<AppIcon name="chevron" :size="11" class="chev" />
         </button>
@@ -89,8 +89,9 @@ defineExpose({ focus: () => input.value?.focus(), isDirty: () => !!draft.title.t
 .chev, .dash { color: var(--ink-3); }
 .kind { color: var(--ink-3); }
 .kind.epic { color: var(--gold); }
-.epic-cell { justify-content: flex-end; }
-.epic-chip { max-width: 180px; }
+.c-epic { overflow: hidden; }
+.epic-cell { justify-content: flex-start; }
+.epic-chip { max-width: 100%; min-width: 0; }
 .create-hint-row td { padding: 0 18px 8px; background: var(--row-selected); border-bottom: 1px solid var(--line-2); }
 .create-hint { display: inline-flex; align-items: center; flex-wrap: wrap; gap: 4px; font-size: 11.5px; color: var(--ink-3); }
 @media (max-width: 720px) {

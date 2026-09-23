@@ -138,6 +138,29 @@ export function facetOptions(dimension: Dimension, counts: Record<string, number
   ]
 }
 
+// Client-side ordering with the same keys as the list API, for siblings in the Outline
+// that come from different requests (matches and their ancestors).
+const PRIORITY_RANK: Record<string, number> = { high: 0, medium: 1, low: 2 }
+export function compareRows(keys: SortKey[]): (a: ListItem, b: ListItem) => number {
+  const value = (row: ListItem, field: SortKey['field']): string | number => {
+    switch (field) {
+      case 'state': return statusMeta(row.state).order
+      case 'priority': return PRIORITY_RANK[row.priority ?? ''] ?? 3
+      case 'updated_at': return Date.parse(row.updated_at) || 0
+      case 'key': { const [prefix, number] = row.key.split('-'); return `${prefix}-${number.padStart(9, '0')}` }
+      case 'title': return row.title.toLowerCase()
+      case 'kind': return row.kind_slug
+    }
+  }
+  return (a, b) => {
+    for (const key of keys) {
+      const x = value(a, key.field), y = value(b, key.field)
+      if (x !== y) return (x < y ? -1 : 1) * (key.desc ? -1 : 1)
+    }
+    return a.id < b.id ? -1 : 1
+  }
+}
+
 // Stable status ordering by workflow (the server orders unknown spellings last).
 export function orderByStatus(rows: ListItem[], desc = false): ListItem[] {
   return rows
