@@ -128,7 +128,7 @@ defineExpose({ focusSearch, input })
       <AppIcon name="layers" :size="13" /><span class="display-label">{{ displayLabel }}</span><AppIcon name="chevron" :size="12" class="facet-chevron" />
     </button>
 
-    <button type="button" class="btn primary new-btn" aria-keyshortcuts="n" data-tip="New ticket · n" @click="emit('create')"><AppIcon name="plus" :size="14" /><span class="new-label">New</span></button>
+    <button type="button" class="btn primary new-btn" aria-label="New ticket" aria-keyshortcuts="n" data-tip="New ticket · n" @click="emit('create')"><AppIcon name="plus" :size="14" /><span class="new-label">New</span></button>
     <button type="button" class="btn filters-btn" :class="{ on: filterCount }" @click="emit('openSheet')">
       <AppIcon name="sliders" :size="14" />Filters<span v-if="filterCount" class="facet-count mono">{{ filterCount }}</span>
     </button>

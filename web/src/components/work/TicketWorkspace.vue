@@ -124,7 +124,7 @@ defineExpose({
   <component :is="mode === 'panel' ? 'aside' : 'article'" ref="root" class="ticket-ws" :class="mode" aria-label="Ticket details" tabindex="-1">
     <TicketHeaderBar
       :ticket-key="item?.key ?? ticketKey" :kind="item?.kind_slug ?? null" :position="position" :mode="mode" :can-write="editable"
-      :can-move="!!item && item.kind_slug !== 'epic'"
+      :can-move="item?.kind_slug === 'ticket'"
       @copy-key="copy(item?.key ?? ticketKey, item?.key ?? ticketKey)" @copy-link="copy(link(), 'link')" @prev="emit('prev')" @next="emit('next')"
       @expand="emit('expand')" @collapse="emit('collapse')" @new-tab="emit('newTab')" @close="emit('close')"
       @move="anchor => openMenu('epic', anchor)" @delete="remove"
@@ -154,11 +154,11 @@ defineExpose({
           <p v-if="!editable" class="read-only" role="note"><AppIcon name="alert" :size="13" />You can read this {{ kindLabel(item.kind_slug).toLowerCase() }} but not change it.</p>
           <InlineTitle ref="title" :value="item.title" :editable="editable" :large="mode === 'full'" :save="ticket.setTitle" />
           <TicketProperties
-            v-if="mode === 'panel'" class="ws-props" :item="item" :editable="editable" layout="row" :now="now"
+            class="ws-props" :class="{ 'only-narrow': mode === 'full' }" :item="item" :editable="editable" layout="row" :now="now"
             @status="anchor => emit('status', anchor)" @priority="anchor => openMenu('priority', anchor)" @assignee="anchor => openMenu('assignee', anchor)"
             @epic="anchor => openMenu('epic', anchor)" @open-parent="key => emit('openKey', key)"
           />
-          <p v-if="mode === 'panel'" class="meta">
+          <p class="meta" :class="{ 'only-narrow': mode === 'full' }">
             Updated <time :datetime="item.updated_at" :data-tip="absoluteTime(item.updated_at)">{{ relativeTime(item.updated_at, { now, long: true }) }}</time>
             · Created <time :datetime="item.created_at" :data-tip="absoluteTime(item.created_at)">{{ relativeTime(item.created_at, { now, long: true }) }}</time>
           </p>
@@ -179,7 +179,7 @@ defineExpose({
             :child-label="item.kind_slug === 'epic' ? 'ticket' : 'task'" :progress="ticket.childProgress()" :add="title => ticket.addChild(title, project.routeKey)"
             @open="key => emit('openKey', key)"
           />
-          <RelationList v-if="mode === 'panel'" class="ws-block" :related="ticket.related.value" @open="key => emit('openKey', key)" />
+          <RelationList class="ws-block" :class="{ 'only-narrow': mode === 'full' }" :related="ticket.related.value" @open="key => emit('openKey', key)" />
 
           <ActivityTimeline
             ref="timeline" class="ws-block" :entries="activity.timeline.value" :loading="activity.loading.value" :loading-older="activity.loadingOlder.value"
@@ -249,7 +249,7 @@ defineExpose({
 .ws-skeleton .chip { width: 86px; height: 26px; border-radius: 999px; }
 
 /* Full page: content left at a readable measure, properties and relations right. */
-.ticket-ws.full { min-height: 100%; }
+.ticket-ws.full { width: 100%; max-width: 1160px; min-height: 100%; margin: 0 auto; }
 .full .ws-scroll { overflow: visible; }
 .full .ws-grid { display: grid; grid-template-columns: minmax(0, 1fr) 320px; gap: 40px; align-items: start; padding: 26px 0 40px; }
 .full .ws-main { min-width: 0; max-width: 820px; }
@@ -259,7 +259,13 @@ defineExpose({
 .side-card :deep(.relation-label) { width: 84px; }
 .full .panel-bar { border-bottom: 0; padding: 0; height: 44px; }
 @media (min-width: 1100px) { .ticket-ws.panel { width: var(--panel-w); } }
-@media (max-width: 980px) { .full .ws-grid { grid-template-columns: minmax(0, 1fr); } .full .ws-side { position: static; order: -1; } }
+.full .only-narrow { display: none; }
+@media (max-width: 980px) {
+  .full .ws-grid { grid-template-columns: minmax(0, 1fr); padding-top: 14px; }
+  .full .ws-side { display: none; }
+  .full .only-narrow { display: revert; }
+  .full .ws-props.only-narrow { display: flex; }
+}
 @media (prefers-reduced-motion: no-preference) {
   .ticket-ws.panel { animation: panel-in .22s cubic-bezier(.2, .7, .2, 1); }
   @keyframes panel-in { from { opacity: 0; transform: translateX(24px); } to { opacity: 1; transform: none; } }

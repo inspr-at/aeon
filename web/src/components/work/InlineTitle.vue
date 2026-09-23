@@ -43,7 +43,10 @@ defineExpose({ start, isDirty: () => dirty.value })
   <div class="inline-title" :class="{ large }">
     <template v-if="editing">
       <textarea ref="area" v-model="draft" class="title-input" rows="1" aria-label="Title" :disabled="saving" @input="grow" @keydown="keydown" @blur="blur" />
-      <p v-if="conflict" class="conflict" role="alert"><AppIcon name="alert" :size="13" />Changed elsewhere to “{{ value }}”. <kbd class="keycap"><AppIcon name="enter" /></kbd> saves yours, <kbd class="keycap">esc</kbd> keeps theirs.</p>
+      <div v-if="conflict" class="conflict" role="alert">
+        <AppIcon name="alert" :size="14" />
+        <p>Changed elsewhere to <strong>“{{ value }}”</strong>. <span class="keys"><kbd class="keycap"><AppIcon name="enter" /></kbd> saves yours · <kbd class="keycap">esc</kbd> keeps theirs</span></p>
+      </div>
       <p v-else class="hint"><kbd class="keycap"><AppIcon name="enter" /></kbd> save · <kbd class="keycap">esc</kbd> cancel</p>
     </template>
     <h2 v-else class="title-text" :class="{ editable }" :tabindex="editable ? 0 : undefined" :data-tip="editable ? 'Click or press e to edit' : undefined" @click="start" @keydown.enter.prevent="start">{{ value }}</h2>
@@ -58,7 +61,10 @@ defineExpose({ start, isDirty: () => dirty.value })
 .title-text:focus-visible { box-shadow: var(--focus-ring); }
 .title-input { display: block; width: calc(100% + 16px); margin: -5px -8px; padding: 4px 7px; border: 1px solid var(--glass-edge); border-radius: 10px; resize: none; overflow: hidden; background: var(--field-bg); box-shadow: var(--field-inset), 0 0 0 1px var(--line); }
 .title-input:focus { box-shadow: var(--focus-ring); }
-.hint, .conflict { display: flex; align-items: center; flex-wrap: wrap; gap: 4px; margin-top: 10px; font-size: 12px; color: var(--ink-3); }
-.conflict { padding: 6px 10px; border-radius: 8px; background: var(--danger-bg); color: var(--ink); }
-.conflict > svg { color: var(--danger); margin-right: 2px; }
+.hint { display: flex; align-items: center; flex-wrap: wrap; gap: 4px; margin-top: 10px; font-size: 12px; color: var(--ink-3); }
+.conflict { display: grid; grid-template-columns: 14px minmax(0, 1fr); gap: 8px; margin-top: 12px; padding: 9px 12px; border-radius: 10px; background: var(--danger-bg); box-shadow: inset 0 0 0 1px var(--danger-line); }
+.conflict > svg { margin-top: 2px; color: var(--danger); }
+.conflict p { font-size: 12.5px; line-height: 1.5; color: var(--ink); }
+.conflict strong { font-weight: 600; }
+.conflict .keys { display: inline-flex; align-items: center; gap: 3px; color: var(--ink-3); white-space: nowrap; }
 </style>

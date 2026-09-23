@@ -93,9 +93,11 @@ defineExpose({ focus: () => input.value?.focus(), isDirty: () => !!draft.title.t
 .create-hint-row td { padding: 0 18px 8px; background: var(--row-selected); border-bottom: 1px solid var(--line-2); }
 .create-hint { display: inline-flex; align-items: center; flex-wrap: wrap; gap: 4px; font-size: 11.5px; color: var(--ink-3); }
 @media (max-width: 720px) {
-  .create-row { display: grid; grid-template-columns: auto 1fr; grid-template-areas: "key key" "title title" "status prio" "epic epic"; gap: 8px; padding: 12px 14px; background: var(--row-selected); box-shadow: inset 3px 0 0 var(--row-accent); }
+  .create-row { display: flex; flex-wrap: wrap; gap: 8px; padding: 12px 14px 14px; background: var(--row-selected); box-shadow: inset 3px 0 0 var(--row-accent); border-bottom: 1px solid var(--line-2); }
   .create-row td { display: block; height: auto; padding: 0 !important; background: none; box-shadow: none !important; }
-  .c-key { grid-area: key; } .c-title { grid-area: title; } .c-status { grid-area: status; } .c-prio { grid-area: prio; } .c-epic { grid-area: epic; }
+  .c-key { display: none !important; }
+  .c-title { flex: 1 0 100%; }
+  .epic-chip { max-width: 140px; }
   .create-input { height: 44px; font-size: 16px; }
   .create-chip { height: 36px; }
   .epic-cell { justify-content: flex-start; }
