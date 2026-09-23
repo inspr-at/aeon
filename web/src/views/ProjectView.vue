@@ -7,7 +7,7 @@ import { density } from '../lib/prefs'
 import { toast } from '../lib/toast'
 import { apiParams, effectiveSort, facetOptions, filtersFromQuery, filtersToQuery, groupRows, hasFilters, orderByStatus, totalFrom, type Dimension, type EpicRef, type GroupBy, type ListFilters } from '../lib/ticketList'
 import { useTicketList } from '../lib/useTicketList'
-import { absoluteTime, cycleSort, relativeTime, statusMeta, type SortField } from '../lib/work'
+import { absoluteTime, cycleSort, relativeTime, stateBuckets, statusMeta, type SortField } from '../lib/work'
 import { useProjects } from '../stores/projects'
 import { useSession } from '../stores/session'
 import AppIcon from '../components/AppIcon.vue'
@@ -64,6 +64,27 @@ const sequence = computed(() => {
   return out
 })
 const total = computed(() => totalFrom(list.facets.value))
+const showAssignee = computed(() => list.rows.value.some(row => row.assignee))
+
+// Header counts come from the project's own state facet, so every spelling of a
+// status lands in the right bucket whatever the summary endpoint reports.
+const stateCounts = ref<Record<string, number> | null>(null)
+let countGeneration = 0
+async function loadCounts() {
+  const within = projectId.value
+  if (!within) return
+  const request = ++countGeneration
+  try {
+    const page = await listNodes({ within, facets: ['state'], limit: 1 })
+    if (request === countGeneration) stateCounts.value = page.facets?.state ?? null
+  } catch { /* the summary counts stay in place */ }
+}
+watch(projectId, () => { stateCounts.value = null; void loadCounts() }, { immediate: true })
+const counts = computed(() => {
+  if (stateCounts.value) return stateBuckets(stateCounts.value)
+  const p = project.value
+  return p ? { open: p.open, progress: p.in_progress, done: p.done, total: p.total } : null
+})
 const knownStates = computed(() => Object.keys(list.facets.value.state ?? {}))
 const filtered = computed(() => hasFilters(filters.value))
 
@@ -186,12 +207,14 @@ function chooseStatus(state: string) {
   const menu = statusMenu.value
   statusMenu.value = null
   if (!menu) return
-  void list.setStatus(menu.row, state)
+  void list.setStatus(menu.row, state).then(loadCounts)
   if (menu.from === 'panel') menu.anchor.focus()
   else table.value?.focusGrid()
 }
 function openEpic(epic: EpicRef) { openKey(epic.key) }
 function setDensity(value: 'comfortable' | 'compact') { density.value = value }
+// Tabbing into the table lands on a visible row, not on an invisible container.
+function focusFirst() { if (!cursorId.value && sequence.value.length) cursorId.value = sequence.value[0].id }
 
 // ---------- Keyboard ----------
 function typing(target: EventTarget | null) {
@@ -242,15 +265,20 @@ onMounted(() => {
   void projects.load()
   window.addEventListener('keydown', keydown)
   clock = setInterval(() => { now.value = Date.now() }, 60_000)
-  if (toolbarWrap.value) {
-    resize = new ResizeObserver(() => { toolbarHeight.value = toolbarWrap.value?.offsetHeight ?? 52 })
-    resize.observe(toolbarWrap.value)
-  }
-  if (stickMark.value) {
-    stick = new IntersectionObserver(([entry]) => { stuck.value = !entry.isIntersecting }, { root: scrollRoot.value, threshold: 0 })
-    stick.observe(stickMark.value)
-  }
 })
+// The toolbar only exists once the project is known, so observe it when it appears.
+watch(toolbarWrap, element => {
+  resize?.disconnect()
+  if (!element) return
+  resize = new ResizeObserver(() => { toolbarHeight.value = element.offsetHeight })
+  resize.observe(element)
+}, { flush: 'post' })
+watch([stickMark, scrollRoot], ([element, root]) => {
+  stick?.disconnect()
+  if (!element || !root) return
+  stick = new IntersectionObserver(([entry]) => { stuck.value = !entry.isIntersecting }, { root, threshold: 0 })
+  stick.observe(element)
+}, { flush: 'post' })
 onBeforeUnmount(() => {
   window.removeEventListener('keydown', keydown)
   clearInterval(clock)
@@ -265,11 +293,11 @@ watch([project, panelItem], ([current, item]) => {
   document.title = item ? `${item.key} ${item.title} · PAIMOS AEON` : `${current.routeKey} ${current.title} · PAIMOS AEON`
 }, { immediate: true })
 
-const progress = computed(() => project.value && project.value.total ? Math.round((project.value.done / project.value.total) * 100) : 0)
+const progress = computed(() => counts.value && counts.value.total ? Math.round((counts.value.done / counts.value.total) * 100) : 0)
 </script>
 
 <template>
-  <section class="project-page" :style="{ '--toolbar-h': `${toolbarHeight}px` }" :aria-labelledby="project ? 'project-title' : undefined">
+  <section class="project-page" :class="{ 'panel-open': !!ticketKey }" :style="{ '--toolbar-h': `${toolbarHeight}px` }" :aria-labelledby="project ? 'project-title' : undefined">
     <template v-if="project">
       <header class="project-head">
         <div class="head-main">
@@ -281,11 +309,11 @@ const progress = computed(() => project.value && project.value.total ? Math.roun
           </div>
           <p class="description" :data-tip="project.description.length > 120 ? project.description : undefined">{{ project.description || 'No description yet.' }}</p>
         </div>
-        <div class="head-stats" :aria-label="`${project.open} open, ${project.in_progress} in progress, ${project.done} done of ${project.total}`">
+        <div v-if="counts" class="head-stats" :aria-label="`${counts.open} open, ${counts.progress} in progress, ${counts.done} done of ${counts.total}`">
           <div class="stat-line">
-            <span class="stat"><StatusIcon state="new" :size="11" /><b>{{ project.open.toLocaleString('en-GB') }}</b> open</span>
-            <span class="stat"><StatusIcon state="in_progress" :size="11" /><b>{{ project.in_progress.toLocaleString('en-GB') }}</b> in progress</span>
-            <span class="stat"><StatusIcon state="done" :size="11" /><b>{{ project.done.toLocaleString('en-GB') }}</b> done</span>
+            <span class="stat"><StatusIcon state="new" :size="11" /><b>{{ counts.open.toLocaleString('en-GB') }}</b> open</span>
+            <span class="stat"><StatusIcon state="in_progress" :size="11" /><b>{{ counts.progress.toLocaleString('en-GB') }}</b> in progress</span>
+            <span class="stat"><StatusIcon state="done" :size="11" /><b>{{ counts.done.toLocaleString('en-GB') }}</b> done</span>
           </div>
           <div class="progress-line">
             <span class="bar"><i :style="{ width: `${progress}%` }" /></span>
@@ -309,10 +337,10 @@ const progress = computed(() => project.value && project.value.total ? Math.roun
         ref="table" :groups="groups" :group="filters.group" :rows-by-id="rowsById" :cursor-id="cursorId" :open-id="panelItem?.id ?? null"
         :query="filters.q" :sort="filters.sort" :density="density" :loading="list.loading.value" :loading-more="list.loadingMore.value"
         :error="list.error.value" :more-error="list.moreError.value" :has-more="!!list.cursor.value" :filtered="filtered" :hiding-closed="!filters.showClosed"
-        :collapsed="collapsed" :total="total" :project-key="routeKey" :scroll-root="scrollRoot" :now="now"
+        :collapsed="collapsed" :total="total" :project-key="routeKey" :scroll-root="scrollRoot" :now="now" :show-assignee="showAssignee"
         @open="openRow" @cursor="id => cursorId = id" @sort="sortBy" @status="(row, anchor) => openStatus(row, anchor, 'list')"
         @copy="row => copyKey(row.key)" @new-tab="row => newTab(row.key)" @toggle-group="toggleGroup" @open-epic="openEpic"
-        @retry="list.load()" @more="list.loadMore()" @clear-filters="clearFilters" @show-closed="update({ showClosed: true })"
+        @retry="list.load()" @more="list.loadMore()" @grid-focus="focusFirst" @clear-filters="clearFilters" @show-closed="update({ showClosed: true })"
       />
 
       <p class="hint">
@@ -371,12 +399,18 @@ const progress = computed(() => project.value && project.value.total ? Math.roun
 .activity { font-size: 12px; color: var(--ink-3); }
 .activity time { color: var(--ink-2); }
 .stick-mark { height: 1px; margin-bottom: -1px; }
-.toolbar-wrap { position: sticky; top: 0; z-index: 5; margin: 0 -28px; padding: 0 28px; }
-.toolbar-wrap.stuck { background: var(--glass); border-bottom: 1px solid var(--line); box-shadow: 0 12px 24px -20px rgba(16, 35, 39, .35); backdrop-filter: blur(18px) saturate(1.2); -webkit-backdrop-filter: blur(18px) saturate(1.2); }
+.toolbar-wrap { position: sticky; top: 0; z-index: 5; margin: 0 -28px; padding: 0 28px; container: toolbar / inline-size; }
+.toolbar-wrap.stuck { background: var(--glass); box-shadow: 0 1px 0 var(--line), 0 12px 24px -20px rgba(16, 35, 39, .35); backdrop-filter: blur(18px) saturate(1.2); -webkit-backdrop-filter: blur(18px) saturate(1.2); }
 .hint { display: flex; align-items: center; justify-content: center; flex-wrap: wrap; gap: 5px; padding: 16px 0 6px; font-size: 12px; color: var(--ink-3); }
 .hint .keycap + .keycap { margin-left: 2px; }
 .hint-link { display: inline-flex; align-items: center; gap: 5px; padding: 0; border: 0; background: transparent; color: var(--ink-3); font-size: 12px; }
 .hint-link:hover { color: var(--teal-ink); }
+/* Wide screens dock the ticket panel: the list reflows beside it instead of under it. */
+@media (min-width: 1100px) {
+  .project-page.panel-open { width: 100%; margin: 0; padding-right: calc(var(--panel-w) + 22px); }
+  .project-page.panel-open .toolbar-wrap { margin-right: 0; padding-right: 0; }
+  .project-page.panel-open .description { max-width: 100%; }
+}
 .page-state { display: grid; justify-items: center; gap: 10px; padding: 96px 24px; text-align: center; }
 .page-state > svg { color: var(--teal); }
 .page-state h1 { font-size: 26px; }

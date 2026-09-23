@@ -1,7 +1,7 @@
 // SPDX-License-Identifier: AGPL-3.0-only
 import { test } from 'node:test'
 import assert from 'node:assert/strict'
-import { cycleSort, descriptionLine, highlight, initials, parseSort, priorityLabel, projectRouteKey, relativeTime, serializeSort, statusMeta, statusOptions } from '../src/lib/work.ts'
+import { cycleSort, stateBuckets, descriptionLine, highlight, initials, parseSort, priorityLabel, projectRouteKey, relativeTime, serializeSort, statusMeta, statusOptions } from '../src/lib/work.ts'
 import { apiParams, effectiveSort, epicOf, facetOptions, filtersFromQuery, filtersToQuery, groupRows, orderByStatus, totalFrom } from '../src/lib/ticketList.ts'
 import type { ListItem } from '../src/lib/api.ts'
 
@@ -12,7 +12,8 @@ test('statuses read the same in every spelling and carry product labels', () => 
   assert.equal(statusMeta('qa').label, 'QA')
   assert.equal(statusMeta('done').closed, true)
   assert.equal(statusMeta('on_hold').label, 'On hold')
-  assert.deepEqual(statusOptions(['in-progress']).map(o => o.value), ['new', 'backlog', 'in-progress', 'qa', 'done', 'delivered', 'accepted', 'cancelled'])
+  assert.deepEqual(statusOptions(['in-progress']).map(o => o.value), ['new', 'backlog', 'in-progress', 'qa', 'accepted', 'delivered', 'done', 'cancelled'])
+  assert.deepEqual(stateBuckets({ 'in-progress': 9, qa: 8, new: 1, backlog: 4, done: 270, cancelled: 8 }), { open: 5, progress: 17, done: 278, total: 300 })
   assert.equal(statusOptions([]).find(o => o.meta.key === 'progress')!.value, 'in_progress')
 })
 
@@ -88,9 +89,9 @@ function row(id: string, state: string, kind = 'ticket', parent: ListItem['paren
 }
 
 test('status order and grouping follow the workflow, epics collect their tickets', () => {
-  const rows = [row('a', 'qa'), row('b', 'in-progress'), row('c', 'new'), row('d', 'backlog')]
-  assert.deepEqual(orderByStatus(rows).map(r => r.id), ['c', 'd', 'b', 'a'])
-  assert.deepEqual(groupRows(rows, 'status', { 'in-progress': 4 }).map(g => [g.label, g.total]), [['New', 1], ['Backlog', 1], ['In progress', 4], ['QA', 1]])
+  const rows = [row('a', 'qa'), row('b', 'in-progress'), row('c', 'new'), row('d', 'backlog'), row('e', 'done'), row('f', 'accepted'), row('g', 'delivered'), row('h', 'in_progress')]
+  assert.deepEqual(orderByStatus(rows).map(r => r.id), ['c', 'd', 'b', 'h', 'a', 'f', 'g', 'e'])
+  assert.deepEqual(groupRows(rows, 'status', { 'in-progress': 4 }).map(g => [g.label, g.total]), [['New', 1], ['Backlog', 1], ['In progress', 4], ['QA', 1], ['Accepted', 1], ['Delivered', 1], ['Done', 1]])
   const epic = row('e', 'backlog', 'epic')
   const ticket = row('t', 'new', 'ticket', { id: 'e', key: 'E', title: 'e', kind_slug: 'epic' })
   const task = row('k', 'qa', 'task', { id: 't', key: 'T', title: 't', kind_slug: 'ticket' })

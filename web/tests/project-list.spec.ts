@@ -123,15 +123,15 @@ test('grouping by status and by epic', async ({ page }) => {
   await mockWork(page, fixtures())
   await page.goto('/p/PHAROS')
   await expect(rows(page)).toHaveCount(5)
-  await page.getByRole('button', { name: 'Group' }).click()
-  await page.getByRole('menuitemradio', { name: 'Status' }).click()
+  await page.getByRole('button', { name: 'Display' }).click()
+  await page.getByRole('dialog', { name: 'Display options' }).getByRole('radio', { name: 'Status' }).click()
   await expect(page).toHaveURL(/group=status/)
   await expect(grid(page).locator('.group-row .group-label')).toHaveText(['New', 'Backlog', 'In progress', 'QA'])
   await expect(grid(page).locator('.group-row .group-count')).toHaveText(['1', '2', '1', '1'])
   await page.getByRole('button', { name: 'Collapse Backlog' }).click()
   await expect(rows(page)).toHaveCount(3)
-  await page.getByRole('button', { name: 'Group: Status' }).click()
-  await page.getByRole('menuitemradio', { name: 'Epic' }).click()
+  await page.getByRole('button', { name: 'Grouped by status' }).click()
+  await page.getByRole('dialog', { name: 'Display options' }).getByRole('radio', { name: 'Epic' }).click()
   await expect(grid(page).locator('.group-row .group-label')).toHaveText(['Guarded multi-cloud provisioning', 'No epic'])
   await expect(grid(page).locator('tbody').first().locator('.key')).toHaveText(['PHAROS-10', 'PHAROS-11', 'PHAROS-12', 'PHAROS-13'])
 })
@@ -278,8 +278,68 @@ test('density switches between 36 and 30 pixel rows', async ({ page }) => {
   await page.goto('/p/PHAROS')
   await expect(rows(page)).toHaveCount(5)
   expect((await rows(page).first().boundingBox())!.height).toBeCloseTo(36, 0)
-  await page.getByRole('radio', { name: 'Compact rows' }).click()
-  expect((await rows(page).first().boundingBox())!.height).toBeCloseTo(30, 0)
+  await page.getByRole('button', { name: 'Display' }).click()
+  await page.getByRole('dialog', { name: 'Display options' }).getByRole('radio', { name: 'Compact' }).click()
+  await expect(rows(page).first()).toHaveCSS('height', '30px')
+})
+
+test('every cell of a row shares one centre line', async ({ page }) => {
+  await mockWork(page, fixtures())
+  await page.goto('/p/PHAROS')
+  await expect(rows(page)).toHaveCount(5)
+  const centres = await row(page, 'PHAROS-11').evaluate(tr => ['.key', '.title-link', '.status-btn span', '.prio-label', '.person-name', 'time', '.kind-glyph', '.c-prio svg', '.c-status svg'].map(selector => {
+    const box = tr.querySelector(selector)!.getBoundingClientRect()
+    return box.top + box.height / 2
+  }))
+  for (const centre of centres) expect(Math.abs(centre - centres[0])).toBeLessThanOrEqual(1)
+})
+
+test('the Assignee column appears only when someone in the result is assigned', async ({ page }) => {
+  await mockWork(page, fixtures())
+  await page.goto('/p/PHAROS')
+  await expect(page.getByRole('columnheader', { name: 'Assignee' })).toBeVisible()
+  await page.goto('/p/PHAROS?status=new')
+  await expect(rows(page)).toHaveCount(1)
+  await expect(page.getByRole('columnheader', { name: 'Assignee' })).toHaveCount(0)
+  await expect(rows(page).first().locator('td')).toHaveCount(5)
+})
+
+test('project header counts every spelling of a status in the right bucket', async ({ page }) => {
+  await mockWork(page, fixtures())
+  await page.goto('/p/PHAROS')
+  const stats = page.locator('.head-stats')
+  await expect(stats).toContainText('3 open')
+  await expect(stats).toContainText('2 in progress')
+  await expect(stats).toContainText('2 done')
+  await expect(stats).toContainText('29%')
+})
+
+test('wide screens dock the side panel beside the list; narrow ones overlay it', async ({ page }) => {
+  await page.setViewportSize({ width: 1440, height: 900 })
+  await mockWork(page, fixtures())
+  await page.goto('/p/PHAROS/PHAROS-12')
+  const panel = page.getByRole('complementary', { name: 'Ticket details' })
+  await expect(panel.getByRole('heading', { name: 'Add an Oracle Cloud connector' })).toBeVisible()
+  const dock = (await panel.boundingBox())!
+  const table = (await page.locator('.table-card').boundingBox())!
+  expect(table.x + table.width).toBeLessThanOrEqual(dock.x)
+  const status = (await page.getByRole('columnheader', { name: 'Status' }).boundingBox())!
+  expect(status.x + status.width).toBeLessThanOrEqual(dock.x)
+  await expect(page.getByRole('columnheader', { name: 'Updated' })).toBeVisible()
+  await expect(row(page, 'PHAROS-12')).toBeInViewport()
+  await page.setViewportSize({ width: 1024, height: 768 })
+  const overlaid = (await page.locator('.table-card').boundingBox())!
+  expect(overlaid.x + overlaid.width).toBeGreaterThan((await panel.boundingBox())!.x)
+})
+
+test('the footer ends the page flow instead of covering rows', async ({ page }) => {
+  await mockWork(page, fixtures({ bigProject: 30 }))
+  await page.goto('/p/AEON')
+  await expect(rows(page)).toHaveCount(31)
+  const footer = page.locator('main footer.app-footer')
+  expect(await footer.evaluate(el => getComputedStyle(el).position)).toBe('static')
+  const last = (await rows(page).last().boundingBox())!, foot = (await footer.boundingBox())!
+  expect(foot.y).toBeGreaterThanOrEqual(last.y + last.height)
 })
 
 test('global search opens a ticket inside its project', async ({ page }) => {

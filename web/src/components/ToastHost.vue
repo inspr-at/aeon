@@ -19,7 +19,7 @@ function act(id: number, run: () => void) { dismiss(id); run() }
 </template>
 
 <style scoped>
-.toast-host { position: fixed; z-index: 60; left: 50%; bottom: calc(var(--footer-h) + 16px); transform: translateX(-50%); display: flex; flex-direction: column; align-items: center; gap: 8px; pointer-events: none; width: max-content; max-width: calc(100vw - 32px); }
+.toast-host { position: fixed; z-index: 60; left: 50%; bottom: 20px; transform: translateX(-50%); display: flex; flex-direction: column; align-items: center; gap: 8px; pointer-events: none; width: max-content; max-width: calc(100vw - 32px); }
 .toast {
   display: flex; align-items: center; gap: 10px; min-height: 40px; padding: 6px 8px 6px 18px; border-radius: 999px; pointer-events: auto;
   background: var(--tip-bg); color: var(--tip-ink); font-size: 13.5px; box-shadow: 0 0 0 1px var(--glass-rim), 0 18px 36px -14px rgba(0, 0, 0, .45);
@@ -35,5 +35,5 @@ function act(id: number, run: () => void) { dismiss(id); run() }
   .toast-enter-active, .toast-leave-active { transition: opacity .2s ease, transform .2s ease; }
   .toast-enter-from, .toast-leave-to { opacity: 0; transform: translateY(8px); }
 }
-@media (max-width: 600px) { .toast-host { bottom: calc(var(--footer-h) + 12px); } .toast { font-size: 13px; } }
+@media (max-width: 600px) { .toast-host { bottom: 16px; } .toast { font-size: 13px; } }
 </style>

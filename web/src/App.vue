@@ -34,34 +34,40 @@ watch(() => [route.path, route.params.projectKey, route.params.ticketKey] as con
     <a class="skip-link" href="#main">Skip to content</a>
     <AppHeader />
     <main id="main" ref="main" tabindex="-1">
-      <section v-if="session.error" class="center-stage" aria-labelledby="connection-title">
-        <div class="connection-error">
-          <p class="eyebrow">Connection interrupted</p>
-          <h1 id="connection-title">Let’s try that again.</h1>
-          <p role="alert">{{ session.error }}</p>
-          <button class="button" :disabled="retrying" @click="retry">{{ retrying ? 'Connecting…' : 'Try again' }}</button>
-        </div>
-      </section>
-      <RouterView v-else />
+      <!-- The footer ends the page flow; it never floats over content. -->
+      <div class="page-flow" :class="{ fill: route.meta.fill && !session.error }">
+        <section v-if="session.error" class="center-stage" aria-labelledby="connection-title">
+          <div class="connection-error">
+            <p class="eyebrow">Connection interrupted</p>
+            <h1 id="connection-title">Let’s try that again.</h1>
+            <p role="alert">{{ session.error }}</p>
+            <button class="button" :disabled="retrying" @click="retry">{{ retrying ? 'Connecting…' : 'Try again' }}</button>
+          </div>
+        </section>
+        <RouterView v-else />
+        <footer v-if="!route.meta.fill || session.error" class="app-footer">
+          <span class="footer-name">PAIMOS AEON</span>
+          <VersionDisplay />
+        </footer>
+      </div>
     </main>
-    <footer class="app-footer">
-      <span class="footer-name">PAIMOS AEON</span>
-      <VersionDisplay />
-    </footer>
     <ToastHost />
     <TooltipHost />
   </div>
 </template>
 
 <style scoped>
-.app-shell { height: 100%; display: grid; grid-template-rows: var(--header-h) minmax(0, 1fr) var(--footer-h); }
+.app-shell { height: 100%; display: grid; grid-template-rows: var(--header-h) minmax(0, 1fr); }
 main { position: relative; min-height: 0; overflow: auto; outline: none; scroll-padding-top: 96px; }
 main:focus-visible { box-shadow: none; }
-/* The vendored version renderer nudges separators with transforms; clip them to the rail. */
+.page-flow { display: flex; flex-direction: column; min-height: 100%; }
+.page-flow > :first-child { flex: 1 0 auto; }
+.page-flow.fill { height: 100%; }
+.page-flow.fill > :first-child { flex: 1 1 auto; min-height: 0; }
+/* The vendored version renderer nudges separators with transforms; clip them to the bar. */
 .app-footer {
-  display: flex; justify-content: space-between; align-items: center; gap: 12px; padding: 0 22px; overflow: clip;
-  box-shadow: inset 0 1px 0 var(--line); background: var(--glass-2); color: var(--ink-2);
-  backdrop-filter: blur(16px) saturate(1.2); -webkit-backdrop-filter: blur(16px) saturate(1.2);
+  display: flex; flex-shrink: 0; justify-content: space-between; align-items: center; gap: 12px; height: 44px; padding: 0 28px; overflow: clip;
+  box-shadow: inset 0 1px 0 var(--line); color: var(--ink-2);
 }
 .footer-name { font: 600 10.5px/1.5 var(--mono); letter-spacing: .22em; color: var(--ink-2); }
 .connection-error { max-width: 420px; text-align: center; }
@@ -69,5 +75,5 @@ main:focus-visible { box-shadow: none; }
 .connection-error .button { margin-top: 24px; }
 .skip-link { position: fixed; z-index: 90; top: 8px; left: 16px; padding: 10px 16px; border-radius: 999px; background: var(--surface-raised); box-shadow: var(--shadow-pop); transform: translateY(-160%); }
 .skip-link:focus { transform: translateY(0); }
-@media (max-width: 600px) { .app-footer { padding: 0 14px; } .footer-name { font-size: 9.5px; letter-spacing: .18em; } }
+@media (max-width: 600px) { .app-footer { padding: 0 16px; } .footer-name { font-size: 9.5px; letter-spacing: .18em; } }
 </style>

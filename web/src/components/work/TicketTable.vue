@@ -1,6 +1,6 @@
 <!-- SPDX-License-Identifier: AGPL-3.0-only -->
 <script setup lang="ts">
-import { onBeforeUnmount, onMounted, ref, watch } from 'vue'
+import { computed, onBeforeUnmount, onMounted, ref, watch } from 'vue'
 import type { ListItem } from '../../lib/api'
 import type { GroupBy, RowGroup, EpicRef } from '../../lib/ticketList'
 import { absoluteTime, highlight, kindLabel, plural, priorityLabel, relativeTime, statusMeta, type SortField, type SortKey } from '../../lib/work'
@@ -30,6 +30,7 @@ const props = defineProps<{
   projectKey: string
   scrollRoot: HTMLElement | null
   now: number
+  showAssignee: boolean
 }>()
 const emit = defineEmits<{
   open: [row: ListItem]
@@ -44,9 +45,10 @@ const emit = defineEmits<{
   more: []
   clearFilters: []
   showClosed: []
+  gridFocus: []
 }>()
 
-const columns: { field: SortField | null; label: string; cls: string }[] = [
+const allColumns: { field: SortField | null; label: string; cls: string }[] = [
   { field: 'key', label: 'Key', cls: 'c-key' },
   { field: 'title', label: 'Title', cls: 'c-title' },
   { field: 'state', label: 'Status', cls: 'c-status' },
@@ -54,6 +56,8 @@ const columns: { field: SortField | null; label: string; cls: string }[] = [
   { field: null, label: 'Assignee', cls: 'c-assignee' },
   { field: 'updated_at', label: 'Updated', cls: 'c-updated' },
 ]
+// Assignee only earns its column when someone in the result is assigned.
+const columns = computed(() => allColumns.filter(column => column.cls !== 'c-assignee' || props.showAssignee))
 const grid = ref<HTMLTableElement>()
 const sentinel = ref<HTMLElement>()
 let observer: IntersectionObserver | undefined
@@ -106,8 +110,7 @@ defineExpose({ focusGrid, scrollToRow, el: grid })
 
 <template>
   <div class="table-card" :class="density">
-    <table ref="grid" class="tickets" role="grid" aria-label="Tickets" :aria-busy="loading" tabindex="0" :aria-activedescendant="cursorId ? `row-${cursorId}` : undefined">
-      <colgroup><col class="w-key" /><col /><col class="w-status" /><col class="w-prio" /><col class="w-assignee" /><col class="w-updated" /></colgroup>
+    <table ref="grid" class="tickets" role="grid" aria-label="Tickets" :aria-busy="loading" tabindex="0" :aria-activedescendant="cursorId ? `row-${cursorId}` : undefined" @focus="emit('gridFocus')">
       <thead>
         <tr>
           <th v-for="column in columns" :key="column.label" scope="col" :class="column.cls" :aria-sort="ariaSort(column.field)">
@@ -128,19 +131,19 @@ defineExpose({ focusGrid, scrollToRow, el: grid })
 
       <tbody v-if="loading && !groups.some(g => g.rows.length)" class="skeleton-body" aria-hidden="true">
         <tr v-for="index in 14" :key="index" class="ticket-row ghost">
-          <td class="c-key"><span class="skeleton sk-key" /></td>
-          <td class="c-title"><span class="skeleton sk-title" :style="{ width: `${38 + ((index * 37) % 45)}%` }" /></td>
-          <td class="c-status"><span class="sk-status"><span class="sk-dot" /><span class="skeleton sk-word" /></span></td>
-          <td class="c-prio"><span class="skeleton sk-word" /></td>
-          <td class="c-assignee"><span class="skeleton sk-word" /></td>
-          <td class="c-updated"><span class="skeleton sk-time" /></td>
+          <td class="c-key"><div class="cell"><span class="skeleton sk-key" /></div></td>
+          <td class="c-title"><div class="cell"><span class="skeleton sk-title" :style="{ width: `${38 + ((index * 37) % 45)}%` }" /></div></td>
+          <td class="c-status"><div class="cell"><span class="sk-dot" /><span class="skeleton sk-word" /></div></td>
+          <td class="c-prio"><div class="cell"><span class="skeleton sk-word" /></div></td>
+          <td v-if="showAssignee" class="c-assignee"><div class="cell"><span class="skeleton sk-word" /></div></td>
+          <td class="c-updated"><div class="cell"><span class="skeleton sk-time" /></div></td>
         </tr>
       </tbody>
 
       <template v-else>
         <tbody v-for="entry in groups" :key="entry.key" :class="{ dim: loading }">
           <tr v-if="group !== 'none'" class="group-row" :class="{ collapsed: collapsed.has(entry.key) }">
-            <th colspan="6" scope="rowgroup">
+            <th :colspan="columns.length" scope="rowgroup">
               <div class="group-head">
                 <button type="button" class="group-toggle" :aria-expanded="!collapsed.has(entry.key)" :aria-label="`${collapsed.has(entry.key) ? 'Expand' : 'Collapse'} ${entry.epic ? entry.epic.key : entry.label}`" @click="emit('toggleGroup', entry.key)">
                   <AppIcon name="chevron" :size="14" />
@@ -176,9 +179,9 @@ defineExpose({ focusGrid, scrollToRow, el: grid })
               :class="{ cursor: cursorId === row.id, open: openId === row.id, epic: row.kind_slug === 'epic' }"
               :aria-selected="cursorId === row.id" @click="rowClick($event, row)"
             >
-              <td class="c-key"><span class="key">{{ row.key }}</span></td>
+              <td class="c-key"><div class="cell"><span class="key">{{ row.key }}</span></div></td>
               <td class="c-title">
-                <div class="title-cell">
+                <div class="cell title-cell">
                   <AppIcon :name="row.kind_slug === 'epic' ? 'epic' : row.kind_slug === 'task' ? 'task' : 'ticket'" :size="14" class="kind-glyph" :class="row.kind_slug" :data-tip="kindLabel(row.kind_slug)" />
                   <a class="title-link" :href="href(row)" tabindex="-1" @click="linkClick">
                     <template v-for="(part, i) in highlight(row.title, query)" :key="i"><mark v-if="part.match">{{ part.text }}</mark><template v-else>{{ part.text }}</template></template>
@@ -186,8 +189,9 @@ defineExpose({ focusGrid, scrollToRow, el: grid })
                   <span v-if="row.kind_slug === 'epic' && row.children_count" class="child-count mono" :data-tip="plural(row.children_count, 'child item')">{{ row.children_count }}</span>
                   <span v-if="epicChip(row)" class="parent-chip" :class="{ epic: epicChip(row)!.kind_slug === 'epic' }" :data-tip="`${kindLabel(epicChip(row)!.kind_slug)} ${epicChip(row)!.key}\n${epicChip(row)!.title}`">
                     <AppIcon v-if="epicChip(row)!.kind_slug === 'epic'" name="epic" :size="10" />
-                    <span v-else class="mono">{{ epicChip(row)!.key }}</span>
+                    <AppIcon v-else name="ticket" :size="10" />
                     <span v-if="epicChip(row)!.kind_slug === 'epic'" class="parent-title">{{ epicChip(row)!.title }}</span>
+                    <span v-else class="parent-title mono">{{ epicChip(row)!.key }}</span>
                   </span>
                   <span class="row-actions">
                     <button type="button" class="icon-btn sm flat" :aria-label="`Copy ${row.key}`" :data-tip="`Copy ${row.key}`" @click.stop="emit('copy', row)"><AppIcon name="copy" :size="13" /></button>
@@ -196,20 +200,24 @@ defineExpose({ focusGrid, scrollToRow, el: grid })
                 </div>
               </td>
               <td class="c-status">
-                <button type="button" class="status-btn" :aria-label="`Status: ${statusMeta(row.state).label}. Change status of ${row.key}`" aria-haspopup="menu" @click.stop="statusClick($event, row)">
+                <div class="cell"><button type="button" class="status-btn" :aria-label="`Status: ${statusMeta(row.state).label}. Change status of ${row.key}`" aria-haspopup="menu" @click.stop="statusClick($event, row)">
                   <StatusIcon :state="row.state" />
                   <span>{{ statusMeta(row.state).label }}</span>
-                </button>
+                </button></div>
               </td>
               <td class="c-prio">
-                <span v-if="row.priority && row.priority !== 'none'" class="prio-cell"><PriorityIcon :priority="row.priority" /><span>{{ priorityLabel(row.priority) }}</span></span>
-                <span v-else class="empty" aria-label="No priority">—</span>
+                <div class="cell">
+                  <template v-if="row.priority && row.priority !== 'none'"><PriorityIcon :priority="row.priority" /><span class="prio-label">{{ priorityLabel(row.priority) }}</span></template>
+                  <span v-else class="empty" aria-label="No priority">—</span>
+                </div>
               </td>
-              <td class="c-assignee">
-                <span v-if="row.assignee" class="person"><PersonAvatar :name="row.assignee.name" :size="20" /><span class="person-name">{{ row.assignee.name }}</span></span>
-                <span v-else class="empty" aria-label="Unassigned">—</span>
+              <td v-if="showAssignee" class="c-assignee">
+                <div class="cell">
+                  <template v-if="row.assignee"><PersonAvatar :name="row.assignee.name" :size="20" /><span class="person-name">{{ row.assignee.name }}</span></template>
+                  <span v-else class="empty" aria-label="Unassigned">—</span>
+                </div>
               </td>
-              <td class="c-updated"><time :datetime="row.updated_at" :data-tip="absoluteTime(row.updated_at)">{{ relativeTime(row.updated_at, { now }) }}</time></td>
+              <td class="c-updated"><div class="cell"><time :datetime="row.updated_at" :data-tip="absoluteTime(row.updated_at)">{{ relativeTime(row.updated_at, { now }) }}</time></div></td>
             </tr>
           </template>
         </tbody>
@@ -255,11 +263,13 @@ defineExpose({ focusGrid, scrollToRow, el: grid })
   --row-h: 36px;
   position: relative; border-radius: var(--radius); border: 1px solid var(--glass-edge); overflow: clip;
   background: linear-gradient(165deg, var(--surface-raised-2), var(--glass) 60%); box-shadow: var(--shadow);
+  container: tickets / inline-size;
 }
 .table-card.compact { --row-h: 30px; }
 .tickets { width: 100%; border-collapse: separate; border-spacing: 0; table-layout: fixed; font-size: 13.5px; }
 .tickets:focus-visible { box-shadow: none; }
-.w-key { width: 118px; } .w-status { width: 138px; } .w-prio { width: 110px; } .w-assignee { width: 156px; } .w-updated { width: 104px; }
+/* Column widths live on the header cells so hidden columns leave no gap. Title takes the rest. */
+th.c-key { width: 118px; } th.c-status { width: 138px; } th.c-prio { width: 112px; } th.c-assignee { width: 156px; } th.c-updated { width: 104px; }
 thead th {
   position: sticky; top: var(--toolbar-h, 0px); z-index: 2; height: 34px; padding: 0 12px; text-align: left; font-weight: 500;
   background: var(--surface-raised-2); border-bottom: 1px solid var(--line-2);
@@ -268,50 +278,57 @@ thead th {
 thead th:first-child { padding-left: 18px; }
 .th-sort, .th-label { display: inline-flex; align-items: center; gap: 6px; height: 26px; margin: 0 -6px; padding: 0 6px; border: 0; border-radius: 6px; background: transparent; font: 500 10.5px/1 var(--mono); letter-spacing: .14em; text-transform: uppercase; color: var(--ink-3); font-variant-ligatures: none; }
 .th-sort:hover { color: var(--ink); background: var(--row-hover); }
+.th-sort:active { background: var(--row-selected); }
 .th-sort.on { color: var(--teal-ink); }
+.th-sort:focus-visible { box-shadow: var(--focus-ring); }
 .sort-mark { display: inline-flex; align-items: center; gap: 1px; min-width: 11px; }
 .sort-index { font-size: 9px; letter-spacing: 0; }
 .default-sort { opacity: .55; }
-.c-updated { text-align: right; }
+thead .c-updated { text-align: right; }
 thead .c-updated .th-sort { flex-direction: row-reverse; }
 
-.ticket-row { height: var(--row-h); cursor: default; }
-.ticket-row td { height: var(--row-h); padding: 0 12px; border-bottom: 1px solid var(--line); vertical-align: middle; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+/* Every cell centres one flex line in the row, so text, icons and chips share a baseline. */
+.ticket-row { height: var(--row-h); cursor: default; scroll-margin-top: calc(var(--toolbar-h, 0px) + 40px); scroll-margin-bottom: 24px; }
+.ticket-row td { height: var(--row-h); padding: 0 12px; border-bottom: 1px solid var(--line); vertical-align: middle; }
 .ticket-row td:first-child { padding-left: 18px; }
+.cell { display: flex; align-items: center; gap: 8px; min-width: 0; height: calc(var(--row-h) - 1px); line-height: 18px; white-space: nowrap; }
+.c-updated .cell { justify-content: flex-end; }
 .ticket-row:hover td { background: var(--row-hover); }
 .ticket-row.cursor td, .ticket-row.open td { background: var(--row-selected); }
 .ticket-row.cursor td:first-child, .ticket-row.open td:first-child { box-shadow: inset 3px 0 0 var(--row-accent); }
-.tickets:focus-visible .ticket-row.cursor td { background: var(--row-selected); }
-.tickets:focus-visible .ticket-row.cursor td:first-child { box-shadow: inset 3px 0 0 var(--row-accent), inset 0 0 0 0 transparent; }
-.ticket-row { scroll-margin-top: calc(var(--toolbar-h, 0px) + 40px); scroll-margin-bottom: 24px; }
 tbody.dim { opacity: .55; }
 tbody:last-of-type .ticket-row:last-child td { border-bottom: 0; }
 
-.key { font: 500 11.5px/1 var(--mono); color: var(--ink-2); letter-spacing: .01em; font-variant-ligatures: none; }
+.key { font: 500 11.5px/18px var(--mono); color: var(--ink-2); letter-spacing: .01em; font-variant-ligatures: none; }
 .ticket-row.open .key, .ticket-row.cursor .key { color: var(--teal-ink); }
-.title-cell { display: flex; align-items: center; gap: 8px; min-width: 0; }
 .kind-glyph { color: var(--ink-3); }
 .kind-glyph.epic { color: var(--gold); }
 .title-link { flex: 0 1 auto; min-width: 0; overflow: hidden; text-overflow: ellipsis; color: var(--ink); text-decoration: none; }
 .ticket-row.epic .title-link { font-weight: 650; }
 .title-link:focus-visible { box-shadow: none; }
 .child-count { flex-shrink: 0; height: 17px; padding: 0 6px; border-radius: 999px; background: var(--chip-bg); box-shadow: inset 0 0 0 1px var(--chip-line); font-size: 10.5px; line-height: 17px; color: var(--ink-2); }
-.parent-chip { display: inline-flex; align-items: center; gap: 5px; flex: 0 1 auto; min-width: 0; max-width: 42%; height: 20px; padding: 0 8px; border-radius: 999px; background: var(--chip-bg); box-shadow: inset 0 0 0 1px var(--chip-line); color: var(--ink-2); font-size: 11.5px; }
-.parent-chip.epic svg { color: var(--gold); }
-.parent-chip .mono { font-size: 10.5px; }
+/* Parent chips stay quiet: tint only, 12px, capped; the title keeps the space first. */
+.parent-chip { display: inline-flex; align-items: center; gap: 5px; flex: 0 3 auto; min-width: 0; max-width: 180px; height: 20px; padding: 0 8px; border-radius: 999px; background: var(--code-bg); color: var(--ink-3); font-size: 12px; line-height: 20px; }
+.parent-chip.epic { min-width: 64px; }
+.parent-chip:not(.epic) { flex-shrink: 0; }
+.parent-chip.epic svg { color: var(--gold); opacity: .85; }
+.parent-chip .mono { font-size: 11px; }
 .parent-title { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 .row-actions { display: inline-flex; gap: 2px; margin-left: auto; flex-shrink: 0; visibility: hidden; }
-.ticket-row:hover .row-actions, .ticket-row.cursor .row-actions { visibility: visible; }
+.ticket-row:hover .row-actions, .ticket-row.cursor .row-actions, .row-actions:focus-within { visibility: visible; }
 .row-actions .icon-btn { width: 24px; height: 24px; color: var(--ink-3); }
 .row-actions .icon-btn:hover { color: var(--teal-ink); }
 .compact .row-actions .icon-btn { width: 22px; height: 22px; }
 
-.status-btn { display: inline-flex; align-items: center; gap: 8px; max-width: 100%; height: 26px; margin-left: -8px; padding: 0 8px; border: 0; border-radius: 999px; background: transparent; color: var(--ink); font-size: 13px; white-space: nowrap; }
+.status-btn { display: inline-flex; align-items: center; gap: 8px; max-width: 100%; height: 26px; margin-left: -8px; padding: 0 8px; border: 0; border-radius: 999px; background: transparent; color: var(--ink); font-size: 13px; line-height: 18px; white-space: nowrap; }
 .status-btn span { overflow: hidden; text-overflow: ellipsis; }
 .status-btn:hover, .status-btn[aria-expanded="true"] { background: var(--chip-bg); box-shadow: inset 0 0 0 1px var(--chip-line); }
+.status-btn:active { background: var(--row-selected); }
+.status-btn:focus-visible { box-shadow: var(--focus-ring); }
 .compact .status-btn { height: 22px; }
-.prio-cell, .person { display: inline-flex; align-items: center; gap: 8px; max-width: 100%; color: var(--ink-2); font-size: 13px; }
-.person-name { overflow: hidden; text-overflow: ellipsis; color: var(--ink); }
+.c-prio .cell, .c-assignee .cell { color: var(--ink-2); font-size: 13px; }
+.prio-label, .person-name { overflow: hidden; text-overflow: ellipsis; }
+.person-name { color: var(--ink); }
 .empty { color: var(--ink-3); }
 .c-updated time { color: var(--ink-2); font-size: 12.5px; font-variant-numeric: tabular-nums; }
 
@@ -319,6 +336,7 @@ tbody:last-of-type .ticket-row:last-child td { border-bottom: 0; }
 .group-head { display: flex; align-items: center; gap: 8px; min-width: 0; }
 .group-toggle { display: grid; place-items: center; width: 24px; height: 24px; padding: 0; border: 0; border-radius: 6px; background: transparent; color: var(--ink-3); }
 .group-toggle:hover { background: var(--row-hover); color: var(--ink); }
+.group-toggle:focus-visible, .group-epic:focus-visible { box-shadow: var(--focus-ring); }
 .group-row.collapsed .group-toggle svg { transform: rotate(-90deg); }
 .group-label { font-size: 13px; font-weight: 650; color: var(--ink); overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 .group-label.muted { color: var(--ink-2); }
@@ -332,10 +350,9 @@ tbody:last-of-type .ticket-row:last-child td { border-bottom: 0; }
 .ghost td { border-bottom-color: var(--line); }
 .sk-key { width: 70px; }
 .sk-title { height: 10px; }
-.sk-status { display: inline-flex; align-items: center; gap: 8px; }
-.sk-dot { width: 12px; height: 12px; border-radius: 50%; box-shadow: inset 0 0 0 1.6px var(--skeleton); }
+.sk-dot { flex-shrink: 0; width: 12px; height: 12px; border-radius: 50%; box-shadow: inset 0 0 0 1.6px var(--skeleton); }
 .sk-word { width: 58px; }
-.sk-time { width: 44px; margin-left: auto; }
+.sk-time { width: 44px; }
 
 .state { display: grid; justify-items: center; gap: 8px; padding: 56px 24px 64px; text-align: center; }
 .state-icon { display: grid; place-items: center; width: 44px; height: 44px; margin-bottom: 6px; border-radius: 50%; background: var(--chip-teal-bg); box-shadow: inset 0 0 0 1px var(--chip-teal-line); color: var(--teal-ink); }
@@ -352,30 +369,35 @@ tbody:last-of-type .ticket-row:last-child td { border-bottom: 0; }
 .spinner { width: 14px; height: 14px; border-radius: 50%; border: 1.8px solid var(--line-2); border-top-color: var(--teal); }
 @media (prefers-reduced-motion: no-preference) { .spinner { animation: spin .8s linear infinite; } @keyframes spin { to { transform: rotate(360deg); } } }
 
-@media (max-width: 1100px) { .w-assignee { width: 120px; } .w-prio { width: 96px; } }
+/* The table reflows to its own width (the docked panel narrows it): Title shrinks first,
+   then Assignee and Updated step aside. */
+@container tickets (max-width: 980px) { th.c-assignee { width: 124px; } th.c-prio { width: 100px; } }
+@container tickets (max-width: 900px) { .c-assignee { display: none; } }
+@container tickets (max-width: 740px) { .c-updated { display: none; } .parent-chip { max-width: 140px; } }
+
 @media (max-width: 720px) {
   .table-card { border-radius: 14px; }
   .tickets, .tickets tbody { display: block; }
-  .tickets colgroup, .tickets thead { display: none; }
+  .tickets thead { display: none; }
   .ticket-row {
     display: grid; grid-template-columns: auto auto minmax(0, 1fr) auto; grid-template-areas: "key status prio updated" "title title title title";
     align-items: center; gap: 5px 10px; height: auto; padding: 10px 14px 11px; border-bottom: 1px solid var(--line);
   }
-  .ticket-row td { display: block; height: auto; padding: 0; border: 0; background: none !important; box-shadow: none !important; }
+  .ticket-row td { display: block !important; height: auto; padding: 0; border: 0; background: none !important; box-shadow: none !important; }
   .ticket-row td:first-child { padding-left: 0; }
+  .ticket-row .cell { height: auto; }
   .ticket-row.cursor, .ticket-row.open { background: var(--row-selected); box-shadow: inset 3px 0 0 var(--row-accent); }
   .c-key { grid-area: key; } .c-status { grid-area: status; } .c-prio { grid-area: prio; } .c-updated { grid-area: updated; }
-  .c-title { grid-area: title; white-space: normal; }
-  .c-assignee { display: none !important; }
-  .title-cell { align-items: flex-start; flex-wrap: wrap; gap: 4px 8px; }
+  .c-title { grid-area: title; }
+  .ticket-row .c-assignee { display: none !important; }
+  .title-cell { align-items: flex-start; flex-wrap: wrap; gap: 4px 8px; white-space: normal; }
   .title-cell .kind-glyph { margin-top: 2px; }
   .title-link { flex: 1 1 calc(100% - 30px); white-space: normal; font-size: 14.5px; line-height: 1.35; display: -webkit-box; -webkit-line-clamp: 2; -webkit-box-orient: vertical; }
-  .parent-chip { max-width: 100%; margin-left: 22px; }
+  .parent-chip { max-width: calc(100% - 22px); margin-left: 22px; }
   .child-count { display: none; }
   .row-actions { display: none; }
   .status-btn { height: 24px; margin-left: 0; padding: 0 8px 0 6px; background: var(--chip-bg); box-shadow: inset 0 0 0 1px var(--chip-line); font-size: 12px; }
-  .prio-cell { font-size: 12px; }
-  .prio-cell span { display: none; }
+  .prio-label { display: none; }
   .ghost { display: grid; }
   .group-row, .group-row th { display: block; }
   .group-row th { top: var(--toolbar-h, 0px); padding: 0 10px; }

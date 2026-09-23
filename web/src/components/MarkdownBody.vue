@@ -49,8 +49,10 @@ const rendered = computed(() => markdown.render(props.body))
 .markdown-body :deep(.task-box:checked) { background: var(--st-ok); box-shadow: none; }
 .markdown-body :deep(.task-box:checked::after) { content: ''; width: 7px; height: 4px; border-left: 1.6px solid var(--surface); border-bottom: 1.6px solid var(--surface); transform: translateY(-1px) rotate(-45deg); }
 .markdown-body :deep(pre) { overflow: auto; margin: 0 0 1em; padding: 12px 14px; border-radius: var(--radius-s); background: var(--surface-sunken); box-shadow: inset 0 0 0 1px var(--line); }
-.markdown-body :deep(code) { font-family: var(--mono); font-size: .86em; font-variant-ligatures: none; font-feature-settings: "liga" 0, "calt" 0; }
-.markdown-body :deep(:not(pre) > code) { padding: 1px 5px; border-radius: 5px; background: var(--surface-sunken); box-shadow: inset 0 0 0 1px var(--line); }
+.markdown-body :deep(code) { font-family: var(--mono); font-size: .92em; font-variant-ligatures: none; font-feature-settings: "liga" 0, "calt" 0; }
+/* Inline code is a quiet tint; only code blocks keep a frame. */
+.markdown-body :deep(:not(pre) > code) { padding: .5px 4px; border-radius: 4px; background: var(--code-bg); color: var(--ink); }
+.markdown-body :deep(pre code) { font-size: .88em; }
 .markdown-body :deep(blockquote) { margin: 0 0 1em; border-left: 3px solid var(--aqua); padding: 2px 0 2px 14px; color: var(--ink-2); }
 .markdown-body :deep(blockquote p) { color: var(--ink-2); }
 .markdown-body :deep(hr) { height: 1px; margin: 1.4em 0; border: 0; background: linear-gradient(90deg, transparent, var(--line-2), transparent); }

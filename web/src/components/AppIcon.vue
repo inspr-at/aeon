@@ -34,12 +34,12 @@ withDefaults(defineProps<{ name: IconName; size?: number }>(), { size: 16 })
     <path v-else-if="name === 'external'" d="M9.4 2.6h4v4M13.4 2.6 7.8 8.2M12 9.6v2.6c0 .7-.6 1.2-1.2 1.2H3.8c-.7 0-1.2-.5-1.2-1.2V5.2c0-.7.5-1.2 1.2-1.2h2.6" />
     <path v-else-if="name === 'filter'" d="M2.4 3.4h11.2L9.3 8.6v4.2l-2.6 1V8.6Z" />
     <path v-else-if="name === 'check'" d="m3.4 8.4 3 3 6.2-6.8" />
-    <path v-else-if="name === 'rows-comfortable'" d="M2.4 3.6h11.2M2.4 8h11.2M2.4 12.4h11.2" />
+    <template v-else-if="name === 'rows-comfortable'"><rect x="2" y="2.6" width="12" height="4.4" rx="1.3" /><rect x="2" y="9" width="12" height="4.4" rx="1.3" /></template>
     <path v-else-if="name === 'rows-compact'" d="M2.4 2.8h11.2M2.4 6.2h11.2M2.4 9.8h11.2M2.4 13.2h11.2" />
     <template v-else-if="name === 'keyboard'"><rect x="1.4" y="3.8" width="13.2" height="8.6" rx="1.8" /><path d="M4.4 6.8h.01M6.8 6.8h.01M9.2 6.8h.01M11.6 6.8h.01M5 9.6h6" /></template>
     <path v-else-if="name === 'epic'" d="M9 1.8 3.6 9.2h4.1l-.9 5 5.6-7.4H8.2Z" />
     <template v-else-if="name === 'ticket'"><rect x="2.6" y="2.4" width="10.8" height="11.2" rx="2" /><path d="M5.4 6h5.2M5.4 8.6h5.2M5.4 11.2h2.8" /></template>
-    <template v-else-if="name === 'task'"><rect x="2.4" y="2.4" width="11.2" height="11.2" rx="2.4" /><path d="m5.4 8.2 1.8 1.8 3.5-3.8" /></template>
+    <template v-else-if="name === 'task'"><rect x="1.8" y="1.8" width="6" height="4.6" rx="1.3" /><path d="M4.8 6.4v4.3c0 .5.4.9.9.9h1.9" /><rect x="7.6" y="9.4" width="6.6" height="4.6" rx="1.3" /></template>
     <template v-else-if="name === 'alert'"><circle cx="8" cy="8" r="6.2" /><path d="M8 4.8v3.6M8 11.1h.01" /></template>
     <path v-else-if="name === 'refresh'" d="M13.2 8a5.2 5.2 0 1 1-1.6-3.8M13.4 2.4v3.2h-3.2" />
     <template v-else-if="name === 'sliders'"><path d="M2.4 4.6h6.6M12.6 4.6h1M2.4 11.4h1M7 11.4h6.6" /><circle cx="10.8" cy="4.6" r="1.7" /><circle cx="5.2" cy="11.4" r="1.7" /></template>

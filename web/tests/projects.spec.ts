@@ -54,6 +54,32 @@ test('filtering highlights matches and an empty result offers to clear', async (
   await expect(page.getByLabel('Filter projects')).toBeFocused()
 })
 
+test('the sort control orders by name, open tickets and progress', async ({ page }) => {
+  await mockWork(page, fixtures())
+  await page.goto('/')
+  const names = page.getByRole('list', { name: 'Projects' }).locator('.name')
+  await expect(names).toHaveText(['Pharos', 'Aeon', 'Studio infrastructure'])
+  await page.getByRole('button', { name: /Sort/ }).click()
+  await page.getByRole('menuitemradio', { name: 'Name' }).click()
+  await expect(page).toHaveURL('/?sort=name')
+  await expect(names).toHaveText(['Aeon', 'Pharos', 'Studio infrastructure'])
+  await page.getByRole('button', { name: /Sort/ }).click()
+  await page.getByRole('menuitemradio', { name: 'Open tickets' }).click()
+  await expect(names).toHaveText(['Pharos', 'Aeon', 'Studio infrastructure'])
+  await expect(page.getByRole('button', { name: /Sort/ })).toContainText('Open tickets')
+})
+
+test('key badges share one column as wide as the widest badge', async ({ page }) => {
+  await mockWork(page, fixtures())
+  await page.goto('/')
+  const names = page.getByRole('list', { name: 'Projects' }).locator('.project-text')
+  await expect(names).toHaveCount(3)
+  const lefts = await names.evaluateAll(els => els.map(el => Math.round(el.getBoundingClientRect().left)))
+  expect(new Set(lefts).size).toBe(1)
+  const widest = Math.max(...await page.locator('.project-row .key-badge').evaluateAll(els => els.map(el => el.getBoundingClientRect().right)))
+  expect(lefts[0] - widest).toBeLessThanOrEqual(19)
+})
+
 test('j, k and Enter open a project from the keyboard', async ({ page }) => {
   await mockWork(page, fixtures())
   await page.goto('/')

@@ -43,7 +43,9 @@ function move(event: KeyboardEvent) {
 .menu-title { padding: 6px 10px 4px; }
 .menu { display: grid; gap: 1px; }
 .menu-item { display: flex; align-items: center; gap: 10px; height: 32px; padding: 0 10px; border: 0; border-radius: 8px; background: transparent; color: var(--ink); font-size: 13.5px; text-align: left; }
-.menu-item:hover, .menu-item:focus-visible { background: var(--row-selected); box-shadow: none; }
+.menu-item:hover { background: var(--row-hover); }
+.menu-item:focus-visible { background: var(--row-selected); box-shadow: inset 0 0 0 1px var(--glass-rim); }
+.menu-item:active { background: var(--row-selected); }
 .menu-item .label { flex: 1; }
 .tick { color: var(--teal); }
 .digit { opacity: 0; }

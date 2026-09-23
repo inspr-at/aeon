@@ -11,9 +11,9 @@ const STATUS: Record<Exclude<StatusKey, 'other'>, Omit<StatusMeta, 'key'>> = {
   backlog: { label: 'Backlog', closed: false, order: 1 },
   progress: { label: 'In progress', closed: false, order: 2 },
   qa: { label: 'QA', closed: false, order: 3 },
-  done: { label: 'Done', closed: true, order: 4 },
+  accepted: { label: 'Accepted', closed: true, order: 4 },
   delivered: { label: 'Delivered', closed: true, order: 5 },
-  accepted: { label: 'Accepted', closed: true, order: 6 },
+  done: { label: 'Done', closed: true, order: 6 },
   cancelled: { label: 'Cancelled', closed: true, order: 7 },
   archived: { label: 'Archived', closed: true, order: 8 },
 }
@@ -42,7 +42,7 @@ export function statusMeta(state: string): StatusMeta {
 export function statusOptions(knownStates: Iterable<string> = []): { value: string; meta: StatusMeta }[] {
   const known = new Set(knownStates)
   const progress = known.has('in-progress') && !known.has('in_progress') ? 'in-progress' : 'in_progress'
-  return ['new', 'backlog', progress, 'qa', 'done', 'delivered', 'accepted', 'cancelled'].map(value => ({ value, meta: statusMeta(value) }))
+  return ['new', 'backlog', progress, 'qa', 'accepted', 'delivered', 'done', 'cancelled'].map(value => ({ value, meta: statusMeta(value) }))
 }
 
 export const PRIORITIES = [
@@ -170,6 +170,20 @@ export function projectDescription(body: string, fields: Record<string, unknown>
   const classic = fields?.classic
   const description = classic && typeof classic === 'object' ? (classic as Record<string, unknown>).description : undefined
   return descriptionLine(typeof description === 'string' && description.trim() ? description : body)
+}
+
+// Project progress buckets, matching the project summaries: open work not yet
+// started, work in flight (in progress and QA), and closed work of any outcome.
+export function stateBuckets(counts: Record<string, number>): { open: number; progress: number; done: number; total: number } {
+  const out = { open: 0, progress: 0, done: 0, total: 0 }
+  for (const [state, count] of Object.entries(counts)) {
+    const meta = statusMeta(state)
+    if (meta.closed) out.done += count
+    else if (meta.key === 'progress' || meta.key === 'qa') out.progress += count
+    else out.open += count
+    out.total += count
+  }
+  return out
 }
 
 export function plural(count: number, one: string, many = `${one}s`): string {

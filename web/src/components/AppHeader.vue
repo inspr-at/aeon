@@ -11,6 +11,7 @@ import { toast } from '../lib/toast'
 import { initials } from '../lib/work'
 import AppIcon from './AppIcon.vue'
 import SearchPalette from './SearchPalette.vue'
+import VersionDisplay from './VersionDisplay.vue'
 
 const session = useSession()
 const projects = useProjects()
@@ -121,6 +122,7 @@ onBeforeUnmount(() => { document.removeEventListener('pointerdown', outside); wi
           </div>
         </div>
         <button ref="signOutButton" class="menu-row" type="button" :disabled="busy" @click="signOut"><AppIcon name="logout" />{{ busy ? 'Signing out…' : 'Sign out' }}</button>
+        <div class="menu-version"><span class="eyebrow">Version</span><VersionDisplay /></div>
         <p v-if="error" class="error" role="alert">{{ error }}</p>
       </div>
     </div>
@@ -143,6 +145,8 @@ onBeforeUnmount(() => { document.removeEventListener('pointerdown', outside); wi
 .crumbs { display: flex; align-items: center; gap: 10px; flex: 0 1 auto; min-width: 0; overflow: hidden; padding-left: 16px; border-left: 1px solid var(--line-2); height: 24px; font-size: 13.5px; }
 .crumb { display: inline-flex; align-items: center; gap: 8px; min-width: 0; height: 30px; padding: 0 8px; margin: 0 -8px; border-radius: 8px; color: var(--ink-2); font-weight: 600; white-space: nowrap; }
 .crumb:hover { color: var(--teal-ink); background: var(--row-hover); }
+.crumb:active { background: var(--row-selected); }
+.crumb:focus-visible { box-shadow: var(--focus-ring); }
 .crumb[aria-current="page"] { color: var(--ink); }
 .crumb.current { color: var(--ink); cursor: default; }
 .crumb.current:hover { background: transparent; }
@@ -156,6 +160,7 @@ onBeforeUnmount(() => { document.removeEventListener('pointerdown', outside); wi
   background: var(--field-bg); box-shadow: var(--field-inset), 0 0 0 1px var(--line); color: var(--ink-3); font-size: 13px;
 }
 .search-pill:hover { color: var(--ink-2); box-shadow: var(--field-inset), 0 0 0 1px var(--glass-rim); }
+.search-pill:active { background: var(--row-selected); }
 .search-pill:focus-visible { box-shadow: var(--focus-ring); }
 .pill-text { flex: 1; text-align: left; }
 .pill-keys { display: inline-flex; gap: 3px; }
@@ -166,6 +171,7 @@ onBeforeUnmount(() => { document.removeEventListener('pointerdown', outside); wi
   font: 700 12px/1 var(--mono); letter-spacing: .02em; font-variant-ligatures: none;
 }
 .avatar-btn:hover, .avatar-btn[aria-expanded="true"] { box-shadow: 0 0 0 1px var(--teal), 0 2px 8px rgba(32, 60, 61, .18); }
+.avatar-btn:active { filter: brightness(.96); }
 .avatar-btn:focus-visible { box-shadow: var(--focus-ring); }
 .account-panel { position: absolute; right: 0; top: 44px; width: min(280px, calc(100vw - 24px)); padding: 8px; }
 .who { display: flex; align-items: center; gap: 12px; padding: 10px 10px 14px; margin-bottom: 6px; border-bottom: 1px solid var(--line); }
@@ -177,6 +183,8 @@ onBeforeUnmount(() => { document.removeEventListener('pointerdown', outside); wi
 .menu-row svg { color: var(--ink-2); }
 .menu-row:hover, .menu-row:focus-visible { background: var(--row-selected); box-shadow: none; }
 .error { margin: 8px 10px 4px; }
+.menu-version { display: flex; align-items: center; justify-content: space-between; gap: 10px; margin-top: 6px; padding: 0 10px; border-top: 1px solid var(--line); }
+.menu-version .eyebrow { margin: 0; }
 @media (max-width: 900px) { .search-pill { width: 180px; } }
 @media (max-width: 600px) {
   .app-header { gap: 8px; padding: 0 10px 0 10px; }

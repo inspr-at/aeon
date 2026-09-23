@@ -88,7 +88,7 @@ defineExpose({ focus, resetScroll, el: root })
 
 <style scoped>
 .ticket-panel {
-  position: fixed; z-index: 15; top: calc(var(--header-h) + 10px); right: 10px; bottom: calc(var(--footer-h) + 10px); width: min(560px, calc(100vw - 20px));
+  position: fixed; z-index: 15; top: calc(var(--header-h) + 10px); right: 10px; bottom: 10px; width: min(560px, calc(100vw - 20px));
   display: flex; flex-direction: column; border-radius: var(--radius); border: 1px solid var(--glass-edge); outline: none;
   background: linear-gradient(165deg, var(--surface-raised), var(--surface-raised-2)); box-shadow: var(--shadow-pop), var(--shadow);
   backdrop-filter: blur(20px) saturate(1.15); -webkit-backdrop-filter: blur(20px) saturate(1.15);
@@ -97,6 +97,8 @@ defineExpose({ focus, resetScroll, el: root })
 .panel-bar { display: flex; align-items: center; gap: 6px; height: 52px; padding: 0 10px 0 14px; border-bottom: 1px solid var(--line); flex-shrink: 0; }
 .key-chip { display: inline-flex; align-items: center; gap: 6px; height: 26px; padding: 0 10px; border: 0; border-radius: 7px; background: var(--chip-teal-bg); box-shadow: inset 0 0 0 1px var(--chip-teal-line); color: var(--teal-ink); font: 600 12px/1 var(--mono); letter-spacing: .03em; font-variant-ligatures: none; }
 .key-chip:hover { filter: brightness(1.03); box-shadow: inset 0 0 0 1px var(--teal); }
+.key-chip:active { filter: brightness(.97); }
+.key-chip:focus-visible, .parent-link:focus-visible, .status-fact:focus-visible { box-shadow: var(--focus-ring); }
 .key-chip .epic { color: var(--gold); }
 .position { margin-left: 6px; font-size: 11.5px; color: var(--ink-3); }
 .nav { display: inline-flex; gap: 2px; margin-left: 2px; }
@@ -112,7 +114,8 @@ defineExpose({ focus, resetScroll, el: root })
 .facts { display: flex; flex-wrap: wrap; gap: 6px; margin-top: 14px; }
 .fact { display: inline-flex; align-items: center; gap: 7px; height: 28px; padding: 0 11px 0 9px; border: 0; border-radius: 999px; background: var(--chip-bg); box-shadow: inset 0 0 0 1px var(--chip-line); color: var(--ink); font-size: 12.5px; white-space: nowrap; }
 .fact.quiet { color: var(--ink-2); padding-left: 11px; }
-.status-fact:hover, .status-fact[aria-expanded="true"] { box-shadow: inset 0 0 0 1px var(--glass-rim); background: var(--row-selected); }
+.status-fact:hover, .status-fact[aria-expanded="true"] { box-shadow: inset 0 0 0 1px var(--glass-rim); background: var(--row-hover); }
+.status-fact:active { background: var(--row-selected); }
 .fact-chevron { color: var(--ink-3); margin-left: -2px; }
 .dash, .unassigned { color: var(--ink-3); }
 .meta { margin-top: 12px; font-size: 12.5px; color: var(--ink-3); }
@@ -125,6 +128,7 @@ defineExpose({ focus, resetScroll, el: root })
 .panel-loading { display: grid; gap: 14px; padding-top: 6px; }
 .panel-loading .w40 { width: 40%; } .panel-loading .w70 { width: 70%; } .panel-loading .w90 { width: 90%; } .panel-loading .w80 { width: 80%; } .panel-loading .w60 { width: 60%; }
 .panel-loading .title-skel { width: 85%; height: 18px; border-radius: 8px; }
+@media (min-width: 1100px) { .ticket-panel { width: var(--panel-w); } }
 @media (prefers-reduced-motion: no-preference) {
   .ticket-panel { animation: panel-in .22s cubic-bezier(.2, .7, .2, 1); }
   @keyframes panel-in { from { opacity: 0; transform: translateX(24px); } to { opacity: 1; transform: none; } }
