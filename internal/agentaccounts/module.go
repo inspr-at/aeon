@@ -1,0 +1,201 @@
+// SPDX-License-Identifier: AGPL-3.0-only
+
+package agentaccounts
+
+import (
+	"context"
+	"net/http"
+
+	"github.com/jackc/pgx/v5"
+	"github.com/jackc/pgx/v5/pgxpool"
+
+	"github.com/inspr-at/aeon/internal/db"
+	"github.com/inspr-at/aeon/internal/httpapi"
+)
+
+// Module serves /api/agent-accounts.
+type Module struct {
+	pool *pgxpool.Pool
+}
+
+var _ httpapi.Module = (*Module)(nil)
+
+// New returns the httpapi.Module for /api/agent-accounts. The coordinator mounts it.
+// Settle and Release are the in-process ledger operations for the run package;
+// they are not HTTP routes.
+func New(pool *pgxpool.Pool) httpapi.Module {
+	return &Module{pool: pool}
+}
+
+// Mount registers account, allowance and routing routes.
+func (m *Module) Mount(mux *http.ServeMux) {
+	mux.HandleFunc("GET /api/agent-accounts", m.list)
+	mux.HandleFunc("POST /api/agent-accounts", m.register)
+	mux.HandleFunc("POST /api/agent-accounts/route", m.route)
+	mux.HandleFunc("POST /api/agent-accounts/{accountId}/windows", m.createWindow)
+	mux.HandleFunc("PATCH /api/agent-accounts/{accountId}", m.patch)
+	mux.HandleFunc("POST /api/agent-accounts/{accountId}/probe", m.probe)
+}
+
+func (m *Module) in(ctx context.Context, tenantID string, fn func(pgx.Tx) error) error {
+	return db.InTenant(ctx, m.pool, tenantID, fn)
+}
+
+func (m *Module) list(w http.ResponseWriter, r *http.Request) {
+	p, ok := principal(w, r)
+	if !ok {
+		return
+	}
+	if err := requireAdmin(p); err != nil {
+		writeErr(w, err)
+		return
+	}
+	var items []Account
+	err := m.in(r.Context(), p.TenantID, func(tx pgx.Tx) error {
+		var err error
+		items, err = listAccounts(r.Context(), tx)
+		return err
+	})
+	if err != nil {
+		writeErr(w, err)
+		return
+	}
+	httpapi.WriteJSON(w, http.StatusOK, items)
+}
+
+func (m *Module) register(w http.ResponseWriter, r *http.Request) {
+	p, ok := principal(w, r)
+	if !ok {
+		return
+	}
+	if err := requireAgent(p); err != nil {
+		writeErr(w, err)
+		return
+	}
+	var in accountWrite
+	if err := decodeJSON(w, r, &in); err != nil {
+		writeErr(w, err)
+		return
+	}
+	var out Account
+	err := m.in(r.Context(), p.TenantID, func(tx pgx.Tx) error {
+		if err := requireScope(r.Context(), tx, r, p, "account.manage"); err != nil {
+			return err
+		}
+		var err error
+		out, err = registerAccount(r.Context(), tx, p, in)
+		return err
+	})
+	if err != nil {
+		writeErr(w, err)
+		return
+	}
+	httpapi.WriteJSON(w, http.StatusCreated, out)
+}
+
+func (m *Module) createWindow(w http.ResponseWriter, r *http.Request) {
+	p, ok := principal(w, r)
+	if !ok {
+		return
+	}
+	if err := requireAdmin(p); err != nil {
+		writeErr(w, err)
+		return
+	}
+	var in windowWrite
+	if err := decodeJSON(w, r, &in); err != nil {
+		writeErr(w, err)
+		return
+	}
+	var out Window
+	err := m.in(r.Context(), p.TenantID, func(tx pgx.Tx) error {
+		var err error
+		out, err = createWindow(r.Context(), tx, p, r.PathValue("accountId"), in)
+		return err
+	})
+	if err != nil {
+		writeErr(w, err)
+		return
+	}
+	httpapi.WriteJSON(w, http.StatusCreated, out)
+}
+
+func (m *Module) patch(w http.ResponseWriter, r *http.Request) {
+	p, ok := principal(w, r)
+	if !ok {
+		return
+	}
+	if err := requireAdmin(p); err != nil {
+		writeErr(w, err)
+		return
+	}
+	var in stateWrite
+	if err := decodeJSON(w, r, &in); err != nil {
+		writeErr(w, err)
+		return
+	}
+	var out Account
+	err := m.in(r.Context(), p.TenantID, func(tx pgx.Tx) error {
+		var err error
+		out, err = updateState(r.Context(), tx, p, r.PathValue("accountId"), in.State)
+		return err
+	})
+	if err != nil {
+		writeErr(w, err)
+		return
+	}
+	httpapi.WriteJSON(w, http.StatusOK, out)
+}
+
+func (m *Module) probe(w http.ResponseWriter, r *http.Request) {
+	p, ok := principal(w, r)
+	if !ok {
+		return
+	}
+	if err := requireAgent(p); err != nil {
+		writeErr(w, err)
+		return
+	}
+	var in probeWrite
+	if err := decodeJSON(w, r, &in); err != nil {
+		writeErr(w, err)
+		return
+	}
+	var out Account
+	err := m.in(r.Context(), p.TenantID, func(tx pgx.Tx) error {
+		var err error
+		out, err = reportProbe(r.Context(), tx, p, r.PathValue("accountId"), in)
+		return err
+	})
+	if err != nil {
+		writeErr(w, err)
+		return
+	}
+	httpapi.WriteJSON(w, http.StatusOK, out)
+}
+
+func (m *Module) route(w http.ResponseWriter, r *http.Request) {
+	p, ok := principal(w, r)
+	if !ok {
+		return
+	}
+	var body struct {
+		RunID          string           `json:"run_id"`
+		EstimatedUnits map[string]int64 `json:"estimated_units"`
+	}
+	if err := decodeJSON(w, r, &body); err != nil {
+		writeErr(w, err)
+		return
+	}
+	var out RouteResult
+	err := m.in(r.Context(), p.TenantID, func(tx pgx.Tx) error {
+		var err error
+		out, err = reserve(r.Context(), tx, r, p, body.RunID, body.EstimatedUnits)
+		return err
+	})
+	if err != nil {
+		writeErr(w, err)
+		return
+	}
+	httpapi.WriteJSON(w, http.StatusOK, out)
+}
