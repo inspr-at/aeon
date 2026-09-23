@@ -32,6 +32,7 @@ scripts/             release checks
 6. **Commits** on your branch only, message `P0.x: what changed` plus the ticket key (e.g. `AEON-7`). Never commit secrets, `.env` files or generated build output. Do not push; the coordinator merges.
 7. **Never** read or print secrets, never touch other worktrees, never run destructive git (`reset --hard`, `clean -f`, `push --force`).
 8. When done: `pct` 100, a one-paragraph summary in `note`, and a final commit.
+9. **No reviews by other models.** Do not run cross-family or any other review gates per package, and never call other model CLIs (claude, codex, grok, cursor-agent) yourself. QA is consolidated per release by the coordinator (Markus, 2026-09-23).
 
 ## Style
 
