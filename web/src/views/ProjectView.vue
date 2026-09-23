@@ -133,7 +133,9 @@ const panelPosition = computed(() => {
   const item = panelItem.value
   if (!item) return null
   const index = sequence.value.findIndex(row => row.id === item.id)
-  return index === -1 ? null : { index, count: sequence.value.length }
+  // While more pages exist, count the whole list (its total), not just what is loaded.
+  const count = list.cursor.value && total.value ? Math.max(total.value, sequence.value.length) : sequence.value.length
+  return index === -1 ? null : { index, count }
 })
 async function resolvePanel() {
   const key = ticketKey.value
@@ -311,9 +313,15 @@ function focusFirst() { if (!cursorId.value && sequence.value.length) cursorId.v
 function typing(target: EventTarget | null) {
   return target instanceof HTMLElement && (target.isContentEditable || ['INPUT', 'TEXTAREA', 'SELECT'].includes(target.tagName))
 }
-function move(step: number) {
-  const rows = sequence.value
+async function move(step: number) {
+  let rows = sequence.value
   if (!rows.length) return
+  // At the end of what is loaded, fetch the next page first so j and Next keep going.
+  const at = rows.findIndex(row => row.id === (ticketKey.value && panelItem.value ? panelItem.value.id : cursorId.value))
+  if (step > 0 && at === rows.length - 1 && list.cursor.value) {
+    await list.loadMore()
+    rows = sequence.value
+  }
   // With a ticket open, move from that ticket; the cursor follows only once the move happens
   // (an unsaved-changes guard may keep the current ticket open).
   const from = ticketKey.value && panelItem.value ? panelItem.value.id : cursorId.value
@@ -335,13 +343,13 @@ function keydown(event: KeyboardEvent) {
   const target = event.target as HTMLElement | null
   if (target?.closest?.('.floating') || document.querySelector('.floating')) return
   if (typing(target)) {
-    if (event.key === 'ArrowDown' && target === toolbar.value?.input) { event.preventDefault(); target.blur(); move(cursorId.value ? 0 : 1) }
+    if (event.key === 'ArrowDown' && target === toolbar.value?.input) { event.preventDefault(); target.blur(); void move(cursorId.value ? 0 : 1) }
     return
   }
   const row = sequence.value.find(item => item.id === cursorId.value)
   switch (event.key) {
-    case 'j': case 'ArrowDown': event.preventDefault(); move(1); break
-    case 'k': case 'ArrowUp': event.preventDefault(); move(-1); break
+    case 'j': case 'ArrowDown': event.preventDefault(); void move(1); break
+    case 'k': case 'ArrowUp': event.preventDefault(); void move(-1); break
     case 'Enter': case 'o':
       if (event.key === 'Enter' && target?.closest('button, a, summary')) return
       if (row) { event.preventDefault(); openRow(row) }

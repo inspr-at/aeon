@@ -253,7 +253,7 @@ defineExpose({
 .full .ws-scroll { overflow: visible; }
 .full .ws-grid { display: grid; grid-template-columns: minmax(0, 1fr) 320px; gap: 40px; align-items: start; padding: 26px 0 40px; }
 .full .ws-main { min-width: 0; max-width: 820px; }
-.full .sections :deep(.markdown-body), .full .inline-composer { max-width: 72ch; }
+.full .sections :deep(.markdown-body), .full .inline-composer, .full .activity, .full .children { max-width: 72ch; }
 .full .ws-side { position: sticky; top: 16px; display: grid; gap: 14px; }
 .side-card { padding: 14px 18px; border-radius: var(--radius); border: 1px solid var(--glass-edge); background: linear-gradient(165deg, var(--surface-raised-2), var(--glass) 60%); box-shadow: var(--shadow); }
 .side-card :deep(.relation-label) { width: 84px; }

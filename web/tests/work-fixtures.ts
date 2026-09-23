@@ -58,6 +58,7 @@ export function fixtures(options: MockOptions = {}) {
     'n-1': [
       { id: '9', at: ago(0.5), type: 'comment', author: { id: mira.id, name: mira.name }, body_markdown: 'Token rotation is **done**; cleanup next.' },
       { id: '8', at: ago(0.9), type: 'comment', author: { id: me.id, name: me.name }, body_markdown: 'Picked this up. `a => b` stays literal.' },
+      { id: '8a', at: ago(2), type: 'comment', author: { id: me.id, name: me.name }, body_markdown: 'I work on this — session: cursor-harbor-fleet (70648dfe-5a0c-4a6f-86f4-dab0870dde5c); role: builder; model: grok-4.6; started: 2026-09-23T10:00:00Z\n\nDelegated via Cursor CLI; coordinator owns the merge.' },
       { id: '7', at: ago(26), type: 'change', author: { id: me.id, name: me.name }, changes: [{ field: 'status', from: 'backlog', to: 'in-progress' }] },
       { id: '6', at: ago(26.02), type: 'change', author: { id: me.id, name: me.name }, changes: [{ field: 'status', from: 'new', to: 'backlog' }, { field: 'priority', from: 'medium', to: 'high' }] },
       { id: '5', at: ago(24 * 20), type: 'created', author: { id: me.id, name: me.name } },

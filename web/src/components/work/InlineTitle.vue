@@ -59,6 +59,10 @@ defineExpose({ start, isDirty: () => dirty.value })
 .title-text.editable { cursor: text; border-radius: 8px; margin: -3px -8px; padding: 3px 8px; }
 @media (hover: hover) { .title-text.editable:hover { background: var(--row-hover); } }
 .title-text:focus-visible { box-shadow: var(--focus-ring); }
+@media (max-width: 720px) {
+  .title-text, .title-input { font-size: 19px; line-height: 1.28; }
+  .large .title-text, .large .title-input { font-size: 23px; }
+}
 .title-input { display: block; width: calc(100% + 16px); margin: -5px -8px; padding: 4px 7px; border: 1px solid var(--glass-edge); border-radius: 10px; resize: none; overflow: hidden; background: var(--field-bg); box-shadow: var(--field-inset), 0 0 0 1px var(--line); }
 .title-input:focus { box-shadow: var(--focus-ring); }
 .hint { display: flex; align-items: center; flex-wrap: wrap; gap: 4px; margin-top: 10px; font-size: 12px; color: var(--ink-3); }

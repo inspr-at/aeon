@@ -1,7 +1,7 @@
 // SPDX-License-Identifier: AGPL-3.0-only
 import { test } from 'node:test'
 import assert from 'node:assert/strict'
-import { buildTimeline, canWrite, commentEditable, describeChange } from '../src/lib/activity.ts'
+import { buildTimeline, canWrite, commentEditable, describeChange, parseWorkerMarker } from '../src/lib/activity.ts'
 import type { ActivityItem } from '../src/lib/api.ts'
 
 const mba = { id: 'p-1', name: 'mba' }, mira = { id: 'p-2', name: 'Mira' }
@@ -55,4 +55,22 @@ test('own comments stay editable for 15 minutes; viewers are read-only', () => {
   assert.equal(canWrite(['member']), true)
   assert.equal(canWrite(['viewer']), false)
   assert.equal(canWrite(undefined), true)
+})
+
+test('worker markers parse in their real variants; other comments stay comments', () => {
+  const plain = parseWorkerMarker('I work on this — session: cursor-harbor-fleet (70648dfe-5a0c-4a6f-86f4-dab0870dde5c); role: builder; started: 2026-09-21T17:46:47.609430+00:00\n\nDelegated via Cursor CLI.')!
+  assert.equal(plain.session, 'cursor-harbor-fleet')
+  assert.equal(plain.sessionId, '70648dfe-5a0c-4a6f-86f4-dab0870dde5c')
+  assert.equal(plain.role, 'builder')
+  assert.equal(plain.started, '2026-09-21T17:46:47.609430+00:00')
+  assert.equal(plain.rest, 'Delegated via Cursor CLI.')
+  const model = parseWorkerMarker('I work on this — session: codex-w5-inbox via claude-code/hausv-org gauntlet (01BocDumGcga4tMjtsEBuHHN); role: builder; model: gpt-5.6-sol; started: 2026-09-03T08:25:11Z')!
+  assert.equal(model.session, 'codex-w5-inbox via claude-code/hausv-org gauntlet')
+  assert.deepEqual(model.extras, [{ key: 'model', value: 'gpt-5.6-sol' }])
+  assert.equal(model.rest, '')
+  const tail = parseWorkerMarker('I work on this — session: Camy (01a07aa8-5a0e-7042-aa28-fe463343bb9e); role: operator; started: 2026-09-11T11:49:00Z. Prepare isolated pin-only deployment.')!
+  assert.equal(tail.started, '2026-09-11T11:49:00Z')
+  assert.equal(tail.rest, 'Prepare isolated pin-only deployment.')
+  assert.equal(parseWorkerMarker('I work on this (review only): Claude reviewer.'), null)
+  assert.equal(parseWorkerMarker('Shipped and verified.'), null)
 })

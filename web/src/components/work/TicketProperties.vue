@@ -45,11 +45,11 @@ const target = (event: Event) => event.currentTarget as HTMLElement
     </div>
     <div class="prop">
       <dt>Priority</dt>
-      <dd><button type="button" class="prop-btn" :disabled="!editable" aria-haspopup="menu" aria-keyshortcuts="p" :aria-label="`Priority: ${priorityLabel(item.priority)}. Change priority`" @click="emit('priority', target($event))"><PriorityIcon v-if="item.priority" :priority="item.priority" /><span v-else class="dash">—</span>{{ item.priority ? priorityLabel(item.priority) : 'No priority' }}<AppIcon v-if="editable" name="chevron" :size="12" class="chev" /></button></dd>
+      <dd><button type="button" class="prop-btn" :disabled="!editable" aria-haspopup="menu" aria-keyshortcuts="p" :aria-label="`Priority: ${priorityLabel(item.priority)}. Change priority`" @click="emit('priority', target($event))"><PriorityIcon v-if="item.priority" :priority="item.priority" /><span v-else class="dash">—</span><span :class="{ unset: !item.priority }">{{ item.priority ? priorityLabel(item.priority) : 'No priority' }}</span><AppIcon v-if="editable" name="chevron" :size="12" class="chev" /></button></dd>
     </div>
     <div class="prop">
       <dt>Assignee</dt>
-      <dd><button type="button" class="prop-btn" :disabled="!editable" aria-haspopup="menu" aria-keyshortcuts="a" :aria-label="`Assignee: ${item.assignee?.name ?? 'nobody'}. Change assignee`" @click="emit('assignee', target($event))"><PersonAvatar v-if="item.assignee" :name="item.assignee.name" :size="18" /><AppIcon v-else name="user" :size="13" class="faint" />{{ item.assignee?.name ?? 'Unassigned' }}<AppIcon v-if="editable" name="chevron" :size="12" class="chev" /></button></dd>
+      <dd><button type="button" class="prop-btn" :disabled="!editable" aria-haspopup="menu" aria-keyshortcuts="a" :aria-label="`Assignee: ${item.assignee?.name ?? 'nobody'}. Change assignee`" @click="emit('assignee', target($event))"><PersonAvatar v-if="item.assignee" :name="item.assignee.name" :size="18" /><AppIcon v-else name="user" :size="13" class="faint" /><span :class="{ unset: !item.assignee }">{{ item.assignee?.name ?? 'Unassigned' }}</span><AppIcon v-if="editable" name="chevron" :size="12" class="chev" /></button></dd>
     </div>
     <div class="prop">
       <dt>Type</dt>
@@ -61,7 +61,7 @@ const target = (event: Event) => event.currentTarget as HTMLElement
         <button v-if="epicParent" type="button" class="prop-btn epic-chip" :data-tip="`Open ${epicParent.key}\n${epicParent.title}`" @click="emit('openParent', epicParent.key)">
           <AppIcon :name="epicParent.kind_slug === 'epic' ? 'epic' : 'ticket'" :size="12" :class="['kind', epicParent.kind_slug]" /><span class="mono">{{ epicParent.key }}</span><span class="epic-title">{{ epicParent.title }}</span>
         </button>
-        <button v-else-if="editable" type="button" class="prop-btn ghost" @click="emit('epic', target($event))"><AppIcon name="epic" :size="12" class="faint" />No epic</button>
+        <button v-else-if="editable" type="button" class="prop-btn ghost" aria-label="No epic. Choose an epic" @click="emit('epic', target($event))"><AppIcon name="epic" :size="12" class="faint" /><span class="unset">No epic</span></button>
         <span v-else class="prop-static faint">No epic</span>
       </dd>
     </div>
@@ -94,7 +94,7 @@ const target = (event: Event) => event.currentTarget as HTMLElement
 .prop-btn[aria-expanded="true"] { background: var(--row-selected); }
 .prop-btn.ghost { color: var(--ink-3); }
 .chev { color: var(--ink-3); margin-left: -2px; }
-.dash, .faint { color: var(--ink-3); }
+.dash, .faint, .unset { color: var(--ink-3); }
 .kind { color: var(--ink-3); }
 .kind.epic { color: var(--gold); }
 .epic-chip { max-width: 100%; }
@@ -104,7 +104,13 @@ const target = (event: Event) => event.currentTarget as HTMLElement
 .mono { font-family: var(--mono); font-size: 11.5px; font-variant-numeric: tabular-nums; font-variant-ligatures: none; }
 .inline-label { font: 500 9.5px/1 var(--mono); letter-spacing: .12em; text-transform: uppercase; color: var(--ink-3); font-variant-ligatures: none; }
 @media (max-width: 720px) {
-  .props.row { flex-wrap: nowrap; overflow-x: auto; margin: 0 -18px; padding: 2px 18px 4px; scrollbar-width: none; }
+  .props.row {
+    flex-wrap: nowrap; overflow-x: auto; margin: 14px -18px 0; padding: 2px 18px 4px; scrollbar-width: none; scroll-padding-inline: 18px;
+    -webkit-mask-image: linear-gradient(to right, transparent 0, #000 16px, #000 calc(100% - 36px), transparent);
+    mask-image: linear-gradient(to right, transparent 0, #000 16px, #000 calc(100% - 36px), transparent);
+  }
+  /* A trailing spacer so the last chip can scroll clear of the fade. */
+  .props.row::after { content: ''; flex: 0 0 24px; }
   .props.row::-webkit-scrollbar { display: none; }
   .props.row .prop { flex-shrink: 0; }
   .row .prop-btn, .row .prop-static { height: 34px; }

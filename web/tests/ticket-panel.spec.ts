@@ -35,7 +35,17 @@ test('the panel shows title, properties, Markdown sections, relations and the ti
   await expect(activity.locator('.entry.changes')).toContainText('changed status New to In progress, changed priority Medium to High')
   await expect(activity.locator('.entry.comment').first()).toContainText('Picked this up.')
   await expect(activity.locator('.entry.comment').last().locator('strong')).toHaveText(['Mira Holm', 'done'])
-  expect(await activity.locator('.entry').evaluateAll(entries => entries.map(entry => entry.className.split(' ')[1]))).toEqual(['created', 'changes', 'comment', 'comment'])
+  expect(await activity.locator('.entry').evaluateAll(entries => entries.map(entry => entry.className.split(' ')[1]))).toEqual(['created', 'changes', 'marker', 'comment', 'comment'])
+  // Agent work markers read as one system line; the rest of the comment stays a comment.
+  const marker = activity.locator('.entry.marker')
+  await expect(marker.locator('.system-line')).toContainText('cursor-harbor-fleet started as builder')
+  await expect(marker.locator('.comment-card')).toHaveText('Delegated via Cursor CLI; coordinator owns the merge.')
+  await expect(marker.getByText('70648dfe-5a0c-4a6f-86f4-dab0870dde5c')).toHaveCount(0)
+  await marker.getByRole('button', { name: /cursor-harbor-fleet started as builder/ }).click()
+  await expect(marker.getByText('70648dfe-5a0c-4a6f-86f4-dab0870dde5c')).toBeVisible()
+  await expect(marker.locator('.marker-detail')).toContainText('grok-4.6')
+  // No comment card sits inside another framed block.
+  expect(await activity.locator('.comment-card .comment-card, .entry.comment > .entry').count()).toBe(0)
   await relations.getByRole('button', { name: /PHAROS-14/ }).click()
   await expect(page).toHaveURL('/p/PHAROS/PHAROS-14')
   expect(errors).toEqual([])
@@ -278,6 +288,81 @@ test('unsaved edits are guarded when moving to another ticket', async ({ page })
   await ws.getByRole('button', { name: 'Next ticket' }).click()
   await page.getByRole('dialog', { name: 'Discard unsaved changes?' }).getByRole('button', { name: 'Discard changes' }).click()
   await expect(page).toHaveURL('/p/PHAROS/PHAROS-13')
+})
+
+test('task lists hang: wrapped lines align with the first line, not under the box', async ({ page }) => {
+  await page.setViewportSize({ width: 1100, height: 800 })
+  const data = fixtures()
+  data.nodes.find(n => n.id === 'n-1')!.fields.acceptance_criteria = '- [x] ' + 'A long criterion that wraps across several lines in the side panel so the hanging indent shows. '.repeat(3)
+  await mockWork(page, data)
+  await page.goto('/p/PHAROS/PHAROS-11')
+  const item = panel(page).getByRole('region', { name: 'Acceptance criteria' }).locator('.task-list-item')
+  const lines = await item.evaluate(li => {
+    const range = document.createRange(); range.selectNodeContents(li)
+    const rects = [...range.getClientRects()].filter(rect => rect.width > 20)
+    const box = li.querySelector('.task-box')!.getBoundingClientRect()
+    return { first: Math.round(rects[0].left), last: Math.round(rects[rects.length - 1].left), count: new Set(rects.map(rect => Math.round(rect.top))).size, boxRight: box.right, boxCentre: box.top + box.height / 2, lineCentre: rects[0].top + rects[0].height / 2 }
+  })
+  expect(lines.count).toBeGreaterThan(2)
+  expect(lines.last).toBe(lines.first)
+  expect(lines.boxRight).toBeLessThan(lines.first)
+  expect(Math.abs(lines.boxCentre - lines.lineCentre)).toBeLessThanOrEqual(2)
+})
+
+test('the panel counts the whole list and next loads the following page', async ({ page }) => {
+  await mockWork(page, fixtures({ bigProject: 450 }))
+  await page.goto('/p/AEON/AEON-298')
+  const ws = panel(page)
+  await expect(ws.locator('.position')).toHaveText('200 / 451')
+  await page.keyboard.press('j')
+  await expect(page).toHaveURL('/p/AEON/AEON-299')
+  await expect(ws.locator('.position')).toHaveText('201 / 451')
+})
+
+test('Tab walks the panel in reading order; Esc closes a popover before the panel', async ({ page }) => {
+  await mockWork(page, fixtures())
+  await page.goto('/p/PHAROS/PHAROS-12')
+  const ws = panel(page)
+  await expect(ws.getByRole('heading', { name: 'Add an Oracle Cloud connector' })).toBeVisible()
+  await ws.getByRole('button', { name: 'Copy PHAROS-12' }).focus()
+  const order: string[] = []
+  for (let i = 0; i < 13; i++) {
+    order.push(await page.evaluate(() => { const el = document.activeElement as HTMLElement; return el.getAttribute('aria-label') ?? el.textContent!.trim().slice(0, 30) }))
+    await page.keyboard.press('Tab')
+  }
+  expect(order).toEqual([
+    'Copy PHAROS-12', 'Previous ticket', 'Next ticket', 'Open as full page', 'Open in a new tab', 'More actions', 'Close ticket details',
+    'Add an Oracle Cloud connector', 'Status: Backlog. Change status', 'Priority: Medium. Change priority', 'Assignee: nobody. Change assignee', 'PHAROS-10Guarded multi-cloud p', 'Add a description',
+  ])
+  await page.keyboard.press('Shift+Tab'); await page.keyboard.press('Shift+Tab'); await page.keyboard.press('Shift+Tab'); await page.keyboard.press('Shift+Tab'); await page.keyboard.press('Shift+Tab')
+  await expect(ws.getByRole('button', { name: /Status: Backlog/ })).toBeFocused()
+  await page.keyboard.press('Enter')
+  await expect(page.getByRole('menu', { name: 'Status of PHAROS-12' })).toBeVisible()
+  await page.keyboard.press('Escape')
+  await expect(page.getByRole('menu', { name: 'Status of PHAROS-12' })).toHaveCount(0)
+  await expect(ws).toBeVisible()
+  await expect(ws.getByRole('button', { name: /Status: Backlog/ })).toBeFocused()
+  await page.keyboard.press('Escape')
+  await expect(page).toHaveURL('/p/PHAROS')
+})
+
+test('quick create shows unset priority and epic as dimmed values', async ({ page }) => {
+  await mockWork(page, fixtures())
+  await page.goto('/p/PHAROS')
+  await expect(page.locator('tr.ticket-row:not(.ghost)')).toHaveCount(5)
+  await page.keyboard.press('n')
+  await expect(page.getByRole('button', { name: 'Priority: No priority' })).toContainText('No priority')
+  await expect(page.getByRole('button', { name: 'Epic: none' })).toContainText('No epic')
+  expect(await page.getByRole('button', { name: 'Epic: none' }).locator('.chip-text').evaluate(el => el.classList.contains('unset'))).toBe(true)
+})
+
+test('a selected row hides its parent chip rather than clipping it under the row actions', async ({ page }) => {
+  await mockWork(page, fixtures())
+  await page.goto('/p/PHAROS/PHAROS-11')
+  const row = page.locator('#row-n-1')
+  await expect(row.locator('.row-actions')).toBeVisible()
+  await expect(row.locator('.parent-chip')).toHaveCSS('opacity', '0')
+  await expect(page.locator('#row-n-2 .parent-chip')).toHaveCSS('opacity', '1')
 })
 
 for (const colorScheme of ['light', 'dark'] as const) {

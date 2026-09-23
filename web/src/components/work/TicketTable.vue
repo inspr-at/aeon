@@ -328,6 +328,9 @@ tbody:last-of-type .ticket-row:last-child td { border-bottom: 0; }
    row; the title fades out beneath them, whatever the row tint underneath. */
 td.c-title { position: relative; }
 .row-actions { position: absolute; top: 50%; right: 8px; display: inline-flex; gap: 2px; transform: translateY(-50%); visibility: hidden; }
+/* The parent chip steps out entirely while row actions show, so it is never clipped. */
+@media (hover: hover) { .ticket-row:hover .parent-chip { opacity: 0; } }
+.ticket-row.cursor .parent-chip, td.c-title:focus-within .parent-chip { opacity: 0; }
 .ticket-row:hover .title-cell, .ticket-row.cursor .title-cell, td.c-title:focus-within .title-cell {
   -webkit-mask-image: linear-gradient(to left, transparent 56px, #000 84px); mask-image: linear-gradient(to left, transparent 56px, #000 84px);
 }

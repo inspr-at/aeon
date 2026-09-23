@@ -56,9 +56,16 @@ export function useTicketList(projectId: Ref<string | null>, filters: Ref<ListFi
     dimensionFacets.value = Object.fromEntries(settled.flatMap(result => result.status === 'fulfilled' ? [result.value] : []))
   }
 
-  async function loadMore() {
+  // One next-page request at a time; callers that need the page await the same promise.
+  let moreRequest: Promise<void> | null = null
+  function loadMore(): Promise<void> {
+    if (loadingMore.value && moreRequest) return moreRequest
+    moreRequest = fetchMore().finally(() => { moreRequest = null })
+    return moreRequest
+  }
+  async function fetchMore() {
     const within = projectId.value
-    if (!within || !cursor.value || loading.value || loadingMore.value) return
+    if (!within || !cursor.value || loading.value) return
     const request = generation
     loadingMore.value = true; moreError.value = ''
     try {

@@ -43,7 +43,7 @@ defineExpose({ start, isDirty: () => dirty.value, editing })
   <section class="md-section" :class="{ editing }" :aria-label="title">
     <header class="section-head">
       <h3 class="eyebrow">{{ title }}</h3>
-      <button v-if="editable && !editing" type="button" class="icon-btn sm flat edit-btn" :aria-label="`Edit ${title.toLowerCase()}`" :data-tip="`Edit ${title.toLowerCase()}`" @click="start"><AppIcon name="edit" :size="13" /></button>
+      <button v-if="editable && !editing && value.trim()" type="button" class="icon-btn sm flat edit-btn" :aria-label="`Edit ${title.toLowerCase()}`" :data-tip="`Edit ${title.toLowerCase()}`" @click="start"><AppIcon name="edit" :size="13" /></button>
     </header>
     <template v-if="editing">
       <div v-if="conflict" class="conflict" role="alert">

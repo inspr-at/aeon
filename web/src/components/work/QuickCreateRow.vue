@@ -58,10 +58,10 @@ defineExpose({ focus: () => input.value?.focus(), isDirty: () => !!draft.title.t
       <div class="cell"><button type="button" class="create-chip" aria-haspopup="menu" :aria-label="`Status: ${statusMeta(draft.state).label}`" @click="open('status', $event)"><StatusIcon :state="draft.state" :size="12" />{{ statusMeta(draft.state).label }}<AppIcon name="chevron" :size="11" class="chev" /></button></div>
     </td>
     <td class="c-prio">
-      <div class="cell"><button type="button" class="create-chip" aria-haspopup="menu" :aria-label="`Priority: ${priorityLabel(draft.priority)}`" @click="open('priority', $event)"><PriorityIcon v-if="draft.priority" :priority="draft.priority" :size="12" /><span v-else class="dash">—</span><span class="chip-text">{{ draft.priority ? priorityLabel(draft.priority) : 'Priority' }}</span><AppIcon name="chevron" :size="11" class="chev" /></button></div>
+      <div class="cell"><button type="button" class="create-chip" aria-haspopup="menu" :aria-label="`Priority: ${priorityLabel(draft.priority)}`" @click="open('priority', $event)"><PriorityIcon v-if="draft.priority" :priority="draft.priority" :size="12" /><span v-else class="dash">—</span><span class="chip-text" :class="{ unset: !draft.priority }">{{ draft.priority ? priorityLabel(draft.priority) : 'No priority' }}</span><AppIcon name="chevron" :size="11" class="chev" /></button></div>
     </td>
     <td class="c-epic" :colspan="showAssignee ? 2 : 1">
-      <div class="cell epic-cell"><button type="button" class="create-chip epic-chip" aria-haspopup="dialog" :aria-label="`Epic: ${draft.epic ? draft.epic.title : 'none'}`" :data-tip="draft.epic ? `${draft.epic.key}\n${draft.epic.title}` : 'Choose an epic'" @click="open('epic', $event)"><AppIcon name="epic" :size="12" class="kind epic" /><span class="chip-text">{{ draft.epic ? draft.epic.title : 'Epic' }}</span></button></div>
+      <div class="cell epic-cell"><button type="button" class="create-chip epic-chip" aria-haspopup="dialog" :aria-label="`Epic: ${draft.epic ? draft.epic.title : 'none'}`" :data-tip="draft.epic ? `${draft.epic.key}\n${draft.epic.title}` : 'Choose an epic'" @click="open('epic', $event)"><AppIcon name="epic" :size="12" class="kind" :class="{ epic: !!draft.epic }" /><span class="chip-text" :class="{ unset: !draft.epic }">{{ draft.epic ? draft.epic.title : 'No epic' }}</span></button></div>
     </td>
   </tr>
   <tr class="create-hint-row" aria-hidden="true">
@@ -85,6 +85,7 @@ defineExpose({ focus: () => input.value?.focus(), isDirty: () => !!draft.title.t
 @media (hover: hover) { .create-chip:hover { box-shadow: inset 0 0 0 1px var(--glass-rim); } }
 .create-chip:focus-visible { box-shadow: var(--focus-ring); }
 .chip-text { overflow: hidden; text-overflow: ellipsis; }
+.chip-text.unset { color: var(--ink-3); }
 .chev, .dash { color: var(--ink-3); }
 .kind { color: var(--ink-3); }
 .kind.epic { color: var(--gold); }

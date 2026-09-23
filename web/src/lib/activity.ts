@@ -68,6 +68,28 @@ export function commentEditable(entry: { at: string; author: { id: string | null
   return !!me && entry.author.id === me && now - Date.parse(entry.at) < EDIT_WINDOW_MS
 }
 
+// Agent attribution markers ("I work on this — session: <name> (<id>); role: <role>;
+// [model: <model>;] started: <iso>") become one compact system line; any text after
+// the marker still reads as a normal comment.
+export interface WorkerMarker { session: string; sessionId: string; role: string; started: string; extras: { key: string; value: string }[]; line: string; rest: string }
+const MARKER = /^I work on this\s*[—–-]+\s*session:\s*(.+?)\s*\(([^()]*)\)\s*;\s*role:\s*([^;]+?)\s*;((?:\s*[\w-]+:\s*[^;]+?;)*?)\s*started:\s*(\S+?)[.;,]?(?=\s|$)(.*)$/i
+// The compact line shows the role's first words; the full text stays in the expansion.
+export function shortRole(role: string): string {
+  const head = role.split(/\s*[(,]/)[0].trim()
+  return head.length > 32 ? `${head.slice(0, 30).trimEnd()}…` : head
+}
+export function parseWorkerMarker(body: string): WorkerMarker | null {
+  const text = body.replace(/\r/g, '').trimStart()
+  const newline = text.indexOf('\n')
+  const first = newline === -1 ? text : text.slice(0, newline)
+  const match = MARKER.exec(first)
+  if (!match) return null
+  const [, session, sessionId, role, extraText, started, tail] = match
+  const extras = [...extraText.matchAll(/([\w-]+):\s*([^;]+?);/g)].map(([, key, value]) => ({ key, value: value.trim() }))
+  const rest = [tail.trim().replace(/^[.;,:]\s*/, ''), newline === -1 ? '' : text.slice(newline + 1)].filter(part => part.trim()).join('\n\n').trim()
+  return { session: session.trim(), sessionId: sessionId.trim(), role: role.trim().toLowerCase(), started, extras, line: first.slice(0, first.length - tail.length).trim(), rest }
+}
+
 // There is no dedicated write role yet; viewers and read-only principals see the panel read-only.
 export function canWrite(roles: string[] | undefined): boolean {
   return !(roles ?? []).some(role => ['viewer', 'readonly', 'read_only', 'read-only'].includes(role.toLowerCase()))
