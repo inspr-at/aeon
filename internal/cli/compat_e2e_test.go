@@ -249,6 +249,69 @@ func TestCompatEndToEnd(t *testing.T) {
 	assertEvent(t, opened, worker.TenantID, "model.registry_seeded")
 }
 
+func TestMessagingCompatEndToEnd(t *testing.T) {
+	isolate(t)
+	opened := dbtest.Open(t)
+	if err := db.EnsureTenant(t.Context(), opened.App, "aeon", "Aeon"); err != nil {
+		t.Fatal(err)
+	}
+	authMod, err := auth.New(auth.Config{Env: "dev", SessionKey: bytes.Repeat([]byte{8}, 32), PublicURL: "http://127.0.0.1", BootstrapTenantSlug: "aeon", BootstrapAdminEmail: "admin@example.com"}, opened.App)
+	if err != nil {
+		t.Fatal(err)
+	}
+	messaging, err := inbox.NewMessaging(opened.App, bytes.Repeat([]byte{6}, 32))
+	if err != nil {
+		t.Fatal(err)
+	}
+	srv := httptest.NewServer((&httpapi.Server{Pool: opened.App, Modules: []httpapi.Module{authMod, nodes.New(opened.App, nodes.SQLWriter{}), inbox.New(opened.App), messaging}, Middleware: []func(http.Handler) http.Handler{authMod.Middleware}}).Handler())
+	defer srv.Close()
+	sender := mintAgent(t, srv.URL, "sender")
+	receiver := mintAgent(t, srv.URL, "receiver")
+	seedProject(t, srv.URL, sender.Token)
+	t.Setenv("PAIMOS_URL", srv.URL)
+	t.Setenv("PAIMOS_API_KEY", sender.Token)
+	missing := filepath.Join(t.TempDir(), "missing")
+	call := func(args []string) string {
+		t.Helper()
+		code, out, stderr := runMessagingCLI(append([]string{"--config", missing, "--json"}, args...), "")
+		if code != 0 {
+			t.Fatalf("messaging command %s: code %d, %s", args[0], code, stderr)
+		}
+		return out
+	}
+	first := call([]string{"tell", "codex:receiver", "--project", "AEON", "--expects-reply", "--idempotency-key", "retry-key", "-m", "reply with validation"})
+	var sent inbox.CompatMessage
+	if err := json.Unmarshal([]byte(first), &sent); err != nil {
+		t.Fatal(err)
+	}
+	if sent.ReplyObligation != "open" {
+		t.Fatal("no reply obligation")
+	}
+	call([]string{"tell", "codex:receiver", "--project", "AEON", "--action-request", "-m", "held action fixture"})
+	t.Setenv("PAIMOS_API_KEY", receiver.Token)
+	page := call([]string{"listen", "--as", "codex:receiver", "--project", "AEON", "--ack"})
+	if !strings.Contains(page, "reply with validation") || strings.Contains(page, "held action fixture") {
+		t.Fatal("listen exposed held content or lost accepted content")
+	}
+	page = call([]string{"listen", "--as", "codex:receiver", "--project", "AEON"})
+	if strings.Contains(page, "reply with validation") {
+		t.Fatal("JSON --ack did not acknowledge")
+	}
+	call([]string{"tell", "paimos:sender", "--project", "AEON", "--reply-to", sent.ID, "-m", "validation complete"})
+	t.Setenv("PAIMOS_API_KEY", sender.Token)
+	replay := call([]string{"tell", "codex:receiver", "--project", "AEON", "--expects-reply", "--idempotency-key", "retry-key", "-m", "reply with validation"})
+	var replayed inbox.CompatMessage
+	if err := json.Unmarshal([]byte(replay), &replayed); err != nil {
+		t.Fatal(err)
+	}
+	if replayed.ReplyObligation != "closed" {
+		t.Fatal("reply did not close obligation")
+	}
+	assertEvent(t, opened, sender.TenantID, "inbox.reply_obligation_opened")
+	assertEvent(t, opened, sender.TenantID, "inbox.reply_obligation_closed")
+	assertEvent(t, opened, sender.TenantID, "inbox.delivery_queued")
+}
+
 type mintedKey struct {
 	Token       string
 	PrincipalID string

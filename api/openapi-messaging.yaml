@@ -1,0 +1,108 @@
+# SPDX-License-Identifier: AGPL-3.0-only
+openapi: 3.1.0
+info: {title: AEON P5.4 messaging, version: '1'}
+# Coordinator merges these paths into api/openapi.yaml and mounts inbox.NewMessaging.
+paths:
+  /api/projects/{projectId}/messages:
+    parameters:
+      - {$ref: '#/components/parameters/Project'}
+    post:
+      operationId: sendCompatMessage
+      description: Authenticated sender; agents require inbox.send. Exact idempotent retries return the original. Action requests are held outside R2 inbox; only an accepted exact counterpart reply closes an obligation.
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: {$ref: '#/components/schemas/Send'}
+      responses:
+        '201': {description: Durable message, content: {application/json: {schema: {$ref: '#/components/schemas/Message'}}}}
+        '409': {description: Idempotency conflict}
+    get:
+      operationId: inspectCompatMessages
+      description: Person administrator inspection, including held bodies. Never releases or executes an action request.
+      responses:
+        '200': {description: Message page}
+  /api/projects/{projectId}/messages/listen:
+    parameters:
+      - {$ref: '#/components/parameters/Project'}
+    get:
+      operationId: listenCompatMessages
+      description: Only the authenticated recipient, optionally selecting its own harness address. Pending accepted R2 messages only; at most ten, ordered by event ID. No target references or secrets. Reading and ACK never close reply obligations.
+      parameters:
+        - {name: to, in: query, schema: {type: string}}
+        - {name: after, in: query, schema: {type: integer, minimum: 0}}
+        - {name: limit, in: query, schema: {type: integer, minimum: 1, maximum: 10, default: 10}}
+      responses:
+        '200': {description: Message page with items, next_after and untrusted-message preamble}
+  /api/projects/{projectId}/message-targets:
+    parameters:
+      - {$ref: '#/components/parameters/Project'}
+    post:
+      operationId: setCompatTarget
+      description: Administrator only. Immutable encrypted target version; supersedes the enabled version for this address and role, without retargeting existing deliveries. Omitted principal_id resolves the unique agent name from the address. References and secrets are write-only.
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: {$ref: '#/components/schemas/TargetInput'}
+      responses:
+        '201': {description: Redacted target}
+    get:
+      operationId: listCompatTargets
+      description: Administrator only; redacted metadata and has_secret, never target_ref or target_secret.
+      parameters:
+        - {name: address, in: query, schema: {type: string}}
+      responses:
+        '200': {description: Redacted target array}
+  /api/projects/{projectId}/message-deliveries:
+    parameters:
+      - {$ref: '#/components/parameters/Project'}
+    get:
+      operationId: listCompatDeliveries
+      description: Administrator only; state, reason, attempts and immutable target IDs only. No bodies, references, credentials or provider errors.
+      responses:
+        '200': {description: Redacted delivery array}
+components:
+  parameters:
+    Project: {name: projectId, in: path, required: true, schema: {type: string, format: uuid}}
+  schemas:
+    Send:
+      type: object
+      additionalProperties: false
+      required: [to, body, idempotency_key]
+      properties:
+        to: {type: string, description: 'harness:agent or principal UUID'}
+        body: {type: string, minLength: 1, maxLength: 65536}
+        idempotency_key: {type: string, minLength: 1, maxLength: 128, writeOnly: true}
+        reply_to: {type: string, format: uuid}
+        expects_reply: {type: boolean, default: false}
+        is_action_request: {type: boolean, default: false}
+        delivery_level: {type: string, enum: [simple, steer], default: simple}
+    Message:
+      type: object
+      properties:
+        id: {type: string, format: uuid}
+        sender_principal_id: {type: string, format: uuid}
+        recipient_principal_id: {type: string, format: uuid}
+        to: {type: string}
+        body: {type: string}
+        reply_to: {type: [string, 'null'], format: uuid}
+        sent_event_id: {type: integer}
+        is_action_request: {type: boolean}
+        expects_reply: {type: boolean}
+        reply_obligation: {type: string, enum: [none, open, closed]}
+        status: {type: string, enum: [accepted, held]}
+        delivery_level: {type: string, enum: [simple, steer]}
+    TargetInput:
+      type: object
+      additionalProperties: false
+      required: [address, adapter, target_kind, target_ref]
+      properties:
+        address: {type: string}
+        principal_id: {type: string, format: uuid}
+        adapter: {type: string, enum: [codex, agentd_codex, agentd_claude, agentd_pi, agentd_cursor, grok_bot_routine, claude_resume, claude_channel]}
+        target_kind: {type: string, enum: [codex_thread, agentd_session, https_webhook, claude_session]}
+        target_ref: {type: string, writeOnly: true}
+        target_secret: {type: string, writeOnly: true, description: Required only for grok_bot_routine}
+        maximum_level: {type: string, enum: [simple, steer], default: simple}
+        role: {type: string, enum: [primary, simple_fallback], default: primary}
