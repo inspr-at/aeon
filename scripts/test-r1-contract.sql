@@ -32,7 +32,7 @@ SELECT set_config('aeon.tenant_id', 'eae00000-0000-0000-0000-000000000001', true
 INSERT INTO principals(id, tenant_id, kind, name) VALUES
  ('eae00000-0000-0000-0000-000000000011', 'eae00000-0000-0000-0000-000000000001', 'person', 'Contract actor');
 DO $$ BEGIN
-    IF (SELECT count(*) FROM node_kinds) <> 8 THEN
+    IF (SELECT count(*) FROM node_kinds) <> 9 THEN
         RAISE EXCEPTION 'new tenant starter kinds missing';
     END IF;
 END $$;
@@ -40,7 +40,7 @@ END $$;
 DELETE FROM node_kinds WHERE slug = 'guideline';
 SELECT aeon_seed_node_kinds('eae00000-0000-0000-0000-000000000001');
 DO $$ BEGIN
-    IF (SELECT count(*) FROM node_kinds) <> 8 THEN
+    IF (SELECT count(*) FROM node_kinds) <> 9 THEN
         RAISE EXCEPTION 'starter kind backfill failed';
     END IF;
 END $$;
@@ -165,7 +165,7 @@ VALUES ('eae00000-0000-0000-0000-000000000001',
         'eae00000-0000-0000-0000-000000000011', 'contract fixture');
 SELECT set_config('aeon.tenant_id', 'eae00000-0000-0000-0000-000000000002', true);
 DO $$ BEGIN
-    IF (SELECT count(*) FROM node_kinds) <> 8 THEN RAISE EXCEPTION 'second tenant starter kinds missing'; END IF;
+    IF (SELECT count(*) FROM node_kinds) <> 9 THEN RAISE EXCEPTION 'second tenant starter kinds missing'; END IF;
     IF (SELECT count(*) FROM nodes) <> 0 OR (SELECT count(*) FROM events) <> 0
        OR (SELECT count(*) FROM saved_views) <> 0 OR (SELECT count(*) FROM import_jobs) <> 0 THEN
         RAISE EXCEPTION 'cross-tenant row leaked';
