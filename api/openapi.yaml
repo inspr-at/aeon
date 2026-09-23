@@ -912,11 +912,548 @@ paths:
         '200': {description: Selected account, content: {application/json: {schema: {$ref: '#/components/schemas/AccountRoute'}}}}
         '403': {$ref: '#/components/responses/Error'}
         '409': {$ref: '#/components/responses/Error'}
+  /projects/{projectId}/journey:
+    get:
+      operationId: getProjectJourney
+      summary: Read a project's derived journey
+      description: ProjectId names a live project node. Stage and the single next action are derived from the current brief, decision, agreed requirements, release, handoff results and R2 decisions; clients cannot set them.
+      security: *auth
+      parameters: [{name: projectId, in: path, required: true, schema: {type: string, format: uuid}}]
+      responses:
+        '200': {description: Journey projection, content: {application/json: {schema: {$ref: '#/components/schemas/Journey'}}}}
+        '404': {$ref: '#/components/responses/Error'}
+  /projects/{projectId}/journey/profile:
+    put:
+      operationId: setJourneyProfile
+      summary: Choose a journey profile
+      description: Person chooses Personal, Professional or Enterprise; expected_revision prevents a stale profile or gate edit. Profile changes never erase recorded decisions.
+      security: [{session: []}]
+      parameters: [{name: projectId, in: path, required: true, schema: {type: string, format: uuid}}]
+      requestBody: {required: true, content: {application/json: {schema: {$ref: '#/components/schemas/JourneyProfileWrite'}}}}
+      responses:
+        '200': {description: Journey projection, content: {application/json: {schema: {$ref: '#/components/schemas/Journey'}}}}
+        '409': {$ref: '#/components/responses/Error'}
+  /projects/{projectId}/journey/actions:
+    post:
+      operationId: advanceProjectJourney
+      summary: Apply the project's next action
+      description: Applies one currently offered action after checking the matching R2 approval where required; never creates an approval decision. Idempotency key and expected_revision fence retries and stale UI actions.
+      security: *auth
+      parameters: [{name: projectId, in: path, required: true, schema: {type: string, format: uuid}}]
+      requestBody: {required: true, content: {application/json: {schema: {$ref: '#/components/schemas/JourneyActionWrite'}}}}
+      responses:
+        '200': {description: Updated journey, content: {application/json: {schema: {$ref: '#/components/schemas/Journey'}}}}
+        '403': {$ref: '#/components/responses/Error'}
+        '409': {$ref: '#/components/responses/Error'}
+  /projects/{projectId}/requirements:
+    get:
+      operationId: listJourneyRequirements
+      summary: List project requirements
+      security: *auth
+      parameters: [{name: projectId, in: path, required: true, schema: {type: string, format: uuid}}]
+      responses:
+        '200': {description: Requirements and generated node links, content: {application/json: {schema: {type: array, items: {$ref: '#/components/schemas/JourneyRequirement'}}}}}
+        '404': {$ref: '#/components/responses/Error'}
+    post:
+      operationId: createJourneyRequirement
+      summary: Add a draft requirement
+      description: A person adds a requirement node in the current draft revision. Later edits use the R1 node API and invalidate any stale Aithema draft or agreement gate.
+      security: [{session: []}]
+      parameters: [{name: projectId, in: path, required: true, schema: {type: string, format: uuid}}]
+      requestBody: {required: true, content: {application/json: {schema: {$ref: '#/components/schemas/JourneyRequirementCreate'}}}}
+      responses:
+        '201': {description: Requirement, content: {application/json: {schema: {$ref: '#/components/schemas/JourneyRequirement'}}}}
+        '409': {$ref: '#/components/responses/Error'}
+  /projects/{projectId}/requirements/agree:
+    post:
+      operationId: agreeJourneyRequirements
+      summary: Agree a requirements revision
+      description: A person-approved R2 requirements gate pins a revision and atomically creates one epic per functional requirement and idempotent ticket nodes from accepted breakdowns. Nonfunctional requirements become acceptance criteria or knowledge nodes. Drafts alone never generate work.
+      security: [{session: []}]
+      parameters: [{name: projectId, in: path, required: true, schema: {type: string, format: uuid}}]
+      requestBody: {required: true, content: {application/json: {schema: {$ref: '#/components/schemas/RequirementsAgreement'}}}}
+      responses:
+        '200': {description: Agreed requirements, content: {application/json: {schema: {type: array, items: {$ref: '#/components/schemas/JourneyRequirement'}}}}}
+        '403': {$ref: '#/components/responses/Error'}
+        '409': {$ref: '#/components/responses/Error'}
+  /projects/{projectId}/releases/{releaseId}/walker:
+    get:
+      operationId: getReleaseWalker
+      summary: Read the A3 release walker
+      description: Stable A3 feature and ticket order, epic node keys, ticket inclusion and linked screens. Feature checkbox state is derived from included open tickets.
+      security: *auth
+      parameters:
+        - {name: projectId, in: path, required: true, schema: {type: string, format: uuid}}
+        - {name: releaseId, in: path, required: true, schema: {type: string, format: uuid}}
+      responses:
+        '200': {description: Walker projection, content: {application/json: {schema: {$ref: '#/components/schemas/ReleaseWalker'}}}}
+        '404': {$ref: '#/components/responses/Error'}
+  /projects/{projectId}/releases/{releaseId}/plan:
+    put:
+      operationId: replaceReleasePlan
+      summary: Replace ticket selection and order
+      description: While planning, atomically replaces the selected ticket set and walker order. Feature tri-state, partial-pick memory, and arrow navigation are client projections; no client may move a ticket after build starts.
+      security: [{session: []}]
+      parameters:
+        - {name: projectId, in: path, required: true, schema: {type: string, format: uuid}}
+        - {name: releaseId, in: path, required: true, schema: {type: string, format: uuid}}
+      requestBody: {required: true, content: {application/json: {schema: {$ref: '#/components/schemas/ReleasePlanWrite'}}}}
+      responses:
+        '200': {description: Walker projection, content: {application/json: {schema: {$ref: '#/components/schemas/ReleaseWalker'}}}}
+        '409': {$ref: '#/components/responses/Error'}
+  /projects/{projectId}/intake/sources:
+    post:
+      operationId: addIntakeSource
+      summary: Record an intake source
+      description: Aithema records a source reference, content digest and provenance; file bytes remain behind Aeon's tenant-scoped file storage boundary. Never accepts credentials in locators.
+      security: *auth
+      parameters: [{name: projectId, in: path, required: true, schema: {type: string, format: uuid}}]
+      requestBody: {required: true, content: {application/json: {schema: {$ref: '#/components/schemas/IntakeSourceWrite'}}}}
+      responses:
+        '201': {description: Source, content: {application/json: {schema: {$ref: '#/components/schemas/IntakeSource'}}}}
+        '409': {$ref: '#/components/responses/Error'}
+  /projects/{projectId}/intake:
+    get:
+      operationId: getProjectIntake
+      summary: Read intake history
+      description: Aithema's current source, transcript and draft history; accepted and superseded proposals remain visible with citations.
+      security: *auth
+      parameters: [{name: projectId, in: path, required: true, schema: {type: string, format: uuid}}]
+      responses:
+        '200': {description: Intake snapshot, content: {application/json: {schema: {$ref: '#/components/schemas/IntakeSnapshot'}}}}
+        '404': {$ref: '#/components/responses/Error'}
+  /projects/{projectId}/intake/transcript-turns:
+    post:
+      operationId: appendIntakeTurn
+      summary: Append a conversation turn
+      description: Appends an immutable conversation turn to a source. Idempotency key binds a retry to the same content.
+      security: *auth
+      parameters: [{name: projectId, in: path, required: true, schema: {type: string, format: uuid}}]
+      requestBody: {required: true, content: {application/json: {schema: {$ref: '#/components/schemas/IntakeTurnWrite'}}}}
+      responses:
+        '201': {description: Turn, content: {application/json: {schema: {$ref: '#/components/schemas/IntakeTurn'}}}}
+        '409': {$ref: '#/components/responses/Error'}
+  /projects/{projectId}/intake/drafts:
+    post:
+      operationId: proposeIntakeDraft
+      summary: Propose a cited draft
+      description: Aithema proposes an immutable cited brief or requirement draft against a target node revision. Proposals never patch people-edited nodes.
+      security: [{agentKey: []}]
+      parameters: [{name: projectId, in: path, required: true, schema: {type: string, format: uuid}}]
+      requestBody: {required: true, content: {application/json: {schema: {$ref: '#/components/schemas/IntakeDraftWrite'}}}}
+      responses:
+        '201': {description: Draft, content: {application/json: {schema: {$ref: '#/components/schemas/IntakeDraft'}}}}
+        '409': {$ref: '#/components/responses/Error'}
+  /projects/{projectId}/intake/drafts/{draftId}/accept:
+    post:
+      operationId: acceptIntakeDraft
+      summary: Accept a cited draft
+      description: Person explicitly accepts one draft. If the target changed since base_event_id, return 409 with no write; acceptance never overwrites later edits.
+      security: [{session: []}]
+      parameters:
+        - {name: projectId, in: path, required: true, schema: {type: string, format: uuid}}
+        - {name: draftId, in: path, required: true, schema: {type: string, format: uuid}}
+      requestBody: {required: true, content: {application/json: {schema: {$ref: '#/components/schemas/IntakeAccept'}}}}
+      responses:
+        '200': {description: Accepted draft, content: {application/json: {schema: {$ref: '#/components/schemas/IntakeDraft'}}}}
+        '403': {$ref: '#/components/responses/Error'}
+        '409': {$ref: '#/components/responses/Error'}
+  /stage-handoffs:
+    post:
+      operationId: requestStageHandoff
+      summary: Request a stage operation
+      description: The journey coordinator creates a fenced request for a registered first-party stage plugin. Janus prepare may precede Pharos deploy; Janus apply follows deployment and permit approval. Server resolves owner, permissions, lineage, evidence ceiling and approved gate; caller cannot supply authority or result.
+      security: *auth
+      requestBody: {required: true, content: {application/json: {schema: {$ref: '#/components/schemas/StageHandoffWrite'}}}}
+      responses:
+        '201': {description: Handoff, content: {application/json: {schema: {$ref: '#/components/schemas/StageHandoff'}}}}
+        '403': {$ref: '#/components/responses/Error'}
+        '409': {$ref: '#/components/responses/Error'}
+  /stage-handoffs/{handoffId}:
+    get:
+      operationId: getStageHandoff
+      summary: Read a stage handoff
+      security: *auth
+      parameters: [{name: handoffId, in: path, required: true, schema: {type: string, format: uuid}}]
+      responses:
+        '200': {description: Safe handoff projection, content: {application/json: {schema: {$ref: '#/components/schemas/StageHandoff'}}}}
+        '404': {$ref: '#/components/responses/Error'}
+  /stage-handoffs/{handoffId}/evidence:
+    post:
+      operationId: appendStageEvidence
+      summary: Append typed stage evidence
+      description: The bound plugin appends monotonic typed evidence. Exact replay is idempotent; divergent replay and stale authority are conflicts. Janus evidence is value-free.
+      security: [{agentKey: []}]
+      parameters: [{name: handoffId, in: path, required: true, schema: {type: string, format: uuid}}]
+      requestBody: {required: true, content: {application/json: {schema: {$ref: '#/components/schemas/StageEvidenceWrite'}}}}
+      responses:
+        '201': {description: Evidence, content: {application/json: {schema: {$ref: '#/components/schemas/StageEvidence'}}}}
+        '403': {$ref: '#/components/responses/Error'}
+        '409': {$ref: '#/components/responses/Error'}
+  /stage-handoffs/{handoffId}/result:
+    post:
+      operationId: closeStageHandoff
+      summary: Record a terminal stage result
+      description: A terminal result requires current lineage, required prerequisite seal and typed evidence. Failed or stale results never advance the journey.
+      security: [{agentKey: []}]
+      parameters: [{name: handoffId, in: path, required: true, schema: {type: string, format: uuid}}]
+      requestBody: {required: true, content: {application/json: {schema: {$ref: '#/components/schemas/StageResultWrite'}}}}
+      responses:
+        '200': {description: Result, content: {application/json: {schema: {$ref: '#/components/schemas/StageResult'}}}}
+        '403': {$ref: '#/components/responses/Error'}
+        '409': {$ref: '#/components/responses/Error'}
+  /plugins:
+    get:
+      operationId: listPlugins
+      summary: List first-party plugins
+      description: Lists compiled first-party manifests and the tenant's pinned enabled state. No runtime plugin upload or arbitrary code loading.
+      security: *auth
+      responses:
+        '200': {description: Plugin registry, content: {application/json: {schema: {type: array, items: {$ref: '#/components/schemas/PluginManifest'}}}}}
+        '403': {$ref: '#/components/responses/Error'}
+  /plugins/{pluginId}/installation:
+    put:
+      operationId: configurePluginInstallation
+      summary: Configure a tenant plugin
+      description: Tenant admin enables a compiled plugin at its exact manifest digest with an explicit permission subset; changes are audited.
+      security: [{session: []}]
+      parameters: [{name: pluginId, in: path, required: true, schema: {type: string, pattern: '^[a-z][a-z0-9_]*$'}}]
+      requestBody: {required: true, content: {application/json: {schema: {$ref: '#/components/schemas/PluginInstallationWrite'}}}}
+      responses:
+        '200': {description: Installation, content: {application/json: {schema: {$ref: '#/components/schemas/PluginInstallation'}}}}
+        '403': {$ref: '#/components/responses/Error'}
+        '409': {$ref: '#/components/responses/Error'}
 components:
   securitySchemes:
     session: {type: apiKey, in: cookie, name: aeon_session}
     agentKey: {type: http, scheme: bearer, description: Bearer token aeon_<prefix>_<secret>}
   schemas:
+    Journey:
+      type: object
+      required: [project_node_id, profile, revision, stage, stages, next_action, requirements_revision]
+      properties:
+        project_node_id: {type: string, format: uuid}
+        profile: {type: string, enum: [personal, professional, enterprise]}
+        revision: {type: integer, minimum: 1}
+        stage: {type: string, enum: [inspire, shape, requirements, plan, build, deploy, access, live]}
+        stages: {type: array, items: {$ref: '#/components/schemas/JourneyStage'}}
+        next_action: {$ref: '#/components/schemas/JourneyNextAction'}
+        requirements_revision: {type: integer, minimum: 0}
+        current_release_id: {type: [string, 'null'], format: uuid}
+    JourneyStage:
+      type: object
+      required: [key, state]
+      properties:
+        key: {type: string, enum: [inspire, shape, requirements, plan, build, deploy, access, live]}
+        state: {type: string, enum: [done, current, later, skipped, blocked]}
+        gate_approval_id: {type: [string, 'null'], format: uuid}
+        handoff_id: {type: [string, 'null'], format: uuid}
+    JourneyNextAction:
+      type: object
+      required: [key, label, stage, available]
+      properties:
+        key: {type: string, enum: [continue_intake, confirm_brief, decide, reopen, approve_requirements, start_build, wait_for_build, approve_candidate, approve_deploy, retry_deploy, approve_permit, plan_next_release]}
+        label: {type: string}
+        stage: {type: string, enum: [inspire, shape, requirements, plan, build, deploy, access, live]}
+        available: {type: boolean}
+        reason: {type: string}
+        approval_request_id: {type: [string, 'null'], format: uuid}
+    JourneyProfileWrite:
+      type: object
+      additionalProperties: false
+      required: [profile, expected_revision]
+      properties:
+        profile: {type: string, enum: [personal, professional, enterprise]}
+        expected_revision: {type: integer, minimum: 1}
+    JourneyActionWrite:
+      type: object
+      additionalProperties: false
+      required: [action, expected_revision, idempotency_key]
+      properties:
+        action: {type: string, enum: [confirm_brief, go, reduce_scope, park, drop, reopen, start_build, approve_candidate, reject_candidate, approve_deploy, retry_deploy, approve_permit, plan_next_release]}
+        expected_revision: {type: integer, minimum: 1}
+        idempotency_key: {type: string, minLength: 1, maxLength: 128}
+        approval_request_id: {type: string, format: uuid}
+        release_id: {type: string, format: uuid}
+        reason: {type: string, maxLength: 2048}
+    JourneyRequirement:
+      type: object
+      required: [node_id, project_node_id, kind, revision, status, title]
+      properties:
+        node_id: {type: string, format: uuid}
+        project_node_id: {type: string, format: uuid}
+        kind: {type: string, enum: [functional, nonfunctional]}
+        revision: {type: integer, minimum: 1}
+        status: {type: string, enum: [draft, agreed, superseded]}
+        title: {type: string}
+        feature_node_id: {type: [string, 'null'], format: uuid, description: Epic node for an agreed functional requirement}
+        generated_ticket_ids: {type: array, items: {type: string, format: uuid}}
+    JourneyRequirementCreate:
+      type: object
+      additionalProperties: false
+      required: [kind, title, body, expected_revision, idempotency_key]
+      properties:
+        kind: {type: string, enum: [functional, nonfunctional]}
+        title: {type: string, minLength: 1}
+        body: {type: string}
+        expected_revision: {type: integer, minimum: 1}
+        idempotency_key: {type: string, minLength: 1, maxLength: 128}
+    RequirementsAgreement:
+      type: object
+      additionalProperties: false
+      required: [expected_revision, approval_request_id, idempotency_key]
+      properties:
+        expected_revision: {type: integer, minimum: 1}
+        approval_request_id: {type: string, format: uuid}
+        idempotency_key: {type: string, minLength: 1, maxLength: 128}
+    ReleaseWalker:
+      type: object
+      required: [release_node_id, project_node_id, state, revision, features, tickets]
+      properties:
+        release_node_id: {type: string, format: uuid}
+        project_node_id: {type: string, format: uuid}
+        state: {type: string, enum: [planning, building, candidate, deploying, refused, access, released, superseded]}
+        revision: {type: integer, minimum: 1}
+        features: {type: array, items: {$ref: '#/components/schemas/WalkerFeature'}}
+        tickets: {type: array, items: {$ref: '#/components/schemas/WalkerTicket'}}
+    WalkerFeature:
+      type: object
+      required: [feature_node_id, epic_key, title, selection]
+      properties:
+        feature_node_id: {type: string, format: uuid}
+        epic_key: {type: string}
+        title: {type: string}
+        selection: {type: string, enum: [empty, none, some, all]}
+        included_count: {type: integer, minimum: 0}
+        open_count: {type: integer, minimum: 0}
+    WalkerTicket:
+      type: object
+      required: [ticket_node_id, key, title, included, position]
+      properties:
+        ticket_node_id: {type: string, format: uuid}
+        key: {type: string}
+        title: {type: string}
+        feature_node_id: {type: [string, 'null'], format: uuid}
+        included: {type: boolean}
+        position: {type: integer, minimum: 0}
+        estimated_hours: {type: [number, 'null'], minimum: 0}
+        screen_node_ids: {type: array, items: {type: string, format: uuid}}
+    ReleasePlanWrite:
+      type: object
+      additionalProperties: false
+      required: [expected_revision, ordered_ticket_ids, included_ticket_ids]
+      properties:
+        expected_revision: {type: integer, minimum: 1}
+        ordered_ticket_ids: {type: array, uniqueItems: true, items: {type: string, format: uuid}}
+        included_ticket_ids: {type: array, uniqueItems: true, items: {type: string, format: uuid}}
+    IntakeSourceWrite:
+      type: object
+      additionalProperties: false
+      required: [kind, label, content_sha256, idempotency_key]
+      properties:
+        kind: {type: string, enum: [url, file, note, conversation]}
+        label: {type: string, minLength: 1, maxLength: 512}
+        locator: {type: string, maxLength: 2048, description: Public URL or symbolic source reference only}
+        file_id: {type: string, format: uuid}
+        content_sha256: {type: string, pattern: '^[0-9a-f]{64}$'}
+        idempotency_key: {type: string, minLength: 1, maxLength: 128}
+    IntakeSource:
+      allOf:
+        - {$ref: '#/components/schemas/IntakeSourceWrite'}
+        - {type: object, required: [id, project_node_id, created_at], properties: {id: {type: string, format: uuid}, project_node_id: {type: string, format: uuid}, created_at: {type: string, format: date-time}}}
+    IntakeTurnWrite:
+      type: object
+      additionalProperties: false
+      required: [source_id, ordinal, speaker, body, idempotency_key]
+      properties:
+        source_id: {type: string, format: uuid}
+        ordinal: {type: integer, minimum: 0}
+        speaker: {type: string, enum: [person, agent]}
+        speaker_principal_id: {type: string, format: uuid}
+        body: {type: string, minLength: 1, maxLength: 65536}
+        idempotency_key: {type: string, minLength: 1, maxLength: 128}
+    IntakeTurn:
+      allOf:
+        - {$ref: '#/components/schemas/IntakeTurnWrite'}
+        - {type: object, required: [id, created_at], properties: {id: {type: string, format: uuid}, created_at: {type: string, format: date-time}}}
+    IntakeCitation:
+      type: object
+      additionalProperties: false
+      required: [source_id, locator]
+      properties:
+        source_id: {type: string, format: uuid}
+        turn_id: {type: string, format: uuid}
+        locator: {type: string, minLength: 1, maxLength: 256, description: 'Stable page, paragraph, time or character-span locator'}
+        quote_sha256: {type: string, pattern: '^[0-9a-f]{64}$'}
+    IntakeDraftWrite:
+      type: object
+      additionalProperties: false
+      required: [kind, title, body, base_event_id, citations, idempotency_key]
+      properties:
+        kind: {type: string, enum: [brief, requirement]}
+        requirement_kind: {type: string, enum: [functional, nonfunctional]}
+        target_node_id: {type: string, format: uuid}
+        title: {type: string, minLength: 1}
+        body: {type: string}
+        base_event_id: {type: integer, minimum: 0, description: Last target-node event observed by Aithema; zero for a new target}
+        citations: {type: array, minItems: 1, items: {$ref: '#/components/schemas/IntakeCitation'}}
+        ticket_suggestions: {type: array, items: {$ref: '#/components/schemas/IntakeTicketSuggestion'}}
+        idempotency_key: {type: string, minLength: 1, maxLength: 128}
+    IntakeTicketSuggestion:
+      type: object
+      additionalProperties: false
+      required: [title, estimated_hours, later, access_change]
+      properties:
+        title: {type: string, minLength: 1}
+        estimated_hours: {type: number, minimum: 0}
+        later: {type: boolean, description: Place in backlog instead of the first release}
+        access_change: {type: boolean}
+    IntakeDraft:
+      allOf:
+        - {$ref: '#/components/schemas/IntakeDraftWrite'}
+        - {type: object, required: [id, status, proposed_at], properties: {id: {type: string, format: uuid}, status: {type: string, enum: [proposed, accepted, rejected]}, proposed_at: {type: string, format: date-time}, accepted_at: {type: [string, 'null'], format: date-time}}}
+    IntakeAccept:
+      type: object
+      additionalProperties: false
+      required: [expected_base_event_id]
+      properties:
+        expected_base_event_id: {type: integer, minimum: 0}
+    IntakeSnapshot:
+      type: object
+      required: [sources, turns, drafts]
+      properties:
+        sources: {type: array, items: {$ref: '#/components/schemas/IntakeSource'}}
+        turns: {type: array, items: {$ref: '#/components/schemas/IntakeTurn'}}
+        drafts: {type: array, items: {$ref: '#/components/schemas/IntakeDraft'}}
+    StageHandoffWrite:
+      type: object
+      additionalProperties: false
+      required: [project_node_id, release_node_id, stage, operation, expected_journey_revision, idempotency_key]
+      properties:
+        project_node_id: {type: string, format: uuid}
+        release_node_id: {type: string, format: uuid}
+        stage: {type: string, enum: [deploy, access]}
+        operation: {type: string, enum: [prepare, apply, deploy, verify]}
+        expected_journey_revision: {type: integer, minimum: 1}
+        idempotency_key: {type: string, minLength: 1, maxLength: 128}
+    StageHandoff:
+      type: object
+      required: [id, project_node_id, release_node_id, stage, operation, plugin_id, attempt, authority_epoch, state, expires_at, evidence_ceiling, plan_digest, predecessor_digest, context_digest]
+      properties:
+        id: {type: string, format: uuid}
+        project_node_id: {type: string, format: uuid}
+        release_node_id: {type: string, format: uuid}
+        stage: {type: string, enum: [deploy, access]}
+        operation: {type: string, enum: [prepare, apply, deploy, verify]}
+        plugin_id: {type: string}
+        attempt: {type: integer, minimum: 1}
+        authority_epoch: {type: integer, minimum: 1}
+        state: {type: string, enum: [requested, active, blocked, succeeded, failed, revoked]}
+        expires_at: {type: string, format: date-time}
+        evidence_ceiling: {type: array, items: {type: string, enum: [deployment, verification, authorization, credential_handoff]}}
+        plan_digest: {type: string, pattern: '^[0-9a-f]{64}$'}
+        predecessor_digest: {type: string, pattern: '^[0-9a-f]{64}$'}
+        context_digest: {type: string, pattern: '^[0-9a-f]{64}$'}
+        result: {$ref: '#/components/schemas/StageResult'}
+    StageEvidenceWrite:
+      type: object
+      additionalProperties: false
+      required: [sequence, kind, outcome, observed_at, authority_epoch]
+      properties:
+        sequence: {type: integer, minimum: 1}
+        kind: {type: string, enum: [deployment, verification, authorization, credential_handoff]}
+        outcome: {type: string, enum: [succeeded, failed, satisfied, blocked]}
+        observed_at: {type: string, format: date-time}
+        authority_epoch: {type: integer, minimum: 1}
+        workflow: {type: string, description: Pharos symbolic configured workflow}
+        environment: {type: string, description: Pharos symbolic configured environment}
+        artifact: {$ref: '#/components/schemas/StageArtifact'}
+        authorized: {type: boolean, description: Janus fact only}
+        credential_ready: {type: boolean, description: Janus fact only}
+    StageEvidence:
+      allOf:
+        - {$ref: '#/components/schemas/StageEvidenceWrite'}
+        - {type: object, required: [handoff_id, received_at], properties: {handoff_id: {type: string, format: uuid}, received_at: {type: string, format: date-time}}}
+    StageArtifact:
+      type: object
+      additionalProperties: false
+      required: [version_scheme, version, release_channel, release_sequence, digest_sha256, commit_digest, manifest_coordinate, manifest_digest_sha256]
+      properties:
+        version_scheme: {type: string, enum: [legacy, inspr-calendar-v1, inspr-calendar-v2]}
+        version: {type: string}
+        release_channel: {type: string}
+        release_sequence: {type: integer, minimum: 1}
+        digest_sha256: {type: string, pattern: '^[0-9a-f]{64}$'}
+        commit_digest: {type: string}
+        manifest_coordinate: {type: string}
+        manifest_digest_sha256: {type: string, pattern: '^[0-9a-f]{64}$'}
+    StageResultWrite:
+      type: object
+      additionalProperties: false
+      required: [outcome, terminal_sequence, authority_epoch, prerequisite_seal_sha256]
+      properties:
+        outcome: {type: string, enum: [succeeded, failed]}
+        terminal_sequence: {type: integer, minimum: 1}
+        authority_epoch: {type: integer, minimum: 1}
+        prerequisite_seal_sha256: {type: string, pattern: '^[0-9a-f]{64}$'}
+        blocker_code: {type: string, enum: [dependency_pending, dependency_failed, reporter_stale, external_waiting, policy_refused]}
+    StageResult:
+      allOf:
+        - {$ref: '#/components/schemas/StageResultWrite'}
+        - {type: object, required: [handoff_id, completed_at], properties: {handoff_id: {type: string, format: uuid}, completed_at: {type: string, format: date-time}}}
+    PluginManifest:
+      type: object
+      required: [id, version, digest_sha256, owner, permissions, node_kinds, views, workflow_steps, agent_tools, integrations, background_jobs, installation]
+      properties:
+        id: {type: string, pattern: '^[a-z][a-z0-9_]*$'}
+        version: {type: string}
+        digest_sha256: {type: string, pattern: '^[0-9a-f]{64}$'}
+        owner: {type: string, description: First-party source package and accountable team}
+        permissions: {type: array, uniqueItems: true, items: {type: string}}
+        node_kinds: {type: array, items: {$ref: '#/components/schemas/PluginNodeKind'}}
+        views: {type: array, items: {$ref: '#/components/schemas/PluginView'}}
+        workflow_steps: {type: array, items: {$ref: '#/components/schemas/PluginWorkflowStep'}}
+        agent_tools: {type: array, items: {$ref: '#/components/schemas/PluginCapability'}}
+        integrations: {type: array, items: {$ref: '#/components/schemas/PluginCapability'}}
+        background_jobs: {type: array, items: {$ref: '#/components/schemas/PluginCapability'}}
+        installation: {$ref: '#/components/schemas/PluginInstallation'}
+    PluginNodeKind:
+      type: object
+      required: [slug, field_schema]
+      properties:
+        slug: {type: string}
+        field_schema: {type: object, description: JSON Schema for tenant-configured node fields}
+        allowed_child_kinds: {type: [array, 'null'], items: {type: string}}
+    PluginView:
+      type: object
+      required: [id, panels]
+      properties:
+        id: {type: string}
+        panels: {type: array, items: {type: string}}
+    PluginWorkflowStep:
+      type: object
+      required: [key, gates]
+      properties:
+        key: {type: string}
+        gates: {type: array, items: {type: string}}
+    PluginCapability:
+      type: object
+      required: [id, permission]
+      properties:
+        id: {type: string}
+        permission: {type: string}
+    PluginInstallationWrite:
+      type: object
+      additionalProperties: false
+      required: [manifest_digest_sha256, enabled, permissions]
+      properties:
+        manifest_digest_sha256: {type: string, pattern: '^[0-9a-f]{64}$'}
+        enabled: {type: boolean}
+        permissions: {type: array, uniqueItems: true, items: {type: string}}
+    PluginInstallation:
+      allOf:
+        - {$ref: '#/components/schemas/PluginInstallationWrite'}
+        - {type: object, required: [plugin_id, version, updated_at], properties: {plugin_id: {type: string}, version: {type: string}, updated_at: {type: string, format: date-time}}}
     InboxSend:
       type: object
       required: [recipient_principal_id, body, idempotency_key]
@@ -1563,8 +2100,7 @@ components:
           format: uuid
         type:
           type: string
-          description: Stable dotted name
-          e.g. node.updated:
+          description: Stable dotted name, e.g. node.updated
         before:
           description: Previous resource snapshot or null
         after:
