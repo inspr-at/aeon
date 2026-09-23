@@ -17,6 +17,7 @@ import (
 type httpError struct {
 	status int
 	msg    string
+	node   *nodeJSON
 }
 
 func (e *httpError) Error() string { return e.msg }
@@ -43,6 +44,13 @@ func writeError(w http.ResponseWriter, status int, msg string) {
 func writeErr(w http.ResponseWriter, err error) {
 	var he *httpError
 	if errors.As(err, &he) {
+		if he.node != nil {
+			writeJSON(w, he.status, struct {
+				Error string    `json:"error"`
+				Node  *nodeJSON `json:"node"`
+			}{Error: he.msg, Node: he.node})
+			return
+		}
 		writeError(w, he.status, he.msg)
 		return
 	}
