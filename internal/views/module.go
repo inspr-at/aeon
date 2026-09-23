@@ -1,0 +1,41 @@
+// SPDX-License-Identifier: AGPL-3.0-only
+
+package views
+
+import (
+	"context"
+	"net/http"
+
+	"github.com/jackc/pgx/v5"
+	"github.com/jackc/pgx/v5/pgxpool"
+
+	"github.com/inspr-at/aeon/internal/db"
+	"github.com/inspr-at/aeon/internal/httpapi"
+)
+
+type Module struct {
+	pool      *pgxpool.Pool
+	inTenant  func(context.Context, *pgxpool.Pool, string, func(pgx.Tx) error) error
+	eventSink EventWriter
+}
+
+// New returns an httpapi.Module serving the saved view endpoints.
+func New(pool *pgxpool.Pool) httpapi.Module {
+	return NewWithEventWriter(pool, sqlEventWriter{})
+}
+
+// NewWithEventWriter returns a module using the provided transactional event writer.
+func NewWithEventWriter(pool *pgxpool.Pool, writer EventWriter) httpapi.Module {
+	if writer == nil {
+		writer = sqlEventWriter{}
+	}
+	return &Module{pool: pool, inTenant: db.InTenant, eventSink: writer}
+}
+
+func (m *Module) Mount(mux *http.ServeMux) {
+	mux.HandleFunc("GET /api/views", m.list)
+	mux.HandleFunc("POST /api/views", m.create)
+	mux.HandleFunc("GET /api/views/{viewId}", m.get)
+	mux.HandleFunc("PATCH /api/views/{viewId}", m.patch)
+	mux.HandleFunc("DELETE /api/views/{viewId}", m.delete)
+}
