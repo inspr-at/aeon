@@ -165,7 +165,7 @@ for (const viewport of [{ width: 1280, height: 720 }, { width: 390, height: 844 
       await expect(page.getByRole('heading', { name: 'Business' })).toBeVisible()
       await page.evaluate(() => document.fonts.ready)
       await noOverflow(page)
-      for (const control of await page.locator('button:visible, a:visible:not(.skip-link), [role="button"]:visible').all()) {
+      for (const control of await page.locator('main').locator('button:visible, a:visible, [role="button"]:visible').all()) {
         const bounds = await control.boundingBox()
         expect(bounds!.height).toBeGreaterThanOrEqual(44)
         expect(bounds!.width).toBeGreaterThanOrEqual(44)

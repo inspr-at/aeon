@@ -203,8 +203,7 @@ for (const theme of ['light', 'dark'] as const) {
     await page.emulateMedia({ colorScheme: theme })
     const errors: string[] = []
     page.on('pageerror', error => errors.push(error.message))
-    await page.goto('/')
-    await page.getByRole('link', { name: 'Agents', exact: true }).click()
+    await page.goto('/agents')
     for (const section of ['Agents', 'Sessions & runs', 'Approvals', 'Pacing']) {
       await page.getByRole('link', { name: section, exact: true }).click()
       await expect(page.getByRole('heading', { name: section, exact: true })).toBeVisible()

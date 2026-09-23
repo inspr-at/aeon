@@ -212,6 +212,8 @@ test('leaving the journey preserves R1 node details and R2 human decisions',asyn
   await mount(page)
   await page.getByRole('link',{name:'PAIMOS AEON home',exact:true}).click()
   await expect(page.getByRole('navigation',{name:'Project journey'})).toHaveCount(0)
+  await expect(page.getByRole('heading',{name:'Projects',level:1})).toBeVisible()
+  await page.evaluate(async()=>{const routerModule='/src/router.ts';const {router}=await import(routerModule);await router.push('/workspace')})
   await page.getByRole('button',{name:'Open PROJ-1: Bakery orders',exact:true}).click()
   const details=page.getByRole('complementary',{name:'Node details'})
   await expect(details.getByRole('heading',{name:'Order context',exact:true})).toBeVisible()

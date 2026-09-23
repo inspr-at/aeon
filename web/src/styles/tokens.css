@@ -1,6 +1,10 @@
 /* SPDX-License-Identifier: AGPL-3.0-only */
-/* Shared material tokens from the accepted INSPR flow prototype. */
+/* INSPR flow material tokens ("porcelain & glass"), extended with semantic
+   tokens so no component needs a literal #fff or rgba(255,…) that breaks in
+   dark mode. Palette tokens keep their prototype names; components should
+   prefer the semantic layer (surface-*, chip-*, keycap-*, row-*, st-*, pr-*). */
 :root, :root[data-theme="light"] {
+  /* Palette */
   --canvas: #f7f6f2;
   --ink: #203c3d;
   --ink-2: #596e70;
@@ -15,6 +19,7 @@
   --gold-ink: #9a6b12;
   --ok: #2f7a5a;
   --warn: #9a6b12;
+  --danger: #b24a44;
   --glass: rgba(255, 254, 250, 0.72);
   --glass-2: rgba(255, 254, 250, 0.5);
   --glass-edge: rgba(255, 255, 255, 0.95);
@@ -23,56 +28,161 @@
   --line-2: rgba(32, 60, 61, 0.18);
   --surface: #fffefa;
   --surface-2: rgba(32, 60, 61, 0.045);
+
+  /* Semantic surfaces */
+  --surface-raised: #fffefa;
+  --surface-raised-2: rgba(255, 254, 250, 0.9);
+  --surface-sunken: rgba(32, 60, 61, 0.045);
+  --field-bg: rgba(255, 255, 255, 0.66);
+  --field-inset: inset 0 1px 2px rgba(32, 60, 61, 0.07);
+  --chip-bg: rgba(255, 255, 255, 0.7);
+  --chip-line: rgba(32, 60, 61, 0.1);
+  --chip-teal-bg: linear-gradient(180deg, #fff, var(--aqua-2));
+  --chip-teal-line: rgba(164, 229, 223, 0.95);
+  --keycap-bg: linear-gradient(180deg, #fff, #f3f1ea);
+  --keycap-line: rgba(32, 60, 61, 0.16);
+  --keycap-ink: var(--ink-2);
+  --btn-bg: linear-gradient(180deg, rgba(255, 255, 255, 0.92), rgba(255, 254, 250, 0.62));
+  --btn-bg-hover: linear-gradient(180deg, #fff, rgba(230, 247, 245, 0.8));
+  --seg-bg: rgba(32, 60, 61, 0.06);
+  --seg-on: linear-gradient(180deg, #fff, var(--aqua-3));
+  --row-hover: rgba(14, 111, 108, 0.045);
+  --row-selected: rgba(164, 229, 223, 0.3);
+  --row-accent: var(--teal);
+  --danger-bg: rgba(178, 74, 68, 0.08);
+  --danger-line: rgba(178, 74, 68, 0.3);
+  --mark-hl: rgba(232, 192, 122, 0.45);
+  --tip-bg: rgba(32, 60, 61, 0.95);
+  --tip-ink: #f3f7f5;
+  --scrim: rgba(16, 35, 39, 0.28);
+  --skeleton: rgba(32, 60, 61, 0.07);
+  --skeleton-hi: rgba(255, 255, 255, 0.7);
+  --track: rgba(32, 60, 61, 0.08);
+  --avatar-bg: radial-gradient(circle at 30% 25%, #fff, var(--aqua-2));
+
+  /* Status (derived from the palette) */
+  --st-new: #d69b31;
+  --st-backlog: #8a9a9b;
+  --st-progress: #0e6f6c;
+  --st-qa-fill: #a4e5df;
+  --st-qa-ring: #0e6f6c;
+  --st-ok: #2f7a5a;
+  --st-closed: #9aa8a9;
+  /* Priority */
+  --pr-high: var(--danger);
+  --pr-medium: var(--ink-2);
+  --pr-low: var(--ink-3);
+
+  /* Canvas light */
+  --wash-1: rgba(199, 239, 236, 0.85);
+  --wash-2: rgba(255, 255, 255, 0.9);
+  --wash-3: rgba(232, 192, 122, 0.16);
+  --wash-4: rgba(164, 229, 223, 0.35);
+  --grain-opacity: 0.35;
+
+  /* Shape */
   --radius: 16px;
   --radius-s: 10px;
+  --radius-row: 8px;
   --shadow: 0 1px 0 rgba(255, 255, 255, 0.9) inset, 0 0 0 1px var(--glass-rim), 0 24px 48px -28px rgba(32, 60, 61, 0.35), 0 2px 6px -2px rgba(32, 60, 61, 0.08);
+  --shadow-pop: 0 0 0 1px var(--line-2), 0 18px 40px -16px rgba(32, 60, 61, 0.35), 0 4px 10px -4px rgba(32, 60, 61, 0.14);
+  --shadow-btn: 0 0 0 1px var(--line), 0 2px 6px -2px rgba(32, 60, 61, 0.15);
+  --shadow-btn-hover: 0 0 0 1px var(--line-2), 0 6px 14px -6px rgba(32, 60, 61, 0.3);
+  --focus-ring: 0 0 0 2px var(--aqua), 0 0 18px rgba(164, 229, 223, 0.8);
+
+  /* Type */
   --font: -apple-system, "SF Pro Text", system-ui, "Segoe UI", Roboto, sans-serif;
   --serif: -apple-system, "SF Pro Display", system-ui, "Segoe UI", Roboto, sans-serif;
   --mono: "JetBrains Mono", ui-monospace, Menlo, monospace;
-  color-scheme: light;
+
+  /* Shell metrics */
+  --header-h: 56px;
+  --footer-h: 44px;
+
+  /* Legacy aliases kept for older views */
   --brand-teal: #0e6f6c;
   --brand-gold: #d69b31;
   --button-ink: #fffefa;
-  --danger: #9c3636;
   --light-wash: rgba(255, 255, 255, 0.9);
   --aqua-wash: rgba(199, 239, 236, 0.6);
   --gold-wash: rgba(232, 192, 122, 0.12);
+  color-scheme: light;
 }
+
 :root[data-theme="dark"] {
   --canvas: #102327;
   --ink: #edf4f0; --ink-2: #acc3c2; --ink-3: #7f9a99;
   --teal: #a4e5df; --teal-ink: #bff0eb;
   --aqua: #2a5c5c; --aqua-2: #1f4a4b; --aqua-3: #183a3c;
+  --gold-ink: #e2b45a; --ok: #7fd1a8; --warn: #e2b45a; --danger: #ef9d95;
   --glass: rgba(24, 48, 52, 0.72); --glass-2: rgba(24, 48, 52, 0.5);
   --glass-edge: rgba(255, 255, 255, 0.12); --glass-rim: rgba(164, 229, 223, 0.18);
   --line: rgba(237, 244, 240, 0.1); --line-2: rgba(237, 244, 240, 0.2);
   --surface: #183034; --surface-2: rgba(237, 244, 240, 0.06);
-  --ok: #7fd1a8; --warn: #e2b45a; --gold-ink: #e2b45a;
+  --surface-raised: #1c393d; --surface-raised-2: rgba(30, 58, 62, 0.92);
+  --surface-sunken: rgba(4, 14, 16, 0.22);
+  --field-bg: rgba(4, 14, 16, 0.24); --field-inset: inset 0 1px 2px rgba(0, 0, 0, 0.25);
+  --chip-bg: rgba(237, 244, 240, 0.07); --chip-line: rgba(237, 244, 240, 0.14);
+  --chip-teal-bg: linear-gradient(180deg, rgba(164, 229, 223, 0.2), rgba(164, 229, 223, 0.1)); --chip-teal-line: rgba(164, 229, 223, 0.4);
+  --keycap-bg: linear-gradient(180deg, rgba(237, 244, 240, 0.14), rgba(237, 244, 240, 0.07)); --keycap-line: rgba(237, 244, 240, 0.2); --keycap-ink: var(--ink);
+  --btn-bg: linear-gradient(180deg, rgba(237, 244, 240, 0.1), rgba(237, 244, 240, 0.04)); --btn-bg-hover: linear-gradient(180deg, rgba(164, 229, 223, 0.18), rgba(164, 229, 223, 0.08));
+  --seg-bg: rgba(4, 14, 16, 0.3); --seg-on: linear-gradient(180deg, rgba(164, 229, 223, 0.24), rgba(164, 229, 223, 0.12));
+  --row-hover: rgba(164, 229, 223, 0.05); --row-selected: rgba(164, 229, 223, 0.11); --row-accent: #a4e5df;
+  --danger-bg: rgba(239, 157, 149, 0.1); --danger-line: rgba(239, 157, 149, 0.35);
+  --mark-hl: rgba(214, 155, 49, 0.38);
+  --tip-bg: rgba(6, 18, 20, 0.96); --tip-ink: #edf4f0;
+  --scrim: rgba(3, 10, 12, 0.5);
+  --skeleton: rgba(237, 244, 240, 0.07); --skeleton-hi: rgba(237, 244, 240, 0.08);
+  --track: rgba(237, 244, 240, 0.09);
+  --avatar-bg: radial-gradient(circle at 30% 25%, rgba(164, 229, 223, 0.35), rgba(164, 229, 223, 0.1));
+  --st-new: #e2b45a; --st-backlog: #7f9a99; --st-progress: #a4e5df; --st-qa-fill: rgba(164, 229, 223, 0.4); --st-qa-ring: #a4e5df; --st-ok: #7fd1a8; --st-closed: #6f8a89;
+  --wash-1: rgba(164, 229, 223, 0.12); --wash-2: transparent; --wash-3: rgba(214, 155, 49, 0.08); --wash-4: transparent;
+  --grain-opacity: 0;
   --shadow: 0 1px 0 rgba(255, 255, 255, 0.06) inset, 0 0 0 1px var(--glass-rim), 0 24px 48px -28px rgba(0, 0, 0, 0.6);
+  --shadow-pop: 0 0 0 1px var(--line-2), 0 18px 40px -16px rgba(0, 0, 0, 0.7), 0 4px 10px -4px rgba(0, 0, 0, 0.4);
+  --shadow-btn: 0 0 0 1px var(--line), 0 2px 6px -2px rgba(0, 0, 0, 0.35);
+  --shadow-btn-hover: 0 0 0 1px var(--line-2), 0 6px 14px -6px rgba(0, 0, 0, 0.5);
+  --focus-ring: 0 0 0 2px rgba(164, 229, 223, 0.75), 0 0 16px rgba(164, 229, 223, 0.35);
+  --button-ink: #102327; --light-wash: transparent; --aqua-wash: rgba(164, 229, 223, 0.09); --gold-wash: rgba(214, 155, 49, 0.06);
   color-scheme: dark;
-  --button-ink: #102327;
-  --danger: #ffb4ab;
-  --light-wash: transparent;
-  --aqua-wash: rgba(164, 229, 223, 0.09);
-  --gold-wash: rgba(214, 155, 49, 0.06);
 }
+
 @media (prefers-color-scheme: dark) {
   :root:not([data-theme="light"]) {
-  --canvas: #102327;
-  --ink: #edf4f0; --ink-2: #acc3c2; --ink-3: #7f9a99;
-  --teal: #a4e5df; --teal-ink: #bff0eb;
-  --aqua: #2a5c5c; --aqua-2: #1f4a4b; --aqua-3: #183a3c;
-  --glass: rgba(24, 48, 52, 0.72); --glass-2: rgba(24, 48, 52, 0.5);
-  --glass-edge: rgba(255, 255, 255, 0.12); --glass-rim: rgba(164, 229, 223, 0.18);
-  --line: rgba(237, 244, 240, 0.1); --line-2: rgba(237, 244, 240, 0.2);
-  --surface: #183034; --surface-2: rgba(237, 244, 240, 0.06);
-  --ok: #7fd1a8; --warn: #e2b45a; --gold-ink: #e2b45a;
-  --shadow: 0 1px 0 rgba(255, 255, 255, 0.06) inset, 0 0 0 1px var(--glass-rim), 0 24px 48px -28px rgba(0, 0, 0, 0.6);
-  color-scheme: dark;
-  --button-ink: #102327;
-  --danger: #ffb4ab;
-  --light-wash: transparent;
-  --aqua-wash: rgba(164, 229, 223, 0.09);
-  --gold-wash: rgba(214, 155, 49, 0.06);
+    --canvas: #102327;
+    --ink: #edf4f0; --ink-2: #acc3c2; --ink-3: #7f9a99;
+    --teal: #a4e5df; --teal-ink: #bff0eb;
+    --aqua: #2a5c5c; --aqua-2: #1f4a4b; --aqua-3: #183a3c;
+    --gold-ink: #e2b45a; --ok: #7fd1a8; --warn: #e2b45a; --danger: #ef9d95;
+    --glass: rgba(24, 48, 52, 0.72); --glass-2: rgba(24, 48, 52, 0.5);
+    --glass-edge: rgba(255, 255, 255, 0.12); --glass-rim: rgba(164, 229, 223, 0.18);
+    --line: rgba(237, 244, 240, 0.1); --line-2: rgba(237, 244, 240, 0.2);
+    --surface: #183034; --surface-2: rgba(237, 244, 240, 0.06);
+    --surface-raised: #1c393d; --surface-raised-2: rgba(30, 58, 62, 0.92);
+    --surface-sunken: rgba(4, 14, 16, 0.22);
+    --field-bg: rgba(4, 14, 16, 0.24); --field-inset: inset 0 1px 2px rgba(0, 0, 0, 0.25);
+    --chip-bg: rgba(237, 244, 240, 0.07); --chip-line: rgba(237, 244, 240, 0.14);
+    --chip-teal-bg: linear-gradient(180deg, rgba(164, 229, 223, 0.2), rgba(164, 229, 223, 0.1)); --chip-teal-line: rgba(164, 229, 223, 0.4);
+    --keycap-bg: linear-gradient(180deg, rgba(237, 244, 240, 0.14), rgba(237, 244, 240, 0.07)); --keycap-line: rgba(237, 244, 240, 0.2); --keycap-ink: var(--ink);
+    --btn-bg: linear-gradient(180deg, rgba(237, 244, 240, 0.1), rgba(237, 244, 240, 0.04)); --btn-bg-hover: linear-gradient(180deg, rgba(164, 229, 223, 0.18), rgba(164, 229, 223, 0.08));
+    --seg-bg: rgba(4, 14, 16, 0.3); --seg-on: linear-gradient(180deg, rgba(164, 229, 223, 0.24), rgba(164, 229, 223, 0.12));
+    --row-hover: rgba(164, 229, 223, 0.05); --row-selected: rgba(164, 229, 223, 0.11); --row-accent: #a4e5df;
+    --danger-bg: rgba(239, 157, 149, 0.1); --danger-line: rgba(239, 157, 149, 0.35);
+    --mark-hl: rgba(214, 155, 49, 0.38);
+    --tip-bg: rgba(6, 18, 20, 0.96); --tip-ink: #edf4f0;
+    --scrim: rgba(3, 10, 12, 0.5);
+    --skeleton: rgba(237, 244, 240, 0.07); --skeleton-hi: rgba(237, 244, 240, 0.08);
+    --track: rgba(237, 244, 240, 0.09);
+    --avatar-bg: radial-gradient(circle at 30% 25%, rgba(164, 229, 223, 0.35), rgba(164, 229, 223, 0.1));
+    --st-new: #e2b45a; --st-backlog: #7f9a99; --st-progress: #a4e5df; --st-qa-fill: rgba(164, 229, 223, 0.4); --st-qa-ring: #a4e5df; --st-ok: #7fd1a8; --st-closed: #6f8a89;
+    --wash-1: rgba(164, 229, 223, 0.12); --wash-2: transparent; --wash-3: rgba(214, 155, 49, 0.08); --wash-4: transparent;
+    --grain-opacity: 0;
+    --shadow: 0 1px 0 rgba(255, 255, 255, 0.06) inset, 0 0 0 1px var(--glass-rim), 0 24px 48px -28px rgba(0, 0, 0, 0.6);
+    --shadow-pop: 0 0 0 1px var(--line-2), 0 18px 40px -16px rgba(0, 0, 0, 0.7), 0 4px 10px -4px rgba(0, 0, 0, 0.4);
+    --shadow-btn: 0 0 0 1px var(--line), 0 2px 6px -2px rgba(0, 0, 0, 0.35);
+    --shadow-btn-hover: 0 0 0 1px var(--line-2), 0 6px 14px -6px rgba(0, 0, 0, 0.5);
+    --focus-ring: 0 0 0 2px rgba(164, 229, 223, 0.75), 0 0 16px rgba(164, 229, 223, 0.35);
+    --button-ink: #102327; --light-wash: transparent; --aqua-wash: rgba(164, 229, 223, 0.09); --gold-wash: rgba(214, 155, 49, 0.06);
+    color-scheme: dark;
   }
 }

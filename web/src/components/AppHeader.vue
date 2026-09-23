@@ -1,13 +1,20 @@
 <!-- SPDX-License-Identifier: AGPL-3.0-only -->
 <script setup lang="ts">
-import { nextTick, onBeforeUnmount, onMounted, ref } from 'vue'
-import { useRouter } from 'vue-router'
+import { computed, nextTick, onBeforeUnmount, onMounted, ref } from 'vue'
+import { useRoute, useRouter } from 'vue-router'
 import mark from '../assets/brand/aeon-mark.svg'
 import { useSession } from '../stores/session'
+import { useProjects } from '../stores/projects'
 import { dark, toggleTheme } from '../lib/theme'
+import { listNodes, type WorkNode } from '../lib/api'
+import { toast } from '../lib/toast'
+import { initials } from '../lib/work'
 import AppIcon from './AppIcon.vue'
+import SearchPalette from './SearchPalette.vue'
 
 const session = useSession()
+const projects = useProjects()
+const route = useRoute()
 const router = useRouter()
 const open = ref(false)
 const busy = ref(false)
@@ -15,6 +22,16 @@ const error = ref('')
 const account = ref<HTMLElement>()
 const trigger = ref<HTMLButtonElement>()
 const signOutButton = ref<HTMLButtonElement>()
+const palette = ref<InstanceType<typeof SearchPalette>>()
+const mac = /Mac|iPhone|iPad/.test(navigator.platform || navigator.userAgent)
+
+// The legacy workspace view keeps its own search; everywhere else search is global.
+const globalSearch = computed(() => !!session.identity && !route.meta.legacySearch)
+const projectKey = computed(() => typeof route.params.projectKey === 'string' ? route.params.projectKey : '')
+const project = computed(() => projectKey.value ? projects.byRouteKey(projectKey.value) : undefined)
+const onProjects = computed(() => route.path === '/')
+const pageTitle = computed(() => !onProjects.value && !projectKey.value && route.path !== '/signin' ? String(route.meta.title ?? '') : '')
+
 async function toggleMenu() {
   open.value = !open.value
   if (open.value) { await nextTick(); signOutButton.value?.focus() }
@@ -39,56 +56,140 @@ async function signOut() {
   } catch { error.value = 'Sign out didn’t complete. Please try again.' }
   finally { busy.value = false }
 }
-onMounted(() => document.addEventListener('pointerdown', outside))
-onBeforeUnmount(() => document.removeEventListener('pointerdown', outside))
+function shortcut(event: KeyboardEvent) {
+  if (!globalSearch.value) return
+  if ((event.metaKey || event.ctrlKey) && !event.altKey && event.key.toLowerCase() === 'k') { event.preventDefault(); palette.value?.open() }
+}
+// A search hit opens in its project: projects open their list, work opens in the side panel.
+async function openHit(node: WorkNode) {
+  await projects.load()
+  const direct = projects.byId(node.id)
+  if (direct) { await router.push(`/p/${encodeURIComponent(direct.routeKey)}`); return }
+  try {
+    const page = await listNodes({ q: node.key, limit: 25 })
+    const item = page.items.find(candidate => candidate.id === node.id)
+    const owner = item?.project ? projects.byId(item.project.id) : undefined
+    if (owner) { await router.push(`/p/${encodeURIComponent(owner.routeKey)}/${encodeURIComponent(node.key)}`); return }
+    toast(`${node.key} is not part of a project, so it has no list to open in.`)
+  } catch (e) {
+    toast(`${node.key} could not be opened: ${e instanceof Error ? e.message : 'unknown error'}`, { tone: 'error' })
+  }
+}
+onMounted(() => { document.addEventListener('pointerdown', outside); window.addEventListener('keydown', shortcut) })
+onBeforeUnmount(() => { document.removeEventListener('pointerdown', outside); window.removeEventListener('keydown', shortcut) })
 </script>
 
 <template>
   <header class="app-header">
-    <RouterLink class="lockup" to="/" aria-label="PAIMOS AEON home">
-      <span class="mark-backing"><img :src="mark" width="34" height="34" alt="" /></span>
+    <RouterLink class="lockup" to="/" aria-label="PAIMOS AEON home" :class="{ compact: !!projectKey || !!pageTitle }">
+      <span class="mark-backing"><img :src="mark" width="26" height="26" alt="" /></span>
       <span class="wordmark">PAIMOS<sup>AEON</sup></span>
     </RouterLink>
-    <div class="header-actions">
-      <button class="icon-button" type="button" :aria-label="dark ? 'Switch to light theme' : 'Switch to dark theme'" :title="dark ? 'Light theme' : 'Dark theme'" @click="toggleTheme">
-        <AppIcon :name="dark ? 'sun' : 'moon'" />
+    <nav v-if="session.identity" class="crumbs" :class="{ deep: !!projectKey || !!pageTitle }" aria-label="Breadcrumb">
+      <RouterLink class="crumb" to="/" :aria-current="onProjects ? 'page' : undefined">Projects</RouterLink>
+      <template v-if="projectKey">
+        <span class="sep" aria-hidden="true">/</span>
+        <RouterLink class="crumb project-crumb" :to="`/p/${encodeURIComponent(project?.routeKey ?? projectKey)}`" :aria-current="route.params.ticketKey ? undefined : 'page'">
+          <span class="key-badge">{{ project?.routeKey ?? projectKey.toUpperCase() }}</span>
+          <span class="crumb-name">{{ project?.title ?? '' }}</span>
+        </RouterLink>
+      </template>
+      <template v-else-if="pageTitle">
+        <span class="sep" aria-hidden="true">/</span>
+        <span class="crumb current" aria-current="page">{{ pageTitle }}</span>
+      </template>
+    </nav>
+    <span class="spacer" />
+    <button v-if="globalSearch" class="search-pill" type="button" aria-label="Search everything" aria-keyshortcuts="Control+K Meta+K" @click="palette?.open()">
+      <AppIcon name="search" :size="15" />
+      <span class="pill-text">Search</span>
+      <span class="pill-keys"><kbd class="keycap">{{ mac ? '⌘' : 'Ctrl' }}</kbd><kbd class="keycap">K</kbd></span>
+    </button>
+    <button class="icon-btn header-btn" type="button" :aria-label="dark ? 'Switch to light theme' : 'Switch to dark theme'" :data-tip="dark ? 'Light theme' : 'Dark theme'" @click="toggleTheme">
+      <AppIcon :name="dark ? 'sun' : 'moon'" />
+    </button>
+    <div v-if="session.identity" ref="account" class="account" @keydown.esc.stop.prevent="closeMenu(true)" @focusout="focusOut">
+      <button ref="trigger" class="avatar-btn header-btn" type="button" :aria-expanded="open" aria-controls="account-panel" :aria-label="`Account for ${session.identity.principal.name}`" @click="toggleMenu">
+        {{ initials(session.identity.principal.name) }}
       </button>
-      <div v-if="session.identity" ref="account" class="account" @keydown.esc.stop.prevent="closeMenu(true)" @focusout="focusOut">
-        <button ref="trigger" class="account-trigger" type="button" :aria-expanded="open" aria-controls="account-panel" :aria-label="`Account for ${session.identity.principal.name}`" @click="toggleMenu">
-          <span class="avatar"><AppIcon name="user" /></span>
-          <span class="user-name">{{ session.identity.principal.name }}</span>
-          <AppIcon name="chevron" />
-        </button>
-        <div v-if="open" id="account-panel" class="account-panel glass-card">
-          <p class="eyebrow">Signed in as</p>
-          <p class="account-name">{{ session.identity.principal.name }}</p>
-          <p class="account-tenant">{{ session.identity.tenant.name }}</p>
-          <button ref="signOutButton" class="sign-out" type="button" :disabled="busy" @click="signOut"><AppIcon name="logout" />{{ busy ? 'Signing out…' : 'Sign out' }}</button>
-          <p v-if="error" class="error" role="alert">{{ error }}</p>
+      <div v-if="open" id="account-panel" class="account-panel pop">
+        <div class="who">
+          <span class="who-avatar" aria-hidden="true">{{ initials(session.identity.principal.name) }}</span>
+          <div class="who-text">
+            <p class="account-name">{{ session.identity.principal.name }}</p>
+            <p class="account-tenant">{{ session.identity.tenant.name }}</p>
+          </div>
         </div>
+        <button ref="signOutButton" class="menu-row" type="button" :disabled="busy" @click="signOut"><AppIcon name="logout" />{{ busy ? 'Signing out…' : 'Sign out' }}</button>
+        <p v-if="error" class="error" role="alert">{{ error }}</p>
       </div>
     </div>
+    <SearchPalette v-if="globalSearch" ref="palette" @select="openHit" />
   </header>
 </template>
 
 <style scoped>
-.app-header { height: 64px; padding: 0 28px; display: flex; align-items: center; justify-content: space-between; gap: 16px; background: var(--glass-2); border-bottom: 1px solid var(--glass-edge); box-shadow: 0 1px 0 var(--line); backdrop-filter: blur(16px) saturate(1.2); z-index: 5; }
-.lockup { display: inline-flex; align-items: center; gap: 11px; min-height: 44px; color: var(--ink); flex-shrink: 0; }
-.mark-backing { display: grid; place-items: center; height: 40px; width: 40px; background: #f7f6f2; border-radius: 10px; }
+.app-header {
+  position: relative; z-index: 20; height: var(--header-h); padding: 0 20px 0 18px; display: flex; align-items: center; gap: 14px;
+  background: var(--glass-2); border-bottom: 1px solid var(--glass-edge); box-shadow: 0 1px 0 var(--line);
+  backdrop-filter: blur(16px) saturate(1.2); -webkit-backdrop-filter: blur(16px) saturate(1.2);
+}
+.lockup { display: inline-flex; align-items: center; gap: 10px; min-height: 40px; padding-right: 4px; color: var(--ink); flex-shrink: 0; border-radius: 10px; }
+.lockup:focus-visible { box-shadow: var(--focus-ring); }
+.mark-backing { display: grid; place-items: center; width: 32px; height: 32px; border-radius: 9px; background: #f7f6f2; box-shadow: 0 0 0 1px var(--glass-rim); }
 .mark-backing img { display: block; }
-.wordmark { font: 600 14px/1 var(--mono); letter-spacing: .19em; white-space: nowrap; }
-.wordmark sup { position: relative; top: -.1em; margin-left: 7px; font: 500 8px/1 var(--mono); letter-spacing: .12em; color: var(--teal-ink); }
-.header-actions { display: flex; align-items: center; gap: 14px; }
+.wordmark { font: 600 13px/1 var(--mono); letter-spacing: .28em; white-space: nowrap; font-variant-ligatures: none; }
+.wordmark sup { position: relative; top: -.15em; margin-left: 2px; font: 600 8px/1 var(--mono); letter-spacing: .16em; color: var(--teal-ink); }
+.crumbs { display: flex; align-items: center; gap: 10px; flex: 0 1 auto; min-width: 0; overflow: hidden; padding-left: 16px; border-left: 1px solid var(--line-2); height: 24px; font-size: 13.5px; }
+.crumb { display: inline-flex; align-items: center; gap: 8px; min-width: 0; height: 30px; padding: 0 8px; margin: 0 -8px; border-radius: 8px; color: var(--ink-2); font-weight: 600; white-space: nowrap; }
+.crumb:hover { color: var(--teal-ink); background: var(--row-hover); }
+.crumb[aria-current="page"] { color: var(--ink); }
+.crumb.current { color: var(--ink); cursor: default; }
+.crumb.current:hover { background: transparent; }
+.crumb-name { overflow: hidden; text-overflow: ellipsis; color: var(--ink); }
+.project-crumb { min-width: 0; }
+.sep { color: var(--ink-3); font-weight: 300; font-size: 16px; }
+.spacer { flex: 1 1 0; min-width: 0; }
+.search-pill, .header-btn, .account { flex-shrink: 0; }
+.search-pill {
+  display: inline-flex; align-items: center; gap: 9px; width: 240px; height: 34px; padding: 0 6px 0 12px; border: 1px solid var(--glass-edge); border-radius: 999px;
+  background: var(--field-bg); box-shadow: var(--field-inset), 0 0 0 1px var(--line); color: var(--ink-3); font-size: 13px;
+}
+.search-pill:hover { color: var(--ink-2); box-shadow: var(--field-inset), 0 0 0 1px var(--glass-rim); }
+.search-pill:focus-visible { box-shadow: var(--focus-ring); }
+.pill-text { flex: 1; text-align: left; }
+.pill-keys { display: inline-flex; gap: 3px; }
 .account { position: relative; }
-.account-trigger { display: flex; align-items: center; gap: 9px; height: 44px; padding: 0 8px 0 0; background: transparent; border: 1px solid transparent; border-radius: 24px; }
-.account-trigger:hover { background: var(--glass); }
-.avatar { display: grid; place-items: center; width: 38px; height: 38px; border: 1px solid var(--glass-rim); border-radius: 50%; background: linear-gradient(145deg, var(--surface), var(--aqua-2)); color: var(--teal-ink); }
-.user-name { font-size: 13px; max-width: 180px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
-.account-panel { position: absolute; right: 0; top: 52px; width: min(290px, calc(100vw - 32px)); padding: 20px; background: var(--surface); }
-.account-name { margin-top: 8px; color: var(--ink); font-weight: 600; overflow-wrap: anywhere; }
-.account-tenant { font-size: 13px; overflow-wrap: anywhere; }
-.sign-out { display: flex; gap: 12px; align-items: center; width: 100%; margin-top: 16px; min-height: 44px; border: 1px solid var(--line); border-radius: var(--radius-s); background: var(--glass); padding: 8px 12px; }
-.sign-out:hover { background: var(--aqua-3); }
-.error { margin-top: 12px; }
-@media (max-width: 600px) { .app-header { padding: 0 16px; gap: 8px; } .header-actions { gap: 8px; } .user-name, .account-trigger > svg { display: none; } .account-trigger { width: 44px; padding: 0; justify-content: center; } .wordmark { font-size: 12px; } .lockup { gap: 8px; } }
+.avatar-btn {
+  display: grid; place-items: center; width: 34px; height: 34px; padding: 0; border: 0; border-radius: 50%;
+  background: var(--avatar-bg); color: var(--teal-ink); box-shadow: 0 0 0 1px var(--glass-rim), 0 2px 6px rgba(32, 60, 61, .12);
+  font: 700 12px/1 var(--mono); letter-spacing: .02em; font-variant-ligatures: none;
+}
+.avatar-btn:hover, .avatar-btn[aria-expanded="true"] { box-shadow: 0 0 0 1px var(--teal), 0 2px 8px rgba(32, 60, 61, .18); }
+.avatar-btn:focus-visible { box-shadow: var(--focus-ring); }
+.account-panel { position: absolute; right: 0; top: 44px; width: min(280px, calc(100vw - 24px)); padding: 8px; }
+.who { display: flex; align-items: center; gap: 12px; padding: 10px 10px 14px; margin-bottom: 6px; border-bottom: 1px solid var(--line); }
+.who-avatar { display: grid; place-items: center; width: 38px; height: 38px; border-radius: 50%; background: var(--avatar-bg); color: var(--teal-ink); box-shadow: 0 0 0 1px var(--glass-rim); font: 700 13px/1 var(--mono); font-variant-ligatures: none; }
+.who-text { min-width: 0; }
+.account-name { color: var(--ink); font-weight: 650; font-size: 14px; overflow-wrap: anywhere; }
+.account-tenant { font-size: 12.5px; color: var(--ink-2); overflow-wrap: anywhere; }
+.menu-row { display: flex; align-items: center; gap: 10px; width: 100%; height: 36px; padding: 0 10px; border: 0; border-radius: 8px; background: transparent; color: var(--ink); font-size: 13.5px; text-align: left; }
+.menu-row svg { color: var(--ink-2); }
+.menu-row:hover, .menu-row:focus-visible { background: var(--row-selected); box-shadow: none; }
+.error { margin: 8px 10px 4px; }
+@media (max-width: 900px) { .search-pill { width: 180px; } }
+@media (max-width: 600px) {
+  .app-header { gap: 8px; padding: 0 10px 0 10px; }
+  .lockup { min-height: 44px; min-width: 44px; justify-content: center; }
+  .lockup.compact .wordmark { display: none; }
+  .wordmark { font-size: 11.5px; letter-spacing: .22em; }
+  .crumbs { padding-left: 10px; gap: 8px; }
+  .crumbs.deep > .crumb:first-child, .crumbs.deep > .sep { display: none; }
+  .crumb.current { overflow: hidden; text-overflow: ellipsis; }
+  .crumb { height: 44px; }
+  .crumb-name { display: none; }
+  .search-pill { width: 44px; height: 44px; padding: 0; justify-content: center; }
+  .pill-text, .pill-keys { display: none; }
+  .header-btn, .avatar-btn { width: 44px; height: 44px; }
+}
 </style>

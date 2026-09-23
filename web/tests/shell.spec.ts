@@ -4,6 +4,11 @@ import { mkdir } from 'node:fs/promises'
 
 const canonical = '260923120000.0.0'
 const identity = { principal: { id: 'person-1', name: 'Markus Barta', email: 'markus@barta.com' }, tenant: { id: 'tenant-1', name: 'INSPR Studio' } }
+const projects = [
+  { id: 'p1', key: 'PRJ-1', title: 'Bakery pickup orders', state: 'active', open: 12, in_progress: 3, done: 20, total: 35, last_activity: '2026-09-23T10:00:00Z' },
+  { id: 'p2', key: 'PRJ-2', title: 'Clinic intake forms', state: 'active', open: 4, in_progress: 0, done: 1, total: 5, last_activity: '2026-09-20T10:00:00Z' },
+]
+const projectNodes = projects.map(p => ({ id: p.id, key: p.key, title: p.title, body: '', state: p.state, kind_slug: 'project', fields: { classic: { key: p.id === 'p1' ? 'BAKE' : 'CLINIC', description: 'A small studio project.' } } }))
 
 async function mockAPI(page: Page, options: { signedIn?: boolean; devMode?: boolean; version?: string; sessionFailure?: boolean; logoutFailure?: boolean; loginFailure?: boolean } = {}) {
   let signedIn = options.signedIn ?? true
@@ -13,6 +18,8 @@ async function mockAPI(page: Page, options: { signedIn?: boolean; devMode?: bool
     const path = new URL(request.url()).pathname
     calls.push({ path, method: request.method(), body: request.postData() })
     if (path === '/api/kinds' || path === '/api/views') return route.fulfill({ json: { items: [] } })
+    if (path === '/api/projects') return route.fulfill({ json: { items: projects } })
+    if (path === '/api/nodes') return route.fulfill({ json: { items: projectNodes, next_cursor: null } })
     if (path === '/api/nodes/tree') return route.fulfill({ json: { items: [], next_cursor: null } })
     if (path === '/api/events/stream') return route.fulfill({ contentType: 'text/event-stream', body: ': heartbeat\n\n' })
     if (path === '/api/version') return route.fulfill({ json: { version: options.version ?? canonical, scheme: 'inspr-calendar-v2' } })
@@ -62,11 +69,14 @@ for (const viewport of [{ width: 1280, height: 720 }, { width: 390, height: 844 
         await expect(page.locator('footer [data-version-view="pretty"]')).toBeVisible()
         await page.evaluate(() => document.fonts.ready)
         await noOverflow(page)
-        expect(await page.locator('.app-header').evaluate(el => el.getBoundingClientRect().height)).toBe(64)
+        expect(await page.locator('.app-header').evaluate(el => el.getBoundingClientRect().height)).toBe(56)
+        // Phones get 44px touch targets; a desktop pointer works with the compact rail.
+        const min = viewport.width < 600 ? 44 : 20
         for (const control of await page.locator('button:visible, a:visible:not(.skip-link), input:visible, [role="button"]:visible').all()) {
-          const bounds = await control.boundingBox()
-          expect(bounds!.height).toBeGreaterThanOrEqual(44)
-          expect(bounds!.width).toBeGreaterThanOrEqual(44)
+          const inSwitch = await control.evaluate(el => !!el.closest('label.switch'))
+          const bounds = await (inSwitch ? control.locator('xpath=ancestor::label[1]') : control).boundingBox()
+          expect(bounds!.height).toBeGreaterThanOrEqual(min)
+          expect(bounds!.width).toBeGreaterThanOrEqual(min)
         }
         await mkdir('/tmp/aeon-p05-shots', { recursive: true })
         await page.screenshot({ path: `/tmp/aeon-p05-shots/${screen}-${viewport.width}-${colorScheme}.png`, fullPage: true })
@@ -91,7 +101,7 @@ test('server-authorized email login and account logout use POST', async ({ page 
   await page.getByLabel('Email address').fill('markus@barta.com')
   await page.getByRole('button', { name: 'Continue with email' }).click()
   await expect(page).toHaveURL('/')
-  await expect(page.getByRole('heading', { name: 'INSPR Studio' })).toBeVisible()
+  await expect(page.getByRole('heading', { name: 'Projects', level: 1 })).toBeVisible()
   await page.getByRole('button', { name: 'Account for Markus Barta' }).click()
   await expect(page.getByRole('button', { name: 'Sign out', exact: true })).toBeFocused()
   await page.keyboard.press('Escape')
@@ -107,11 +117,11 @@ test('session outages show retry rather than authenticated content', async ({ pa
   await mockAPI(page, { sessionFailure: true })
   await page.goto('/')
   await expect(page.getByRole('alert')).toContainText('couldn’t reach your workspace')
-  await expect(page.getByRole('heading', { name: 'INSPR Studio' })).toHaveCount(0)
+  await expect(page.getByRole('heading', { name: 'Projects' })).toHaveCount(0)
   await page.unroute('**/api/**')
   await mockAPI(page)
   await page.getByRole('button', { name: 'Try again' }).click()
-  await expect(page.getByRole('heading', { name: 'INSPR Studio' })).toBeVisible()
+  await expect(page.getByRole('heading', { name: 'Projects', level: 1 })).toBeVisible()
 })
 
 test('failed sign-out retains identity and allows retry', async ({ page }) => {

@@ -77,7 +77,7 @@ async function emit(page: Page, name = 'node.updated') { await page.evaluate(nam
 
 test('dynamic kinds, arbitrary-depth tree and cursor paging retain parent collapse', async ({ page }) => {
   const { calls } = await setup(page, { pagination: true })
-  await page.goto('/')
+  await page.goto('/workspace')
   await expect(page.getByRole('button', { name: 'Open PR-1: First project' })).toBeVisible()
   await page.getByRole('button', { name: 'Load more work' }).click()
   await expect(page.getByRole('button', { name: 'Open EXP-1: Try a new idea' })).toBeVisible()
@@ -93,7 +93,7 @@ test('dynamic kinds, arbitrary-depth tree and cursor paging retain parent collap
 
 test('list filters and saved views round trip filters, sorting and columns', async ({ page }) => {
   const { calls } = await setup(page)
-  await page.goto('/')
+  await page.goto('/workspace')
   await page.getByText('Saved views', { exact: true }).click()
   await page.getByLabel('Open a view').selectOption('view-1')
   await expect(page.getByRole('button', { name: 'List', exact: true })).toHaveAttribute('aria-pressed', 'true')
@@ -117,7 +117,7 @@ test('list filters and saved views round trip filters, sorting and columns', asy
 
 test('global search opens by keyboard and selects with arrows and Enter', async ({ page }) => {
   const { calls } = await setup(page)
-  await page.goto('/')
+  await page.goto('/workspace')
   await page.getByRole('button', { name: 'Search all work' }).focus()
   await page.keyboard.press('Control+k')
   await expect(page.getByRole('combobox', { name: 'Search all work' })).toBeFocused()
@@ -138,7 +138,7 @@ test('global search opens by keyboard and selects with arrows and Enter', async 
 test('Markdown renders safely; failed edits keep drafts and successful edits use PATCH', async ({ page }) => {
   const { state, calls } = await setup(page, { failPatch: true })
   state.root.body += '\n<script>window.pwned = true</script>\n\n[bad](javascript:alert(1))\n\n![remote](https://example.invalid/pixel.png)'
-  await page.goto('/')
+  await page.goto('/workspace')
   await openRoot(page)
   await expect(page.getByRole('heading', { name: 'Context' })).toBeVisible()
   await expect(page.locator('.markdown-body strong')).toHaveText('shared')
@@ -157,7 +157,7 @@ test('Markdown renders safely; failed edits keep drafts and successful edits use
 
 test('named SSE refreshes rows, preserves drafts, detects conflicts and closes on navigation', async ({ page }) => {
   const { state } = await setup(page)
-  await page.goto('/')
+  await page.goto('/workspace')
   await openRoot(page)
   await page.getByRole('button', { name: 'Edit node' }).click()
   await page.getByRole('complementary', { name: 'Node details' }).getByLabel('Markdown', { exact: true }).fill('My unsaved work')
@@ -186,7 +186,7 @@ test('named SSE refreshes rows, preserves drafts, detects conflicts and closes o
 
 test('deleted nodes preserve a draft without permitting a save', async ({ page }) => {
   const { state } = await setup(page)
-  await page.goto('/'); await openRoot(page)
+  await page.goto('/workspace'); await openRoot(page)
   await page.getByRole('button', { name: 'Edit node' }).click()
   await page.getByRole('complementary', { name: 'Node details' }).getByLabel('Markdown', { exact: true }).fill('Keep me')
   state.deleted = true; await emit(page, 'node.deleted')
@@ -197,7 +197,7 @@ test('deleted nodes preserve a draft without permitting a save', async ({ page }
 
 test('creation uses tenant kinds, selected parent and JSON fields', async ({ page }) => {
   const { calls } = await setup(page)
-  await page.goto('/'); await openRoot(page)
+  await page.goto('/workspace'); await openRoot(page)
   await page.getByRole('button', { name: 'New node', exact: true }).click()
   const dialog = page.getByRole('dialog', { name: 'Create a node' })
   await expect(dialog.getByLabel('Parent node ID')).toHaveValue(root.id)
@@ -212,7 +212,7 @@ test('creation uses tenant kinds, selected parent and JSON fields', async ({ pag
 
 test('tree failures are actionable and retry recovers', async ({ page }) => {
   const { state } = await setup(page, { failTree: true })
-  await page.goto('/')
+  await page.goto('/workspace')
   await expect(page.getByRole('alert')).toContainText('Tree temporarily unavailable')
   state.failTree = false
   await page.getByRole('button', { name: 'Retry work' }).click()
@@ -223,10 +223,10 @@ for (const colorScheme of ['light', 'dark'] as const) {
   test(`mobile workspace and Markdown sidebar fit the shell in ${colorScheme}`, async ({ page }) => {
     await setup(page)
     await page.setViewportSize({ width: 390, height: 844 }); await page.emulateMedia({ colorScheme })
-    await page.goto('/'); await openRoot(page)
+    await page.goto('/workspace'); await openRoot(page)
     await expect(page.getByRole('heading', { name: 'Context' })).toBeVisible()
     expect(await page.evaluate(() => document.documentElement.scrollWidth <= innerWidth)).toBe(true)
-    expect((await page.getByRole('complementary', { name: 'Node details' }).boundingBox())?.y).toBe(64)
+    expect((await page.getByRole('complementary', { name: 'Node details' }).boundingBox())?.y).toBe(56)
     await expect(page.getByRole('button', { name: 'Tree', exact: true })).not.toBeVisible()
     await page.screenshot({ path: `/tmp/aeon-p14b-mobile-${colorScheme}.png`, fullPage: true })
     await page.getByRole('button', { name: 'Close node details' }).click()
@@ -237,7 +237,7 @@ for (const colorScheme of ['light', 'dark'] as const) {
 
 test('move and delete use their dedicated R1 endpoints', async ({ page }) => {
   const { calls } = await setup(page)
-  await page.goto('/'); await openRoot(page)
+  await page.goto('/workspace'); await openRoot(page)
   await page.getByRole('button', { name: 'Move node', exact: true }).click()
   await page.getByLabel('New parent ID').fill('destination')
   await page.getByLabel('Before sibling ID').fill('sibling')
