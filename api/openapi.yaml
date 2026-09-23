@@ -548,7 +548,19 @@ paths:
     parameters: [{$ref: '#/components/parameters/NodeId'}]
     post:
       operationId: moveNode
-      description: Atomically reparent/reorder; reject cycles and disallowed child kinds.
+      description: |
+        Atomically reparent/reorder; reject cycles and disallowed child kinds.
+        Optional If-Unmodified-Since must equal Node.updated_at at second precision.
+        The comparison holds the node row lock inside the move transaction.
+        A mismatch returns 412 with the current node, without changing nodes or
+        appending an event. Each successful move advances updated_at to at least
+        the next second so competing moves cannot reuse the same precondition.
+        Omission preserves unconditional move behavior.
+      parameters:
+        - name: If-Unmodified-Since
+          in: header
+          description: Node.updated_at as RFC3339 (fractional seconds accepted) or an HTTP date. Both timestamps are truncated to seconds before equality comparison. Invalid or repeated values return 400.
+          schema: {type: string}
       security: *auth
       requestBody:
         $ref: '#/components/requestBodies/MoveNode'
@@ -561,6 +573,16 @@ paths:
           $ref: '#/components/responses/Error'
         '409':
           $ref: '#/components/responses/Error'
+        '412':
+          description: Node changed; current node snapshot from the locked transaction.
+          content:
+            application/json:
+              schema:
+                type: object
+                required: [error, node]
+                properties:
+                  error: {type: string, const: node has changed}
+                  node: {$ref: '#/components/schemas/Node'}
   /relations:
     get:
       operationId: listRelations

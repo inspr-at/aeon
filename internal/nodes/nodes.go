@@ -104,21 +104,10 @@ func (m *Module) handleUpdateNode(w http.ResponseWriter, r *http.Request) {
 		writeErr(w, err)
 		return
 	}
-	var expected *time.Time
-	if value, present := r.Header["If-Unmodified-Since"]; present {
-		if len(value) != 1 {
-			writeErr(w, badRequest("invalid If-Unmodified-Since"))
-			return
-		}
-		at, err := time.Parse(time.RFC3339Nano, value[0])
-		if err != nil {
-			at, err = http.ParseTime(value[0])
-		}
-		if err != nil {
-			writeErr(w, badRequest("invalid If-Unmodified-Since"))
-			return
-		}
-		expected = &at
+	expected, err := parseUnmodifiedSince(r.Header)
+	if err != nil {
+		writeErr(w, err)
+		return
 	}
 	node, err := m.updateNode(r.Context(), p, id, raw, expected)
 	if err != nil {
@@ -168,7 +157,12 @@ func (m *Module) handleMoveNode(w http.ResponseWriter, r *http.Request) {
 		writeErr(w, err)
 		return
 	}
-	node, err := m.moveNode(r.Context(), p, id, parentID, beforeID)
+	expected, err := parseUnmodifiedSince(r.Header)
+	if err != nil {
+		writeErr(w, err)
+		return
+	}
+	node, err := m.moveNode(r.Context(), p, id, parentID, beforeID, expected)
 	if err != nil {
 		writeErr(w, err)
 		return
@@ -399,7 +393,7 @@ func (m *Module) deleteNode(ctx context.Context, p tenant.Principal, id string) 
 	})
 }
 
-func (m *Module) moveNode(ctx context.Context, p tenant.Principal, id string, parentID, beforeID *string) (nodeJSON, error) {
+func (m *Module) moveNode(ctx context.Context, p tenant.Principal, id string, parentID, beforeID *string, expected *time.Time) (nodeJSON, error) {
 	var node nodeJSON
 	err := m.tx(ctx, p.TenantID, func(ctx context.Context, tx pgx.Tx) error {
 		if err := lockTree(ctx, tx); err != nil {
@@ -408,6 +402,10 @@ func (m *Module) moveNode(ctx context.Context, p tenant.Principal, id string, pa
 		current, err := loadNode(ctx, tx, id, true)
 		if err != nil {
 			return err
+		}
+		// Check the locked snapshot before any position or parent changes.
+		if expected != nil && !current.UpdatedAt.Truncate(time.Second).Equal(expected.Truncate(time.Second)) {
+			return &httpError{status: http.StatusPreconditionFailed, msg: "node has changed", node: &current}
 		}
 		if parentID != nil && *parentID == current.ID {
 			return conflict("node cannot parent itself")
@@ -441,7 +439,8 @@ func (m *Module) moveNode(ctx context.Context, p tenant.Principal, id string, pa
 		}
 		loaded, scanErr := scanNode(tx.QueryRow(ctx, `
 			UPDATE nodes
-			SET parent_id = $1::uuid, position = $2::numeric, updated_at = now()
+			SET parent_id = $1::uuid, position = $2::numeric,
+			    updated_at = greatest(clock_timestamp(), date_trunc('second', updated_at) + interval '1 second')
 			WHERE id = $3::uuid AND deleted_at IS NULL
 			RETURNING `+nodeReturning, parentID, position, id))
 		if errors.Is(scanErr, pgx.ErrNoRows) {
@@ -457,6 +456,26 @@ func (m *Module) moveNode(ctx context.Context, p tenant.Principal, id string, pa
 		return nil
 	})
 	return node, err
+}
+
+// parseUnmodifiedSince shares PATCH's accepted timestamp syntax. The caller
+// chooses the comparison precision while holding the node row lock.
+func parseUnmodifiedSince(header http.Header) (*time.Time, error) {
+	values, present := header["If-Unmodified-Since"]
+	if !present {
+		return nil, nil
+	}
+	if len(values) != 1 {
+		return nil, badRequest("invalid If-Unmodified-Since")
+	}
+	at, err := time.Parse(time.RFC3339Nano, values[0])
+	if err != nil {
+		at, err = http.ParseTime(values[0])
+	}
+	if err != nil {
+		return nil, badRequest("invalid If-Unmodified-Since")
+	}
+	return &at, nil
 }
 
 func createKeyChoice(key, prefix *string) (explicit, generatedPrefix string, err error) {
