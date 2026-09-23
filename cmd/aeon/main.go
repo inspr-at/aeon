@@ -6,10 +6,14 @@
 package main
 
 import (
+	"context"
 	"fmt"
 	"os"
 
+	"github.com/jackc/pgx/v5/pgxpool"
+
 	"github.com/inspr-at/aeon/internal/cli"
+	"github.com/inspr-at/aeon/internal/principallink"
 )
 
 func main() {
@@ -30,6 +34,15 @@ func main() {
 	if len(os.Args) > 2 && os.Args[1] == "import" && os.Args[2] == "backfill-relations" {
 		if err := backfillRelations(os.Args[3:], os.Stdout); err != nil {
 			fmt.Fprintln(os.Stderr, "import:", err)
+			os.Exit(1)
+		}
+		return
+	}
+	if len(os.Args) > 1 && os.Args[1] == "principal" {
+		if err := withPool(func(ctx context.Context, pool *pgxpool.Pool) error {
+			return principallink.Run(ctx, pool, os.Args[2:], os.Stdout)
+		}); err != nil {
+			fmt.Fprintln(os.Stderr, "principal:", err)
 			os.Exit(1)
 		}
 		return
