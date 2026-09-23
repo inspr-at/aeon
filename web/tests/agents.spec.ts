@@ -139,7 +139,8 @@ test('expired approvals and agent identities cannot decide', async ({ page }) =>
 test('pacing preview and window creation match the contract', async ({ page }) => {
   const { calls } = await setup(page)
   await page.goto('/pacing')
-  await page.getByLabel('Account', { exact: true }).selectOption(accountId)
+  // The wrapping label includes option text; match the select's accessible name.
+  await page.getByRole('combobox', { name: 'Account', exact: true }).selectOption(accountId)
   await page.getByLabel('Starts (local time)').fill('2026-09-23T10:00')
   await page.getByLabel('Ends (local time)').fill('2026-09-23T20:00')
   await page.getByLabel('Pacing model').selectOption('frontload')
@@ -157,7 +158,7 @@ test('pacing preview and window creation match the contract', async ({ page }) =
 test('pacing rejects reversed dates and preserves drafts on conflict and refresh', async ({ page }) => {
   const { state, calls } = await setup(page)
   await page.goto('/pacing')
-  await page.getByLabel('Account', { exact: true }).selectOption(accountId)
+  await page.getByRole('combobox', { name: 'Account', exact: true }).selectOption(accountId)
   await page.getByLabel('Starts (local time)').fill('2026-09-24T10:00')
   await page.getByLabel('Ends (local time)').fill('2026-09-23T10:00')
   await page.getByRole('button', { name: 'Create allowance window' }).click()
