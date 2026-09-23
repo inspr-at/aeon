@@ -68,6 +68,12 @@ func undoDeleted(ctx context.Context, tx pgx.Tx, p tenant.Principal, e events.Ev
 		}
 		return events.Change{}, err
 	}
+	if err := enforceGraph(ctx, tx, p.TenantID, original.SourceNodeID, original.TargetNodeID, original.Type); err != nil {
+		if errors.Is(err, events.ErrNotFound) || errors.Is(err, errGraph) {
+			return events.Change{}, events.ErrConflict
+		}
+		return events.Change{}, err
+	}
 	restored, err := scanRelation(tx.QueryRow(ctx, `INSERT INTO node_relations(tenant_id,id,source_node_id,target_node_id,type,created_at)
   VALUES($1,$2,$3,$4,$5,$6) RETURNING id::text,source_node_id::text,target_node_id::text,type,created_at`,
 		p.TenantID, original.ID, original.SourceNodeID, original.TargetNodeID, original.Type, original.CreatedAt))

@@ -13,6 +13,7 @@ import (
 	"strings"
 	"time"
 
+	"github.com/inspr-at/aeon/internal/business/crm"
 	"github.com/inspr-at/aeon/internal/db"
 	"github.com/inspr-at/aeon/internal/events"
 	"github.com/inspr-at/aeon/internal/httpapi"
@@ -63,6 +64,8 @@ func failure(w http.ResponseWriter, err error) {
 	switch {
 	case errors.Is(err, pgx.ErrNoRows), errors.Is(err, events.ErrNotFound):
 		writeError(w, 404, "not_found", "relation or node not found")
+	case errors.Is(err, errGraph):
+		writeError(w, 409, "conflict", "relation kind or direction is not allowed")
 	case errors.Is(err, events.ErrConflict):
 		writeError(w, 409, "conflict", "relation conflicts with current state")
 	case errors.As(err, &pe) && (pe.Code == "23505" || pe.Code == "40001" || pe.Code == "40P01"):
@@ -82,7 +85,7 @@ func uuid(s string) (string, bool) {
 
 func validType(s string) bool {
 	switch s {
-	case "blocks", "relates", "implements", "cites", "duplicates":
+	case "blocks", "relates", "implements", "cites", "duplicates", crm.CustomerOf, crm.ContactFor:
 		return true
 	}
 	return false
@@ -147,6 +150,9 @@ func (m *module) create(w http.ResponseWriter, r *http.Request) {
 	var result Relation
 	err := db.InTenant(r.Context(), m.pool, p.TenantID, func(tx pgx.Tx) error {
 		if err := lockNodes(r.Context(), tx, p, source, target); err != nil {
+			return err
+		}
+		if err := enforceGraph(r.Context(), tx, p.TenantID, source, target, input.Type); err != nil {
 			return err
 		}
 		var err error

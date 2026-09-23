@@ -2,6 +2,7 @@
 package importer
 
 import (
+	"bytes"
 	"context"
 	"crypto/sha256"
 	"encoding/json"
@@ -15,6 +16,7 @@ import (
 	"github.com/inspr-at/aeon/internal/db"
 	"github.com/inspr-at/aeon/internal/events"
 	"github.com/inspr-at/aeon/internal/tenant"
+	"github.com/inspr-at/aeon/internal/tenantbootstrap"
 	"github.com/jackc/pgx/v5"
 	"github.com/jackc/pgx/v5/pgxpool"
 )
@@ -30,11 +32,11 @@ func (w PostgresWriter) Write(ctx context.Context, s Snapshot, tenantSlug string
 	if s.SourceID == "" {
 		return r, errors.New("source identity is required")
 	}
-	var tenantID string
-	if err := w.Pool.QueryRow(ctx, `SELECT id FROM tenants WHERE slug=$1`, tenantSlug).Scan(&tenantID); err != nil {
+	tenantID, err := tenantbootstrap.ResolveSlug(ctx, w.Pool, tenantSlug)
+	if err != nil {
 		return r, fmt.Errorf("resolve tenant: %w", err)
 	}
-	err := db.InTenant(ctx, w.Pool, tenantID, func(tx pgx.Tx) error {
+	err = db.InTenant(ctx, w.Pool, tenantID, func(tx pgx.Tx) error {
 		if _, err := tx.Exec(ctx, `SELECT pg_advisory_xact_lock(hashtextextended($1,42))`, tenantID+":"+s.SourceID); err != nil {
 			return err
 		}
@@ -52,11 +54,19 @@ func (w PostgresWriter) Write(ctx context.Context, s Snapshot, tenantSlug string
 			if prefix == "" {
 				return "", fmt.Errorf("unsupported classic issue type %q", slug)
 			}
-			if _, err := tx.Exec(ctx, `INSERT INTO node_kinds(tenant_id,slug,label,short_prefix,icon) VALUES($1,$2,$3,$4,$5) ON CONFLICT(tenant_id,slug) DO NOTHING`, tenantID, slug, strings.ReplaceAll(slug, "_", " "), prefix, slug); err != nil {
+			tag, err := tx.Exec(ctx, `INSERT INTO node_kinds(tenant_id,slug,label,short_prefix,icon) VALUES($1,$2,$3,$4,$5) ON CONFLICT(tenant_id,slug) DO NOTHING`, tenantID, slug, strings.ReplaceAll(slug, "_", " "), prefix, slug)
+			if err != nil {
 				return "", err
 			}
 			if err := tx.QueryRow(ctx, `SELECT id FROM node_kinds WHERE tenant_id=$1 AND slug=$2`, tenantID, slug).Scan(&id); err != nil {
 				return "", err
+			}
+			if tag.RowsAffected() != 0 {
+				if _, err := events.Append(ctx, tx, tenant.Principal{TenantID: tenantID, ID: actor}, events.Change{
+					Type: "import.kind_created", After: map[string]any{"id": id, "slug": slug, "short_prefix": prefix, "source_id": s.SourceID},
+				}); err != nil {
+					return "", err
+				}
 			}
 			kinds[slug] = id
 			return id, nil
@@ -198,6 +208,10 @@ func (w PostgresWriter) Write(ctx context.Context, s Snapshot, tenantSlug string
 
 func importUsers(ctx context.Context, tx pgx.Tx, tenantID string, s Snapshot) (string, map[int64]string, error) {
 	users := map[int64]string{}
+	actor, err := ensureImportActor(ctx, tx, tenantID)
+	if err != nil {
+		return "", nil, err
+	}
 	for _, u := range s.Users {
 		id, ok := intField(u, "id")
 		if !ok {
@@ -209,6 +223,13 @@ func importUsers(ctx context.Context, tx pgx.Tx, tenantID string, s Snapshot) (s
 			return "", nil, fmt.Errorf("user %d missing username", id)
 		}
 		var identityID, principalID string
+		var before []byte
+		err := tx.QueryRow(ctx, `SELECT jsonb_build_object('identity',to_jsonb(i),'principal',to_jsonb(p))
+			FROM identities i LEFT JOIN principals p ON p.identity_id=i.id AND p.tenant_id=$1::uuid
+			WHERE i.issuer='paimos-classic' AND i.subject=$2`, tenantID, subject).Scan(&before)
+		if err != nil && !errors.Is(err, pgx.ErrNoRows) {
+			return "", nil, err
+		}
 		createdAt := parseClassicTime(stringField(u, "created_at"))
 		if err := tx.QueryRow(ctx, `INSERT INTO identities(issuer,subject,email,display_name,created_at) VALUES('paimos-classic',$1,$2,$3,coalesce($4::timestamptz,now())) ON CONFLICT(issuer,subject) DO UPDATE SET email=EXCLUDED.email,display_name=EXCLUDED.display_name RETURNING id`, subject, nullString(stringField(u, "email")), name, createdAt).Scan(&identityID); err != nil {
 			return "", nil, err
@@ -217,10 +238,26 @@ func importUsers(ctx context.Context, tx pgx.Tx, tenantID string, s Snapshot) (s
 		if err := tx.QueryRow(ctx, `INSERT INTO principals(tenant_id,kind,identity_id,name,roles,created_at) VALUES($1,'person',$2,$3,$4,coalesce($5::timestamptz,now())) ON CONFLICT(tenant_id,identity_id) WHERE identity_id IS NOT NULL DO UPDATE SET name=EXCLUDED.name,roles=EXCLUDED.roles RETURNING id`, tenantID, identityID, name, roles, createdAt).Scan(&principalID); err != nil {
 			return "", nil, err
 		}
+		var after []byte
+		if err := tx.QueryRow(ctx, `SELECT jsonb_build_object('identity',to_jsonb(i),'principal',to_jsonb(p))
+			FROM identities i JOIN principals p ON p.identity_id=i.id AND p.tenant_id=$1::uuid
+			WHERE i.id=$2::uuid`, tenantID, identityID).Scan(&after); err != nil {
+			return "", nil, err
+		}
+		if !bytes.Equal(before, after) {
+			typ := "import.user_updated"
+			if len(before) == 0 {
+				typ = "import.user_created"
+			}
+			if _, err := events.Append(ctx, tx, tenant.Principal{TenantID: tenantID, ID: actor}, events.Change{
+				Type: typ, Before: rawSnapshot(before), After: json.RawMessage(after),
+			}); err != nil {
+				return "", nil, err
+			}
+		}
 		users[id] = principalID
 	}
-	actor, err := ensureImportActor(ctx, tx, tenantID)
-	return actor, users, err
+	return actor, users, nil
 }
 
 func ensureImportActor(ctx context.Context, tx pgx.Tx, tenantID string) (string, error) {
@@ -228,6 +265,11 @@ func ensureImportActor(ctx context.Context, tx pgx.Tx, tenantID string) (string,
 	err := tx.QueryRow(ctx, `SELECT id FROM principals WHERE tenant_id=$1 AND kind='agent' AND name='Classic Paimos importer' ORDER BY created_at LIMIT 1`, tenantID).Scan(&actor)
 	if errors.Is(err, pgx.ErrNoRows) {
 		err = tx.QueryRow(ctx, `INSERT INTO principals(tenant_id,kind,name,roles) VALUES($1,'agent','Classic Paimos importer',ARRAY['importer']) RETURNING id`, tenantID).Scan(&actor)
+		if err == nil {
+			_, err = events.Append(ctx, tx, tenant.Principal{TenantID: tenantID, ID: actor}, events.Change{
+				Type: "import.actor_created", After: map[string]any{"principal_id": actor},
+			})
+		}
 	}
 	return actor, err
 }
