@@ -31,6 +31,8 @@ type Change struct {
 	Type   string
 	Before any
 	After  any
+	// At preserves a source timestamp during import; nil uses the database clock.
+	At     *time.Time
 	UndoOf *int64
 }
 
@@ -55,10 +57,10 @@ func Append(ctx context.Context, tx pgx.Tx, p tenant.Principal, c Change) (Event
 		return Event{}, fmt.Errorf("event requires a snapshot")
 	}
 	return scanEvent(tx.QueryRow(ctx, `INSERT INTO events
-  (tenant_id, actor_principal_id, node_id, type, before, after, undo_of)
-  VALUES ($1,$2,$3,$4,$5,$6,$7)
-  RETURNING id, actor_principal_id::text, node_id::text, type, before, after, at, undo_of`,
-		p.TenantID, p.ID, c.NodeID, c.Type, before, after, c.UndoOf))
+	  (tenant_id, actor_principal_id, node_id, type, before, after, at, undo_of)
+	  VALUES ($1,$2,$3,$4,$5,$6,coalesce($7::timestamptz,clock_timestamp()),$8)
+	  RETURNING id, actor_principal_id::text, node_id::text, type, before, after, at, undo_of`,
+		p.TenantID, p.ID, c.NodeID, c.Type, before, after, c.At, c.UndoOf))
 }
 
 func snapshot(v any) (json.RawMessage, error) {

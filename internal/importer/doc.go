@@ -74,6 +74,8 @@
 // source URL, not the bearer key. Re-runs update a node only when its imported
 // fields change, reject a key owned by another source, and deduplicate
 // auxiliary events by stable classic reference (and content digest for editable
-// comment/attachment metadata). Writes run in db.InTenant, serialized per
-// tenant and source with a transaction advisory lock.
+// comment/attachment metadata). Native and auxiliary changes use events.Append
+// within db.InTenant, preserving available classic timestamps on auxiliary
+// events. Writes are serialized per tenant and source with a transaction
+// advisory lock.
 package importer

@@ -13,13 +13,13 @@ import (
 	"time"
 
 	"github.com/inspr-at/aeon/internal/db"
+	"github.com/inspr-at/aeon/internal/events"
+	"github.com/inspr-at/aeon/internal/tenant"
 	"github.com/jackc/pgx/v5"
 	"github.com/jackc/pgx/v5/pgxpool"
 )
 
-// PostgresWriter targets the R1 nodes, relations and events contract on
-// p10.contract. TODO(AEON-17): remove the test-only contract fixture after
-// that branch's migrations land in the integration branch.
+// PostgresWriter targets the R1 nodes, relations and events schema.
 type PostgresWriter struct{ Pool *pgxpool.Pool }
 
 func (w PostgresWriter) Write(ctx context.Context, s Snapshot, tenantSlug string) (Report, error) {
@@ -295,15 +295,18 @@ func upsertNode(ctx context.Context, tx pgx.Tx, tenantID, sourceID, kindID, key,
 	if err := tx.QueryRow(ctx, `SELECT to_jsonb(nodes) FROM nodes WHERE tenant_id=$1 AND id=$2`, tenantID, id).Scan(&afterJSON); err != nil {
 		return "", false, false, err
 	}
-	_, err = tx.Exec(ctx, `INSERT INTO events(tenant_id,actor_principal_id,node_id,type,before,after) VALUES($1,$2,$3,$4,$5::jsonb,$6::jsonb)`, tenantID, actor, id, map[bool]string{true: "import.node_created", false: "import.node_updated"}[created], nullableJSON(beforeJSON), string(afterJSON))
+	_, err = events.Append(ctx, tx, tenant.Principal{TenantID: tenantID, ID: actor}, events.Change{
+		NodeID: &id, Type: map[bool]string{true: "import.node_created", false: "import.node_updated"}[created],
+		Before: rawSnapshot(beforeJSON), After: json.RawMessage(afterJSON),
+	})
 	return id, created, !created, err
 }
 
-func nullableJSON(b []byte) any {
+func rawSnapshot(b []byte) any {
 	if len(b) == 0 {
 		return nil
 	}
-	return string(b)
+	return json.RawMessage(b)
 }
 
 func setParent(ctx context.Context, tx pgx.Tx, tenantID, actor, childID, parentID string) error {
@@ -321,7 +324,10 @@ func setParent(ctx context.Context, tx pgx.Tx, tenantID, actor, childID, parentI
 	if err := tx.QueryRow(ctx, `SELECT to_jsonb(nodes) FROM nodes WHERE tenant_id=$1 AND id=$2`, tenantID, childID).Scan(&after); err != nil {
 		return err
 	}
-	_, err = tx.Exec(ctx, `INSERT INTO events(tenant_id,actor_principal_id,node_id,type,before,after) VALUES($1,$2,$3,'import.parent_changed',$4::jsonb,$5::jsonb)`, tenantID, actor, childID, string(before), string(after))
+	_, err = events.Append(ctx, tx, tenant.Principal{TenantID: tenantID, ID: actor}, events.Change{
+		NodeID: &childID, Type: "import.parent_changed",
+		Before: json.RawMessage(before), After: json.RawMessage(after),
+	})
 	return err
 }
 
@@ -352,15 +358,13 @@ func importEvent(ctx context.Context, tx pgx.Tx, tenantID, actor, nodeID, typ, s
 		return nil
 	}
 	payload := Record{"classic_ref": ref, "record": record}
-	raw, err := jsonValue(payload)
-	if err != nil {
-		return err
-	}
-	at := parseClassicTime(stringField(record, "created_at"))
+	at := classicTime(stringField(record, "created_at"))
 	if at == nil {
-		at = parseClassicTime(stringField(record, "changed_at"))
+		at = classicTime(stringField(record, "changed_at"))
 	}
-	_, err = tx.Exec(ctx, `INSERT INTO events(tenant_id,actor_principal_id,node_id,type,after,at) VALUES($1,$2,$3,$4,$5::jsonb,coalesce($6::timestamptz,clock_timestamp()))`, tenantID, actor, nodeID, typ, string(raw), at)
+	_, err := events.Append(ctx, tx, tenant.Principal{TenantID: tenantID, ID: actor}, events.Change{
+		NodeID: &nodeID, Type: typ, After: payload, At: at,
+	})
 	return err
 }
 func issueBody(r Record) string {
@@ -385,12 +389,15 @@ func nullString(s string) any {
 	return s
 }
 func parseClassicTime(s string) any {
+	return classicTime(s)
+}
+func classicTime(s string) *time.Time {
 	if s == "" {
 		return nil
 	}
 	for _, layout := range []string{time.RFC3339Nano, "2006-01-02 15:04:05", "2006-01-02"} {
 		if t, err := time.Parse(layout, s); err == nil {
-			return t
+			return &t
 		}
 	}
 	return nil
