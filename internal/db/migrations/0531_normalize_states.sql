@@ -35,11 +35,12 @@ BEGIN
                 WHEN 'inprogress' THEN 'in_progress'
                 WHEN 'canceled' THEN 'cancelled'
                 ELSE lower(btrim(old_node.state)) END;
-            UPDATE nodes SET state=canonical,
-                updated_at=greatest(clock_timestamp(),updated_at+interval '1 microsecond')
+            -- A spelling normalisation is not a change anyone made: keep updated_at
+            -- so lists keep their order, and use a type the activity timeline skips.
+            UPDATE nodes SET state=canonical
             WHERE tenant_id=tenant AND id=old_node.id RETURNING * INTO new_node;
             INSERT INTO events(tenant_id,actor_principal_id,node_id,type,before,after)
-            VALUES(tenant,actor,old_node.id,'node.updated',to_jsonb(old_node),to_jsonb(new_node));
+            VALUES(tenant,actor,old_node.id,'node.state_normalized',to_jsonb(old_node),to_jsonb(new_node));
         END LOOP;
     END LOOP;
     PERFORM set_config('aeon.tenant_id',coalesce(prior_setting,''),true);

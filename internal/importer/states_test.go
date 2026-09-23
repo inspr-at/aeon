@@ -190,7 +190,7 @@ func TestNormalizeStatesMigrationEventsAndRollback(t *testing.T) {
 	}
 	for _, tid := range tenants {
 		if err := db.InTenant(ctx, d.App, tid, func(tx pgx.Tx) error {
-			rows, err := tx.Query(ctx, `SELECT e.before,e.after,p.name,p.roles FROM events e JOIN principals p ON p.tenant_id=e.tenant_id AND p.id=e.actor_principal_id WHERE e.tenant_id=$1 AND e.type='node.updated' ORDER BY e.id`, tid)
+			rows, err := tx.Query(ctx, `SELECT e.before,e.after,p.name,p.roles FROM events e JOIN principals p ON p.tenant_id=e.tenant_id AND p.id=e.actor_principal_id WHERE e.tenant_id=$1 AND e.type='node.state_normalized' ORDER BY e.id`, tid)
 			if err != nil {
 				return err
 			}
