@@ -4,8 +4,6 @@ package auth
 
 import (
 	"bytes"
-	"context"
-	"errors"
 	"net/http"
 	"net/http/httptest"
 	"os"
@@ -13,9 +11,6 @@ import (
 	"testing"
 	"time"
 
-	"github.com/jackc/pgx/v5"
-
-	"github.com/inspr-at/aeon/internal/db"
 	"github.com/inspr-at/aeon/internal/httpapi"
 )
 
@@ -26,14 +21,10 @@ func TestNewRejectsShortKey(t *testing.T) {
 	}
 }
 
-func TestNewUsesInTenantStub(t *testing.T) {
+func TestNewDefaults(t *testing.T) {
 	m, err := New(Config{SessionKey: bytes.Repeat([]byte{1}, 32)}, nil)
 	if err != nil {
 		t.Fatal(err)
-	}
-	err = m.inTenant(context.Background(), nil, "00000000-0000-0000-0000-000000000001", func(pgx.Tx) error { return nil })
-	if !errors.Is(err, db.ErrNotImplemented) {
-		t.Fatalf("inTenant: %v", err)
 	}
 	if m.cfg.BootstrapTenantSlug != "inspr" {
 		t.Fatalf("slug %q", m.cfg.BootstrapTenantSlug)

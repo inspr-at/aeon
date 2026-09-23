@@ -56,8 +56,12 @@ func TestMigrationsApplyAndReapply(t *testing.T) {
 	if err := again.QueryRow(ctx, `SELECT count(*) FROM schema_migrations`).Scan(&n); err != nil {
 		t.Fatal(err)
 	}
-	if n != 3 {
-		t.Fatalf("schema_migrations rows = %d, want 3", n)
+	names, err := migrationNames()
+	if err != nil {
+		t.Fatal(err)
+	}
+	if n != len(names) {
+		t.Fatalf("schema_migrations rows = %d, want %d (one per embedded migration)", n, len(names))
 	}
 
 	var versions string

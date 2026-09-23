@@ -16,6 +16,8 @@ import (
 	"syscall"
 	"time"
 
+	"github.com/inspr-at/aeon/internal/auth"
+
 	"github.com/inspr-at/aeon/internal/config"
 	"github.com/inspr-at/aeon/internal/db"
 	"github.com/inspr-at/aeon/internal/httpapi"
@@ -58,7 +60,22 @@ func serveListener(ctx context.Context, cfg config.Config, ln net.Listener) erro
 		return err
 	}
 
-	api := &httpapi.Server{Pool: pool, Web: webFS}
+	authCfg, err := auth.FromEnv()
+	if err != nil {
+		_ = ln.Close()
+		return err
+	}
+	authMod, err := auth.New(authCfg, pool)
+	if err != nil {
+		_ = ln.Close()
+		return err
+	}
+	api := &httpapi.Server{
+		Pool:       pool,
+		Web:        webFS,
+		Modules:    []httpapi.Module{authMod},
+		Middleware: []func(http.Handler) http.Handler{authMod.Middleware},
+	}
 	srv := &http.Server{
 		Handler:           api.Handler(),
 		ReadHeaderTimeout: 10 * time.Second,

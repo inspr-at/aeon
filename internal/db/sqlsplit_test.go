@@ -41,7 +41,8 @@ func TestSplitCoreMigrations(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if strings.Join(names, ",") != "0001_tenants.sql,0002_identities.sql,0003_principals.sql" {
+	// Core migrations come first and in order; later packages add their own ranges.
+	if len(names) < 3 || strings.Join(names[:3], ",") != "0001_tenants.sql,0002_identities.sql,0003_principals.sql" {
 		t.Fatalf("migrations: %v", names)
 	}
 	body, err := migrationFiles.ReadFile("migrations/0003_principals.sql")
