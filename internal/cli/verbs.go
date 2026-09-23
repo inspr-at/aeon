@@ -4,15 +4,14 @@ package cli
 
 import (
 	"fmt"
-	"os"
 	"strconv"
 	"strings"
 )
 
 // The issue, knowledge and search verbs match the paimos commands INSPR
-// doctrine invokes. The Aeon HTTP contract does not include those resources
-// yet, so a well-formed invocation exits 3 with "arrives in R1". model resolve
-// and onboard are explicit stubs.
+// doctrine invokes. They call the Aeon node and search APIs and print the
+// classic text shapes. Commands with no Aeon resource exit 3; see
+// unsupportedCompat.
 
 var knowledgeTypes = []string{"memory", "runbook", "guideline", "external-system", "related-project"}
 
@@ -53,7 +52,7 @@ func (rt *runtime) cmdIssueList() *Command {
 			if limit < 0 || offset < 0 {
 				return usagef("--limit and --offset must be 0 or greater")
 			}
-			return arrives("issue list")
+			return rt.listIssues(project, status, typ, priority, assignee, limit, offset)
 		},
 	}
 }
@@ -69,7 +68,7 @@ func (rt *runtime) cmdIssueGet() *Command {
 			if _, err := normalizeIssueRef(args[0]); err != nil {
 				return err
 			}
-			return arrives("issue get")
+			return rt.getIssue(args[0])
 		},
 	}
 }
@@ -98,7 +97,7 @@ func (rt *runtime) cmdIssueCreate() *Command {
 			fs.string(&notes, "notes", 0, "inline notes")
 			fs.string(&notesFile, "notes-file", 0, "notes file")
 			fs.strings(&tags, "tags", "tag name (repeatable)")
-			fs.bool(&dryRun, "dry-run", 0, "accepted; the API is not available yet")
+			fs.bool(&dryRun, "dry-run", 0, "validate and print the action without writing")
 		},
 		run: func(args []string) error {
 			if strings.TrimSpace(project) == "" {
@@ -107,16 +106,16 @@ func (rt *runtime) cmdIssueCreate() *Command {
 			if strings.TrimSpace(title) == "" {
 				return usagef("--title is required")
 			}
-			if err := exclusive(description, descriptionFile, "description"); err != nil {
+			desc, err := rt.readText(description, descriptionFile, "description")
+			if err != nil {
 				return err
 			}
-			if err := exclusive(ac, acFile, "ac"); err != nil {
+			acText, err := rt.readText(ac, acFile, "ac")
+			if err != nil {
 				return err
 			}
-			if err := exclusive(notes, notesFile, "notes"); err != nil {
-				return err
-			}
-			if err := existingFiles(descriptionFile, acFile, notesFile); err != nil {
+			notesText, err := rt.readText(notes, notesFile, "notes")
+			if err != nil {
 				return err
 			}
 			if strings.TrimSpace(parent) != "" {
@@ -124,7 +123,18 @@ func (rt *runtime) cmdIssueCreate() *Command {
 					return err
 				}
 			}
-			return arrives("issue create")
+			if dryRun {
+				kind := strings.TrimSpace(typ)
+				if kind == "" {
+					kind = "ticket"
+				}
+				fmt.Fprintf(rt.stdout, "dry-run: would create %s in %s — %s\n", kind, strings.TrimSpace(project), strings.TrimSpace(title))
+				return nil
+			}
+			return rt.createIssue(issueInput{
+				Project: project, Title: title, Type: typ, Status: status, Priority: priority,
+				Parent: parent, Assignee: assignee, Description: desc, AC: acText, Notes: notesText, Tags: tags,
+			})
 		},
 	}
 }
@@ -159,7 +169,7 @@ func (rt *runtime) cmdIssueUpdate() *Command {
 			fs.string(&closeNoteFile, "close-note-file", 0, "close note file")
 			fs.strings(&addTag, "add-tag", "tag to add (repeatable)")
 			fs.strings(&removeTag, "remove-tag", "tag to remove (repeatable)")
-			fs.bool(&dryRun, "dry-run", 0, "accepted; the API is not available yet")
+			fs.bool(&dryRun, "dry-run", 0, "validate and print the action without writing")
 		},
 		run: func(args []string) error {
 			if _, err := normalizeIssueRef(args[0]); err != nil {
@@ -170,19 +180,20 @@ func (rt *runtime) cmdIssueUpdate() *Command {
 					return err
 				}
 			}
-			if err := exclusive(description, descriptionFile, "description"); err != nil {
+			desc, err := rt.readText(description, descriptionFile, "description")
+			if err != nil {
 				return err
 			}
-			if err := exclusive(ac, acFile, "ac"); err != nil {
+			acText, err := rt.readText(ac, acFile, "ac")
+			if err != nil {
 				return err
 			}
-			if err := exclusive(notes, notesFile, "notes"); err != nil {
+			notesText, err := rt.readText(notes, notesFile, "notes")
+			if err != nil {
 				return err
 			}
-			if err := exclusive(closeNote, closeNoteFile, "close-note"); err != nil {
-				return err
-			}
-			if err := existingFiles(descriptionFile, acFile, notesFile, closeNoteFile); err != nil {
+			closeText, err := rt.readText(closeNote, closeNoteFile, "close-note")
+			if err != nil {
 				return err
 			}
 			changed := strings.TrimSpace(title+typ+status+priority+parent+assignee+project+description+descriptionFile+ac+acFile+notes+notesFile+closeNote+closeNoteFile) != "" ||
@@ -190,7 +201,15 @@ func (rt *runtime) cmdIssueUpdate() *Command {
 			if !changed {
 				return usagef("nothing to update")
 			}
-			return arrives("issue update")
+			if dryRun {
+				fmt.Fprintf(rt.stdout, "dry-run: would update %s\n", args[0])
+				return nil
+			}
+			return rt.updateIssue(issuePatch{
+				Ref: args[0], Title: title, Type: typ, Status: status, Priority: priority,
+				Parent: parent, Assignee: assignee, Project: project, Description: desc,
+				AC: acText, Notes: notesText, CloseNote: closeText, AddTag: addTag, RemoveTag: removeTag,
+			})
 		},
 	}
 }
@@ -211,16 +230,14 @@ func (rt *runtime) cmdIssueComment() *Command {
 			if _, err := normalizeIssueRef(args[0]); err != nil {
 				return err
 			}
-			if err := exclusive(body, bodyFile, "body"); err != nil {
+			text, err := rt.readText(body, bodyFile, "body")
+			if err != nil {
 				return err
 			}
-			if strings.TrimSpace(body) == "" && strings.TrimSpace(bodyFile) == "" {
+			if strings.TrimSpace(text) == "" {
 				return usagef("--body or --body-file is required")
 			}
-			if err := existingFiles(bodyFile); err != nil {
-				return err
-			}
-			return arrives("issue comment")
+			return rt.commentIssue(args[0], text)
 		},
 	}
 }
@@ -256,7 +273,7 @@ func (rt *runtime) cmdKnowledgeList() *Command {
 			if err := optionalKnowledgeType(typ); err != nil {
 				return err
 			}
-			return arrives("knowledge list")
+			return rt.listKnowledge(project, typ)
 		},
 	}
 }
@@ -282,7 +299,7 @@ func (rt *runtime) cmdKnowledgeGet() *Command {
 			if strings.TrimSpace(project) == "" {
 				return usagef("--project is required")
 			}
-			return arrives("knowledge get")
+			return rt.getKnowledge(args[0], args[1], project)
 		},
 	}
 }
@@ -315,13 +332,11 @@ func (rt *runtime) cmdKnowledgeCreate() *Command {
 			if strings.TrimSpace(title) == "" {
 				return usagef("--title is required")
 			}
-			if err := exclusive(body, bodyFile, "body"); err != nil {
+			text, err := rt.readText(body, bodyFile, "body")
+			if err != nil {
 				return err
 			}
-			if err := existingFiles(bodyFile); err != nil {
-				return err
-			}
-			return arrives("knowledge create")
+			return rt.createKnowledge(project, typ, slug, title, text, status)
 		},
 	}
 }
@@ -354,19 +369,18 @@ func (rt *runtime) cmdKnowledgeUpdate() *Command {
 			if strings.TrimSpace(project) == "" {
 				return usagef("--project is required")
 			}
-			if err := exclusive(body, bodyFile, "body"); err != nil {
+			text, err := rt.readText(body, bodyFile, "body")
+			if err != nil {
 				return err
 			}
-			if err := exclusive(metadata, metadataFile, "metadata"); err != nil {
-				return err
-			}
-			if err := existingFiles(bodyFile, metadataFile); err != nil {
+			meta, err := rt.readText(metadata, metadataFile, "metadata")
+			if err != nil {
 				return err
 			}
 			if strings.TrimSpace(title+body+bodyFile+status+newSlug+metadata+metadataFile) == "" {
 				return usagef("nothing to update")
 			}
-			return arrives("knowledge update")
+			return rt.updateKnowledge(args[0], args[1], project, title, text, status, newSlug, meta)
 		},
 	}
 }
@@ -397,7 +411,7 @@ func (rt *runtime) cmdSearch(use string) *Command {
 			if limit < 0 {
 				return usagef("--limit must be 0 or greater")
 			}
-			return arrives("search")
+			return rt.searchIssues(strings.Join(args, " "), project, typ, limit)
 		},
 	}
 }
@@ -430,7 +444,7 @@ func (rt *runtime) cmdModelResolve() *Command {
 			if strings.TrimSpace(args[0]) == "" {
 				return usagef("role is required")
 			}
-			return notYet("model resolve is not yet available")
+			return rt.resolveModel(args[0], author, harness)
 		},
 	}
 }
@@ -450,7 +464,7 @@ func (rt *runtime) cmdOnboard() *Command {
 			if strings.TrimSpace(project) == "" {
 				return usagef("--project is required")
 			}
-			return arrives("onboard")
+			return rt.onboard(project, agent, format)
 		},
 	}
 }
@@ -505,23 +519,6 @@ func requireKnowledgeType(seg string) error {
 func exclusive(inline, file, name string) error {
 	if strings.TrimSpace(inline) != "" && strings.TrimSpace(file) != "" {
 		return usagef("--%s and --%s-file are mutually exclusive", name, name)
-	}
-	return nil
-}
-
-func existingFiles(paths ...string) error {
-	for _, p := range paths {
-		p = strings.TrimSpace(p)
-		if p == "" || p == "-" {
-			continue
-		}
-		st, err := os.Stat(p)
-		if err != nil {
-			return fmt.Errorf("%s: %w", p, err)
-		}
-		if st.IsDir() {
-			return fmt.Errorf("%s is a directory", p)
-		}
 	}
 	return nil
 }
