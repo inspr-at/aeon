@@ -1,0 +1,67 @@
+# SPDX-License-Identifier: AGPL-3.0-only
+name: Release
+
+on:
+  push:
+    tags:
+      - "v*"
+
+permissions:
+  contents: read
+  packages: write
+  attestations: write
+  id-token: write
+
+jobs:
+  release:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v7
+      - uses: actions/setup-node@v7
+        with:
+          node-version: "24"
+
+      - name: Validate inspr-calendar-v2 tag
+        id: version
+        run: node scripts/release-tag.mjs
+
+      - name: Release checks
+        run: node scripts/verify-release.mjs --release
+
+      - name: Tag matches version.json
+        env:
+          VERSION: ${{ steps.version.outputs.version }}
+        run: |
+          set -euo pipefail
+          got=$(node scripts/verify-release.mjs --release)
+          node --input-type=module -e 'const got = JSON.parse(process.argv[1]); if (got.version !== process.env.VERSION) { console.error("version.json " + got.version + " does not match tag " + process.env.VERSION); process.exit(1); }' "$got"
+
+      - uses: docker/setup-buildx-action@v4
+
+      - uses: docker/login-action@v4
+        with:
+          registry: ghcr.io
+          username: ${{ github.actor }}
+          password: ${{ secrets.GITHUB_TOKEN }}
+
+      # The only published tag is the calendar version. Never push a latest tag.
+      - name: Build and push
+        id: push
+        uses: docker/build-push-action@v7
+        with:
+          context: .
+          push: true
+          platforms: linux/amd64
+          provenance: mode=max
+          tags: ghcr.io/inspr-at/aeon:${{ steps.version.outputs.version }}
+          # -X github.com/inspr-at/aeon/internal/version.Version=<version without v>
+          build-args: |
+            VERSION=${{ steps.version.outputs.version }}
+
+      - name: Record pushed digest
+        run: |
+          {
+            echo "### Pushed image"
+            echo
+            echo "ghcr.io/inspr-at/aeon@${{ steps.push.outputs.digest }}"
+          } >> "$GITHUB_STEP_SUMMARY"

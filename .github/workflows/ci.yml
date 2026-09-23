@@ -1,0 +1,124 @@
+# SPDX-License-Identifier: AGPL-3.0-only
+name: CI
+
+on:
+  push:
+  pull_request:
+
+permissions:
+  contents: read
+
+jobs:
+  go:
+    runs-on: ubuntu-latest
+    services:
+      postgres:
+        image: pgvector/pgvector:pg18
+        env:
+          POSTGRES_USER: aeon
+          POSTGRES_PASSWORD: aeon
+          POSTGRES_DB: aeon
+        ports:
+          - 5432:5432
+        options: >-
+          --health-cmd "pg_isready -U aeon -d aeon"
+          --health-interval 10s
+          --health-timeout 5s
+          --health-retries 10
+    env:
+      AEON_TEST_DATABASE_URL: postgres://aeon:aeon@127.0.0.1:5432/aeon?sslmode=disable
+    steps:
+      - uses: actions/checkout@v7
+      - uses: actions/setup-go@v7
+        with:
+          go-version: "1.26"
+      - run: go vet ./...
+      - run: go test ./...
+
+  web:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v7
+      - uses: actions/setup-node@v7
+        with:
+          node-version: "24"
+          cache: npm
+          cache-dependency-path: web/package-lock.json
+      - working-directory: web
+        run: npm ci
+      - working-directory: web
+        run: npm run typecheck
+      - working-directory: web
+        run: npm run build
+
+  release-check:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v7
+      - uses: actions/setup-node@v7
+        with:
+          node-version: "24"
+      - run: node scripts/verify-release.mjs
+
+  e2e:
+    runs-on: ubuntu-latest
+    # AEON-13: allowed to fail until the server and UI packages merge; the smoke turns green after that.
+    continue-on-error: true
+    services:
+      postgres:
+        image: pgvector/pgvector:pg18
+        env:
+          POSTGRES_USER: aeon
+          POSTGRES_PASSWORD: aeon
+          POSTGRES_DB: aeon
+        ports:
+          - 5432:5432
+        options: >-
+          --health-cmd "pg_isready -U aeon -d aeon"
+          --health-interval 10s
+          --health-timeout 5s
+          --health-retries 10
+    env:
+      AEON_ENV: dev
+      AEON_DATABASE_URL: postgres://aeon:aeon@127.0.0.1:5432/aeon?sslmode=disable
+      BASE_URL: http://127.0.0.1:8080
+    steps:
+      - uses: actions/checkout@v7
+      - uses: actions/setup-go@v7
+        with:
+          go-version: "1.26"
+      - uses: actions/setup-node@v7
+        with:
+          node-version: "24"
+          cache: npm
+          cache-dependency-path: web/package-lock.json
+      - name: Install web dependencies
+        working-directory: web
+        run: npm ci
+      - name: Build web
+        working-directory: web
+        run: npm run build
+      - name: Build server
+        run: go build -tags webembed -o bin/aeon ./cmd/aeon
+      - name: Install Playwright
+        working-directory: web
+        run: npx playwright install --with-deps chromium
+      - name: Start server and run smoke
+        run: |
+          set -euo pipefail
+          nohup ./bin/aeon serve >"$RUNNER_TEMP/aeon.log" 2>&1 &
+          echo $! >"$RUNNER_TEMP/aeon.pid"
+          ready=0
+          for _ in $(seq 1 30); do
+            if curl -sf "$BASE_URL/api/health" >/dev/null; then
+              ready=1
+              break
+            fi
+            sleep 1
+          done
+          if [ "$ready" -ne 1 ]; then
+            echo "server did not become ready" >&2
+            cat "$RUNNER_TEMP/aeon.log" >&2 || true
+            exit 1
+          fi
+          npm run e2e --prefix web

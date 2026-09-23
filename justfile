@@ -20,6 +20,10 @@ test:
 web-check:
     cd web && npm run typecheck && npm run build
 
+# Playwright smoke against a running server (BASE_URL defaults to http://127.0.0.1:8080)
+e2e:
+    cd web && npx playwright install chromium && npm run e2e
+
 # Build the web app and the binary
 build: web-check
     go build -o bin/aeon ./cmd/aeon
