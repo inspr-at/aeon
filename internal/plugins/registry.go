@@ -1,209 +1,260 @@
 // SPDX-License-Identifier: AGPL-3.0-only
 
-// Package plugins registers compiled first-party capabilities and tenant installations.
 package plugins
 
 import (
-	"context"
-	"crypto/sha256"
-	"encoding/hex"
 	"encoding/json"
-	"errors"
 	"fmt"
-	"regexp"
-	"sort"
+	"slices"
+	"strings"
+	"sync"
 )
 
-var nameRE = regexp.MustCompile(`^[a-z][a-z0-9_]*$`)
-
-// Manifest is the startup-time ceiling for a compiled plugin. DigestSHA256 is
-// the SHA-256 of its JSON representation with DigestSHA256 empty.
-type Manifest struct {
-	ID             string         `json:"id"`
-	Version        string         `json:"version"`
-	DigestSHA256   string         `json:"digest_sha256"`
-	Owner          string         `json:"owner"`
-	Permissions    []string       `json:"permissions"`
-	NodeKinds      []NodeKind     `json:"node_kinds"`
-	Views          []View         `json:"views"`
-	WorkflowSteps  []WorkflowStep `json:"workflow_steps"`
-	AgentTools     []Capability   `json:"agent_tools"`
-	Integrations   []Capability   `json:"integrations"`
-	BackgroundJobs []Capability   `json:"background_jobs"`
-}
-type NodeKind struct {
-	Slug              string          `json:"slug"`
-	FieldSchema       json.RawMessage `json:"field_schema"`
-	AllowedChildKinds []string        `json:"allowed_child_kinds,omitempty"`
-}
-type View struct {
-	ID     string   `json:"id"`
-	Panels []string `json:"panels"`
-}
-type WorkflowStep struct {
-	Key   string   `json:"key"`
-	Gates []string `json:"gates"`
-}
-type Capability struct {
-	ID         string `json:"id"`
-	Permission string `json:"permission"`
-}
-
-// Capabilities contains only installed, declared permissions, never a DB pool.
-type Capabilities struct{ allowed map[string]struct{} }
-
-func Narrow(allowed []string) Capabilities {
-	c := Capabilities{allowed: map[string]struct{}{}}
-	for _, p := range allowed {
-		c.allowed[p] = struct{}{}
-	}
-	return c
-}
-func (c Capabilities) Has(permission string) bool { _, ok := c.allowed[permission]; return ok }
-
-type Call struct {
-	TenantID     string
-	PrincipalID  string
-	Capabilities Capabilities
-}
-type NodeKindContributor interface {
-	NodeKinds(context.Context, Call) []NodeKind
-}
-type ViewProvider interface {
-	Views(context.Context, Call) []View
-}
-type StepPlugin interface {
-	Evaluate(context.Context, Call, string) error
-	Request(context.Context, Call, string) error
-	ApplyResult(context.Context, Call, string) error
-}
-type ToolProvider interface {
-	AgentTools(context.Context, Call) []Capability
-}
-type IntegrationProvider interface {
-	Integrations(context.Context, Call) []Capability
-}
-type JobProvider interface {
-	BackgroundJobs(context.Context, Call) []Capability
-}
-
+// Registry holds compiled plugins. Register is safe for concurrent use.
+// Seal it before serving; later Register calls fail.
 type Registry struct {
-	entries      map[string]Manifest
-	schemaOwners map[string]string
-	steps        map[string]StepPlugin
+	mu           sync.Mutex
+	sealed       bool
+	plugins      map[string]Plugin
+	kinds        map[string]string
+	schemaIDs    map[string]string
+	views        map[string]string
+	steps        map[string]string
+	tools        map[string]string
+	integrations map[string]string
+	jobs         map[string]string
 }
 
+// NewRegistry returns an empty unsealed registry.
 func NewRegistry() *Registry {
-	return &Registry{entries: map[string]Manifest{}, schemaOwners: map[string]string{}, steps: map[string]StepPlugin{}}
+	return &Registry{
+		plugins:      map[string]Plugin{},
+		kinds:        map[string]string{},
+		schemaIDs:    map[string]string{},
+		views:        map[string]string{},
+		steps:        map[string]string{},
+		tools:        map[string]string{},
+		integrations: map[string]string{},
+		jobs:         map[string]string{},
+	}
 }
 
-func Digest(m Manifest) (string, error) {
-	m.DigestSHA256 = ""
-	b, err := json.Marshal(m)
-	if err != nil {
-		return "", err
-	}
-	sum := sha256.Sum256(b)
-	return hex.EncodeToString(sum[:]), nil
-}
-func Seal(m Manifest) Manifest {
-	digest, err := Digest(m)
-	if err != nil {
-		panic(err)
-	}
-	m.DigestSHA256 = digest
-	return m
-}
-func (r *Registry) Register(m Manifest) error {
-	if !nameRE.MatchString(m.ID) || m.Version == "" || m.Owner == "" {
-		return errors.New("invalid plugin identity")
-	}
-	if _, ok := r.entries[m.ID]; ok {
-		return fmt.Errorf("duplicate plugin %s", m.ID)
-	}
-	d, err := Digest(m)
+// Register validates p and stores it. A digest mismatch, duplicate id, unknown
+// permission, or schema collision is rejected.
+func (r *Registry) Register(p Plugin) error {
+	manifest, bindings, err := normalize(p)
 	if err != nil {
 		return err
 	}
-	if m.DigestSHA256 != d {
-		return fmt.Errorf("plugin %s digest mismatch", m.ID)
+	sum, err := hashPlugin(manifest, bindings)
+	if err != nil {
+		return err
 	}
-	perms := map[string]bool{}
-	for _, p := range m.Permissions {
-		if !nameRE.MatchString(p) || perms[p] {
-			return fmt.Errorf("invalid or duplicate permission %s", p)
-		}
-		perms[p] = true
+	if p.Manifest.DigestSHA256 != sum {
+		return fmt.Errorf("plugins: digest mismatch")
 	}
-	claims := map[string]bool{}
-	claim := func(group, id string) error {
-		if id == "" || claims[group+":"+id] {
-			return fmt.Errorf("duplicate %s %s", group, id)
-		}
-		claims[group+":"+id] = true
-		return nil
+	manifest.DigestSHA256 = sum
+	ids, err := schemaIDsOf(manifest.NodeKinds)
+	if err != nil {
+		return err
 	}
-	for _, k := range m.NodeKinds {
-		if err := claim("kind", k.Slug); err != nil {
-			return err
-		}
-		if !json.Valid(k.FieldSchema) {
-			return fmt.Errorf("invalid schema %s", k.Slug)
-		}
-		var schema map[string]any
-		if err := json.Unmarshal(k.FieldSchema, &schema); err != nil || schema == nil {
-			return fmt.Errorf("invalid schema %s", k.Slug)
-		}
-		if owner := r.schemaOwners[k.Slug]; owner != "" {
-			return fmt.Errorf("schema collision %s with %s", k.Slug, owner)
-		}
+
+	r.mu.Lock()
+	defer r.mu.Unlock()
+	if r.sealed {
+		return fmt.Errorf("plugins: registry is sealed")
 	}
-	for _, v := range m.Views {
-		if err := claim("view", v.ID); err != nil {
-			return err
-		}
+	if _, ok := r.plugins[manifest.ID]; ok {
+		return fmt.Errorf("plugins: duplicate id %q", manifest.ID)
 	}
-	for _, s := range m.WorkflowSteps {
-		if err := claim("step", s.Key); err != nil {
-			return err
-		}
+	kindIDs := idsOfKinds(manifest.NodeKinds)
+	viewIDs := idsOfViews(manifest.Views)
+	stepIDs := idsOfSteps(manifest.WorkflowSteps)
+	toolIDs := idsOfCaps(manifest.AgentTools)
+	integrationIDs := idsOfCaps(manifest.Integrations)
+	jobIDs := idsOfCaps(manifest.BackgroundJobs)
+	if err := collide(r.kinds, kindIDs, "node kind"); err != nil {
+		return err
 	}
-	for _, set := range [][]Capability{m.AgentTools, m.Integrations, m.BackgroundJobs} {
-		for _, c := range set {
-			if !perms[c.Permission] {
-				return fmt.Errorf("unknown permission %s", c.Permission)
-			}
-			if err := claim("capability", c.ID); err != nil {
-				return err
-			}
-		}
+	if err := collide(r.schemaIDs, ids, "field schema"); err != nil {
+		return err
 	}
-	for _, k := range m.NodeKinds {
-		r.schemaOwners[k.Slug] = m.ID
+	if err := collide(r.views, viewIDs, "view"); err != nil {
+		return err
 	}
-	r.entries[m.ID] = m
+	if err := collide(r.steps, stepIDs, "workflow step"); err != nil {
+		return err
+	}
+	if err := collide(r.tools, toolIDs, "agent tool"); err != nil {
+		return err
+	}
+	if err := collide(r.integrations, integrationIDs, "integration"); err != nil {
+		return err
+	}
+	if err := collide(r.jobs, jobIDs, "background job"); err != nil {
+		return err
+	}
+	occupy(r.kinds, kindIDs, manifest.ID)
+	occupy(r.schemaIDs, ids, manifest.ID)
+	occupy(r.views, viewIDs, manifest.ID)
+	occupy(r.steps, stepIDs, manifest.ID)
+	occupy(r.tools, toolIDs, manifest.ID)
+	occupy(r.integrations, integrationIDs, manifest.ID)
+	occupy(r.jobs, jobIDs, manifest.ID)
+	stored := p
+	stored.Manifest = manifest
+	stored.StepPermissions = bindings
+	r.plugins[manifest.ID] = stored.clone()
 	return nil
 }
-func (r *Registry) Get(id string) (Manifest, bool) { m, ok := r.entries[id]; return m, ok }
-func (r *Registry) List() []Manifest {
-	out := make([]Manifest, 0, len(r.entries))
-	for _, m := range r.entries {
-		out = append(out, m)
+
+// Seal freezes the registry.
+func (r *Registry) Seal() {
+	r.mu.Lock()
+	r.sealed = true
+	r.mu.Unlock()
+}
+
+func (r *Registry) isSealed() bool {
+	r.mu.Lock()
+	defer r.mu.Unlock()
+	return r.sealed
+}
+
+func (r *Registry) plugin(id string) (Plugin, bool) {
+	r.mu.Lock()
+	defer r.mu.Unlock()
+	p, ok := r.plugins[id]
+	if !ok {
+		return Plugin{}, false
 	}
-	sort.Slice(out, func(i, j int) bool { return out[i].ID < out[j].ID })
+	return p.clone(), true
+}
+
+func (r *Registry) list() []Plugin {
+	r.mu.Lock()
+	defer r.mu.Unlock()
+	out := make([]Plugin, 0, len(r.plugins))
+	for _, p := range r.plugins {
+		out = append(out, p.clone())
+	}
+	slices.SortFunc(out, func(a, b Plugin) int { return strings.Compare(a.Manifest.ID, b.Manifest.ID) })
 	return out
 }
 
-// BindStep attaches a compiled implementation after its manifest is registered.
-// It cannot enlarge the manifest's declared permissions.
-func (r *Registry) BindStep(id string, step StepPlugin) error {
-	if _, ok := r.entries[id]; !ok || step == nil {
-		return fmt.Errorf("unregistered step plugin %s", id)
+func collide(index map[string]string, ids []string, what string) error {
+	for _, id := range ids {
+		if owner, ok := index[id]; ok {
+			return fmt.Errorf("plugins: %s %q collides with %s", what, id, owner)
+		}
 	}
-	if _, ok := r.steps[id]; ok {
-		return fmt.Errorf("step plugin %s already bound", id)
-	}
-	r.steps[id] = step
 	return nil
 }
-func (r *Registry) Step(id string) (StepPlugin, bool) { step, ok := r.steps[id]; return step, ok }
+
+func occupy(index map[string]string, ids []string, pluginID string) {
+	for _, id := range ids {
+		index[id] = pluginID
+	}
+}
+
+func schemaIDsOf(kinds []NodeKind) ([]string, error) {
+	var ids []string
+	seen := map[string]struct{}{}
+	for _, kind := range kinds {
+		id, err := schemaID(kind.FieldSchema)
+		if err != nil {
+			return nil, err
+		}
+		if id == "" {
+			continue
+		}
+		if _, ok := seen[id]; ok {
+			return nil, fmt.Errorf("plugins: field schema %q collides with %s", id, kind.Slug)
+		}
+		seen[id] = struct{}{}
+		ids = append(ids, id)
+	}
+	return ids, nil
+}
+
+func idsOfKinds(kinds []NodeKind) []string {
+	out := make([]string, len(kinds))
+	for i, kind := range kinds {
+		out[i] = kind.Slug
+	}
+	return out
+}
+
+func idsOfViews(views []View) []string {
+	out := make([]string, len(views))
+	for i, view := range views {
+		out[i] = view.ID
+	}
+	return out
+}
+
+func idsOfSteps(steps []WorkflowStep) []string {
+	out := make([]string, len(steps))
+	for i, step := range steps {
+		out[i] = step.Key
+	}
+	return out
+}
+
+func idsOfCaps(caps []Capability) []string {
+	out := make([]string, len(caps))
+	for i, cap := range caps {
+		out[i] = cap.ID
+	}
+	return out
+}
+
+func (p Plugin) clone() Plugin {
+	m := p.Manifest
+	m.Permissions = cloneStrings(m.Permissions)
+	m.NodeKinds = cloneKinds(m.NodeKinds)
+	m.Views = cloneViews(m.Views)
+	m.WorkflowSteps = cloneSteps(m.WorkflowSteps)
+	m.AgentTools = cloneCaps(m.AgentTools)
+	m.Integrations = cloneCaps(m.Integrations)
+	m.BackgroundJobs = cloneCaps(m.BackgroundJobs)
+	bindings := make(map[string]string, len(p.StepPermissions))
+	for key, perm := range p.StepPermissions {
+		bindings[key] = perm
+	}
+	p.Manifest = m
+	p.StepPermissions = bindings
+	return p
+}
+
+func cloneKinds(in []NodeKind) []NodeKind {
+	out := make([]NodeKind, len(in))
+	for i, kind := range in {
+		kind.FieldSchema = json.RawMessage(append([]byte(nil), kind.FieldSchema...))
+		kind.AllowedChildKinds = cloneStrings(kind.AllowedChildKinds)
+		out[i] = kind
+	}
+	return out
+}
+
+func cloneViews(in []View) []View {
+	out := make([]View, len(in))
+	for i, view := range in {
+		view.Panels = cloneStrings(view.Panels)
+		out[i] = view
+	}
+	return out
+}
+
+func cloneSteps(in []WorkflowStep) []WorkflowStep {
+	out := make([]WorkflowStep, len(in))
+	for i, step := range in {
+		step.Gates = cloneStrings(step.Gates)
+		out[i] = step
+	}
+	return out
+}
+
+func cloneCaps(in []Capability) []Capability {
+	return append([]Capability(nil), in...)
+}
