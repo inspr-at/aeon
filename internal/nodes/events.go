@@ -6,6 +6,7 @@ import (
 	"context"
 	"encoding/json"
 
+	"github.com/inspr-at/aeon/internal/principallink"
 	"github.com/jackc/pgx/v5"
 )
 
@@ -68,6 +69,15 @@ func snapshot(v any) (json.RawMessage, error) {
 }
 
 func (m *Module) writeEvent(ctx context.Context, tx pgx.Tx, e Event) error {
+	var tenantID string
+	if err := tx.QueryRow(ctx, `SELECT current_setting('aeon.tenant_id')`).Scan(&tenantID); err != nil {
+		return err
+	}
+	canonical, _, err := principallink.Resolve(ctx, tx, tenantID, e.ActorPrincipalID)
+	if err != nil {
+		return err
+	}
+	e.ActorPrincipalID = canonical
 	if err := m.events.WriteEvent(ctx, tx, e); err != nil {
 		return err
 	}

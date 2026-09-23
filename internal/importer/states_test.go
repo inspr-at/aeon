@@ -42,7 +42,7 @@ func TestStateNormalizationAndStoredUserBackfill(t *testing.T) {
 	var principal string
 	var initialEvents int
 	txdo(func(tx pgx.Tx) error {
-		if err := tx.QueryRow(ctx, `SELECT p.id::text FROM principals p JOIN identities i ON i.id=p.identity_id WHERE p.tenant_id=$1 AND i.subject='source:7' AND p.name='Markus Barta'`, tid).Scan(&principal); err != nil {
+		if err := tx.QueryRow(ctx, `SELECT p.id::text FROM principals p JOIN identities i ON i.id=p.identity_id WHERE p.tenant_id=$1 AND i.subject='source:7' AND p.name='mba'`, tid).Scan(&principal); err != nil {
 			return err
 		}
 		for i, state := range want {
@@ -69,9 +69,9 @@ func TestStateNormalizationAndStoredUserBackfill(t *testing.T) {
 		}
 		return nil
 	})
-	// Simulate the old importer leaving only classic references and usernames.
+	// Simulate the old importer leaving only classic references and full names.
 	txdo(func(tx pgx.Tx) error {
-		if _, err := tx.Exec(ctx, `UPDATE principals SET name='mba' WHERE tenant_id=$1 AND id=$2`, tid, principal); err != nil {
+		if _, err := tx.Exec(ctx, `UPDATE principals SET name='Markus Barta' WHERE tenant_id=$1 AND id=$2`, tid, principal); err != nil {
 			return err
 		}
 		if _, err := tx.Exec(ctx, `UPDATE nodes SET fields=fields-'assignee' WHERE tenant_id=$1 AND key LIKE 'ST-%'`, tid); err != nil {
@@ -113,7 +113,7 @@ func TestStateNormalizationAndStoredUserBackfill(t *testing.T) {
 		}
 		return nil
 	})
-	// Username-only snapshots retain a richer mapped principal name.
+	// Username-only snapshots keep the classic username.
 	s.Users = []Record{{"id": 7, "username": "mba", "role": "member"}}
 	if _, err := w.Write(ctx, s, "states"); err != nil {
 		t.Fatal(err)
@@ -123,7 +123,7 @@ func TestStateNormalizationAndStoredUserBackfill(t *testing.T) {
 		if err := tx.QueryRow(ctx, `SELECT name FROM principals WHERE tenant_id=$1 AND id=$2`, tid, principal).Scan(&name); err != nil {
 			return err
 		}
-		if name != "Markus Barta" {
+		if name != "mba" {
 			return fmt.Errorf("display name regressed: %s", name)
 		}
 		return nil

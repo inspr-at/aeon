@@ -41,7 +41,10 @@
 //     import events.
 //   - Users become classic identities and tenant principals. User id,
 //     username, display_name/name/first_name/last_name, email, role and created_at
-//     are used; user preferences stay
+//     are used. Principal names retain the classic username; principal email
+//     supports explicit identity matching. Linked users resolve to canonical
+//     principals for future assignments, while fields.classic stays unchanged.
+//     User preferences stay
 //     skipped. Passwords, keys, sessions and TOTP secrets are never requested.
 //
 // Intentionally skipped: project active_issue_count, done_issue_count,

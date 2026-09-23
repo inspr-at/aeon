@@ -116,7 +116,11 @@ func TestClassicAssigneeProjectionAndFacets(t *testing.T) {
 	}
 	other := addPrincipal(t, "assignee-other")
 	otherKind := kindBySlug(t, other, "ticket")
-	mustNode(t, other, `{"kind_id":"`+otherKind.ID+`","title":"Other","fields":{"assignee":"`+mapped+`","classic":{"source_id":"source","assignee_id":7}}}`)
+	status, body = call(t, &other, "POST", "/api/nodes", `{"kind_id":"`+otherKind.ID+`","title":"Other","fields":{"assignee":"`+mapped+`"}}`)
+	if status != 400 {
+		t.Fatalf("accepted foreign assignment: %d %s", status, body)
+	}
+	mustNode(t, other, `{"kind_id":"`+otherKind.ID+`","title":"Other","fields":{"classic":{"source_id":"source","assignee_id":7}}}`)
 	status, body = call(t, &other, "GET", "/api/nodes?facets=assignee", "")
 	page = decode[nodePage](t, status, body, 200)
 	if len(page.Items) != 1 || page.Items[0].Assignee != nil || page.Facets["assignee"]["none"] != 1 {

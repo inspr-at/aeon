@@ -27,6 +27,13 @@ func canonicalState(state string) string {
 }
 
 func userDisplayName(u Record) string {
+	if username := strings.TrimSpace(stringField(u, "username")); username != "" {
+		return username
+	}
+	return userFullName(u)
+}
+
+func userFullName(u Record) string {
 	for _, key := range []string{"display_name", "full_name", "name"} {
 		if name := strings.TrimSpace(stringField(u, key)); name != "" {
 			return name
@@ -40,7 +47,7 @@ func userDisplayName(u Record) string {
 
 func storedUser(u Record, source string) Record {
 	out := Record{"source_id": source}
-	for _, key := range []string{"id", "username", "display_name", "full_name", "name", "first_name", "last_name"} {
+	for _, key := range []string{"id", "username", "display_name", "full_name", "name", "first_name", "last_name", "email"} {
 		if value, ok := u[key]; ok {
 			out[key] = value
 		}
@@ -51,7 +58,7 @@ func storedUser(u Record, source string) Record {
 // identities.subject is the durable source+classic-ID mapping. Read it even
 // when a partial snapshot omits users; never match IDs across source instances.
 func storedUserRefs(ctx context.Context, tx pgx.Tx, tenantID, source string) (map[int64]string, error) {
-	rows, err := tx.Query(ctx, `SELECT i.subject,p.id::text FROM principals p
+	rows, err := tx.Query(ctx, `SELECT i.subject,coalesce(p.linked_to,p.id)::text FROM principals p
  JOIN identities i ON i.id=p.identity_id
  WHERE p.tenant_id=$1 AND i.issuer='paimos-classic'
  AND starts_with(i.subject,$2)`, tenantID, source+":")

@@ -371,7 +371,8 @@ func (m *Module) listNodes(ctx context.Context, tenantID string, q listQuery) (n
 // Native fields win, including an explicit null (unassignment). Classic IDs
 // are resolved only through this tenant's source-qualified identity mapping.
 const assigneeJoin = ` LEFT JOIN LATERAL (
-    SELECT person.id,person.name FROM principals person
+    SELECT coalesce(target.id,person.id) AS id,coalesce(target.name,person.name) AS name FROM principals person
+    LEFT JOIN principals target ON target.tenant_id=person.tenant_id AND target.id=person.linked_to
     LEFT JOIN identities identity ON identity.id=person.identity_id
     WHERE person.tenant_id=n.tenant_id AND (
         person.id::text = CASE
@@ -404,7 +405,8 @@ func listFilterSQL(q listQuery) (string, []any) {
         AND (cardinality($2::text[])=0 OR k.slug=ANY($2::text[]) OR n.kind_id::text=ANY($2::text[]))
         AND (cardinality($3::text[])=0 OR n.state=ANY($3::text[]))
         AND (cardinality($4::text[])=0 OR coalesce(nullif(n.fields->>'priority',''),'none')=ANY($4::text[]))
-        AND (cardinality($5::text[])=0 OR coalesce(assignee.id::text,'none')=ANY($5::text[]))
+        AND (cardinality($5::text[])=0 OR coalesce(assignee.id::text,'none')=ANY($5::text[])
+            OR assignee.id IN (SELECT coalesce(linked_to,id) FROM principals WHERE id::text=ANY($5::text[])))
         AND ($6::text='' OR n.key ILIKE '%'||$6::text||'%' OR n.title ILIKE '%'||$6::text||'%')
         AND ($7::uuid IS NULL OR (n.id IN (SELECT id FROM scope) AND n.id<>$7::uuid))
         AND ($7::uuid IS NOT NULL OR NOT $8::bool OR (CASE WHEN $10::bool THEN n.id IN (SELECT id FROM scope) AND n.id<>$9::uuid ELSE n.parent_id IS NOT DISTINCT FROM $9::uuid END))

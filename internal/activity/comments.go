@@ -10,6 +10,7 @@ import (
 
 	"github.com/inspr-at/aeon/internal/db"
 	"github.com/inspr-at/aeon/internal/events"
+	"github.com/inspr-at/aeon/internal/principallink"
 	"github.com/inspr-at/aeon/internal/tenant"
 	"github.com/jackc/pgx/v5"
 )
@@ -33,16 +34,17 @@ func (m *module) writeComment(ctx context.Context, p tenant.Principal, node stri
 		if err := tx.QueryRow(ctx, `SELECT id::text FROM nodes WHERE tenant_id=$1 AND id=$2 AND deleted_at IS NULL FOR SHARE`, p.TenantID, node).Scan(&found); err != nil {
 			return err
 		}
-		var name string
-		if err := tx.QueryRow(ctx, `SELECT name FROM principals WHERE tenant_id=$1 AND id=$2`, p.TenantID, p.ID).Scan(&name); err != nil {
+		canonical, name, err := principallink.Resolve(ctx, tx, p.TenantID, p.ID)
+		if err != nil {
 			return err
 		}
+		p.ID = canonical
 		change := events.Change{NodeID: &node, Type: "comment.created", After: commentSnapshot{Body: body}}
 		var at time.Time
 		if id != 0 {
 			var author string
 			var raw json.RawMessage
-			if err := tx.QueryRow(ctx, `SELECT actor_principal_id::text,at,after FROM events WHERE tenant_id=$1 AND node_id=$2 AND id=$3 AND type='comment.created'`, p.TenantID, node, id).Scan(&author, &at, &raw); err != nil {
+			if err := tx.QueryRow(ctx, `SELECT coalesce(person.linked_to,person.id)::text,e.at,e.after FROM events e JOIN principals person ON person.tenant_id=e.tenant_id AND person.id=e.actor_principal_id WHERE e.tenant_id=$1 AND e.node_id=$2 AND e.id=$3 AND e.type='comment.created'`, p.TenantID, node, id).Scan(&author, &at, &raw); err != nil {
 				return err
 			}
 			if author != p.ID {

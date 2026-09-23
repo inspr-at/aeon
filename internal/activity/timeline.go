@@ -178,17 +178,19 @@ func readPeople(ctx context.Context, tx pgx.Tx, tenantID string, evs []activityE
 			}
 		}
 	}
-	rows, err := tx.Query(ctx, `SELECT p.id::text,p.name,CASE WHEN i.issuer='paimos-classic' THEN i.subject ELSE '' END
+	rows, err := tx.Query(ctx, `SELECT p.id::text,coalesce(target.id,p.id)::text,coalesce(target.name,p.name),CASE WHEN i.issuer='paimos-classic' THEN i.subject ELSE '' END
 	 FROM principals p LEFT JOIN identities i ON i.id=p.identity_id
+ LEFT JOIN principals target ON target.tenant_id=p.tenant_id AND target.id=p.linked_to
 	 WHERE p.tenant_id=$1 AND (p.id::text=ANY($2::text[]) OR (i.issuer='paimos-classic' AND i.subject=ANY($3::text[])))
  UNION ALL
- SELECT p.id::text,p.name,'username:'||aliases.alias FROM principals p JOIN (
+ SELECT p.id::text,coalesce(target.id,p.id)::text,coalesce(target.name,p.name),'username:'||aliases.alias FROM principals p JOIN (
    SELECT min(after->'principal'->>'id') AS principal_id,
      (after->'classic'->>'source_id')||':'||(after->'classic'->>'username') AS alias
    FROM events WHERE tenant_id=$1 AND type IN ('import.user_created','import.user_updated')
    GROUP BY (after->'classic'->>'source_id')||':'||(after->'classic'->>'username')
    HAVING count(DISTINCT after->'principal'->>'id')=1
  ) aliases ON aliases.principal_id=p.id::text
+ LEFT JOIN principals target ON target.tenant_id=p.tenant_id AND target.id=p.linked_to
  WHERE p.tenant_id=$1 AND aliases.alias=ANY($4::text[])`, tenantID, ids, subjects, aliases)
 	if err != nil {
 		return nil, err
@@ -196,11 +198,11 @@ func readPeople(ctx context.Context, tx pgx.Tx, tenantID string, evs []activityE
 	defer rows.Close()
 	people := map[string]Author{}
 	for rows.Next() {
-		var id, name, subject string
-		if err := rows.Scan(&id, &name, &subject); err != nil {
+		var id, canonical, name, subject string
+		if err := rows.Scan(&id, &canonical, &name, &subject); err != nil {
 			return nil, err
 		}
-		a := Author{ID: &id, Name: name}
+		a := Author{ID: &canonical, Name: name}
 		people[id] = a
 		if subject != "" {
 			people[subject] = a
