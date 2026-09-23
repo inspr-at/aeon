@@ -24,4 +24,42 @@
 // (playwright.ui.config.ts). UI tests mock R1 routes and EventSource, covering
 // pagination, filters, views, draft safety, rendering, mutation errors, live
 // updates and mobile light/dark layouts without another backend worker.
+//
+// P2.7 (AEON-31) adds /agents, /runs/:runId?, /approvals and /pacing.
+// src/lib/agents.ts mirrors the R2 human-session API. Agent accounts show
+// daemon/principal bindings and probes; administrators may change account state.
+// Run details expose durable status, requested/effective model evidence, pinned
+// profile, timestamps and aggregate content-free token/cost telemetry. Approval
+// decisions require a person identity and an explicit review step; conflicts
+// preserve the reason, expired requests cannot be decided, and revocation does
+// not rewrite historical approval decisions. Pacing previews use the canonical
+// steady/frontload/unrestricted curves and submit bounded allowance windows.
+// All writes go to the owning backend modules, which own tenant transactions
+// and events. This package performs no database queries or server wiring.
+//
+// src/lib/agentLive.ts owns each view's SSE connection and a 30-second fallback
+// refresh. Named R2 hints, generic messages and reconnections refresh authorized
+// projections; a latest-request fence discards stale responses. Connections and
+// timers close on unmount, and user drafts survive refresh. The coordinator
+// should align named hints with the final backend event writers. Polling covers
+// additional names without inventing projection data from event snapshots.
+//
+// Contract gaps for coordinator integration (api/openapi.yaml at R2 handoff):
+// no agent/session directory, no human run list, no run telemetry history GET,
+// no allowance-window GET or windows on AgentAccount. Therefore /agents lists
+// registered accounts, /runs opens by UUID or an approval link, and /pacing
+// previews/creates policy without claiming live allowance counters. The created
+// window is explicitly a creation snapshot. Approval has no revoked field, so
+// revocation is reported as action feedback, not an inferred active-grant state.
+// GET /approvals has limit but no cursor/filter; UI labels the 200-row bound.
+// Do not use the agent-only queued-run, claim, probe or telemetry-write APIs
+// from the browser. Full session and live allowance lists need coordinator-owned
+// read contracts before this frontend can expose them.
+//
+// R2 verification adds tests/agents.spec.ts (mocked routes and EventSource) for
+// account actions, telemetry, approvals/revocation, expiry/identity restrictions,
+// pacing curves/validation, stale reads, failures, cleanup and mobile themes.
+// API wire and pacing math checks also run under npm run test:unit. Run npm test
+// in a host context that permits Chromium's macOS Mach-port registration; the
+// restricted worker sandbox prevents browser startup before assertions run.
 package web

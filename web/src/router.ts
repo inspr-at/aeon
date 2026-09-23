@@ -9,6 +9,10 @@ export const router = createRouter({
   history: createWebHistory(),
   routes: [
     { path: '/', component: HomeView, meta: { title: 'Workspace' } },
+    { path: '/agents', component: () => import('./views/AgentsView.vue'), meta: { title: 'Agents' } },
+    { path: '/runs/:runId?', component: () => import('./views/RunsView.vue'), meta: { title: 'Sessions & runs' } },
+    { path: '/approvals', component: () => import('./views/ApprovalsView.vue'), meta: { title: 'Approvals' } },
+    { path: '/pacing', component: () => import('./views/PacingView.vue'), meta: { title: 'Pacing' } },
     { path: '/signin', component: SignInView, meta: { title: 'Sign in' } },
     { path: '/:pathMatch(.*)*', component: NotFoundView, meta: { title: 'Page not found' } },
   ],
