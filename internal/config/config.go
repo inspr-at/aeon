@@ -5,7 +5,9 @@ package config
 
 import (
 	"fmt"
+	"net/url"
 	"os"
+	"strings"
 )
 
 // Config is the process configuration for `aeon serve`.
@@ -21,6 +23,8 @@ type Config struct {
 
 // FromEnv reads AEON_* variables. Empty optional values take their defaults.
 // AEON_DATABASE_URL is required. AEON_ENV must be dev or prod.
+// AEON_DATABASE_PASSWORD_FILE, when set, supplies the database password from a
+// file (host-generated secret) so it never appears in the environment.
 func FromEnv() (Config, error) {
 	cfg := Config{
 		Addr:                getenv("AEON_ADDR", ":8080"),
@@ -39,6 +43,13 @@ func FromEnv() (Config, error) {
 	if cfg.DatabaseURL == "" {
 		return Config{}, fmt.Errorf("AEON_DATABASE_URL is required")
 	}
+	if f := os.Getenv("AEON_DATABASE_PASSWORD_FILE"); f != "" {
+		u, err := withPasswordFile(cfg.DatabaseURL, f)
+		if err != nil {
+			return Config{}, err
+		}
+		cfg.DatabaseURL = u
+	}
 	return cfg, nil
 }
 
@@ -47,4 +58,22 @@ func getenv(key, fallback string) string {
 		return v
 	}
 	return fallback
+}
+
+// withPasswordFile sets the password of a postgres:// URL from the first line of file.
+func withPasswordFile(dsn, file string) (string, error) {
+	b, err := os.ReadFile(file)
+	if err != nil {
+		return "", fmt.Errorf("AEON_DATABASE_PASSWORD_FILE: %w", err)
+	}
+	pw := strings.TrimSpace(strings.SplitN(string(b), "\n", 2)[0])
+	if pw == "" {
+		return "", fmt.Errorf("AEON_DATABASE_PASSWORD_FILE is empty")
+	}
+	u, err := url.Parse(dsn)
+	if err != nil || u.User == nil {
+		return "", fmt.Errorf("AEON_DATABASE_URL must be a postgres:// URL with a user")
+	}
+	u.User = url.UserPassword(u.User.Username(), pw)
+	return u.String(), nil
 }
