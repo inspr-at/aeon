@@ -1,6 +1,6 @@
 // SPDX-License-Identifier: AGPL-3.0-only
 export interface Identity {
-  principal: { id: string; name: string; email?: string }
+  principal: { id: string; name: string; email?: string; kind?: 'person' | 'agent'; roles?: string[] }
   tenant: { id: string; name: string }
 }
 

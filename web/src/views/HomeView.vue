@@ -162,6 +162,7 @@ onBeforeUnmount(() => { generation++; metadataGeneration++; clearTimeout(refresh
       <div class="work-content">
         <div class="work-toolbar">
           <div class="view-switch" aria-label="Work display"><button class="quiet" :aria-pressed="mode === 'tree'" @click="mode = 'tree'"><AppIcon name="tree" />Tree</button><button class="quiet" :aria-pressed="mode === 'list'" @click="mode = 'list'"><AppIcon name="list" />List</button></div>
+          <RouterLink class="quiet" to="/agents">Agents</RouterLink>
           <span class="connection" role="status">{{ live ? 'Live' : 'Reconnecting…' }}</span>
           <button class="quiet" :disabled="busy" aria-label="Refresh work" @click="changed">Refresh</button>
           <button class="button" :disabled="!kinds.length" @click="openCreate"><AppIcon name="plus" />New node</button>

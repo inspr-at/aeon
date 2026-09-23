@@ -112,3 +112,106 @@ test('EventSource listens to named R1 events, reconnects and releases its connec
     stop(); assert.equal(closed, true)
   } finally { globalThis.EventSource = original }
 })
+
+test('R2 reads and mutations use only the human-session contract', async () => {
+  const { listAccounts, getRun, listApprovals, setAccountState, decideApproval, revokeApproval, createWindow } = await import('../src/lib/agents.ts')
+  const calls: { url: string; method: string; body: unknown }[] = []
+  globalThis.fetch = async (url, init) => {
+    calls.push({ url: String(url), method: init?.method ?? 'GET', body: init?.body ? JSON.parse(String(init.body)) : undefined })
+    assert.equal(init?.credentials, 'same-origin')
+    if (init?.body) assert.equal(new Headers(init.headers).get('Content-Type'), 'application/json')
+    return Response.json({})
+  }
+  await listAccounts(); await getRun('run/id'); await listApprovals()
+  await setAccountState('account/id', 'draining')
+  await decideApproval('approval/id', 'denied', 'Wrong resource')
+  await revokeApproval('approval/id')
+  const window = { starts_at: '2026-09-23T10:00:00Z', ends_at: '2026-09-23T12:00:00Z', unit: 'tokens' as const, allowance: 1000, pace_model: 'frontload' as const, burst_ratio: 0.1 }
+  await createWindow('account/id', window)
+  assert.deepEqual(calls, [
+    { url: '/api/agent-accounts', method: 'GET', body: undefined },
+    { url: '/api/runs/run%2Fid', method: 'GET', body: undefined },
+    { url: '/api/approvals?limit=200', method: 'GET', body: undefined },
+    { url: '/api/agent-accounts/account%2Fid', method: 'PATCH', body: { state: 'draining' } },
+    { url: '/api/approvals/approval%2Fid/decision', method: 'POST', body: { decision: 'denied', reason: 'Wrong resource' } },
+    { url: '/api/approvals/approval%2Fid/revoke', method: 'POST', body: undefined },
+    { url: '/api/agent-accounts/account%2Fid/windows', method: 'POST', body: window },
+  ])
+})
+
+test('R2 failures retain HTTP status and tolerate non-JSON error bodies', async () => {
+  const { getRun } = await import('../src/lib/agents.ts')
+  const { APIError } = await import('../src/lib/api.ts')
+  for (const status of [401, 403, 404, 409, 503]) {
+    respond({ error: 'Not available' }, status)
+    await assert.rejects(getRun('run-1'), error => error instanceof APIError && error.status === status && error.message === 'Not available')
+  }
+  globalThis.fetch = async () => new Response('Unavailable', { status: 502 })
+  await assert.rejects(getRun('run-1'), /Request failed \(502\)/)
+})
+
+test('pacing curves preserve steady/frontload policy and hard allowance bounds', async () => {
+  const { paceFraction } = await import('../src/lib/agents.ts')
+  assert.equal(paceFraction('steady', 0.5, 0.1), 0.6)
+  assert.equal(paceFraction('frontload', 0.5, 0.1), 0.85)
+  assert.equal(paceFraction('unrestricted', 0, 0), 1)
+  assert.equal(paceFraction('steady', -1, 0.1), 0.1)
+  for (const model of ['steady', 'frontload', 'unrestricted'] as const) {
+    assert.equal(paceFraction(model, 2, 0.1), 1)
+    assert.equal(paceFraction(model, 0.75, 1), 1)
+    let previous = 0
+    for (let step = 0; step <= 100; step++) {
+      const value = paceFraction(model, step / 100, 0.1)
+      assert.ok(value >= previous && value <= 1)
+      previous = value
+    }
+  }
+})
+
+test('R2 live reads fence stale responses, retain failed snapshots, refresh on hints and close', async () => {
+  const { createRenderer, h } = await import('vue')
+  const { useAgentLive } = await import('../src/lib/agentLive.ts')
+  const original = globalThis.EventSource
+  let stream: MockStream | undefined
+  let closed = false
+  class MockStream extends EventTarget {
+    onopen?: () => void; onerror?: () => void; onmessage?: () => void
+    constructor(url: string) { super(); assert.equal(url, '/api/events/stream'); stream = this }
+    close() { closed = true }
+  }
+  globalThis.EventSource = MockStream as unknown as typeof EventSource
+  const renderer = createRenderer({
+    insert() {}, remove() {}, createElement: () => ({}), createText: () => ({}), createComment: () => ({}),
+    setText() {}, setElementText() {}, parentNode: () => null, nextSibling: () => null, patchProp() {},
+  })
+  const requests: { resolve: (value: number) => void; reject: (cause: Error) => void }[] = []
+  let resource: ReturnType<typeof useAgentLive<number>>
+  const app = renderer.createApp({ setup() {
+    resource = useAgentLive(() => new Promise<number>((resolve, reject) => requests.push({ resolve, reject })))
+    return () => h('div')
+  } })
+  try {
+    app.mount({})
+    const fresh = resource!.refresh()
+    requests[1]!.resolve(2); await fresh
+    requests[0]!.resolve(1); await Promise.resolve()
+    assert.equal(resource!.data.value, 2)
+    const failure = resource!.refresh()
+    requests[2]!.reject(new Error('Offline')); await failure
+    assert.equal(resource!.data.value, 2)
+    assert.equal(resource!.error.value, 'Offline')
+    stream!.onerror!(); assert.equal(resource!.live.value, false)
+    stream!.onopen!(); assert.equal(resource!.live.value, true)
+    stream!.dispatchEvent(new Event('run.telemetry'))
+    stream!.dispatchEvent(new Event('approval.approved'))
+    await new Promise(resolve => setTimeout(resolve, 200))
+    assert.equal(requests.length, 4) // Reconnect and a hint burst coalesce.
+    requests[3]!.resolve(3); await Promise.resolve()
+    assert.equal(resource!.data.value, 3)
+    assert.equal(resource!.error.value, '')
+    const pending = resource!.refresh()
+    app.unmount(); assert.equal(closed, true)
+    requests[4]!.resolve(4); await pending
+    assert.equal(resource!.data.value, 3)
+  } finally { if (!closed) app.unmount(); globalThis.EventSource = original }
+})

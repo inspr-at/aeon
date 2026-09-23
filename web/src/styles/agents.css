@@ -1,0 +1,30 @@
+/* SPDX-License-Identifier: AGPL-3.0-only */
+.agent-workspace { max-width: 1280px; margin: auto; padding: 28px; display: grid; gap: 22px; }
+.agent-heading, .agent-actions, .agent-card-heading { display: flex; flex-wrap: wrap; align-items: center; justify-content: space-between; gap: 16px; }
+.agent-actions { font-size: 12px; color: var(--ink-2); }
+.agent-heading h1 { margin-top: 8px; }
+.agent-nav { display: flex; flex-wrap: wrap; gap: 6px; border-bottom: 1px solid var(--line); padding-bottom: 12px; }
+.agent-nav a { display: inline-flex; min-height: 44px; align-items: center; padding: 8px 14px; border-radius: var(--radius-s); }
+.agent-nav a.router-link-exact-active { background: var(--aqua-2); color: var(--teal-ink); font-weight: 600; }
+.agent-grid { display: grid; grid-template-columns: repeat(auto-fit, minmax(min(100%, 330px), 1fr)); gap: 20px; }
+.agent-card { padding: 22px; display: grid; align-content: start; gap: 18px; min-width: 0; overflow-wrap: anywhere; }
+.agent-card h2 { font-size: 19px; font-weight: 550; }
+.agent-card h3 { margin: 0; font-size: 15px; }
+.agent-card dl, .agent-metrics { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 16px; margin: 0; }
+.agent-card dt { color: var(--ink-2); font-size: 12px; }
+.agent-card dd { margin: 3px 0 0; overflow-wrap: anywhere; }
+.agent-badge { border: 1px solid var(--line-2); border-radius: 20px; padding: 4px 10px; font: 12px/1.5 var(--mono); }
+.agent-notice { padding: 16px; border: 1px solid var(--line-2); border-radius: var(--radius-s); }
+.agent-empty { padding: 40px 24px; text-align: center; }
+.agent-form { display: grid; gap: 16px; }
+.agent-form label, .agent-card label { display: grid; gap: 6px; color: var(--ink-2); font-size: 13px; }
+.agent-workspace input, .agent-workspace select, .agent-workspace textarea { width: 100%; min-width: 0; min-height: 44px; padding: 10px 12px; border: 1px solid var(--line-2); border-radius: var(--radius-s); background: var(--surface); color: var(--ink); font: inherit; }
+.agent-workspace textarea { resize: vertical; }
+.agent-form-row { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 16px; }
+.agent-workspace button { min-height: 44px; }
+.agent-workspace button:disabled { cursor: default; }
+.agent-workspace progress { width: 100%; height: 14px; accent-color: var(--teal); }
+.agent-table { width: 100%; border-collapse: collapse; font-size: 13px; }
+.agent-table th, .agent-table td { text-align: left; padding: 10px; border-bottom: 1px solid var(--line); }
+.agent-table th { color: var(--ink-2); font-weight: 500; }
+@media (max-width: 600px) { .agent-workspace { padding: 20px 16px; } .agent-form-row { grid-template-columns: 1fr; } .agent-card { padding: 18px; } }
