@@ -109,20 +109,19 @@ onMounted(load)
   <section class="hours-view" aria-labelledby="hours-title">
     <header><div><p class="eyebrow">Business</p><h1 id="hours-title">Hours</h1><p>Recorded work, frozen rates and approved periods.</p></div><button :disabled="busy || loading" @click="load">Refresh</button></header>
     <p v-if="error" role="alert" class="error">{{ error }} <button :disabled="busy" @click="load">Reload</button></p>
-    <p v-if="notice" role="status">{{ notice }}</p>
-    <p v-if="loading" role="status">Loading hours…</p>
+    <p role="status" aria-label="Hours status">{{ loading ? 'Loading hours…' : notice }}</p>
     <template v-if="ready">
       <div class="columns">
         <section class="card" aria-labelledby="periods-title">
           <h2 id="periods-title">Time periods</h2>
-          <label>Period<select :value="selected?.id || ''" :disabled="busy || loading" @change="choose(($event.target as HTMLSelectElement).value)"><option value="">Select a period</option><option v-for="p in periods" :key="p.id" :value="p.id">{{ date(p.starts_at) }} – {{ date(p.ends_at) }} · {{ p.state }}</option></select></label>
+          <label><span id="hours-period-label">Period</span><select aria-labelledby="hours-period-label" :value="selected?.id || ''" :disabled="busy || loading" @change="choose(($event.target as HTMLSelectElement).value)"><option value="">Select a period</option><option v-for="p in periods" :key="p.id" :value="p.id">{{ date(p.starts_at) }} – {{ date(p.ends_at) }} · {{ p.state }}</option></select></label>
           <p v-if="!periods.length">No periods yet. Open one to start recording time.</p>
           <details><summary>Open a period</summary><form @submit.prevent="createPeriod"><label>Principal ID<input v-model="principal" required :readonly="!isAdmin" /></label><label>Period starts<input v-model="periodStart" type="datetime-local" step="1" required /></label><label>Period ends<input v-model="periodEnd" type="datetime-local" step="1" required /></label><button :disabled="busy || loading" class="primary">Open period</button></form></details>
         </section>
         <section class="card" aria-labelledby="totals-title">
           <h2 id="totals-title">Subtree totals</h2>
-          <form @submit.prevent="loadTotals"><label>Root work item<select v-model="totalNode" required @change="totals = null"><option value="">Select work item</option><option v-for="n in nodes" :key="n.id" :value="n.id">{{ n.key }} · {{ n.title }}</option></select></label><label class="check"><input v-model="approvedOnly" type="checkbox" @change="totals = null" />Approved periods only</label><button :disabled="busy || !totalNode">Calculate totals</button></form>
-          <div v-if="totals" aria-live="polite"><strong>{{ duration(totals.duration_seconds) }}</strong><p v-for="a in totals.amounts" :key="a.currency">{{ a.currency }} {{ a.amount }}</p><p v-if="!totals.amounts.length">No recorded time.</p></div>
+          <form @submit.prevent="loadTotals"><label><span id="hours-root-label">Root work item</span><select aria-labelledby="hours-root-label" v-model="totalNode" required @change="totals = null"><option value="">Select work item</option><option v-for="n in nodes" :key="n.id" :value="n.id">{{ n.key }} · {{ n.title }}</option></select></label><label class="check"><input v-model="approvedOnly" type="checkbox" @change="totals = null" />Approved periods only</label><button :disabled="busy || !totalNode">Calculate totals</button></form>
+          <div role="status" aria-label="Subtree totals" aria-live="polite"><template v-if="totals"><strong>{{ duration(totals.duration_seconds) }}</strong><p v-for="a in totals.amounts" :key="a.currency">{{ a.currency }} {{ a.amount }}</p><p v-if="!totals.amounts.length">No recorded time.</p></template></div>
         </section>
       </div>
       <section v-if="selected" class="card" aria-labelledby="entries-title">
@@ -132,10 +131,10 @@ onMounted(load)
         <p v-if="!entries.length">No time entries in this period.</p>
         <template v-if="selected.state === 'open'">
           <details><summary>Record time</summary><form class="entry-form" @submit.prevent="createEntry">
-            <label>Source<select v-model="source"><option v-if="isPerson" value="manual">Manual time</option><option value="agent_run">Terminal agent run</option></select></label>
-            <template v-if="source === 'manual'"><label>Work item<select v-model="node" required><option value="">Select work item</option><option v-for="n in nodes" :key="n.id" :value="n.id">{{ n.key }} · {{ n.title }}</option></select></label><label>Started<input v-model="started" type="datetime-local" step="1" required /></label><label>Ended<input v-model="ended" type="datetime-local" step="1" required /></label></template>
-            <label v-else>Agent run ID<input v-model="run" required /><small>Uses the run’s recorded principal, work item and terminal interval.</small></label>
-            <label>Cost unit<select v-model="cost" required><option value="">Select cost unit</option><option v-for="c in costs" :key="c.id" :value="c.id">{{ c.key }} · {{ c.title }}</option></select></label><label>Currency<input v-model="currency" pattern="[A-Z]{3}" maxlength="3" required /></label><label>Note<textarea v-model="note" maxlength="65536" /></label><p>The effective hourly bill rate is frozen when recorded. Entries cannot be edited.</p><button class="primary" :disabled="busy || loading || !costs.length">Record time</button>
+            <label><span id="hours-source-label">Source</span><select aria-labelledby="hours-source-label" v-model="source"><option v-if="isPerson" value="manual">Manual time</option><option value="agent_run">Terminal agent run</option></select></label>
+            <template v-if="source === 'manual'"><label><span id="hours-work-item-label">Work item</span><select aria-labelledby="hours-work-item-label" v-model="node" required><option value="">Select work item</option><option v-for="n in nodes" :key="n.id" :value="n.id">{{ n.key }} · {{ n.title }}</option></select></label><label>Started<input v-model="started" type="datetime-local" step="1" required /></label><label>Ended<input v-model="ended" type="datetime-local" step="1" required /></label></template>
+            <label v-else><span id="hours-run-label">Agent run ID</span><input aria-labelledby="hours-run-label" aria-describedby="hours-run-hint" v-model="run" required /><small id="hours-run-hint">Uses the run’s recorded principal, work item and terminal interval.</small></label>
+            <label><span id="hours-cost-label">Cost unit</span><select aria-labelledby="hours-cost-label" v-model="cost" required><option value="">Select cost unit</option><option v-for="c in costs" :key="c.id" :value="c.id">{{ c.key }} · {{ c.title }}</option></select></label><label>Currency<input v-model="currency" pattern="[A-Z]{3}" maxlength="3" required /></label><label>Note<textarea v-model="note" maxlength="65536" /></label><p>The effective hourly bill rate is frozen when recorded. Entries cannot be edited.</p><button class="primary" :disabled="busy || loading || !costs.length">Record time</button>
           </form></details>
           <div v-if="isAdmin" class="approval"><p>Approval closes this period and seals exactly the entries shown above.</p><label class="check"><input v-model="review" type="checkbox" :disabled="busy || !digest" />I have reviewed these entries</label><button :disabled="busy || loading || !review || !digest" @click="approve">Approve and close period</button><p v-if="!digest">Reload to obtain the current approval snapshot.</p></div>
         </template>

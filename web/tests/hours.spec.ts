@@ -3,6 +3,8 @@
 // Mounts the owned view through Vite; production router is coordinator-owned.
 import { test, expect, type Page } from '@playwright/test'
 
+test.use({ timezoneId: 'Europe/Vienna' })
+
 const person = '10000000-0000-4000-8000-000000000001'
 const periodID = '20000000-0000-4000-8000-000000000001'
 const root = '30000000-0000-4000-8000-000000000001'
@@ -79,20 +81,21 @@ test('terminal run conversion sends no client time or principal facts', async ({
   const { calls } = await setup(page); await mount(page)
   await page.locator('summary').filter({ hasText: /^Record time$/ }).click()
   await page.getByLabel('Source', { exact: true }).selectOption('agent_run')
-  await page.getByLabel('Agent run ID').fill('50000000-0000-4000-8000-000000000001')
+  await page.getByLabel('Agent run ID', { exact: true }).fill('50000000-0000-4000-8000-000000000001')
   await page.getByLabel('Cost unit', { exact: true }).selectOption(cost)
   await page.getByRole('button', { name: 'Record time', exact: true }).click()
-  await expect(page.getByRole('status')).toContainText('Time recorded.')
+  await expect(page.getByRole('status', { name: 'Hours status', exact: true })).toHaveText('Time recorded.')
   const call = calls.find(c => c.path === '/api/time-entries' && c.method === 'POST')!
   expect(call.body).toEqual({ period_id: periodID, source: 'agent_run', cost_unit_node_id: cost, currency: 'EUR', agent_run_id: '50000000-0000-4000-8000-000000000001', note: '' })
 })
 test('subtree totals keep currencies separate and exact', async ({ page }) => {
   const { calls } = await setup(page, { approved: true }); await mount(page)
-  await page.getByLabel('Root work item').selectOption(root)
+  await page.getByLabel('Root work item', { exact: true }).selectOption(root)
   await page.getByRole('checkbox', { name: 'Approved periods only' }).check()
   await page.getByRole('button', { name: 'Calculate totals' }).click()
-  await expect(page.getByText('USD 0.0001', { exact: true })).toBeVisible()
-  await expect(page.locator('[aria-live="polite"]')).toContainText('EUR 99999999999999.9999')
+  const totals = page.getByRole('status', { name: 'Subtree totals', exact: true })
+  await expect(totals.locator('p')).toHaveText(['EUR 99999999999999.9999', 'USD 0.0001'])
+  await expect(totals.getByText('USD 0.0001', { exact: true })).toBeVisible()
   expect(calls.some(c => c.path.endsWith('/time-totals?approved_only=true'))).toBeTruthy()
   await expect(page.getByRole('button', { name: 'Approve and close period' })).toHaveCount(0)
 })
@@ -113,10 +116,10 @@ test('manual entry submits the selected principal and UTC interval', async ({ pa
   await page.getByLabel('Ended', { exact: true }).fill('2026-09-23T13:00:00')
   await page.getByLabel('Cost unit', { exact: true }).selectOption(cost)
   await page.getByRole('button', { name: 'Record time', exact: true }).click()
-  await expect(page.getByRole('status')).toContainText('Time recorded.')
+  await expect(page.getByRole('status', { name: 'Hours status', exact: true })).toHaveText('Time recorded.')
   const writes = calls.filter(c => c.path === '/api/time-entries' && c.method === 'POST')
   expect(writes).toHaveLength(1)
-  expect(writes[0]!.body).toMatchObject({ principal_id: person, node_id: root, source: 'manual' })
+  expect(writes[0]!.body).toEqual({ period_id: periodID, principal_id: person, node_id: root, source: 'manual', cost_unit_node_id: cost, currency: 'EUR', note: '', started_at: '2026-09-23T10:00:00.000Z', ended_at: '2026-09-23T11:00:00.000Z' })
   expect(writes[0]!.body.started_at).toMatch(/Z$/)
   expect(Date.parse(writes[0]!.body.ended_at) - Date.parse(writes[0]!.body.started_at)).toBe(3600000)
 })
