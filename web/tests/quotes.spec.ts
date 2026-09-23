@@ -9,7 +9,7 @@ const contactId = '40000000-0000-4000-8000-000000000001'
 const costId = '50000000-0000-4000-8000-000000000001'
 const digest = 'a'.repeat(64)
 async function setup(page: Page, customer = false) {
-  const quote = { quote_node_id: quoteId, project_node_id: projectId, customer_org_node_id: orgId, current_version: 1, state: 'draft', revision: 2 }
+  const quote = { quote_node_id: quoteId, project_node_id: projectId, customer_org_node_id: orgId, current_version: 1, state: customer ? 'issued' : 'draft', revision: customer ? 3 : 2 }
   const version = { quote_node_id: quoteId, version: 1, recipient_contact_node_id: contactId, currency: 'EUR', title: 'Website work', terms_markdown: 'Pay in 30 days', lines: [{ position: 0, description: 'Design', cost_unit_node_id: costId, unit: 'hour', quantity: 3, rate_amount: 19.99, net_amount: 59.97, tax_rate: 0.2 }], subtotal: 59.97, tax_total: 11.994, total: 71.964, content_sha256: digest }
   const calls: { path: string; method: string; body: string | null }[] = []
   await page.route('**/api/**', async route => {
@@ -62,9 +62,10 @@ test('administrator freezes exact decimals and issues the current version', asyn
 })
 
 test('customer accepts only by sending the displayed frozen digest', async ({ page }) => {
-  const { calls, quote } = await setup(page, true)
-  quote.state = 'issued'
+  const { calls } = await setup(page, true)
   await page.getByRole('button', { name: new RegExp(quoteId) }).click()
+  await expect(page.getByLabel('Quote details')).toContainText('Status: issued')
+  await expect(page.getByLabel('Quote details')).toContainText(`SHA-256 ${digest}`)
   await expect(page.getByRole('button', { name: 'Freeze version' })).toHaveCount(0)
   await page.getByRole('button', { name: 'Accept this exact offer' }).click()
   await expect(page.getByText('Acceptance recorded.')).toBeVisible()
