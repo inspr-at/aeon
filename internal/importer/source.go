@@ -13,6 +13,7 @@ import (
 	"os"
 	"strconv"
 	"strings"
+	"sync"
 	"time"
 )
 
@@ -41,9 +42,14 @@ type Source interface {
 }
 
 type HTTPSource struct {
-	base   *url.URL
-	key    string
-	client *http.Client
+	base        *url.URL
+	key         string
+	client      *http.Client
+	concurrency int
+	delay       time.Duration
+	limit       chan struct{}
+	mu          sync.Mutex
+	nextRequest time.Time
 }
 
 // NewHTTPSource reads the bearer token once from a path. Errors never contain
@@ -66,10 +72,42 @@ func NewHTTPSource(rawURL, keyFile string, client *http.Client) (*HTTPSource, er
 	}
 	copyClient := *client
 	copyClient.CheckRedirect = func(*http.Request, []*http.Request) error { return http.ErrUseLastResponse }
-	return &HTTPSource{base: u, key: key, client: &copyClient}, nil
+	s := &HTTPSource{base: u, key: key, client: &copyClient}
+	_ = s.Configure(4, 0)
+	return s, nil
+}
+
+// Configure sets the request cap and minimum spacing between request starts.
+// Call before Read; a source is used for one import at a time.
+func (s *HTTPSource) Configure(concurrency int, delay time.Duration) error {
+	if concurrency < 1 || delay < 0 {
+		return errors.New("concurrency must be positive and delay nonnegative")
+	}
+	s.concurrency, s.delay, s.limit = concurrency, delay, make(chan struct{}, concurrency)
+	return nil
 }
 
 func (s *HTTPSource) get(ctx context.Context, path string, out any) error {
+	select {
+	case s.limit <- struct{}{}:
+		defer func() { <-s.limit }()
+	case <-ctx.Done():
+		return ctx.Err()
+	}
+	s.mu.Lock()
+	wait := time.Until(s.nextRequest)
+	if wait > 0 {
+		timer := time.NewTimer(wait)
+		defer timer.Stop()
+		select {
+		case <-timer.C:
+		case <-ctx.Done():
+			s.mu.Unlock()
+			return ctx.Err()
+		}
+	}
+	s.nextRequest = time.Now().Add(s.delay)
+	s.mu.Unlock()
 	u := *s.base
 	parts := strings.SplitN(path, "?", 2)
 	u.Path = strings.TrimSuffix(u.Path, "/") + "/api" + parts[0]
@@ -260,25 +298,62 @@ func (s *HTTPSource) Read(ctx context.Context, projectKey string) (Snapshot, err
 			}
 		}
 	}
+	var allIssues []Record
 	for _, p := range snap.Projects {
-		for _, issue := range p.Issues {
-			if err := s.readDetails(ctx, issue, snap.Details); err != nil {
-				return snap, err
+		allIssues = append(allIssues, p.Issues...)
+	}
+	allIssues = append(allIssues, snap.Orphans...)
+	workCtx, cancel := context.WithCancel(ctx)
+	defer cancel()
+	jobs := make(chan Record)
+	errCh := make(chan error, 1)
+	var wg sync.WaitGroup
+	var detailsMu sync.Mutex
+	for n := 0; n < s.concurrency && n < len(allIssues); n++ {
+		wg.Add(1)
+		go func() {
+			defer wg.Done()
+			for issue := range jobs {
+				id, detail, err := s.readDetails(workCtx, issue)
+				if err != nil {
+					select {
+					case errCh <- err:
+					default:
+					}
+					cancel()
+					return
+				}
+				detailsMu.Lock()
+				snap.Details[id] = detail
+				detailsMu.Unlock()
 			}
+		}()
+	}
+sendLoop:
+	for _, issue := range allIssues {
+		select {
+		case jobs <- issue:
+		case <-workCtx.Done():
+			break sendLoop
 		}
 	}
-	for _, issue := range snap.Orphans {
-		if err := s.readDetails(ctx, issue, snap.Details); err != nil {
-			return snap, err
-		}
+	close(jobs)
+	wg.Wait()
+	select {
+	case err := <-errCh:
+		return snap, err
+	default:
+	}
+	if err := ctx.Err(); err != nil {
+		return snap, err
 	}
 	return snap, nil
 }
 
-func (s *HTTPSource) readDetails(ctx context.Context, issue Record, details map[int64]Details) error {
+func (s *HTTPSource) readDetails(ctx context.Context, issue Record) (int64, Details, error) {
 	iid, ok := intField(issue, "id")
 	if !ok {
-		return errors.New("issue missing id")
+		return 0, Details{}, errors.New("issue missing id")
 	}
 	base := "/issues/" + strconv.FormatInt(iid, 10)
 	d := Details{}
@@ -287,11 +362,10 @@ func (s *HTTPSource) readDetails(ctx context.Context, issue Record, details map[
 		to     *[]Record
 	}{{"/relations", &d.Relations}, {"/comments", &d.Comments}, {"/history", &d.History}, {"/attachments", &d.Attachments}} {
 		if err := s.get(ctx, base+part.suffix, part.to); err != nil {
-			return err
+			return 0, Details{}, err
 		}
 	}
-	details[iid] = d
-	return nil
+	return iid, d, nil
 }
 
 func stringField(r Record, k string) string { s, _ := r[k].(string); return s }

@@ -24,14 +24,19 @@ func importPaimos(args []string, stdout io.Writer) error {
 	tenant := flags.String("tenant", "", "Aeon tenant slug")
 	project := flags.String("project", "", "classic project key")
 	dryRun := flags.Bool("dry-run", false, "read and report without writing")
+	concurrency := flags.Int("concurrency", 4, "maximum concurrent source requests")
+	delay := flags.Duration("delay", 0, "minimum delay between source request starts")
 	if err := flags.Parse(args); err != nil {
 		return errors.New("invalid import flags")
 	}
 	if flags.NArg() != 0 || *sourceURL == "" || *keyFile == "" || *tenant == "" {
-		return errors.New("usage: aeon import paimos --source-url URL --api-key-file FILE --tenant SLUG [--project KEY] [--dry-run]")
+		return errors.New("usage: aeon import paimos --source-url URL --api-key-file FILE --tenant SLUG [--project KEY] [--dry-run] [--concurrency N] [--delay DURATION]")
 	}
 	source, err := importer.NewHTTPSource(*sourceURL, *keyFile, nil)
 	if err != nil {
+		return err
+	}
+	if err := source.Configure(*concurrency, *delay); err != nil {
 		return err
 	}
 	ctx, stop := signal.NotifyContext(context.Background(), syscall.SIGTERM, syscall.SIGINT)

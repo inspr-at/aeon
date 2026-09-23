@@ -1,81 +1,57 @@
 // SPDX-License-Identifier: AGPL-3.0-only
 
-// Package importer moves the readable classic Paimos API snapshot into Aeon's
-// R1 node model. The source is never mutated. Mapping, field by field:
+// Package importer copies the read-only classic Paimos API snapshot to Aeon.
+// The importer never changes the source. Mapping, field by field:
 //
-//   - projects.id -> nodes.key PRJ-<id> and fields.classic.record.id;
-//     projects.key -> fields.classic.record.key (the project prefix is retained
-//     there and each issue's full issue_key is copied verbatim to nodes.key);
-//     name -> title; description -> body; status -> state; created_at and
-//     updated_at -> node timestamps. node_depth, product_owner, customer_label,
-//     customer_id/name, logo_path, tags, rate_hourly/lp, ai_defaults/policy,
-//     and derived activity/count/effective-rate values -> fields.classic.record.
-//     product_owner also resolves to fields.classic.principals.product_owner.
-//     A project is a root node of kind project. Active, frozen, archived and
-//     deleted projects are read separately because status=all excludes trash.
-//   - issues.id -> fields.classic.record.id; issue_key -> nodes.key unchanged;
-//     type -> node kind, including epic, ticket, task, release, sprint and
-//     cost_unit; title -> title; description (or knowledge body) -> body;
-//     status -> state; created_at/updated_at -> node timestamps; deleted_at ->
-//     fields.classic.record.deleted_at pending an R1 trash policy. project_id
-//     -> project parent node; parent_id and parent relation -> issue parent
-//     node on a second pass. issue_number, priority, acceptance_criteria,
-//     notes, report_summary, cost_unit, release, billing_type, total_budget,
-//     rate_hourly/lp, start/end dates, estimate_hours/lp, ar_hours/lp,
-//     time_override, group_state, sprint_state, jira_id/version/text,
-//     pharos_request_id, color, sprint_ids, archived, assignee_id, created_by,
-//     accepted_at/by, invoiced_at/number, deleted_by, tags, booked/budget
-//     hours, time_logged/rollup/total, and AI work status -> fields.classic.record.
-//     assignee_id, created_by, accepted_by and deleted_by also resolve to
-//     fields.classic.principals UUIDs when their users are in the snapshot.
-//     Orphan sprint issues are root nodes (their full SPRINT-<id> keys stay
-//     intact); deleted issues are read through /issues/trash. Derived display
-//     fields (assignee, children, creator/editor names) are
-//     retained there too; no inferred authorship is manufactured.
-//   - knowledge entries of types memory, runbook, external_system,
-//     related_project and guideline are read from the unified per-project
-//     knowledge API, merged with GET /issues/<id> for their original issue_key,
-//     then imported as nodes of matching kinds. slug, metadata, reference_count,
-//     last_referenced_at, content_revised_at, needs_review and review_reason
-//     -> fields.classic.record; title/body/status -> native node columns.
-//     Project knowledge is imported. User and instance memory APIs are separate
-//     classic scopes; the project knowledge list does not enumerate them.
-//   - issue_relations parent -> nodes.parent_id; depends_on -> directed blocks
-//     from dependency to dependent; relates -> canonical symmetric relates;
-//     duplicates and cites -> same-named node_relations. groups, sprint,
-//     cost_unit, release and other classic relation types cannot fit the
-//     R1 relation type constraint; impacts also has no equivalent. Their full
-//     records are retained as import.relation events. All relations are also
-//     retained as events.
-//     Relations to out-of-scope nodes remain in import.relation events, but
-//     no dangling Aeon relation is created.
-//   - comments.id, issue_id, author_id/name, avatar_path, body, visibility,
-//     client_request_id and created_at -> import.comment event payload and
-//     event time. R1 has no separate comment table yet.
-//   - issue_history.id, issue_id, changed_by/name, snapshot, changed_at,
-//     agent_name and session_id -> import.history event payload and event time.
-//     Historical snapshots are retained verbatim; they are not replayed as
-//     native edits. R1 event actor is the importer agent because classic user
-//     identity is historical data within the payload.
-//   - attachment.id, issue_id, object_key, filename, content_type,
-//     size_bytes, uploaded_by/uploader and created_at -> import.attachment
-//     event payload and event time. File bytes are not fetched. The dry-run
-//     report calls this out as attachments.file_bytes.
-//   - users.id -> identities.subject <source-hash>:<id> with issuer
-//     paimos-classic; username -> identity display_name and principal name;
-//     email -> identity email; role -> principal roles; created_at -> both
-//     identity and principal creation timestamps; remaining public user
-//     profile/preferences and status are reported as unmapped. Password hashes,
-//     API keys, sessions and TOTP secrets are never requested or imported.
+//   - Project id -> node key PRJ-<id>; name -> title; description -> body;
+//     status -> state; created_at/updated_at -> node timestamps. Product owner
+//     resolves to fields.product_owner when its principal exists. Tags are in
+//     fields.tags (R1 has no tag relation). Every fetched noncomputed project
+//     value is also copied verbatim to fields.classic.<name>.
+//   - Issue id and issue_key identify the node; type -> kind; title -> title;
+//     description or knowledge body -> body; status -> state; timestamps ->
+//     node timestamps; project_id/parent_id and parent relation -> parent node.
+//     fields.acceptance_criteria and fields.notes retain Markdown for the
+//     sidebar. fields.priority, tags, estimate_hours, estimate_lp, budget_hours,
+//     total_budget, start_date, end_date, release, sprint_ids, needs_review,
+//     archived, and accepted_at hold the corresponding source values. The
+//     assignee_id, created_by and accepted_by user IDs resolve to principal
+//     UUIDs in fields.assignee, fields.created_by and fields.accepted_by.
+//     Unresolved source IDs remain in fields.classic. Every fetched issue
+//     value is also copied verbatim to fields.classic.<name>, including other
+//     billing, time, Jira, metadata and historical fields. The source URL hash
+//     is kept in fields.classic.source_id for safe reruns.
+//   - Project knowledge is merged with its issue record, then imported with
+//     its original issue key. Orphan sprints become root nodes. Trash issues
+//     are fetched, and deleted_at is retained in fields.classic.deleted_at.
+//   - Relations become native parent, blocks, relates, duplicates and cites
+//     links where possible. Every relation, including unsupported types and
+//     out-of-scope targets, is retained in an import.relation event. Comments,
+//     history and attachment metadata are retained verbatim in import events.
+//   - Users become classic identities and tenant principals. User id,
+//     username, email, role and created_at are used; user preferences stay
+//     skipped. Passwords, keys, sessions and TOTP secrets are never requested.
 //
-// Every source API field not assigned a native column is reported by dry-run
-// as unmapped and retained under fields.classic.record for nodes or the
-// classic record in auxiliary events. The source identity is a hash of the
-// source URL, not the bearer key. Re-runs update a node only when its imported
-// fields change, reject a key owned by another source, and deduplicate
-// auxiliary events by stable classic reference (and content digest for editable
-// comment/attachment metadata). Native and auxiliary changes use events.Append
-// within db.InTenant, preserving available classic timestamps on auxiliary
-// events. Writes are serialized per tenant and source with a transaction
-// advisory lock.
+// Intentionally skipped: project active_issue_count, done_issue_count,
+// issue_count, open_issue_count, effective_rate_hourly, effective_rate_lp,
+// last_activity, node_depth and rate_inherited, all derived/computed values;
+// user fields status, nickname, first_name, last_name, avatar_path,
+// markdown_default, monospace_fields, recent_projects_limit,
+// internal_rate_hourly, show_alt_unit_table, show_alt_unit_detail, locale,
+// recent_timers_limit, timezone, preview_hover_delay,
+// issue_auto_refresh_enabled, issue_auto_refresh_interval_seconds,
+// search_scope_shortcut, command_palette_shortcut,
+// intake_confidence_threshold, last_login_at, totp_enabled,
+// accruals_stats_enabled, accruals_extra_statuses and is_super_admin;
+// attachment file bytes (only metadata is fetched); and nonproject user and
+// instance memory, which the project knowledge endpoint does not enumerate.
+// These skips are not reported as unmapped_fields. All fetched work fields
+// survive either in node fields or in import event payloads. Dry runs perform
+// the same source reads and return an empty unmapped_fields array. Source GETs
+// are capped at four concurrently by default; --concurrency and --delay can
+// lower pressure on classic PPM.
+//
+// Reruns update nodes only when imported content changes and deduplicate
+// auxiliary events. Native writes are serialized per tenant and source with a
+// transaction advisory lock and use events.Append inside db.InTenant.
 package importer

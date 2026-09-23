@@ -10,6 +10,8 @@ import (
 	"path/filepath"
 	"strconv"
 	"strings"
+	"sync"
+	"sync/atomic"
 	"testing"
 	"time"
 
@@ -20,13 +22,13 @@ import (
 func fakeClassic(t *testing.T) (*HTTPSource, func()) {
 	t.Helper()
 	responses := map[string]string{
-		"/api/projects?status=all":       `[{"id":3,"key":"PAI","name":"Paimos","description":"legacy","status":"active","rate_hourly":100}]`,
+		"/api/projects?status=all":       `[{"id":3,"key":"PAI","name":"Paimos","description":"legacy","status":"active","rate_hourly":100,"tags":["studio"],"customer_label":"Client","product_owner":7,"ai_defaults":{"mode":"manual"},"active_issue_count":2}]`,
 		"/api/projects?status=deleted":   `[]`,
 		"/api/users":                     `[{"id":7,"username":"markus","email":"markus@example.test","role":"admin","locale":"de"}]`,
 		"/api/users?status=deleted":      `[]`,
 		"/api/issues?limit=100&offset=0": `{"issues":[{"id":99,"issue_key":"SPRINT-99","type":"sprint","title":"Sprint","status":"open"}],"has_more":false}`,
 		"/api/issues/trash":              `[]`,
-		"/api/projects/3/issues":         `[{"id":10,"project_id":3,"issue_key":"PAI-10","type":"epic","title":"Epic","status":"open","description":"root"},{"id":11,"project_id":3,"issue_key":"PAI-11","type":"ticket","title":"Ticket","status":"open","description":"body","parent_id":10,"priority":"high"}]`,
+		"/api/projects/3/issues":         `[{"id":10,"project_id":3,"issue_key":"PAI-10","type":"epic","title":"Epic","status":"open","description":"root"},{"id":11,"project_id":3,"issue_key":"PAI-11","type":"ticket","title":"Ticket","status":"open","description":"body","parent_id":10,"priority":"high","acceptance_criteria":"- [ ] done","notes":"**private**","tags":["ready"],"assignee_id":7,"created_by":7,"estimate_hours":2.5,"estimate_lp":3,"budget_hours":8,"total_budget":1000,"start_date":"2026-01-02","end_date":"2026-01-09","release":"r1","sprint_ids":[99],"needs_review":true,"archived":false,"accepted_at":"2026-01-10T10:00:00Z","accepted_by":7,"jira_text":"verbatim"}]`,
 		"/api/projects/3/knowledge":      `[{"id":12,"project_id":3,"type":"memory","slug":"lesson","title":"Lesson","body":"keep","status":"active","metadata":{"a":1}}]`,
 		"/api/issues/12":                 `{"id":12,"project_id":3,"issue_key":"PAI-12","type":"memory","title":"Lesson","status":"active"}`,
 		"/api/issues/10/relations":       `[{"source_id":10,"target_id":11,"type":"parent"}]`,
@@ -92,8 +94,8 @@ func TestImportDryRunAndRerun(t *testing.T) {
 	if dry.Counts["projects"] != 1 || dry.Counts["ticket"] != 1 || dry.Counts["memory"] != 1 || dry.Counts["sprint"] != 1 || dry.Counts["comments"] != 1 {
 		t.Fatalf("wrong dry run: %+v", dry)
 	}
-	if !strings.Contains(strings.Join(dry.UnmappedFields, ","), "issues.priority") {
-		t.Fatalf("missing unmapped field: %+v", dry)
+	if len(dry.UnmappedFields) != 0 {
+		t.Fatalf("work fields remain unmapped: %+v", dry.UnmappedFields)
 	}
 	d := dbtest.Open(t)
 	if err := db.EnsureTenant(ctx, d.Admin, "test", "Test"); err != nil {
@@ -166,8 +168,47 @@ func TestImportDryRunAndRerun(t *testing.T) {
 	if err := json.Unmarshal(fields, &data); err != nil {
 		t.Fatal(err)
 	}
-	if data["classic"].(map[string]any)["record"].(map[string]any)["priority"] != "high" {
-		t.Fatal("unmapped field lost")
+	for key, want := range map[string]any{
+		"acceptance_criteria": "- [ ] done", "notes": "**private**", "priority": "high",
+		"estimate_hours": 2.5, "estimate_lp": float64(3), "budget_hours": float64(8),
+		"total_budget": float64(1000), "start_date": "2026-01-02", "end_date": "2026-01-09",
+		"release": "r1", "needs_review": true, "archived": false,
+		"accepted_at": "2026-01-10T10:00:00Z",
+	} {
+		if data[key] != want {
+			t.Errorf("%s = %v, want %v", key, data[key], want)
+		}
+	}
+	if data["tags"].([]any)[0] != "ready" || data["sprint_ids"].([]any)[0] != float64(99) {
+		t.Fatal("tags or sprint references lost")
+	}
+	for _, name := range []string{"assignee", "created_by", "accepted_by"} {
+		if data[name] == nil || data[name] == "" {
+			t.Errorf("%s principal missing", name)
+		}
+	}
+	classic := data["classic"].(map[string]any)
+	if classic["jira_text"] != "verbatim" || classic["priority"] != "high" || classic["assignee_id"] != float64(7) {
+		t.Fatal("verbatim classic issue fields lost")
+	}
+	if _, ok := classic["record"]; ok {
+		t.Fatal("obsolete classic.record nesting")
+	}
+	if err := d.Admin.QueryRow(ctx, `SELECT fields FROM nodes WHERE key='PRJ-3'`).Scan(&fields); err != nil {
+		t.Fatal(err)
+	}
+	data = nil
+	if err := json.Unmarshal(fields, &data); err != nil {
+		t.Fatal(err)
+	}
+	if data["tags"].([]any)[0] != "studio" || data["classic"].(map[string]any)["customer_label"] != "Client" {
+		t.Fatal("project fields lost")
+	}
+	if data["product_owner"] == nil || data["classic"].(map[string]any)["ai_defaults"].(map[string]any)["mode"] != "manual" {
+		t.Fatal("project principal or nested classic field lost")
+	}
+	if _, ok := data["classic"].(map[string]any)["active_issue_count"]; ok {
+		t.Fatal("computed project count retained")
 	}
 }
 
@@ -197,6 +238,62 @@ func TestAllClassicIssueKindsUseR1Nodes(t *testing.T) {
 		}
 		if count != 1 {
 			t.Fatalf("kind %s missing", kind)
+		}
+	}
+}
+
+func TestSourceRequestCapAndDelay(t *testing.T) {
+	var active, peak atomic.Int32
+	var mu sync.Mutex
+	var starts []time.Time
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		n := active.Add(1)
+		for {
+			old := peak.Load()
+			if n <= old || peak.CompareAndSwap(old, n) {
+				break
+			}
+		}
+		mu.Lock()
+		starts = append(starts, time.Now())
+		mu.Unlock()
+		time.Sleep(25 * time.Millisecond)
+		active.Add(-1)
+		_, _ = w.Write([]byte(`[]`))
+	}))
+	defer server.Close()
+	file := filepath.Join(t.TempDir(), "key")
+	if err := os.WriteFile(file, []byte("fake-key"), 0600); err != nil {
+		t.Fatal(err)
+	}
+	source, err := NewHTTPSource(server.URL, file, server.Client())
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := source.Configure(2, 15*time.Millisecond); err != nil {
+		t.Fatal(err)
+	}
+	var wg sync.WaitGroup
+	for n := 0; n < 8; n++ {
+		wg.Add(1)
+		go func() {
+			defer wg.Done()
+			var rows []Record
+			if err := source.get(context.Background(), "/probe", &rows); err != nil {
+				t.Error(err)
+			}
+		}()
+	}
+	wg.Wait()
+	if peak.Load() > 2 || peak.Load() < 2 {
+		t.Fatalf("peak requests = %d", peak.Load())
+	}
+	if len(starts) != 8 {
+		t.Fatalf("request starts = %d", len(starts))
+	}
+	for n := 1; n < len(starts); n++ {
+		if gap := starts[n].Sub(starts[n-1]); gap < 10*time.Millisecond {
+			t.Fatalf("request spacing = %s", gap)
 		}
 	}
 }
