@@ -101,7 +101,7 @@ defineExpose({ open, refresh })
 .search-palette { width: min(640px, calc(100vw - 24px)); max-width: none; max-height: min(560px, 80dvh); margin: 12dvh auto auto; padding: 0; border: 0; background: transparent; color: var(--ink); overflow: visible; }
 .search-palette::backdrop { background: var(--scrim); backdrop-filter: blur(2px); }
 .palette-card { display: flex; flex-direction: column; max-height: min(560px, 80dvh); border-radius: var(--radius); background: var(--surface-raised); border: 1px solid var(--glass-edge); box-shadow: var(--shadow-pop); overflow: hidden; }
-.palette-input { display: flex; align-items: center; gap: 12px; padding: 0 12px 0 18px; height: 56px; border-bottom: 1px solid var(--line); color: var(--ink-3); }
+.palette-input { display: flex; flex-shrink: 0; align-items: center; gap: 12px; padding: 0 12px 0 18px; height: 56px; border-bottom: 1px solid var(--line); color: var(--ink-3); }
 .palette-input input { flex: 1; min-width: 0; height: 100%; border: 0; background: transparent; color: var(--ink); font-size: 16px; }
 .palette-input input:focus { box-shadow: none; }
 .palette-input input::placeholder { color: var(--ink-3); }
@@ -113,7 +113,7 @@ defineExpose({ open, refresh })
 .search-result[aria-selected="true"] { background: var(--row-selected); }
 .search-result .enter { color: var(--ink-3); }
 .more { margin: 8px 12px 6px; }
-.palette-foot { display: flex; gap: 18px; padding: 10px 18px; border-top: 1px solid var(--line); font-size: 12px; color: var(--ink-3); }
+.palette-foot { display: flex; flex-shrink: 0; gap: 18px; padding: 10px 18px; border-top: 1px solid var(--line); font-size: 12px; color: var(--ink-3); }
 .palette-foot span { display: inline-flex; align-items: center; gap: 4px; }
 .palette-foot .keycap + .keycap { margin-left: 2px; }
 @media (max-width: 600px) {

@@ -316,7 +316,6 @@ tbody:last-of-type .ticket-row:last-child td { border-bottom: 0; }
 .c-updated time { color: var(--ink-2); font-size: 12.5px; font-variant-numeric: tabular-nums; }
 
 .group-row th { position: sticky; top: calc(var(--toolbar-h, 0px) + 35px); z-index: 1; height: 36px; padding: 0 12px 0 8px; text-align: left; font-weight: 400; background: var(--surface-raised-2); border-bottom: 1px solid var(--line); backdrop-filter: blur(12px); -webkit-backdrop-filter: blur(12px); }
-tbody + tbody .group-row th { border-top: 1px solid var(--line); }
 .group-head { display: flex; align-items: center; gap: 8px; min-width: 0; }
 .group-toggle { display: grid; place-items: center; width: 24px; height: 24px; padding: 0; border: 0; border-radius: 6px; background: transparent; color: var(--ink-3); }
 .group-toggle:hover { background: var(--row-hover); color: var(--ink); }
@@ -372,6 +371,7 @@ tbody + tbody .group-row th { border-top: 1px solid var(--line); }
   .title-cell .kind-glyph { margin-top: 2px; }
   .title-link { flex: 1 1 calc(100% - 30px); white-space: normal; font-size: 14.5px; line-height: 1.35; display: -webkit-box; -webkit-line-clamp: 2; -webkit-box-orient: vertical; }
   .parent-chip { max-width: 100%; margin-left: 22px; }
+  .child-count { display: none; }
   .row-actions { display: none; }
   .status-btn { height: 24px; margin-left: 0; padding: 0 8px 0 6px; background: var(--chip-bg); box-shadow: inset 0 0 0 1px var(--chip-line); font-size: 12px; }
   .prio-cell { font-size: 12px; }

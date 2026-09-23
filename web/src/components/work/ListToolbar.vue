@@ -103,7 +103,7 @@ defineExpose({ focusSearch, input })
 
     <span class="spacer" />
 
-    <span class="count mono" role="status" aria-live="polite">{{ total === null ? (loading ? '…' : '') : plural(total, 'ticket') }}</span>
+    <span class="count mono" role="status" aria-live="polite"><span v-if="total === null && loading" class="skeleton count-skeleton" aria-label="Counting tickets" /><template v-else-if="total !== null">{{ plural(total, 'ticket') }}</template></span>
     <label class="switch closed-switch">
       <input type="checkbox" :checked="!filters.showClosed" @change="emit('showClosed', !($event.target as HTMLInputElement).checked)" />
       <span>Hide closed</span>
@@ -159,6 +159,7 @@ defineExpose({ focusSearch, input })
 .clear-all { padding: 0 8px; }
 .spacer { flex: 1; }
 .count { font-size: 12px; color: var(--ink-2); white-space: nowrap; }
+.count-skeleton { display: inline-block; width: 64px; height: 8px; vertical-align: middle; }
 .closed-switch { font-size: 12.5px; }
 .group-btn { color: var(--ink-2); }
 .group-btn.on { color: var(--teal-ink); }

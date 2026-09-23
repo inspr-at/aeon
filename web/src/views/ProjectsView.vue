@@ -128,9 +128,9 @@ onBeforeUnmount(() => { window.removeEventListener('keydown', keydown); clearInt
               </span>
               <span class="project-desc">{{ project.description || 'No description' }}</span>
             </span>
-            <span class="num stat" :class="{ zero: !project.open }"><StatusIcon state="new" :size="11" class="stat-icon" />{{ project.open.toLocaleString('en-GB') }}<span class="stat-label"> open</span></span>
-            <span class="num stat" :class="{ zero: !project.in_progress }"><StatusIcon state="in_progress" :size="11" class="stat-icon" />{{ project.in_progress.toLocaleString('en-GB') }}<span class="stat-label"> in progress</span></span>
-            <span class="num stat" :class="{ zero: !project.done }"><StatusIcon state="done" :size="11" class="stat-icon" />{{ project.done.toLocaleString('en-GB') }}<span class="stat-label"> done</span></span>
+            <span class="num stat" :class="{ zero: !project.open }"><StatusIcon state="new" :size="11" class="stat-icon" /><span class="n">{{ project.open.toLocaleString('en-GB') }}</span></span>
+            <span class="num stat" :class="{ zero: !project.in_progress }"><StatusIcon state="in_progress" :size="11" class="stat-icon" /><span class="n">{{ project.in_progress.toLocaleString('en-GB') }}</span></span>
+            <span class="num stat" :class="{ zero: !project.done }"><StatusIcon state="done" :size="11" class="stat-icon" /><span class="n">{{ project.done.toLocaleString('en-GB') }}</span></span>
             <span class="progress" :data-tip="`${project.done.toLocaleString('en-GB')} of ${project.total.toLocaleString('en-GB')} done`">
               <span class="bar"><i :style="{ width: `${percent(project)}%` }" /></span>
               <span class="mono pct">{{ project.total ? `${percent(project)}%` : '—' }}</span>
@@ -167,7 +167,7 @@ onBeforeUnmount(() => { window.removeEventListener('keydown', keydown); clearInt
 .sort-note { font-size: 10.5px; }
 .projects-head, .project-row {
   display: grid; align-items: center; column-gap: 18px;
-  grid-template-columns: 84px minmax(0, 1fr) 60px 96px 60px 150px 104px 14px;
+  grid-template-columns: 78px minmax(0, 1fr) 64px 96px 64px 150px 104px 14px;
 }
 .projects-head { height: 34px; padding: 0 20px; border-bottom: 1px solid var(--line); font: 500 10.5px/1 var(--mono); letter-spacing: .14em; text-transform: uppercase; color: var(--ink-3); font-variant-ligatures: none; }
 .projects-head > :first-child { grid-column: 1 / 3; }
@@ -187,12 +187,12 @@ onBeforeUnmount(() => { window.removeEventListener('keydown', keydown); clearInt
 .project-desc { font-size: 13px; color: var(--ink-2); overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 .state-chip { height: 18px; padding: 0 7px; font-size: 10px; text-transform: uppercase; letter-spacing: .08em; }
 .state-chip.frozen { color: var(--gold-ink); box-shadow: inset 0 0 0 1px rgba(214, 155, 49, .45); }
-.key-badge { justify-self: start; max-width: 84px; overflow: hidden; text-overflow: ellipsis; }
+.key-badge { justify-self: start; max-width: 78px; overflow: hidden; text-overflow: ellipsis; }
 .projects-head > span { white-space: nowrap; }
 .stat { display: inline-flex; align-items: center; gap: 6px; font: 500 13px/1 var(--mono); font-variant-numeric: tabular-nums; font-variant-ligatures: none; color: var(--ink); }
 .stat.zero { color: var(--ink-3); }
 .stat-icon { opacity: .9; }
-.stat-label { display: none; }
+.stat .n { min-width: 4.2ch; text-align: right; }
 .stats-line { display: none; }
 .progress { display: flex; align-items: center; gap: 10px; }
 .progress .bar { flex: 1; }

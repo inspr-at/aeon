@@ -46,7 +46,7 @@
   --btn-bg-hover: linear-gradient(180deg, #fff, rgba(230, 247, 245, 0.8));
   --seg-bg: rgba(32, 60, 61, 0.06);
   --seg-on: linear-gradient(180deg, #fff, var(--aqua-3));
-  --row-hover: rgba(14, 111, 108, 0.045);
+  --row-hover: rgba(14, 111, 108, 0.055);
   --row-selected: rgba(164, 229, 223, 0.3);
   --row-accent: var(--teal);
   --danger-bg: rgba(178, 74, 68, 0.08);
@@ -127,7 +127,7 @@
   --keycap-bg: linear-gradient(180deg, rgba(237, 244, 240, 0.14), rgba(237, 244, 240, 0.07)); --keycap-line: rgba(237, 244, 240, 0.2); --keycap-ink: var(--ink);
   --btn-bg: linear-gradient(180deg, rgba(237, 244, 240, 0.1), rgba(237, 244, 240, 0.04)); --btn-bg-hover: linear-gradient(180deg, rgba(164, 229, 223, 0.18), rgba(164, 229, 223, 0.08));
   --seg-bg: rgba(4, 14, 16, 0.3); --seg-on: linear-gradient(180deg, rgba(164, 229, 223, 0.24), rgba(164, 229, 223, 0.12));
-  --row-hover: rgba(164, 229, 223, 0.05); --row-selected: rgba(164, 229, 223, 0.11); --row-accent: #a4e5df;
+  --row-hover: rgba(164, 229, 223, 0.06); --row-selected: rgba(164, 229, 223, 0.11); --row-accent: #a4e5df;
   --danger-bg: rgba(239, 157, 149, 0.1); --danger-line: rgba(239, 157, 149, 0.35);
   --mark-hl: rgba(214, 155, 49, 0.38);
   --tip-bg: rgba(6, 18, 20, 0.96); --tip-ink: #edf4f0;
@@ -166,7 +166,7 @@
     --keycap-bg: linear-gradient(180deg, rgba(237, 244, 240, 0.14), rgba(237, 244, 240, 0.07)); --keycap-line: rgba(237, 244, 240, 0.2); --keycap-ink: var(--ink);
     --btn-bg: linear-gradient(180deg, rgba(237, 244, 240, 0.1), rgba(237, 244, 240, 0.04)); --btn-bg-hover: linear-gradient(180deg, rgba(164, 229, 223, 0.18), rgba(164, 229, 223, 0.08));
     --seg-bg: rgba(4, 14, 16, 0.3); --seg-on: linear-gradient(180deg, rgba(164, 229, 223, 0.24), rgba(164, 229, 223, 0.12));
-    --row-hover: rgba(164, 229, 223, 0.05); --row-selected: rgba(164, 229, 223, 0.11); --row-accent: #a4e5df;
+    --row-hover: rgba(164, 229, 223, 0.06); --row-selected: rgba(164, 229, 223, 0.11); --row-accent: #a4e5df;
     --danger-bg: rgba(239, 157, 149, 0.1); --danger-line: rgba(239, 157, 149, 0.35);
     --mark-hl: rgba(214, 155, 49, 0.38);
     --tip-bg: rgba(6, 18, 20, 0.96); --tip-ink: #edf4f0;

@@ -18,7 +18,8 @@ function place() {
   const rect = props.anchor.getBoundingClientRect()
   const height = panel.value.scrollHeight
   const room = innerHeight - rect.bottom - 12
-  above.value = room < Math.min(height, 260) && rect.top > room
+  // Open above when the menu would not fit below and there is more room above.
+  above.value = room < Math.min(height, 420) && rect.top > room
   maxHeight.value = Math.max(160, Math.min(420, above.value ? rect.top - 12 : room))
   const width = Math.min(props.width, innerWidth - 16)
   const left = props.align === 'end' ? rect.right - width : rect.left
