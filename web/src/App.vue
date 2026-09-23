@@ -3,6 +3,7 @@
 import { ref, watch, nextTick } from 'vue'
 import { useRoute, useRouter } from 'vue-router'
 import AppHeader from './components/AppHeader.vue'
+import ConfirmHost from './components/ConfirmHost.vue'
 import ToastHost from './components/ToastHost.vue'
 import TooltipHost from './components/TooltipHost.vue'
 import VersionDisplay from './components/VersionDisplay.vue'
@@ -52,6 +53,7 @@ watch(() => [route.path, route.params.projectKey, route.params.ticketKey] as con
       </div>
     </main>
     <ToastHost />
+    <ConfirmHost />
     <TooltipHost />
   </div>
 </template>

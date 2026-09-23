@@ -8,6 +8,7 @@ import AppIcon from '../AppIcon.vue'
 import PersonAvatar from './PersonAvatar.vue'
 import PriorityIcon from './PriorityIcon.vue'
 import StatusIcon from './StatusIcon.vue'
+import QuickCreateRow, { type QuickDraft } from './QuickCreateRow.vue'
 
 const props = defineProps<{
   groups: RowGroup[]
@@ -31,6 +32,10 @@ const props = defineProps<{
   scrollRoot: HTMLElement | null
   now: number
   showAssignee: boolean
+  creating: boolean
+  projectId: string
+  knownStates: string[]
+  create: (draft: QuickDraft) => Promise<boolean>
 }>()
 const emit = defineEmits<{
   open: [row: ListItem]
@@ -46,6 +51,7 @@ const emit = defineEmits<{
   clearFilters: []
   showClosed: []
   gridFocus: []
+  closeCreate: []
 }>()
 
 const allColumns: { field: SortField | null; label: string; cls: string }[] = [
@@ -59,6 +65,7 @@ const allColumns: { field: SortField | null; label: string; cls: string }[] = [
 // Assignee only earns its column when someone in the result is assigned.
 const columns = computed(() => allColumns.filter(column => column.cls !== 'c-assignee' || props.showAssignee))
 const grid = ref<HTMLTableElement>()
+const quick = ref<InstanceType<typeof QuickCreateRow>>()
 const sentinel = ref<HTMLElement>()
 let observer: IntersectionObserver | undefined
 
@@ -105,7 +112,7 @@ function observe() {
 onMounted(observe)
 watch(() => [props.scrollRoot, props.hasMore, props.loadingMore], observe)
 onBeforeUnmount(() => observer?.disconnect())
-defineExpose({ focusGrid, scrollToRow, el: grid })
+defineExpose({ focusGrid, scrollToRow, el: grid, focusCreate: () => quick.value?.focus(), createDirty: () => !!quick.value?.isDirty() })
 </script>
 
 <template>
@@ -129,6 +136,9 @@ defineExpose({ focusGrid, scrollToRow, el: grid })
         </tr>
       </thead>
 
+      <tbody v-if="creating" class="create-body">
+        <QuickCreateRow ref="quick" :project-id="projectId" :known-states="knownStates" :show-assignee="showAssignee" :create="create" @close="emit('closeCreate')" />
+      </tbody>
       <tbody v-if="loading && !groups.some(g => g.rows.length)" class="skeleton-body" aria-hidden="true">
         <tr v-for="index in 14" :key="index" class="ticket-row ghost">
           <td class="c-key"><div class="cell"><span class="skeleton sk-key" /></div></td>
@@ -360,6 +370,8 @@ td.c-title { position: relative; }
 .sk-word { width: 58px; }
 .sk-time { width: 44px; }
 
+.create-body :deep(.create-row) { scroll-margin-top: calc(var(--toolbar-h, 0px) + 40px); }
+@media (max-width: 720px) { .create-body { display: block; } }
 .state { display: grid; justify-items: center; gap: 8px; padding: 56px 24px 64px; text-align: center; }
 .state-icon { display: grid; place-items: center; width: 44px; height: 44px; margin-bottom: 6px; border-radius: 50%; background: var(--chip-teal-bg); box-shadow: inset 0 0 0 1px var(--chip-teal-line); color: var(--teal-ink); }
 .state-icon.danger { background: var(--danger-bg); box-shadow: inset 0 0 0 1px var(--danger-line); color: var(--danger); }

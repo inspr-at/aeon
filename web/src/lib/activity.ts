@@ -1,0 +1,74 @@
+// SPDX-License-Identifier: AGPL-3.0-only
+// Turns the B2 activity feed (newest first, page by page) into a readable,
+// chronological timeline: comments stay as they are; field changes by the same
+// person within a few minutes collapse into one line.
+import type { ActivityChange, ActivityItem } from './api.ts'
+import { normaliseState, priorityLabel, statusMeta } from './work.ts'
+
+export const COLLAPSE_MS = 5 * 60_000
+export const EDIT_WINDOW_MS = 15 * 60_000
+
+export type TimelineEntry =
+  | { kind: 'comment'; id: string; at: string; author: ActivityItem['author']; body: string }
+  | { kind: 'changes'; id: string; at: string; author: ActivityItem['author']; changes: ActivityChange[] }
+  | { kind: 'created'; id: string; at: string; author: ActivityItem['author'] }
+
+function sameAuthor(a: ActivityItem['author'], b: ActivityItem['author']) {
+  return a.id && b.id ? a.id === b.id : a.name === b.name
+}
+function sameValue(field: ActivityChange['field'], a: string | null, b: string | null) {
+  return field === 'status' ? normaliseState(a ?? '') === normaliseState(b ?? '') : (a ?? '') === (b ?? '')
+}
+function merge(into: ActivityChange[], next: ActivityChange[]): ActivityChange[] {
+  const out = into.map(change => ({ ...change }))
+  for (const change of next) {
+    const existing = out.find(item => item.field === change.field)
+    if (existing) existing.to = change.to
+    else out.push({ ...change })
+  }
+  return out.filter(change => change.field === 'parent' || !sameValue(change.field, change.from, change.to))
+}
+
+// items: newest first, as the API pages them. Returns oldest first.
+export function buildTimeline(items: ActivityItem[], windowMs = COLLAPSE_MS): TimelineEntry[] {
+  const out: TimelineEntry[] = []
+  for (const item of [...items].reverse()) {
+    if (item.type === 'comment') { out.push({ kind: 'comment', id: item.id, at: item.at, author: item.author, body: item.body_markdown ?? '' }); continue }
+    if (item.type === 'created') { out.push({ kind: 'created', id: item.id, at: item.at, author: item.author }); continue }
+    const changes = item.changes ?? []
+    const last = out[out.length - 1]
+    if (last?.kind === 'changes' && sameAuthor(last.author, item.author) && Date.parse(item.at) - Date.parse(last.at) <= windowMs) {
+      last.changes = merge(last.changes, changes)
+      last.at = item.at
+      if (!last.changes.length) out.pop()
+      continue
+    }
+    const fresh = merge([], changes)
+    if (fresh.length) out.push({ kind: 'changes', id: item.id, at: item.at, author: item.author, changes: fresh })
+  }
+  return out
+}
+
+const FIELD_LABEL: Record<ActivityChange['field'], string> = { status: 'status', priority: 'priority', assignee: 'assignee', title: 'title', parent: 'parent' }
+export function changeValue(field: ActivityChange['field'], value: string | null): string {
+  if (field === 'status') return value ? statusMeta(value).label : '—'
+  if (field === 'priority') return priorityLabel(value)
+  if (field === 'assignee') return value || 'nobody'
+  if (field === 'title') return value ? `“${value.length > 60 ? `${value.slice(0, 57)}…` : value}”` : '—'
+  return value ?? '—'
+}
+export function describeChange(change: ActivityChange): { label: string; from?: string; to?: string } {
+  if (change.field === 'parent') return { label: 'moved it to another parent' }
+  if (change.field === 'assignee' && !change.from) return { label: 'assigned it to', to: changeValue('assignee', change.to) }
+  if (change.field === 'assignee' && !change.to) return { label: 'unassigned', from: changeValue('assignee', change.from) }
+  return { label: `changed ${FIELD_LABEL[change.field]}`, from: changeValue(change.field, change.from), to: changeValue(change.field, change.to) }
+}
+
+export function commentEditable(entry: { at: string; author: { id: string | null } }, me: string | undefined, now = Date.now()): boolean {
+  return !!me && entry.author.id === me && now - Date.parse(entry.at) < EDIT_WINDOW_MS
+}
+
+// There is no dedicated write role yet; viewers and read-only principals see the panel read-only.
+export function canWrite(roles: string[] | undefined): boolean {
+  return !(roles ?? []).some(role => ['viewer', 'readonly', 'read_only', 'read-only'].includes(role.toLowerCase()))
+}

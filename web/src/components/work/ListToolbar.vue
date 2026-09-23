@@ -25,6 +25,7 @@ const emit = defineEmits<{
   density: [value: 'comfortable' | 'compact']
   openSheet: []
   needNames: []
+  create: []
 }>()
 
 const draft = ref(props.filters.q)
@@ -127,6 +128,7 @@ defineExpose({ focusSearch, input })
       <AppIcon name="layers" :size="13" /><span class="display-label">{{ displayLabel }}</span><AppIcon name="chevron" :size="12" class="facet-chevron" />
     </button>
 
+    <button type="button" class="btn primary new-btn" aria-keyshortcuts="n" data-tip="New ticket · n" @click="emit('create')"><AppIcon name="plus" :size="14" /><span class="new-label">New</span></button>
     <button type="button" class="btn filters-btn" :class="{ on: filterCount }" @click="emit('openSheet')">
       <AppIcon name="sliders" :size="14" />Filters<span v-if="filterCount" class="facet-count mono">{{ filterCount }}</span>
     </button>
@@ -187,19 +189,22 @@ defineExpose({ focusSearch, input })
 .display-btn { gap: 6px; color: var(--ink-2); }
 .display-btn.on { color: var(--teal-ink); }
 .filters-btn { display: none; }
+.new-btn { height: 32px; padding: 0 14px 0 11px; gap: 6px; }
 .display-panel { display: grid; gap: 8px; padding: 6px 8px 8px; }
 .display-panel .eyebrow + .seg { margin-bottom: 6px; }
 .seg.wide { display: grid; grid-auto-flow: column; grid-auto-columns: 1fr; }
 .seg.wide button { height: 30px; }
 /* Narrow list (docked panel or small window): tighter search, no count. */
-@container toolbar (max-width: 1000px) { .list-search { width: 190px; } .count { display: none; } }
+@container toolbar (max-width: 1000px) { .list-search { width: 190px; } .count { display: none; } .new-btn { width: 32px; padding: 0; } .new-label { display: none; } }
 @container toolbar (max-width: 820px) { .list-search { width: 136px; } .list-search .field { padding-right: 10px; } .facet-btn { padding: 0 11px; } .facet-btn:not(.on) .facet-end { display: none; } }
-@container toolbar (max-width: 680px) { .display-label { display: none; } .display-btn { padding: 0 9px; } }
+@container toolbar (max-width: 900px) { .display-label { display: none; } .display-btn { padding: 0 9px; } }
 @media (max-width: 900px) { .facets, .chips, .display-btn, .closed-switch, .spacer { display: none; } .list-search { flex: 1; width: auto; } .filters-btn { display: inline-flex; } }
 @media (max-width: 600px) {
   .toolbar { flex-wrap: nowrap; gap: 8px; padding: 8px 0; }
   .list-search .field { height: 44px; font-size: 16px; }
   .filters-btn { height: 44px; padding: 0 14px; }
+  .new-btn { order: 3; width: 44px; height: 44px; padding: 0; }
+  .new-label { display: none; }
   .count { display: none; }
 }
 </style>

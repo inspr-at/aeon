@@ -5,7 +5,7 @@ export type IconName =
   | 'sun' | 'moon' | 'user' | 'chevron' | 'chevron-right' | 'chevron-left' | 'chevron-up' | 'arrow' | 'arrow-up' | 'arrow-down'
   | 'logout' | 'tree' | 'compass' | 'search' | 'list' | 'plus' | 'close' | 'edit' | 'copy' | 'external' | 'filter' | 'check'
   | 'rows-comfortable' | 'rows-compact' | 'keyboard' | 'epic' | 'ticket' | 'task' | 'alert' | 'refresh' | 'sliders' | 'enter'
-  | 'inbox' | 'folder' | 'layers' | 'archive' | 'clock'
+  | 'inbox' | 'folder' | 'layers' | 'archive' | 'clock' | 'expand' | 'collapse' | 'more' | 'link' | 'trash'
 </script>
 <script setup lang="ts">
 withDefaults(defineProps<{ name: IconName; size?: number }>(), { size: 16 })
@@ -48,6 +48,11 @@ withDefaults(defineProps<{ name: IconName; size?: number }>(), { size: 16 })
     <path v-else-if="name === 'folder'" d="M2 4.6c0-.6.4-1 1-1h3.2l1.5 1.5H13c.6 0 1 .4 1 1V12c0 .6-.4 1-1 1H3c-.6 0-1-.4-1-1Z" />
     <path v-else-if="name === 'layers'" d="M8 2 14 5 8 8 2 5ZM2 8.2l6 3 6-3M2 11.2l6 3 6-3" />
     <template v-else-if="name === 'archive'"><rect x="1.8" y="2.8" width="12.4" height="3.4" rx="1" /><path d="M3 6.2v6.2c0 .6.4 1 1 1h8c.6 0 1-.4 1-1V6.2M6.4 9h3.2" /></template>
+    <path v-else-if="name === 'expand'" d="M9.4 2.6h4v4M13.4 2.6 9.2 6.8M6.6 13.4h-4v-4M2.6 13.4l4.2-4.2" />
+    <path v-else-if="name === 'collapse'" d="M13.4 2.6 9.4 6.6M9.4 3v3.6H13M2.6 13.4l4-4M6.6 13V9.4H3" />
+    <template v-else-if="name === 'more'"><circle cx="3.4" cy="8" r="1.25" fill="currentColor" stroke="none" /><circle cx="8" cy="8" r="1.25" fill="currentColor" stroke="none" /><circle cx="12.6" cy="8" r="1.25" fill="currentColor" stroke="none" /></template>
+    <path v-else-if="name === 'link'" d="M6.6 9.4 9.4 6.6M7.2 4.4l1.2-1.2a2.6 2.6 0 0 1 3.7 3.7l-1.2 1.2M8.8 11.6l-1.2 1.2a2.6 2.6 0 0 1-3.7-3.7l1.2-1.2" />
+    <path v-else-if="name === 'trash'" d="M2.8 4.2h10.4M6.2 4.2V2.8h3.6v1.4M4.2 4.2l.7 8.6c.1.7.6 1.2 1.3 1.2h3.6c.7 0 1.2-.5 1.3-1.2l.7-8.6M6.8 7v4.2M9.2 7v4.2" />
     <template v-else-if="name === 'clock'"><circle cx="8" cy="8" r="6.2" /><path d="M8 4.6V8l2.2 1.4" /></template>
     <template v-else><circle cx="8" cy="8" r="6.2" /><path d="M10.6 5.4 9.2 9.2l-3.8 1.4 1.4-3.8Z" /></template>
   </svg>

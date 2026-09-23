@@ -31,6 +31,8 @@ const globalSearch = computed(() => !!session.identity && !route.meta.legacySear
 const projectKey = computed(() => typeof route.params.projectKey === 'string' ? route.params.projectKey : '')
 const project = computed(() => projectKey.value ? projects.byRouteKey(projectKey.value) : undefined)
 const onProjects = computed(() => route.path === '/')
+// Full-page tickets get their own crumb; the side panel keeps the list as the page.
+const fullTicket = computed(() => typeof route.params.ticketKey === 'string' && route.query.view === 'full' ? route.params.ticketKey.toUpperCase() : '')
 const pageTitle = computed(() => !onProjects.value && !projectKey.value && route.path !== '/signin' ? String(route.meta.title ?? '') : '')
 
 async function toggleMenu() {
@@ -90,10 +92,14 @@ onBeforeUnmount(() => { document.removeEventListener('pointerdown', outside); wi
       <RouterLink class="crumb" to="/" :aria-current="onProjects ? 'page' : undefined">Projects</RouterLink>
       <template v-if="projectKey">
         <span class="sep" aria-hidden="true">/</span>
-        <RouterLink class="crumb project-crumb" :to="`/p/${encodeURIComponent(project?.routeKey ?? projectKey)}`" :aria-current="route.params.ticketKey ? undefined : 'page'">
+        <RouterLink class="crumb project-crumb" :to="`/p/${encodeURIComponent(project?.routeKey ?? projectKey)}`" :aria-current="fullTicket ? undefined : 'page'">
           <span class="key-badge">{{ project?.routeKey ?? projectKey.toUpperCase() }}</span>
           <span class="crumb-name">{{ project?.title ?? '' }}</span>
         </RouterLink>
+        <template v-if="fullTicket">
+          <span class="sep" aria-hidden="true">/</span>
+          <span class="crumb current mono-crumb" aria-current="page">{{ fullTicket }}</span>
+        </template>
       </template>
       <template v-else-if="pageTitle">
         <span class="sep" aria-hidden="true">/</span>
@@ -153,6 +159,7 @@ onBeforeUnmount(() => { document.removeEventListener('pointerdown', outside); wi
 .crumb-name { overflow: hidden; text-overflow: ellipsis; color: var(--ink); }
 .project-crumb { min-width: 0; }
 .sep { color: var(--ink-3); font-weight: 300; font-size: 16px; }
+.mono-crumb { font: 500 12px/1 var(--mono); letter-spacing: .02em; font-variant-ligatures: none; }
 .spacer { flex: 1 1 0; min-width: 0; }
 .search-pill, .header-btn, .account { flex-shrink: 0; }
 .search-pill {
