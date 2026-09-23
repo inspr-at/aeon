@@ -6,12 +6,14 @@ import (
 	"bytes"
 	"context"
 	"encoding/json"
+	"fmt"
 	"io"
 	"net"
 	"net/http"
 	"net/http/cookiejar"
 	"net/http/httptest"
 	"net/url"
+	"os"
 	"path/filepath"
 	"regexp"
 	"strings"
@@ -23,6 +25,7 @@ import (
 	"github.com/inspr-at/aeon/internal/auth"
 	"github.com/inspr-at/aeon/internal/db"
 	"github.com/inspr-at/aeon/internal/dbtest"
+	"github.com/inspr-at/aeon/internal/harness"
 	"github.com/inspr-at/aeon/internal/httpapi"
 	"github.com/inspr-at/aeon/internal/inbox"
 	"github.com/inspr-at/aeon/internal/modelregistry"
@@ -80,6 +83,7 @@ func TestCompatEndToEnd(t *testing.T) {
 			search.New(opened.App, nil),
 			modelregistry.New(opened.App),
 			inbox.New(opened.App),
+			harness.New(opened.App),
 		},
 		Middleware: []func(http.Handler) http.Handler{authMod.Middleware},
 	}
@@ -120,6 +124,12 @@ func TestCompatEndToEnd(t *testing.T) {
 
 	worker := mintAgent(t, srv.URL, "worker")
 	peer := mintAgent(t, srv.URL, "peer")
+	if err := db.InTenant(ctx, opened.App, worker.TenantID, func(tx pgx.Tx) error {
+		_, err := tx.Exec(ctx, `UPDATE agent_keys SET scopes=array_cat(scopes,$2::text[]) WHERE principal_id=$1`, worker.PrincipalID, []string{"harness.read", "harness.write", "harness.worker", "harness.control"})
+		return err
+	}); err != nil {
+		t.Fatal(err)
+	}
 	seedProject(t, srv.URL, worker.Token)
 	t.Setenv("PAIMOS_API_KEY", worker.Token)
 
@@ -213,6 +223,60 @@ func TestCompatEndToEnd(t *testing.T) {
 	code, out, errOut = runCLI([]string{"paimos", "--config", missing, "session", "start", "--project", "AEON", "--agent", "worker"}, "")
 	if code != 0 || !strings.Contains(out, "export PAIMOS_AGENT_NAME=worker\n") || !regexp.MustCompile(`export PAIMOS_SESSION_ID=[0-9a-f-]{36}\n`).MatchString(out) {
 		t.Fatalf("session code %d out %q err %q", code, out, errOut)
+	}
+
+	// Exercise the P5.3 constructors directly until the coordinator switches the
+	// shared compat_cmds.go entry points to them.
+	refFile := filepath.Join(t.TempDir(), "session.ref")
+	leaseFile := filepath.Join(t.TempDir(), "worker.lease")
+	if err := os.WriteFile(refFile, []byte("vendor-session-ref-000000000001\n"), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(leaseFile, []byte("private-worker-lease-00000000000000000001\n"), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	code, out, errOut = runHarnessPrepared([]string{"--config", missing, "--json", "harness", "register", "--project", "AEON", "--agent", "worker", "--harness", "codex", "--host", "test-host", "--harness-session-file", refFile, "--worker-lease-file", leaseFile, "--role", "coordinator", "--capability", "status,interrupt,stop,inbox"})
+	if code != 0 {
+		t.Fatalf("harness register code %d err %s", code, errOut)
+	}
+	var session struct {
+		ID string `json:"id"`
+	}
+	if err := json.Unmarshal([]byte(out), &session); err != nil || !validUUID(session.ID) {
+		t.Fatalf("harness registration response %q: %v", out, err)
+	}
+	code, out, errOut = runHarnessPrepared([]string{"--config", missing, "--json", "harness", "list", "--project", "AEON"})
+	if code != 0 || !strings.Contains(out, session.ID) {
+		t.Fatalf("harness list code %d out %s err %s", code, out, errOut)
+	}
+	code, out, errOut = runHarnessPrepared([]string{"--config", missing, "--json", "harness", "status", "--project", "AEON", "--session", session.ID})
+	if code != 0 || !strings.Contains(out, session.ID) {
+		t.Fatalf("harness status code %d out %s err %s", code, out, errOut)
+	}
+	code, out, errOut = runHarnessPrepared([]string{"--config", missing, "--json", "harness", "heartbeat", "--project", "AEON", "--session", session.ID, "--agent", "worker", "--worker-lease-file", leaseFile, "--phase", "working", "--activity", "busy", "--activity-sequence", "1"})
+	if code != 0 || !strings.Contains(out, `"activity":"busy"`) {
+		t.Fatalf("harness heartbeat code %d out %s err %s", code, out, errOut)
+	}
+	code, out, errOut = runHarnessPrepared([]string{"--config", missing, "--json", "harness", "orchestrator", "--project", "AEON"})
+	if code != 0 || !strings.Contains(out, `"state":"resolved"`) {
+		t.Fatalf("harness orchestrator code %d out %s err %s", code, out, errOut)
+	}
+	code, out, errOut = runHarnessPrepared([]string{"--config", missing, "--json", "harness", "yield", "--project", "AEON", "--session", session.ID, "--agent", "worker", "--worker-lease-file", leaseFile})
+	if code != 0 || !strings.Contains(out, `"controls":[]`) {
+		t.Fatalf("harness yield code %d out %s err %s", code, out, errOut)
+	}
+	code, out, errOut = runHarnessPrepared([]string{"--config", missing, "--json", "harness", "drain", "--project", "AEON", "--session", session.ID, "--agent", "worker", "--worker-lease-file", leaseFile})
+	if code != 0 || strings.TrimSpace(out) != "[]" {
+		t.Fatalf("harness drain code %d out %s err %s", code, out, errOut)
+	}
+	code, out, errOut = runHarnessPrepared([]string{"--config", missing, "--json", "harness", "mark-stopped", "--project", "AEON", "--session", session.ID, "--agent", "worker", "--worker-lease-file", leaseFile})
+	if code != 0 || !strings.Contains(out, `"phase":"stopped"`) {
+		t.Fatalf("harness stop code %d out %s err %s", code, out, errOut)
+	}
+	var bundleOut bytes.Buffer
+	bundleRT := &runtime{program: "paimos", stdout: &bundleOut, stderr: &bytes.Buffer{}, configPath: missing, jsonOut: true}
+	if err := bundleRT.harnessSessionFull("AEON", "worker", "json", session.ID); err != nil || !strings.Contains(bundleOut.String(), key) {
+		t.Fatalf("full bundle %s: %v", bundleOut.String(), err)
 	}
 
 	code, out, errOut = runCLI([]string{"paimos", "--config", missing, "onboard", "--project", "AEON", "--agent", "worker"}, "")
@@ -377,4 +441,26 @@ func assertEvent(t *testing.T, opened *dbtest.DB, tenantID, eventType string) {
 	if n < 1 {
 		t.Fatalf("no %s event", eventType)
 	}
+}
+
+func runHarnessPrepared(args []string) (int, string, string) {
+	var out, errOut bytes.Buffer
+	rt := &runtime{program: "paimos", stdout: &out, stderr: &errOut, stdin: strings.NewReader("")}
+	root := &Command{subs: []*Command{rt.cmdHarnessV2()}}
+	cmd, rest, err := rt.walk(root, args)
+	if err == nil {
+		var pos []string
+		pos, err = rt.parse(cmd, rest)
+		if err == nil {
+			err = cmd.checkArgs(pos)
+		}
+		if err == nil {
+			err = cmd.run(pos)
+		}
+	}
+	if err != nil {
+		fmt.Fprintln(&errOut, err)
+		return 1, out.String(), errOut.String()
+	}
+	return 0, out.String(), errOut.String()
 }

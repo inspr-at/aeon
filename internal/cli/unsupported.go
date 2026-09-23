@@ -12,8 +12,6 @@ package cli
 // and does not open a network connection.
 
 const (
-	reasonHarness = "Aeon has no harness-session control plane; work orders and agent runs do not register, bind, heartbeat, drain or stop a vendor session"
-
 	reasonAnchors = "anchor scan and verify read a repo index file; Aeon has no anchor resource"
 
 	reasonSkill = "skill render writes a harness artifact; Aeon has no skill-render resource"
@@ -35,8 +33,6 @@ const (
 	reasonClassicTarget = "message target set with --address, --adapter or a classic kind stores an encrypted receiver Aeon does not keep; use --principal and --kind pull"
 
 	reasonDeliveries = "message deliveries is the classic redacted delivery log; Aeon inbox targets have no delivery ledger"
-
-	reasonBundle = "session start --bundle full and --format files need the classic knowledge bundle cache; Aeon session start emits the agent and session id only"
 
 	reasonKnowledgeKind = "Aeon seeds memory, runbook and guideline nodes; external-system and related-project are not node kinds"
 
@@ -64,20 +60,6 @@ var unsupportedCompat = []struct {
 	{"listen --follow", []string{"listen", "--project", "AEON", "--follow"}, reasonListenFollow},
 	{"message target set classic", []string{"message", "target", "set", "--project", "AEON", "--address", "codex:worker", "--adapter", "codex", "--kind", "codex_thread"}, reasonClassicTarget},
 	{"message deliveries", []string{"message", "deliveries"}, reasonDeliveries},
-	{"session start --bundle full", []string{"session", "start", "--project", "AEON", "--agent", "worker", "--bundle", "full"}, reasonBundle},
 	{"knowledge external-system", []string{"knowledge", "create", "--type", "external-system", "--slug", "x", "--project", "AEON", "--title", "X"}, reasonKnowledgeKind},
 	{"knowledge related-project", []string{"knowledge", "get", "related-project", "x", "--project", "AEON"}, reasonKnowledgeKind},
-	{"harness register", []string{"harness", "register"}, reasonHarness},
-	{"harness list", []string{"harness", "list"}, reasonHarness},
-	{"harness status", []string{"harness", "status"}, reasonHarness},
-	{"harness orchestrator", []string{"harness", "orchestrator"}, reasonHarness},
-	{"harness bind", []string{"harness", "bind"}, reasonHarness},
-	{"harness heartbeat", []string{"harness", "heartbeat"}, reasonHarness},
-	{"harness yield", []string{"harness", "yield"}, reasonHarness},
-	{"harness drain", []string{"harness", "drain"}, reasonHarness},
-	{"harness complete-delivery", []string{"harness", "complete-delivery"}, reasonHarness},
-	{"harness interrupt", []string{"harness", "interrupt"}, reasonHarness},
-	{"harness stop", []string{"harness", "stop"}, reasonHarness},
-	{"harness complete-control", []string{"harness", "complete-control"}, reasonHarness},
-	{"harness mark-stopped", []string{"harness", "mark-stopped"}, reasonHarness},
 }
