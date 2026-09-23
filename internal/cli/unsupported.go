@@ -12,8 +12,6 @@ package cli
 // and does not open a network connection.
 
 const (
-	reasonHarness = "Aeon has no harness-session control plane; work orders and agent runs do not register, bind, heartbeat, drain or stop a vendor session"
-
 	reasonRunAgent = "run-agent watch is an operator-local vendor process; Aeon work orders do not spawn one"
 
 	reasonBaseline = "baseline-batch report-built is replaced by stage handoffs and is not a compat verb"
@@ -29,8 +27,6 @@ const (
 	reasonClassicTarget = "message target set with --address, --adapter or a classic kind stores an encrypted receiver Aeon does not keep; use --principal and --kind pull"
 
 	reasonDeliveries = "message deliveries is the classic redacted delivery log; Aeon inbox targets have no delivery ledger"
-
-	reasonBundle = "session start --bundle full and --format files need the classic knowledge bundle cache; Aeon session start emits the agent and session id only"
 
 	reasonKnowledgeKind = "Aeon knowledge types are memory, runbook, guideline, external-system, and related-project"
 
