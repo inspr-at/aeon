@@ -35,6 +35,213 @@ paths:
                 properties:
                   version: { type: string, description: "YYMMDDhhmmss.0.0 or dev" }
                   scheme: { type: string, enum: [inspr-calendar-v2] }
+  /auth/login:
+    get:
+      operationId: authLogin
+      summary: Start the OIDC authorization-code flow with PKCE
+      security: []
+      responses:
+        "302":
+          description: Redirect to the identity provider
+        "500":
+          description: Sign-in is not available
+          content:
+            text/html:
+              schema: { type: string }
+  /auth/callback:
+    get:
+      operationId: authCallback
+      summary: Finish sign-in and start a session
+      security: []
+      parameters:
+        - { name: code, in: query, schema: { type: string } }
+        - { name: state, in: query, schema: { type: string } }
+        - { name: error, in: query, schema: { type: string } }
+      responses:
+        "302":
+          description: Session cookie set; redirect to the app
+          headers:
+            Set-Cookie:
+              schema: { type: string }
+        "400":
+          description: Sign-in failed
+          content:
+            text/html:
+              schema: { type: string }
+        "403":
+          description: Not a member of this workspace yet
+          content:
+            text/html:
+              schema: { type: string }
+        "500":
+          description: Workspace is not ready
+          content:
+            text/html:
+              schema: { type: string }
+  /auth/logout:
+    post:
+      operationId: authLogout
+      summary: End the current session
+      security: []
+      responses:
+        "204":
+          description: Session deleted and cookie cleared
+  /auth/dev-login:
+    post:
+      operationId: authDevLogin
+      summary: Sign in by email when AEON_ENV=dev
+      description: Not mounted unless AEON_ENV=dev. Other environments respond 404.
+      security: []
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [email]
+              properties:
+                email: { type: string, format: email }
+      responses:
+        "200":
+          description: Session started
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/Me" }
+        "400":
+          description: Email missing or invalid
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/Error" }
+        "403":
+          description: Not a member of this workspace yet
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/Error" }
+        "404":
+          description: Dev login is disabled
+  /me:
+    get:
+      operationId: getMe
+      summary: Acting principal, tenant and identity
+      security:
+        - session: []
+        - agentKey: []
+      responses:
+        "200":
+          description: Caller
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/Me" }
+        "401":
+          description: Not signed in
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/Error" }
+  /agent-keys:
+    get:
+      operationId: listAgentKeys
+      summary: List agent keys for the caller's tenant
+      security:
+        - session: []
+        - agentKey: []
+      responses:
+        "200":
+          description: Keys, without secrets
+          content:
+            application/json:
+              schema:
+                type: object
+                required: [keys]
+                properties:
+                  keys:
+                    type: array
+                    items: { $ref: "#/components/schemas/AgentKey" }
+        "401":
+          description: Not signed in
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/Error" }
+        "403":
+          description: Admin role required
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/Error" }
+    post:
+      operationId: createAgentKey
+      summary: Create an agent key and return its secret once
+      description: Creates an agent principal with this name when the tenant does not already have one.
+      security:
+        - session: []
+        - agentKey: []
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [name]
+              properties:
+                name: { type: string }
+                scopes:
+                  type: array
+                  items: { type: string }
+                expires_at: { type: string, format: date-time }
+      responses:
+        "201":
+          description: Key created. token is shown only in this response.
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/AgentKeyCreated" }
+        "400":
+          description: Invalid name, scopes or expiry
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/Error" }
+        "401":
+          description: Not signed in
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/Error" }
+        "403":
+          description: Admin role required
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/Error" }
+  /agent-keys/{id}:
+    delete:
+      operationId: revokeAgentKey
+      summary: Revoke an agent key
+      security:
+        - session: []
+        - agentKey: []
+      parameters:
+        - name: id
+          in: path
+          required: true
+          schema: { type: string, format: uuid }
+      responses:
+        "204":
+          description: Revoked
+        "400":
+          description: id is not a uuid
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/Error" }
+        "401":
+          description: Not signed in
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/Error" }
+        "403":
+          description: Admin role required
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/Error" }
+        "404":
+          description: No such key in this tenant
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/Error" }
 components:
   securitySchemes:
     session:
@@ -44,3 +251,71 @@ components:
     agentKey:
       type: http
       scheme: bearer
+      description: Bearer token aeon_<prefix>_<secret>
+  schemas:
+    Error:
+      type: object
+      required: [error]
+      properties:
+        error: { type: string }
+    Principal:
+      type: object
+      required: [id, tenant_id, kind, name, roles]
+      properties:
+        id: { type: string, format: uuid }
+        tenant_id: { type: string, format: uuid }
+        kind: { type: string, enum: [person, agent] }
+        name: { type: string }
+        roles:
+          type: array
+          items: { type: string }
+    Tenant:
+      type: object
+      required: [id, slug, name]
+      properties:
+        id: { type: string, format: uuid }
+        slug: { type: string }
+        name: { type: string }
+    Identity:
+      type: object
+      required: [id, issuer, subject]
+      properties:
+        id: { type: string, format: uuid }
+        issuer: { type: string }
+        subject: { type: string }
+        email: { type: ["string", "null"] }
+        display_name: { type: ["string", "null"] }
+    Me:
+      type: object
+      required: [principal, tenant, identity]
+      properties:
+        principal: { $ref: "#/components/schemas/Principal" }
+        tenant: { $ref: "#/components/schemas/Tenant" }
+        identity:
+          oneOf:
+            - { $ref: "#/components/schemas/Identity" }
+            - { type: "null" }
+    AgentKey:
+      type: object
+      required: [id, principal_id, name, prefix, scopes, created_at]
+      properties:
+        id: { type: string, format: uuid }
+        principal_id: { type: string, format: uuid }
+        name: { type: string }
+        prefix: { type: string }
+        scopes:
+          type: array
+          items: { type: string }
+        created_at: { type: string, format: date-time }
+        expires_at: { type: ["string", "null"], format: date-time }
+        last_used_at: { type: ["string", "null"], format: date-time }
+        revoked_at: { type: ["string", "null"], format: date-time }
+    AgentKeyCreated:
+      allOf:
+        - { $ref: "#/components/schemas/AgentKey" }
+        - type: object
+          required: [token]
+          properties:
+            token:
+              type: string
+              description: Returned once. Format aeon_<prefix>_<secret>.

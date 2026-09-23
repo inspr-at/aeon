@@ -12,9 +12,9 @@ db-up:
 db-down:
     docker stop aeon-dev-db
 
-# Go tests (needs db-up)
+# Go tests. Auth tests only touch aeon_p03 (parallel packages keep their own databases).
 test:
-    AEON_TEST_DATABASE_URL="{{db_url}}" go test ./...
+    AEON_TEST_DATABASE_URL="postgres://aeon:aeon@127.0.0.1:55432/aeon_p03?sslmode=disable" go test ./...
 
 # Web typecheck and build
 web-check:
