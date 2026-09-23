@@ -27,10 +27,12 @@ import (
 	"github.com/inspr-at/aeon/internal/journey"
 	"github.com/inspr-at/aeon/internal/modelregistry"
 	"github.com/inspr-at/aeon/internal/nodes"
+	"github.com/inspr-at/aeon/internal/plugins"
 	"github.com/inspr-at/aeon/internal/relations"
 	"github.com/inspr-at/aeon/internal/releases"
 	"github.com/inspr-at/aeon/internal/requirements"
 	"github.com/inspr-at/aeon/internal/search"
+	"github.com/inspr-at/aeon/internal/stagehandoff"
 	"github.com/inspr-at/aeon/internal/tenant"
 	"github.com/inspr-at/aeon/internal/views"
 	"github.com/inspr-at/aeon/internal/workorders"
@@ -91,6 +93,11 @@ func serveListener(ctx context.Context, cfg config.Config, ln net.Listener) erro
 		return err
 	}
 	// R1: embeddings are optional; without AEON_EMBEDDING_URL search is lexical only.
+	pluginRegistry, err := plugins.Builtin()
+	if err != nil {
+		_ = ln.Close()
+		return fmt.Errorf("plugins: %w", err)
+	}
 	embedProvider, err := embedding.FromEnv()
 	if err != nil {
 		_ = ln.Close()
@@ -124,6 +131,9 @@ func serveListener(ctx context.Context, cfg config.Config, ln net.Listener) erro
 			requirements.New(pool),
 			releases.New(pool),
 			intake.New(pool),
+			plugins.NewWithRegistry(pool, pluginRegistry),
+			// No LaunchChecks provider yet: stage launch admission fails closed.
+			stagehandoff.New(pool, pluginRegistry),
 		},
 		Middleware: []func(http.Handler) http.Handler{authMod.Middleware},
 	}
