@@ -13,6 +13,21 @@ just web-check    # web typecheck and build
 just dev          # run the server (API on :8080); `cd web && npm run dev` for the UI
 ```
 
+## Command line
+
+`aeon` is the agent command line. `aeon serve` still runs the server. Invoking the same binary as `paimos` (argv[0]) answers the same verbs, so existing doctrine commands keep their shape.
+
+```sh
+aeon auth login --url https://aeon.example --name default --key-file ./agent.key
+aeon whoami
+aeon issue list --project AEON
+aeon mcp
+```
+
+Named instances and the default live in `~/.aeon/config.yaml`. The agent API key is read from `--key-file` or stdin, never echoed, and stored under `~/.aeon/keys/` mode 0600. `AEON_URL` together with `AEON_API_KEY` (or `AEON_API_KEY_FILE`) is a process-only target. When the binary is `paimos`, `PAIMOS_URL` and `PAIMOS_API_KEY` work the same way.
+
+`whoami` calls `GET /api/me`. Issue, knowledge, search and onboard exit 3 with `arrives in R1` until those endpoints exist. `model resolve` exits 3 with a not-yet message. `aeon mcp` serves those tools over stdio.
+
 Versioning: INSPR Calendar Versioning v2 (`inspr-calendar-v2`, `YYMMDDhhmmss.0.0`); the version display uses the pinned INSPR presentation bundle, checked by `just release-check`.
 
 ## UI shell (P0.5 / AEON-10)
