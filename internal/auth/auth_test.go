@@ -73,7 +73,7 @@ func TestOIDCCookieSeal(t *testing.T) {
 		t.Fatal(err)
 	}
 	rec := httptest.NewRecorder()
-	payload := oidcPayload{State: "st", Nonce: "no", Verifier: "ve", Exp: time.Now().Add(time.Minute).Unix()}
+	payload := oidcPayload{State: "st", Nonce: "no", Verifier: "ve", Tenant: "inspr", Exp: time.Now().Add(time.Minute).Unix()}
 	if err := m.setOIDCCookie(rec, payload); err != nil {
 		t.Fatal(err)
 	}
@@ -90,7 +90,7 @@ func TestOIDCCookieSeal(t *testing.T) {
 	if _, err := m.readOIDCCookie(req); err == nil {
 		t.Fatal("tampered cookie accepted")
 	}
-	expired := oidcPayload{State: "st", Nonce: "no", Verifier: "ve", Exp: time.Now().Add(-time.Minute).Unix()}
+	expired := oidcPayload{State: "st", Nonce: "no", Verifier: "ve", Tenant: "inspr", Exp: time.Now().Add(-time.Minute).Unix()}
 	raw, err := m.seal(expired)
 	if err != nil {
 		t.Fatal(err)

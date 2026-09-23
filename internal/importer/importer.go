@@ -38,6 +38,9 @@ func (i Importer) Run(ctx context.Context, tenant, project string, dryRun bool) 
 	if err != nil {
 		return Report{}, err
 	}
+	if snap.SourceID == "" || snap.SourceID != i.Source.InstanceID() {
+		return Report{}, fmt.Errorf("source instance identity mismatch")
+	}
 	report := Analyze(snap)
 	if dryRun {
 		return report, nil

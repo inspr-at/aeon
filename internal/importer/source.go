@@ -63,11 +63,13 @@ func isNotFound(err error) bool {
 
 // Source is deliberately read-only. The client below only sends GET requests.
 type Source interface {
+	InstanceID() string
 	Read(context.Context, string) (Snapshot, error)
 }
 
 type HTTPSource struct {
 	base        *url.URL
+	instanceID  string
 	key         string
 	client      *http.Client
 	concurrency int
@@ -97,10 +99,15 @@ func NewHTTPSource(rawURL, keyFile string, client *http.Client) (*HTTPSource, er
 	}
 	copyClient := *client
 	copyClient.CheckRedirect = func(*http.Request, []*http.Request) error { return http.ErrUseLastResponse }
-	s := &HTTPSource{base: u, key: key, client: &copyClient}
+	origin := sha256.Sum256([]byte(u.String()))
+	s := &HTTPSource{base: u, instanceID: fmt.Sprintf("%x", origin[:12]), key: key, client: &copyClient}
 	_ = s.Configure(4, 0)
 	return s, nil
 }
+
+// InstanceID is the classic PPM source URL identity kept for rerun
+// compatibility. PMA uses an explicitly named instance in PMAAdapter.
+func (s *HTTPSource) InstanceID() string { return s.instanceID }
 
 // Configure sets the request cap and minimum spacing between request starts.
 // Call before Read; a source is used for one import at a time.
@@ -164,8 +171,7 @@ func (s *HTTPSource) get(ctx context.Context, path string, out any) error {
 
 func (s *HTTPSource) Read(ctx context.Context, projectKey string) (Snapshot, error) {
 	snap := Snapshot{Details: map[int64]Details{}}
-	origin := sha256.Sum256([]byte(s.base.String()))
-	snap.SourceID = fmt.Sprintf("%x", origin[:12])
+	snap.SourceID = s.InstanceID()
 	var projects []Record
 	if err := s.get(ctx, "/projects?status=all", &projects); err != nil {
 		return snap, err
