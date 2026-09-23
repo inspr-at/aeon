@@ -207,7 +207,7 @@ func TestKindCRUD(t *testing.T) {
 	page := decode[struct {
 		Items []kindJSON `json:"items"`
 	}](t, status, body, http.StatusOK)
-	if len(page.Items) != 8 {
+	if len(page.Items) != 9 {
 		t.Fatalf("starter kinds: %d", len(page.Items))
 	}
 	if page.Items[0].AllowedChildKinds != nil {
