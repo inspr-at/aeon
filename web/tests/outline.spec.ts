@@ -156,7 +156,10 @@ test('dragging a ticket onto an epic moves it there, guarded against newer copie
   await expect(row(page, 'PHAROS-10')).not.toHaveAttribute('draggable', 'true')
   await row(page, 'PHAROS-14').dragTo(row(page, 'PHAROS-10'))
   await expect(page.getByText('PHAROS-14 moved to PHAROS-10 Guarded multi-cloud provisioning')).toBeVisible()
-  expect(calls.find(call => call.path.endsWith('/move'))?.body).toEqual({ parent_id: 'n-epic', before_id: null })
+  const move = calls.find(call => call.path.endsWith('/move'))!
+  expect(move.body).toEqual({ parent_id: 'n-epic', before_id: null })
+  expect(move.headers['if-unmodified-since']).toBe(ago(12))
+  expect(calls.filter(call => call.path === '/api/nodes/n-4' && call.method === 'GET')).toHaveLength(0)
   // The ticket sits inside the epic now, which opened to show it.
   await expect(row(page, 'PHAROS-14')).toHaveAttribute('aria-level', '2')
   await page.getByRole('button', { name: 'Undo' }).click()
@@ -169,10 +172,16 @@ test('a drag onto an epic does not move a ticket that changed elsewhere', async 
   const calls = await mockWork(page, data)
   await page.goto('/p/PHAROS?view=outline')
   await expect(row(page, 'PHAROS-14')).toBeVisible()
-  data.nodes.find(node => node.id === 'n-4')!.updated_at = new Date().toISOString()
+  const ticket = data.nodes.find(node => node.id === 'n-4')!
+  ticket.updated_at = new Date().toISOString(); ticket.title = 'Visual acceptance, renamed by Mira'
   await row(page, 'PHAROS-14').dragTo(row(page, 'PHAROS-10'))
   await expect(page.getByText('PHAROS-14 was changed elsewhere, so it was not moved.')).toBeVisible()
-  expect(calls.filter(call => call.path.endsWith('/move'))).toHaveLength(0)
+  // One guarded move, answered 412 with the current node: no extra read, nothing moved.
+  expect(calls.filter(call => call.path.endsWith('/move'))).toHaveLength(1)
+  expect(calls.filter(call => call.path === '/api/nodes/n-4' && call.method === 'GET')).toHaveLength(0)
+  await expect(row(page, 'PHAROS-14')).toContainText('renamed by Mira')
+  await expect(row(page, 'PHAROS-14')).toHaveAttribute('aria-level', '1')
+  expect(ticket.parent_id).toBe('p-pharos')
 })
 
 test('docked, the toolbar keeps a labelled Closed toggle and epic counts stay readable on hover', async ({ page }) => {
@@ -197,9 +206,9 @@ test('docked, the toolbar keeps a labelled Closed toggle and epic counts stay re
   void calls
 })
 
-test('moves send the precondition and treat a 412 as a conflict', async ({ page }) => {
+test('a 412 without a node body still settles as a conflict with the current copy', async ({ page }) => {
   await mockWork(page, tree())
-  // The backend answers 412 once its atomic move precondition sees a newer copy.
+  // Defensive path: older servers answer 412 with only an error; the row is then re-read.
   const sent: string[] = []
   await page.route('**/api/nodes/*/move', route => { sent.push(route.request().headers()['if-unmodified-since'] ?? ''); return route.fulfill({ status: 412, json: { error: 'node has changed' } }) })
   await page.goto('/p/PHAROS?view=outline')

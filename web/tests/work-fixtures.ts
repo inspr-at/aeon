@@ -136,6 +136,13 @@ export async function mockWork(page: Page, data: Fixtures, options: MockOptions 
     const movePath = /^\/api\/nodes\/([^/]+)\/move$/.exec(path)
     if (movePath) {
       const node = data.nodes.find(n => n.id === movePath[1])!
+      // B5: If-Unmodified-Since compared at second precision; 412 carries the current node.
+      const expected = request.headers()['if-unmodified-since']
+      const seconds = (iso: string) => Math.floor(Date.parse(iso) / 1000)
+      if (expected && seconds(expected) !== seconds(node.updated_at)) {
+        const { kind_slug: kind, project: _p, ...current } = node
+        return route.fulfill({ status: 412, json: { error: 'node has changed', node: { ...current, kind_id: `k-${kind}`, position: '0', deleted_at: null } } })
+      }
       node.parent_id = (body as { parent_id: string }).parent_id
       node.updated_at = new Date(now + 90_000).toISOString()
       const { kind_slug: kind, project: _p, ...rest } = node

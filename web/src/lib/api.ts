@@ -69,7 +69,9 @@ export type NodePatch = Partial<Pick<WorkNode, 'title' | 'body' | 'fields' | 'st
 
 export class APIError extends Error {
   readonly status: number
-  constructor(status: number, message: string) { super(message); this.status = status }
+  // The parsed error body, when the server sent one (a 412 on move carries the current node).
+  readonly body: Record<string, unknown>
+  constructor(status: number, message: string, body: Record<string, unknown> = {}) { super(message); this.status = status; this.body = body }
 }
 async function json<T>(path: string, method = 'GET', body?: unknown, headers: Record<string, string> = {}): Promise<T> {
   const response = await api(path, {
@@ -78,7 +80,7 @@ async function json<T>(path: string, method = 'GET', body?: unknown, headers: Re
   })
   if (!response.ok) {
     const data = await response.json().catch(() => ({}))
-    throw new APIError(response.status, typeof data?.error === 'string' ? data.error : `Request failed (${response.status})`)
+    throw new APIError(response.status, typeof data?.error === 'string' ? data.error : `Request failed (${response.status})`, data && typeof data === 'object' ? data : {})
   }
   return response.status === 204 ? undefined as T : response.json()
 }
@@ -99,7 +101,7 @@ export const createNode = (body: NodeCreate) => json<WorkNode>('/nodes', 'POST',
 // ifUnmodifiedSince is the node's updated_at as read; a newer server copy answers 412.
 export const updateNode = (id: string, body: NodePatch, options: { ifUnmodifiedSince?: string } = {}) =>
   json<WorkNode>(`/nodes/${idPath(id)}`, 'PATCH', body, options.ifUnmodifiedSince ? { 'If-Unmodified-Since': options.ifUnmodifiedSince } : {})
-// ifUnmodifiedSince: sent ahead of the backend's atomic move precondition (412 on a newer copy).
+// ifUnmodifiedSince: the node's updated_at as read; the move answers 412 with the current node when it changed.
 export const moveNode = (id: string, parent_id: string | null, before_id?: string | null, options: { ifUnmodifiedSince?: string } = {}) =>
   json<WorkNode>(`/nodes/${idPath(id)}/move`, 'POST', { parent_id, before_id }, options.ifUnmodifiedSince ? { 'If-Unmodified-Since': options.ifUnmodifiedSince } : {})
 export const deleteNode = (id: string) => json<void>(`/nodes/${idPath(id)}`, 'DELETE')
