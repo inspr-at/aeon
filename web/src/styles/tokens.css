@@ -39,6 +39,7 @@
   --chip-line: rgba(32, 60, 61, 0.1);
   --code-bg: rgba(32, 60, 61, 0.06);
   --comment-page-bg: rgba(255, 254, 250, 0.82);
+  --comment-page-edge: 0 1px 2px rgba(32, 60, 61, 0.05), inset 0 0 0 1px rgba(255, 255, 255, 0.95);
   --chip-teal-bg: linear-gradient(180deg, #fff, var(--aqua-2));
   --chip-teal-line: rgba(164, 229, 223, 0.95);
   --keycap-bg: linear-gradient(180deg, #fff, #f3f1ea);
@@ -125,7 +126,7 @@
   --surface-raised: #1c393d; --surface-raised-2: rgba(30, 58, 62, 0.92);
   --surface-sunken: rgba(4, 14, 16, 0.22);
   --field-bg: rgba(4, 14, 16, 0.24); --field-inset: inset 0 1px 2px rgba(0, 0, 0, 0.25);
-  --chip-bg: rgba(237, 244, 240, 0.07); --chip-line: rgba(237, 244, 240, 0.14); --code-bg: rgba(237, 244, 240, 0.08); --comment-page-bg: rgba(237, 244, 240, 0.05);
+  --chip-bg: rgba(237, 244, 240, 0.07); --chip-line: rgba(237, 244, 240, 0.14); --code-bg: rgba(237, 244, 240, 0.08); --comment-page-bg: rgba(237, 244, 240, 0.05); --comment-page-edge: none;
   --chip-teal-bg: linear-gradient(180deg, rgba(164, 229, 223, 0.2), rgba(164, 229, 223, 0.1)); --chip-teal-line: rgba(164, 229, 223, 0.4);
   --keycap-bg: linear-gradient(180deg, rgba(237, 244, 240, 0.14), rgba(237, 244, 240, 0.07)); --keycap-line: rgba(237, 244, 240, 0.2); --keycap-ink: var(--ink);
   --btn-bg: linear-gradient(180deg, rgba(237, 244, 240, 0.1), rgba(237, 244, 240, 0.04)); --btn-bg-hover: linear-gradient(180deg, rgba(164, 229, 223, 0.18), rgba(164, 229, 223, 0.08));
@@ -164,7 +165,7 @@
     --surface-raised: #1c393d; --surface-raised-2: rgba(30, 58, 62, 0.92);
     --surface-sunken: rgba(4, 14, 16, 0.22);
     --field-bg: rgba(4, 14, 16, 0.24); --field-inset: inset 0 1px 2px rgba(0, 0, 0, 0.25);
-    --chip-bg: rgba(237, 244, 240, 0.07); --chip-line: rgba(237, 244, 240, 0.14); --code-bg: rgba(237, 244, 240, 0.08); --comment-page-bg: rgba(237, 244, 240, 0.05);
+    --chip-bg: rgba(237, 244, 240, 0.07); --chip-line: rgba(237, 244, 240, 0.14); --code-bg: rgba(237, 244, 240, 0.08); --comment-page-bg: rgba(237, 244, 240, 0.05); --comment-page-edge: none;
     --chip-teal-bg: linear-gradient(180deg, rgba(164, 229, 223, 0.2), rgba(164, 229, 223, 0.1)); --chip-teal-line: rgba(164, 229, 223, 0.4);
     --keycap-bg: linear-gradient(180deg, rgba(237, 244, 240, 0.14), rgba(237, 244, 240, 0.07)); --keycap-line: rgba(237, 244, 240, 0.2); --keycap-ink: var(--ink);
     --btn-bg: linear-gradient(180deg, rgba(237, 244, 240, 0.1), rgba(237, 244, 240, 0.04)); --btn-bg-hover: linear-gradient(180deg, rgba(164, 229, 223, 0.18), rgba(164, 229, 223, 0.08));

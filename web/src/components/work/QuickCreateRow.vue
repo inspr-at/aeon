@@ -14,7 +14,8 @@ import StatusMenu from './StatusMenu.vue'
 
 // "New ticket" at the top of the table: type a title, Tab through type,
 // status, priority and epic, Enter creates and the row stays for the next one.
-const props = defineProps<{ projectId: string; knownStates: string[]; showAssignee: boolean; create: (draft: QuickDraft) => Promise<boolean>; initialEpic?: { id: string; key: string; title: string } | null; indent?: number }>()
+// trailing: how many table columns follow Priority (the epic chip spans them, or joins Priority when none do).
+const props = defineProps<{ projectId: string; knownStates: string[]; trailing: number; create: (draft: QuickDraft) => Promise<boolean>; initialEpic?: { id: string; key: string; title: string } | null; indent?: number }>()
 const emit = defineEmits<{ close: [] }>()
 const draft = reactive<QuickDraft>({ title: '', kind: 'ticket', state: 'new', priority: '', epic: props.initialEpic ?? null })
 const busy = ref(false)
@@ -58,14 +59,17 @@ defineExpose({ focus: () => input.value?.focus(), isDirty: () => !!draft.title.t
       <div class="cell"><button type="button" class="create-chip" aria-haspopup="menu" :aria-label="`Status: ${statusMeta(draft.state).label}`" @click="open('status', $event)"><StatusIcon :state="draft.state" :size="12" />{{ statusMeta(draft.state).label }}<AppIcon name="chevron" :size="11" class="chev" /></button></div>
     </td>
     <td class="c-prio">
-      <div class="cell"><button type="button" class="create-chip" aria-haspopup="menu" :aria-label="`Priority: ${priorityLabel(draft.priority)}`" @click="open('priority', $event)"><PriorityIcon v-if="draft.priority" :priority="draft.priority" :size="12" /><span v-else class="dash">—</span><span class="chip-text" :class="{ unset: !draft.priority }">{{ draft.priority ? priorityLabel(draft.priority) : 'No priority' }}</span><AppIcon name="chevron" :size="11" class="chev" /></button></div>
+      <div class="cell">
+        <button type="button" class="create-chip" aria-haspopup="menu" :aria-label="`Priority: ${priorityLabel(draft.priority)}`" @click="open('priority', $event)"><PriorityIcon v-if="draft.priority" :priority="draft.priority" :size="12" /><span v-else class="dash">—</span><span class="chip-text" :class="{ unset: !draft.priority }">{{ draft.priority ? priorityLabel(draft.priority) : 'No priority' }}</span><AppIcon name="chevron" :size="11" class="chev" /></button>
+        <button v-if="trailing < 1" type="button" class="create-chip epic-chip" aria-haspopup="dialog" :aria-label="`Epic: ${draft.epic ? draft.epic.title : 'none'}`" :data-tip="draft.epic ? `${draft.epic.key}\n${draft.epic.title}` : 'Choose an epic'" @click="open('epic', $event)"><AppIcon name="epic" :size="12" class="kind" :class="{ epic: !!draft.epic }" /></button>
+      </div>
     </td>
-    <td class="c-epic" :colspan="showAssignee ? 2 : 1">
+    <td v-if="trailing > 0" class="c-epic" :colspan="trailing">
       <div class="cell epic-cell"><button type="button" class="create-chip epic-chip" aria-haspopup="dialog" :aria-label="`Epic: ${draft.epic ? draft.epic.title : 'none'}`" :data-tip="draft.epic ? `${draft.epic.key}\n${draft.epic.title}` : 'Choose an epic'" @click="open('epic', $event)"><AppIcon name="epic" :size="12" class="kind" :class="{ epic: !!draft.epic }" /><span class="chip-text" :class="{ unset: !draft.epic }">{{ draft.epic ? draft.epic.title : 'No epic' }}</span></button></div>
     </td>
   </tr>
   <tr class="create-hint-row" aria-hidden="true">
-    <td :colspan="showAssignee ? 6 : 5"><span class="create-hint"><kbd class="keycap"><AppIcon name="enter" /></kbd> create and keep going · <kbd class="keycap">tab</kbd> type, status, priority, epic · <kbd class="keycap">esc</kbd> close</span></td>
+    <td :colspan="trailing + 4"><span class="create-hint"><kbd class="keycap"><AppIcon name="enter" /></kbd> create and keep going · <kbd class="keycap">tab</kbd> type, status, priority, epic · <kbd class="keycap">esc</kbd> close</span></td>
   </tr>
   <OptionMenu v-if="menu?.kind === 'type'" :anchor="menu.anchor" title="Type" subject="the new ticket" kind="type" :options="kindOptions" :current="draft.kind" @choose="value => choose(() => { draft.kind = value })" @close="close" />
   <StatusMenu v-if="menu?.kind === 'status'" :anchor="menu.anchor" :current="draft.state" :known-states="knownStates" ticket-key="the new ticket" @choose="value => choose(() => { draft.state = value })" @close="close" />

@@ -261,7 +261,7 @@ defineExpose({
 .full .panel-bar { border-bottom: 0; padding: 0; height: 44px; }
 @media (min-width: 1100px) { .ticket-ws.panel { width: var(--panel-w); } }
 /* On the page canvas a tint reads muddy; comments get a light raised fill instead. */
-.full :deep(.comment-card) { background: var(--comment-page-bg); box-shadow: 0 1px 2px rgba(32, 60, 61, .05), inset 0 0 0 1px var(--glass-edge); }
+.full :deep(.comment-card) { background: var(--comment-page-bg); box-shadow: var(--comment-page-edge); }
 .full .only-narrow { display: none; }
 @media (max-width: 980px) {
   .full .ws-grid { grid-template-columns: minmax(0, 1fr); padding-top: 14px; }

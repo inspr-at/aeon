@@ -70,8 +70,23 @@ const allColumns: { field: SortField | null; label: string; cls: string }[] = [
   { field: null, label: 'Assignee', cls: 'c-assignee' },
   { field: 'updated_at', label: 'Updated', cls: 'c-updated' },
 ]
+// Columns step aside as the table narrows (docked panel): Assignee first, then Updated.
+// This is decided here rather than in CSS so every colspan matches the visible columns.
+const width = ref(1200)
+const phone = ref(false)
+const showAssigneeCol = computed(() => props.showAssignee && !phone.value && width.value > 900)
+const showUpdatedCol = computed(() => phone.value || width.value > 740)
 // Assignee only earns its column when someone in the result is assigned.
-const columns = computed(() => allColumns.filter(column => column.cls !== 'c-assignee' || props.showAssignee))
+const columns = computed(() => allColumns.filter(column => (column.cls !== 'c-assignee' || showAssigneeCol.value) && (column.cls !== 'c-updated' || showUpdatedCol.value)))
+const card = ref<HTMLElement>()
+let sizer: ResizeObserver | undefined
+const phoneQuery = window.matchMedia('(max-width: 720px)')
+const phoneChange = () => { phone.value = phoneQuery.matches }
+onMounted(() => {
+  phoneChange(); phoneQuery.addEventListener('change', phoneChange)
+  if (card.value) { sizer = new ResizeObserver(([entry]) => { width.value = entry.contentRect.width }); sizer.observe(card.value) }
+})
+onBeforeUnmount(() => { phoneQuery.removeEventListener('change', phoneChange); sizer?.disconnect() })
 const grid = ref<HTMLTableElement>()
 const quick = ref<InstanceType<typeof QuickCreateRow>>()
 const inlineQuick = ref<InstanceType<typeof QuickCreateRow>[]>([])
@@ -188,7 +203,7 @@ defineExpose({
 </script>
 
 <template>
-  <div class="table-card" :class="density">
+  <div ref="card" class="table-card" :class="density">
     <table ref="grid" class="tickets" :class="{ outline: !!outline }" :role="outline ? 'treegrid' : 'grid'" :aria-label="outline ? 'Ticket outline' : 'Tickets'" :aria-busy="loading" tabindex="0" :aria-activedescendant="cursorId ? `row-${cursorId}` : undefined" @focus="emit('gridFocus')">
       <thead>
         <tr>
@@ -209,7 +224,7 @@ defineExpose({
       </thead>
 
       <tbody v-if="creating" class="create-body">
-        <QuickCreateRow ref="quick" :project-id="projectId" :known-states="knownStates" :show-assignee="showAssignee" :create="create" @close="emit('closeCreate')" />
+        <QuickCreateRow ref="quick" :project-id="projectId" :known-states="knownStates" :trailing="columns.length - 4" :create="create" @close="emit('closeCreate')" />
       </tbody>
       <tbody v-if="loading && !entries.length" class="skeleton-body" aria-hidden="true">
         <tr v-for="index in 14" :key="index" class="ticket-row ghost">
@@ -217,8 +232,8 @@ defineExpose({
           <td class="c-title"><div class="cell"><span class="skeleton sk-title" :style="{ width: `${38 + ((index * 37) % 45)}%` }" /></div></td>
           <td class="c-status"><div class="cell"><span class="sk-dot" /><span class="skeleton sk-word" /></div></td>
           <td class="c-prio"><div class="cell"><span class="skeleton sk-word" /></div></td>
-          <td v-if="showAssignee" class="c-assignee"><div class="cell"><span class="skeleton sk-word" /></div></td>
-          <td class="c-updated"><div class="cell"><span class="skeleton sk-time" /></div></td>
+          <td v-if="showAssigneeCol" class="c-assignee"><div class="cell"><span class="skeleton sk-word" /></div></td>
+          <td v-if="showUpdatedCol" class="c-updated"><div class="cell"><span class="skeleton sk-time" /></div></td>
         </tr>
       </tbody>
 
@@ -287,8 +302,8 @@ defineExpose({
             </td>
             <td class="c-status"><div class="cell"><span class="sk-dot" /><span class="skeleton sk-word" /></div></td>
             <td class="c-prio"><div class="cell"><span class="skeleton sk-word" /></div></td>
-            <td v-if="showAssignee" class="c-assignee"><div class="cell" /></td>
-            <td class="c-updated"><div class="cell"><span class="skeleton sk-time" /></div></td>
+            <td v-if="showAssigneeCol" class="c-assignee"><div class="cell" /></td>
+            <td v-if="showUpdatedCol" class="c-updated"><div class="cell"><span class="skeleton sk-time" /></div></td>
           </tr>
 
           <!-- More children or top-level work to load -->
@@ -306,7 +321,7 @@ defineExpose({
 
           <!-- Inline create under an epic -->
           <QuickCreateRow
-            v-else-if="entry.type === 'create'" ref="inlineQuick" :project-id="projectId" :known-states="knownStates" :show-assignee="showAssignee" :create="create"
+            v-else-if="entry.type === 'create'" ref="inlineQuick" :project-id="projectId" :known-states="knownStates" :trailing="columns.length - 4" :create="create"
             :initial-epic="entry.epic" :indent="(entry.depth + 1) * INDENT" @close="emit('closeCreate')"
           />
 
@@ -371,13 +386,13 @@ defineExpose({
                 <span v-else class="empty" aria-label="No priority">—</span>
               </div>
             </td>
-            <td v-if="showAssignee" class="c-assignee">
+            <td v-if="showAssigneeCol" class="c-assignee">
               <div class="cell">
                 <template v-if="entry.row.assignee"><PersonAvatar :name="entry.row.assignee.name" :size="20" /><span class="person-name">{{ entry.row.assignee.name }}</span></template>
                 <span v-else class="empty" aria-label="Unassigned">—</span>
               </div>
             </td>
-            <td class="c-updated"><div class="cell"><time :datetime="entry.row.updated_at" :data-tip="absoluteTime(entry.row.updated_at)">{{ relativeTime(entry.row.updated_at, { now }) }}</time></div></td>
+            <td v-if="showUpdatedCol" class="c-updated"><div class="cell"><time :datetime="entry.row.updated_at" :data-tip="absoluteTime(entry.row.updated_at)">{{ relativeTime(entry.row.updated_at, { now }) }}</time></div></td>
           </tr>
         </template>
       </tbody>
@@ -504,7 +519,7 @@ tbody .ticket-row.top:first-child td { border-top: 0; }
 .parent-title { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 /* Row actions float over the end of the title cell instead of reserving space in every
    row; the title fades out beneath them, whatever the row tint underneath. */
-td.c-title { position: relative; }
+td.c-title { position: relative; overflow: hidden; }
 .row-actions { position: absolute; top: 50%; right: 8px; display: inline-flex; gap: 2px; transform: translateY(-50%); visibility: hidden; }
 /* The parent chip steps out entirely while row actions show, so it is never clipped. */
 @media (hover: hover) { .ticket-row:hover .parent-chip { opacity: 0; } }
@@ -571,10 +586,11 @@ td.c-title { position: relative; }
 /* The table reflows to its own width (the docked panel narrows it): Title shrinks first,
    then Assignee and Updated step aside. */
 @container tickets (max-width: 980px) { th.c-assignee { width: 124px; } th.c-prio { width: 100px; } }
-@container tickets (max-width: 900px) { .c-assignee { display: none; } }
+/* Epic progress gives the title room first: the bar goes, the count stays. */
+@container tickets (max-width: 900px) { .epic-progress .bar { display: none; } .epic-progress { padding-left: 8px; } }
 /* Below ~820px Priority keeps only its icon (label in the tooltip); Status keeps its label. */
 @container tickets (max-width: 820px) { th.c-prio { width: 84px; } th.c-prio .th-sort { letter-spacing: .06em; } .prio-label { display: none; } th.c-key { width: 108px; } }
-@container tickets (max-width: 740px) { .c-updated { display: none; } .parent-chip { max-width: 140px; } }
+@container tickets (max-width: 740px) { .parent-chip { max-width: 140px; } }
 
 @media (max-width: 720px) {
   .table-card { border-radius: 14px; }
@@ -613,6 +629,7 @@ td.c-title { position: relative; }
   .tree-row .tree { display: contents; }
   .tree-row .title-link { flex-basis: calc(100% - 60px); }
   .epic-progress { flex-basis: 100%; margin-left: 22px; padding-left: 0; }
+  .epic-progress .bar { display: block; width: 96px; }
   .ticket-row.top td { border-top: 0; }
   .more-row { display: block; padding: 6px 14px; }
   .more-row td { display: block; height: auto; border: 0; padding: 0; }

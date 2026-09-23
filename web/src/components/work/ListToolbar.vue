@@ -128,7 +128,7 @@ defineExpose({ focusSearch, input })
     <span class="spacer" />
 
     <span class="count mono" role="status" aria-live="polite"><span v-if="total === null && loading" class="skeleton count-skeleton" aria-label="Counting tickets" /><template v-else-if="total !== null">{{ plural(total, 'ticket') }}</template></span>
-    <label class="switch closed-switch">
+    <label class="switch closed-switch" data-tip="Hide closed">
       <input type="checkbox" :checked="!filters.showClosed" @change="emit('showClosed', !($event.target as HTMLInputElement).checked)" />
       <span>Hide closed</span>
     </label>
@@ -220,6 +220,8 @@ defineExpose({ focusSearch, input })
 @container toolbar (max-width: 920px) { .list-search { width: 150px; } .facet-btn { padding: 0 11px; } .facet-btn:not(.on) .facet-end { display: none; } }
 @container toolbar (max-width: 820px) { .list-search { width: 136px; } .list-search .field { padding-right: 10px; } .facet-btn { padding: 0 11px; } .facet-btn:not(.on) .facet-end { display: none; } }
 @container toolbar (max-width: 900px) { .display-label { display: none; } .display-btn { padding: 0 9px; } }
+/* Narrowest docked width: the switch keeps its name for screen readers and in its tooltip. */
+@container toolbar (max-width: 800px) { .closed-switch span { position: absolute; width: 1px; height: 1px; overflow: hidden; clip-path: inset(50%); white-space: nowrap; } }
 @media (max-width: 900px) { .facets, .chips, .display-btn, .closed-switch, .spacer { display: none; } .list-search { flex: 1; width: auto; } .filters-btn { display: inline-flex; } }
 @media (max-width: 600px) {
   .toolbar { flex-wrap: nowrap; gap: 8px; padding: 8px 0; }

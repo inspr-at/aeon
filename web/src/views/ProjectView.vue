@@ -561,7 +561,7 @@ watch([project, panelItem], ([current, item]) => {
       <StatusMenu v-if="statusMenu" :anchor="statusMenu.anchor" :current="statusMenu.row.state" :known-states="knownStates" :ticket-key="statusMenu.row.key" @choose="chooseStatus" @close="closeStatus" />
       <ShortcutSheet ref="shortcuts" />
       <FilterSheet
-        ref="filterSheet" :filters="filters" :options="options" :total="total"
+        ref="filterSheet" :filters="filters" :options="options" :total="total" :view="viewMode" @expand-all="outline.expandAll()" @collapse-all="outline.collapseAll()"
         @toggle="toggleValue" @clear-all="clearFilters" @show-closed="value => update({ showClosed: value })" @group="setGroup"
         @opened="list.resolveNames(options('assignee').map(o => o.value))"
       />
