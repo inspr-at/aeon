@@ -351,7 +351,7 @@ func importEvent(ctx context.Context, tx pgx.Tx, tenantID, actor, nodeID, typ, s
 		ref += fmt.Sprintf(":%x", hash[:16])
 	}
 	var exists bool
-	if err := tx.QueryRow(ctx, `SELECT EXISTS(SELECT 1 FROM events WHERE tenant_id=$1 AND type=$2 AND after->>'classic_ref'=$3)`, tenantID, typ, ref).Scan(&exists); err != nil {
+	if err := tx.QueryRow(ctx, `SELECT EXISTS(SELECT 1 FROM events WHERE tenant_id=$1 AND type=$2 AND after ? 'classic_ref' AND after->>'classic_ref'=$3)`, tenantID, typ, ref).Scan(&exists); err != nil {
 		return err
 	}
 	if exists {
