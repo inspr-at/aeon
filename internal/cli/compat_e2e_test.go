@@ -12,6 +12,7 @@ import (
 	"net/http/cookiejar"
 	"net/http/httptest"
 	"net/url"
+	"os"
 	"path/filepath"
 	"regexp"
 	"strings"
@@ -239,6 +240,65 @@ func TestCompatEndToEnd(t *testing.T) {
 	code, out, errOut = runCLI([]string{"paimos", "--config", missing, "message", "target", "list"}, "")
 	if code != 0 || !strings.Contains(out, "pull") || !strings.Contains(out, "enabled") || strings.Contains(out, "http") {
 		t.Fatalf("target list code %d out %q err %q", code, out, errOut)
+	}
+
+	code, out, errOut = runCLI([]string{"paimos", "--config", missing, "knowledge", "create", "--type", "external-system", "--slug", "sentry", "--project", "AEON", "--title", "Sentry", "--body", "errors"}, "")
+	if code != 0 || !strings.Contains(out, "✓ created external-system/sentry (EXT-") {
+		t.Fatalf("external-system create code %d out %q err %q", code, out, errOut)
+	}
+	code, out, errOut = runCLI([]string{"paimos", "--config", missing, "knowledge", "update", "external-system", "sentry", "--project", "AEON", "--metadata", `{"url":"https://sentry.example"}`}, "")
+	if code != 0 || !strings.Contains(out, "✓ updated external-system/sentry (") {
+		t.Fatalf("external-system update code %d out %q err %q", code, out, errOut)
+	}
+	code, out, errOut = runCLI([]string{"paimos", "--config", missing, "knowledge", "get", "external-system", "sentry", "--project", "AEON"}, "")
+	if code != 0 || !strings.Contains(out, "external-system/sentry (") || !strings.Contains(out, "title:  Sentry") {
+		t.Fatalf("external-system get code %d out %q err %q", code, out, errOut)
+	}
+	code, out, errOut = runCLI([]string{"paimos", "--config", missing, "knowledge", "create", "--type", "related-project", "--slug", "inspr", "--project", "AEON", "--title", "INSPR", "--body", "upstream"}, "")
+	if code != 0 || !strings.Contains(out, "✓ created related-project/inspr (RPR-") {
+		t.Fatalf("related-project create code %d out %q err %q", code, out, errOut)
+	}
+	code, out, errOut = runCLI([]string{"paimos", "--config", missing, "knowledge", "list", "--project", "AEON", "--type", "related-project"}, "")
+	if code != 0 || !strings.Contains(out, "related-project") || !strings.Contains(out, "inspr") {
+		t.Fatalf("related-project list code %d out %q err %q", code, out, errOut)
+	}
+	code, out, errOut = runCLI([]string{"paimos", "--config", missing, "knowledge", "create", "--type", "guideline", "--slug", "ship", "--project", "AEON", "--title", "Ship", "--body", "do not float money"}, "")
+	if code != 0 || !strings.Contains(out, "✓ created guideline/ship (") {
+		t.Fatalf("guideline create code %d out %q err %q", code, out, errOut)
+	}
+
+	workspace := t.TempDir()
+	code, out, errOut = runCLI([]string{"paimos", "--config", missing, "skill", "render", "ops", "--project", "AEON", "--harness", "claude-code", "--workspace", workspace}, "")
+	if code != 0 || !strings.Contains(out, "wrote ") || !strings.Contains(out, "rev=") {
+		t.Fatalf("skill render code %d out %q err %q", code, out, errOut)
+	}
+	skillPath := filepath.Join(workspace, ".claude", "commands", "ops.md")
+	skillBody, err := os.ReadFile(skillPath)
+	if err != nil {
+		t.Fatal(err)
+	}
+	skillText := string(skillBody)
+	if !strings.Contains(skillText, "<!-- paimos: rendered from AEON/ops@") || !strings.Contains(skillText, "harness=claude-code -->") || !strings.Contains(skillText, "https://sentry.example") || !strings.Contains(skillText, "do not float money") || !strings.Contains(skillText, "INSPR") {
+		t.Fatalf("rendered skill:\n%s", skillText)
+	}
+	code, out, errOut = runCLI([]string{"paimos", "--config", missing, "sync", "check", "--project", "AEON", "--workspace", workspace}, "")
+	if code != 0 || !strings.Contains(out, "identical") || !strings.Contains(out, "(no drift)") {
+		t.Fatalf("sync identical code %d out %q err %q", code, out, errOut)
+	}
+	if err := os.WriteFile(skillPath, []byte(strings.TrimRight(skillText, "\n")+"\nuser edit\n"), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	code, out, errOut = runCLI([]string{"paimos", "--config", missing, "sync", "check", "--project", "AEON", "--workspace", workspace}, "")
+	if code != 1 || !strings.Contains(out, "diff") || !strings.Contains(out, "1 artifact(s) in drift") {
+		t.Fatalf("sync drift code %d out %q err %q", code, out, errOut)
+	}
+	code, _, errOut = runCLI([]string{"paimos", "--config", missing, "run-agent", "watch"}, "")
+	if code != 3 || !strings.Contains(errOut, reasonRunAgent) {
+		t.Fatalf("run-agent watch code %d err %q", code, errOut)
+	}
+	code, _, errOut = runCLI([]string{"paimos", "--config", missing, "baseline-batch", "report-built"}, "")
+	if code != 3 || !strings.Contains(errOut, reasonBaseline) {
+		t.Fatalf("baseline-batch code %d err %q", code, errOut)
 	}
 
 	assertEvent(t, opened, worker.TenantID, "node.created")

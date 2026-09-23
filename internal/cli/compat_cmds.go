@@ -541,11 +541,11 @@ func (rt *runtime) cmdHarness() *Command {
 
 func (rt *runtime) compatStubs() []*Command {
 	return []*Command{
-		stubCommand("anchors", "anchors <scan|verify>", reasonAnchors, "scan", "verify"),
-		stubCommand("skill", "skill <render>", reasonSkill, "render"),
+		rt.cmdAnchors(),
+		rt.cmdSkill(),
 		stubCommand("run-agent", "run-agent <watch>", reasonRunAgent, "watch"),
 		stubCommand("baseline-batch", "baseline-batch <report-built>", reasonBaseline, "report-built"),
-		stubCommand("sync", "sync <check>", reasonSync, "check"),
+		rt.cmdSync(),
 		rt.cmdHarness(),
 	}
 }

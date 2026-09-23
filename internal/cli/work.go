@@ -447,12 +447,8 @@ type knowledgeView struct {
 }
 
 func knowledgeSupported(typ string) bool {
-	switch typ {
-	case "memory", "runbook", "guideline":
-		return true
-	default:
-		return false
-	}
+	_, ok := knowledgeKindSlug(typ)
+	return ok
 }
 
 func (rt *runtime) rejectKnowledgeKind(typ string) error {
@@ -465,7 +461,7 @@ func (rt *runtime) rejectKnowledgeKind(typ string) error {
 func viewKnowledge(n apiNode, kinds kindTable) knowledgeView {
 	fields := fieldMap(n.Fields)
 	return knowledgeView{
-		Type:   kinds.slug(n.KindID),
+		Type:   knowledgeCLIType(kinds.slug(n.KindID)),
 		Slug:   fieldString(fields, "slug"),
 		Title:  n.Title,
 		Status: n.State,
@@ -495,6 +491,9 @@ func (rt *runtime) knowledgeNodes(project, typ string) (kindTable, []apiNode, er
 	if err := rt.rejectKnowledgeKind(typ); err != nil && typ != "" {
 		return kindTable{}, nil, err
 	}
+	if err := rt.ensureKnowledgeKinds(); err != nil {
+		return kindTable{}, nil, err
+	}
 	proj, err := rt.projectNode(project)
 	if err != nil {
 		return kindTable{}, nil, err
@@ -504,10 +503,16 @@ func (rt *runtime) knowledgeNodes(project, typ string) (kindTable, []apiNode, er
 		return kindTable{}, nil, err
 	}
 	q := url.Values{"parent_id": {proj.ID}, "include_descendants": {"true"}}
+	want := ""
 	if typ != "" {
-		k, ok := kinds.bySlug[typ]
+		slug, ok := knowledgeKindSlug(typ)
 		if !ok {
-			return kindTable{}, nil, rt.fail(fmt.Errorf("node kind %q is not configured", typ), "")
+			return kindTable{}, nil, rt.rejectKnowledgeKind(typ)
+		}
+		want = slug
+		k, ok := kinds.bySlug[slug]
+		if !ok {
+			return kindTable{}, nil, rt.fail(fmt.Errorf("node kind %q is not configured", slug), "")
 		}
 		q.Set("kind_id", k.ID)
 	}
@@ -521,7 +526,7 @@ func (rt *runtime) knowledgeNodes(project, typ string) (kindTable, []apiNode, er
 		if !knowledgeSupported(slug) {
 			continue
 		}
-		if typ != "" && slug != typ {
+		if want != "" && slug != want {
 			continue
 		}
 		kept = append(kept, n)
@@ -569,11 +574,18 @@ func (rt *runtime) createKnowledge(project, typ, slug, title, body, status strin
 	if err := rt.rejectKnowledgeKind(typ); err != nil {
 		return err
 	}
+	if err := rt.ensureKnowledgeKinds(); err != nil {
+		return err
+	}
 	proj, err := rt.projectNode(project)
 	if err != nil {
 		return err
 	}
-	kind, err := rt.kind(typ)
+	kindSlug, ok := knowledgeKindSlug(typ)
+	if !ok {
+		return rt.rejectKnowledgeKind(typ)
+	}
+	kind, err := rt.kind(kindSlug)
 	if err != nil {
 		return err
 	}

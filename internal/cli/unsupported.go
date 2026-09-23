@@ -14,15 +14,9 @@ package cli
 const (
 	reasonHarness = "Aeon has no harness-session control plane; work orders and agent runs do not register, bind, heartbeat, drain or stop a vendor session"
 
-	reasonAnchors = "anchor scan and verify read a repo index file; Aeon has no anchor resource"
-
-	reasonSkill = "skill render writes a harness artifact; Aeon has no skill-render resource"
-
 	reasonRunAgent = "run-agent watch is an operator-local vendor process; Aeon work orders do not spawn one"
 
 	reasonBaseline = "baseline-batch report-built is replaced by stage handoffs and is not a compat verb"
-
-	reasonSync = "sync check diffs a local knowledge cache; Aeon has no sync verb"
 
 	reasonAgentd = "paimos-agentd serve is a separate operator binary (cmd/aeon-agentd), not an aeon subcommand"
 
@@ -38,7 +32,7 @@ const (
 
 	reasonBundle = "session start --bundle full and --format files need the classic knowledge bundle cache; Aeon session start emits the agent and session id only"
 
-	reasonKnowledgeKind = "Aeon seeds memory, runbook and guideline nodes; external-system and related-project are not node kinds"
+	reasonKnowledgeKind = "Aeon knowledge types are memory, runbook, guideline, external-system, and related-project"
 
 	reasonExpectsReply = "tell --expects-reply and --action-request open a classic obligation; Aeon inbox send has no held reply"
 )
@@ -51,12 +45,8 @@ var unsupportedCompat = []struct {
 	Args   []string
 	Reason string
 }{
-	{"anchors scan", []string{"anchors", "scan"}, reasonAnchors},
-	{"anchors verify", []string{"anchors", "verify"}, reasonAnchors},
-	{"skill render", []string{"skill", "render", "ops"}, reasonSkill},
 	{"run-agent watch", []string{"run-agent", "watch"}, reasonRunAgent},
 	{"baseline-batch report-built", []string{"baseline-batch", "report-built"}, reasonBaseline},
-	{"sync check", []string{"sync", "check"}, reasonSync},
 	{"paimos-agentd serve", nil, reasonAgentd},
 	{"tell harness:agent", []string{"tell", "codex:worker", "--project", "AEON", "--level", "simple", "-m", "hi"}, reasonHarnessAddress},
 	{"tell --expects-reply", []string{"tell", "00000000-0000-4000-8000-000000000001", "--project", "AEON", "--expects-reply", "-m", "hi"}, reasonExpectsReply},
@@ -65,8 +55,6 @@ var unsupportedCompat = []struct {
 	{"message target set classic", []string{"message", "target", "set", "--project", "AEON", "--address", "codex:worker", "--adapter", "codex", "--kind", "codex_thread"}, reasonClassicTarget},
 	{"message deliveries", []string{"message", "deliveries"}, reasonDeliveries},
 	{"session start --bundle full", []string{"session", "start", "--project", "AEON", "--agent", "worker", "--bundle", "full"}, reasonBundle},
-	{"knowledge external-system", []string{"knowledge", "create", "--type", "external-system", "--slug", "x", "--project", "AEON", "--title", "X"}, reasonKnowledgeKind},
-	{"knowledge related-project", []string{"knowledge", "get", "related-project", "x", "--project", "AEON"}, reasonKnowledgeKind},
 	{"harness register", []string{"harness", "register"}, reasonHarness},
 	{"harness list", []string{"harness", "list"}, reasonHarness},
 	{"harness status", []string{"harness", "status"}, reasonHarness},
