@@ -60,3 +60,34 @@ func importPaimos(args []string, stdout io.Writer) error {
 	}
 	return json.NewEncoder(stdout).Encode(report)
 }
+
+// backfillRelations replays stored import.relation events into node relations
+// and release membership. It never contacts the classic source.
+func backfillRelations(args []string, stdout io.Writer) error {
+	flags := flag.NewFlagSet("aeon import backfill-relations", flag.ContinueOnError)
+	flags.SetOutput(io.Discard)
+	tenant := flags.String("tenant", "", "Aeon tenant slug")
+	if err := flags.Parse(args); err != nil || flags.NArg() != 0 || *tenant == "" {
+		return errors.New("usage: aeon import backfill-relations --tenant SLUG")
+	}
+	ctx, stop := signal.NotifyContext(context.Background(), syscall.SIGTERM, syscall.SIGINT)
+	defer stop()
+	cfg, err := config.FromEnv()
+	if err != nil {
+		return err
+	}
+	pool, err := db.Open(ctx, cfg.DatabaseURL)
+	if err != nil {
+		return fmt.Errorf("open target database: %w", err)
+	}
+	defer pool.Close()
+	var tenantID string
+	if err := pool.QueryRow(ctx, `SELECT id FROM tenants WHERE slug=$1`, *tenant).Scan(&tenantID); err != nil {
+		return fmt.Errorf("tenant %q: %w", *tenant, err)
+	}
+	report, err := importer.BackfillRelations(ctx, pool, tenantID)
+	if err != nil {
+		return err
+	}
+	return json.NewEncoder(stdout).Encode(report)
+}
