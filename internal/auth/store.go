@@ -1,0 +1,514 @@
+// SPDX-License-Identifier: AGPL-3.0-only
+
+package auth
+
+import (
+	"context"
+	"crypto/rand"
+	"encoding/hex"
+	"errors"
+	"fmt"
+	"strings"
+	"time"
+
+	"github.com/jackc/pgx/v5"
+	"github.com/jackc/pgx/v5/pgconn"
+	"github.com/jackc/pgx/v5/pgtype"
+
+	"github.com/inspr-at/aeon/internal/tenant"
+)
+
+var (
+	errNotMember = errors.New("not a member")
+	errNoTenant  = errors.New("bootstrap tenant is missing")
+	errNotFound  = errors.New("not found")
+)
+
+func scanPrincipal(row pgx.Row) (tenant.Principal, error) {
+	var p tenant.Principal
+	var kind string
+	var roles pgtype.FlatArray[string]
+	if err := row.Scan(&p.ID, &p.TenantID, &kind, &p.Name, &roles); err != nil {
+		return tenant.Principal{}, err
+	}
+	p.Kind = tenant.PrincipalKind(kind)
+	p.Roles = []string(roles)
+	if p.Roles == nil {
+		p.Roles = []string{}
+	}
+	return p, nil
+}
+
+func isUnique(err error) bool {
+	var pe *pgconn.PgError
+	return errors.As(err, &pe) && pe.Code == "23505"
+}
+
+func (m *Module) bootstrapTenant(ctx context.Context) (string, error) {
+	var id string
+	err := m.pool.QueryRow(ctx, `
+		SELECT id::text FROM tenants WHERE slug = $1
+	`, m.cfg.BootstrapTenantSlug).Scan(&id)
+	if errors.Is(err, pgx.ErrNoRows) {
+		return "", errNoTenant
+	}
+	if err != nil {
+		return "", err
+	}
+	return id, nil
+}
+
+func (m *Module) upsertIdentity(ctx context.Context, issuer, subject, email, display string) (string, error) {
+	var emailArg, displayArg any
+	if strings.TrimSpace(email) != "" {
+		emailArg = strings.TrimSpace(email)
+	}
+	if strings.TrimSpace(display) != "" {
+		displayArg = strings.TrimSpace(display)
+	}
+	var id string
+	err := m.pool.QueryRow(ctx, `
+		INSERT INTO identities (issuer, subject, email, display_name)
+		VALUES ($1, $2, $3, $4)
+		ON CONFLICT (issuer, subject) DO UPDATE
+		SET email = COALESCE(EXCLUDED.email, identities.email),
+		    display_name = COALESCE(EXCLUDED.display_name, identities.display_name)
+		RETURNING id::text
+	`, issuer, subject, emailArg, displayArg).Scan(&id)
+	return id, err
+}
+
+// ensurePerson returns the person principal for this identity inside the tenant.
+// The bootstrap admin email is provisioned with the admin role on first sign-in.
+func (m *Module) ensurePerson(ctx context.Context, tenantID, identityID, email, name string) (tenant.Principal, error) {
+	var p tenant.Principal
+	err := m.inTenant(ctx, m.pool, tenantID, func(tx pgx.Tx) error {
+		var err error
+		p, err = scanPrincipal(tx.QueryRow(ctx, `
+			SELECT id::text, tenant_id::text, kind, name, roles
+			FROM principals
+			WHERE identity_id = $1::uuid AND kind = 'person'
+		`, identityID))
+		if err == nil {
+			return nil
+		}
+		if !errors.Is(err, pgx.ErrNoRows) {
+			return err
+		}
+		if !adminEmail(email, m.cfg.BootstrapAdminEmail) {
+			return errNotMember
+		}
+		if strings.TrimSpace(name) == "" {
+			name = strings.TrimSpace(email)
+		}
+		if _, err := tx.Exec(ctx, "SAVEPOINT person_insert"); err != nil {
+			return err
+		}
+		p, err = scanPrincipal(tx.QueryRow(ctx, `
+			INSERT INTO principals (tenant_id, kind, identity_id, name, roles)
+			VALUES ($1::uuid, 'person', $2::uuid, $3, $4)
+			RETURNING id::text, tenant_id::text, kind, name, roles
+		`, tenantID, identityID, name, []string{"admin"}))
+		if isUnique(err) {
+			if _, rbErr := tx.Exec(ctx, "ROLLBACK TO SAVEPOINT person_insert"); rbErr != nil {
+				return rbErr
+			}
+			p, err = scanPrincipal(tx.QueryRow(ctx, `
+				SELECT id::text, tenant_id::text, kind, name, roles
+				FROM principals
+				WHERE identity_id = $1::uuid AND kind = 'person'
+			`, identityID))
+			return err
+		}
+		if err != nil {
+			return err
+		}
+		_, err = tx.Exec(ctx, "RELEASE SAVEPOINT person_insert")
+		return err
+	})
+	return p, err
+}
+
+func adminEmail(got, want string) bool {
+	want = strings.TrimSpace(want)
+	if want == "" {
+		return false
+	}
+	return strings.EqualFold(strings.TrimSpace(got), want)
+}
+
+// personByEmail finds a person in the bootstrap tenant by identity email.
+func (m *Module) personByEmail(ctx context.Context, tenantID, email string) (tenant.Principal, string, error) {
+	var p tenant.Principal
+	var identityID string
+	err := m.inTenant(ctx, m.pool, tenantID, func(tx pgx.Tx) error {
+		var kind string
+		var roles pgtype.FlatArray[string]
+		err := tx.QueryRow(ctx, `
+			SELECT p.id::text, p.tenant_id::text, p.kind, p.name, p.roles, i.id::text
+			FROM principals p
+			JOIN identities i ON i.id = p.identity_id
+			WHERE p.kind = 'person' AND lower(i.email) = lower($1)
+			ORDER BY p.created_at
+			LIMIT 1
+		`, email).Scan(&p.ID, &p.TenantID, &kind, &p.Name, &roles, &identityID)
+		if err != nil {
+			return err
+		}
+		p.Kind = tenant.PrincipalKind(kind)
+		p.Roles = []string(roles)
+		if p.Roles == nil {
+			p.Roles = []string{}
+		}
+		return nil
+	})
+	return p, identityID, err
+}
+
+func (m *Module) startSession(ctx context.Context, identityID, tenantID, principalID string) (string, error) {
+	raw := make([]byte, 32)
+	if _, err := rand.Read(raw); err != nil {
+		return "", err
+	}
+	_, err := m.pool.Exec(ctx, `
+		INSERT INTO sessions (id, identity_id, tenant_id, principal_id, expires_at)
+		VALUES ($1, $2::uuid, $3::uuid, $4::uuid, now() + interval '30 days')
+	`, sessionID(raw), identityID, tenantID, principalID)
+	if err != nil {
+		return "", err
+	}
+	return hex.EncodeToString(raw), nil
+}
+
+func decodeSessionToken(value string) ([]byte, error) {
+	raw, err := hex.DecodeString(value)
+	if err != nil || len(raw) != 32 {
+		return nil, errBadCookie
+	}
+	return raw, nil
+}
+
+func (m *Module) authenticateSession(ctx context.Context, raw []byte) (tenant.Principal, bool, error) {
+	id := sessionID(raw)
+	var tenantID, principalID string
+	err := m.pool.QueryRow(ctx, `
+		UPDATE sessions
+		SET last_seen_at = now(), expires_at = now() + interval '30 days'
+		WHERE id = $1 AND expires_at > now()
+		RETURNING tenant_id::text, principal_id::text
+	`, id).Scan(&tenantID, &principalID)
+	if errors.Is(err, pgx.ErrNoRows) {
+		_, _ = m.pool.Exec(ctx, `DELETE FROM sessions WHERE id = $1`, id)
+		return tenant.Principal{}, false, nil
+	}
+	if err != nil {
+		return tenant.Principal{}, false, err
+	}
+	var p tenant.Principal
+	err = m.inTenant(ctx, m.pool, tenantID, func(tx pgx.Tx) error {
+		var scanErr error
+		p, scanErr = scanPrincipal(tx.QueryRow(ctx, `
+			SELECT id::text, tenant_id::text, kind, name, roles
+			FROM principals WHERE id = $1::uuid
+		`, principalID))
+		return scanErr
+	})
+	if errors.Is(err, pgx.ErrNoRows) {
+		_, _ = m.pool.Exec(ctx, `DELETE FROM sessions WHERE id = $1`, id)
+		return tenant.Principal{}, false, nil
+	}
+	if err != nil {
+		return tenant.Principal{}, false, err
+	}
+	return p, true, nil
+}
+
+func (m *Module) deleteSession(ctx context.Context, raw []byte) error {
+	_, err := m.pool.Exec(ctx, `DELETE FROM sessions WHERE id = $1`, sessionID(raw))
+	return err
+}
+
+// prefixFor builds aeon_<prefix>_<secret>'s prefix: 32 hex chars of the tenant
+// uuid, then 16 hex chars of randomness. The tenant half lets the bearer
+// resolver enter InTenant before it can see the row.
+func prefixFor(tenantID string) (string, error) {
+	compact := strings.ToLower(strings.ReplaceAll(tenantID, "-", ""))
+	if len(compact) != 32 || !isHex(compact) {
+		return "", fmt.Errorf("tenant id %q is not a uuid", tenantID)
+	}
+	buf := make([]byte, 8)
+	if _, err := rand.Read(buf); err != nil {
+		return "", err
+	}
+	return compact + hex.EncodeToString(buf), nil
+}
+
+func tenantFromPrefix(prefix string) (string, bool) {
+	if len(prefix) < 48 || !isHex(prefix[:32]) {
+		return "", false
+	}
+	h := strings.ToLower(prefix[:32])
+	return h[0:8] + "-" + h[8:12] + "-" + h[12:16] + "-" + h[16:20] + "-" + h[20:32], true
+}
+
+func isHex(s string) bool {
+	for _, c := range s {
+		switch {
+		case c >= '0' && c <= '9', c >= 'a' && c <= 'f', c >= 'A' && c <= 'F':
+		default:
+			return false
+		}
+	}
+	return s != ""
+}
+
+func newSecret() (string, string, error) {
+	buf := make([]byte, 32)
+	if _, err := rand.Read(buf); err != nil {
+		return "", "", err
+	}
+	secret := hex.EncodeToString(buf)
+	return secret, hashSecret(secret), nil
+}
+
+func (m *Module) authenticateAgent(ctx context.Context, prefix, secret string) (tenant.Principal, bool, error) {
+	tenantID, ok := tenantFromPrefix(prefix)
+	if !ok {
+		return tenant.Principal{}, false, nil
+	}
+	var p tenant.Principal
+	err := m.inTenant(ctx, m.pool, tenantID, func(tx pgx.Tx) error {
+		var principalID, gotTenant string
+		err := tx.QueryRow(ctx, `
+			UPDATE agent_keys k
+			SET last_used_at = now()
+			WHERE k.prefix = $1 AND k.hash = $2
+			  AND k.revoked_at IS NULL
+			  AND (k.expires_at IS NULL OR k.expires_at > now())
+			  AND EXISTS (
+			    SELECT 1 FROM principals p
+			    WHERE p.id = k.principal_id AND p.kind = 'agent'
+			  )
+			RETURNING k.principal_id::text, k.tenant_id::text
+		`, prefix, hashSecret(secret)).Scan(&principalID, &gotTenant)
+		if err != nil {
+			return err
+		}
+		if !strings.EqualFold(gotTenant, tenantID) {
+			return pgx.ErrNoRows
+		}
+		p, err = scanPrincipal(tx.QueryRow(ctx, `
+			SELECT id::text, tenant_id::text, kind, name, roles
+			FROM principals WHERE id = $1::uuid
+		`, principalID))
+		return err
+	})
+	if errors.Is(err, pgx.ErrNoRows) {
+		return tenant.Principal{}, false, nil
+	}
+	if err != nil {
+		return tenant.Principal{}, false, err
+	}
+	if p.Kind != tenant.Agent {
+		return tenant.Principal{}, false, nil
+	}
+	return p, true, nil
+}
+
+type keyRecord struct {
+	ID          string
+	PrincipalID string
+	Name        string
+	Prefix      string
+	Scopes      []string
+	CreatedAt   time.Time
+	ExpiresAt   *time.Time
+	LastUsedAt  *time.Time
+	RevokedAt   *time.Time
+	Token       string
+}
+
+func (m *Module) createAgentKey(ctx context.Context, p tenant.Principal, name string, scopes []string, expires *time.Time) (keyRecord, error) {
+	if scopes == nil {
+		scopes = []string{}
+	}
+	var rec keyRecord
+	err := m.inTenant(ctx, m.pool, p.TenantID, func(tx pgx.Tx) error {
+		var principalID string
+		err := tx.QueryRow(ctx, `
+			SELECT id::text FROM principals
+			WHERE kind = 'agent' AND name = $1
+			ORDER BY created_at
+			LIMIT 1
+		`, name).Scan(&principalID)
+		if errors.Is(err, pgx.ErrNoRows) {
+			err = tx.QueryRow(ctx, `
+				INSERT INTO principals (tenant_id, kind, name, roles)
+				VALUES ($1::uuid, 'agent', $2, '{}')
+				RETURNING id::text
+			`, p.TenantID, name).Scan(&principalID)
+		}
+		if err != nil {
+			return err
+		}
+		for attempt := 0; attempt < 5; attempt++ {
+			prefix, err := prefixFor(p.TenantID)
+			if err != nil {
+				return err
+			}
+			secret, hash, err := newSecret()
+			if err != nil {
+				return err
+			}
+			if _, err := tx.Exec(ctx, "SAVEPOINT key_insert"); err != nil {
+				return err
+			}
+			var id string
+			var created time.Time
+			err = tx.QueryRow(ctx, `
+				INSERT INTO agent_keys (tenant_id, principal_id, name, prefix, hash, scopes, expires_at)
+				VALUES ($1::uuid, $2::uuid, $3, $4, $5, $6, $7)
+				RETURNING id::text, created_at
+			`, p.TenantID, principalID, name, prefix, hash, scopes, expires).Scan(&id, &created)
+			if isUnique(err) {
+				if _, rbErr := tx.Exec(ctx, "ROLLBACK TO SAVEPOINT key_insert"); rbErr != nil {
+					return rbErr
+				}
+				continue
+			}
+			if err != nil {
+				return err
+			}
+			if _, err := tx.Exec(ctx, "RELEASE SAVEPOINT key_insert"); err != nil {
+				return err
+			}
+			rec = keyRecord{
+				ID:          id,
+				PrincipalID: principalID,
+				Name:        name,
+				Prefix:      prefix,
+				Scopes:      scopes,
+				CreatedAt:   created,
+				ExpiresAt:   expires,
+				Token:       "aeon_" + prefix + "_" + secret,
+			}
+			return nil
+		}
+		return errors.New("agent key prefix collision")
+	})
+	return rec, err
+}
+
+func (m *Module) listAgentKeys(ctx context.Context, tenantID string) ([]keyRecord, error) {
+	var out []keyRecord
+	err := m.inTenant(ctx, m.pool, tenantID, func(tx pgx.Tx) error {
+		rows, err := tx.Query(ctx, `
+			SELECT id::text, principal_id::text, name, prefix, scopes, created_at, expires_at, last_used_at, revoked_at
+			FROM agent_keys
+			ORDER BY created_at DESC, id
+		`)
+		if err != nil {
+			return err
+		}
+		defer rows.Close()
+		for rows.Next() {
+			var rec keyRecord
+			var scopes pgtype.FlatArray[string]
+			if err := rows.Scan(&rec.ID, &rec.PrincipalID, &rec.Name, &rec.Prefix, &scopes, &rec.CreatedAt, &rec.ExpiresAt, &rec.LastUsedAt, &rec.RevokedAt); err != nil {
+				return err
+			}
+			rec.Scopes = []string(scopes)
+			if rec.Scopes == nil {
+				rec.Scopes = []string{}
+			}
+			out = append(out, rec)
+		}
+		return rows.Err()
+	})
+	if out == nil {
+		out = []keyRecord{}
+	}
+	return out, err
+}
+
+func (m *Module) revokeAgentKey(ctx context.Context, tenantID, id string) error {
+	return m.inTenant(ctx, m.pool, tenantID, func(tx pgx.Tx) error {
+		tag, err := tx.Exec(ctx, `
+			UPDATE agent_keys
+			SET revoked_at = COALESCE(revoked_at, now())
+			WHERE id = $1::uuid
+		`, id)
+		if err != nil {
+			return err
+		}
+		if tag.RowsAffected() == 0 {
+			return errNotFound
+		}
+		return nil
+	})
+}
+
+type meView struct {
+	Principal tenant.Principal
+	TenantID  string
+	Slug      string
+	Name      string
+	Identity  *identityView
+}
+
+type identityView struct {
+	ID          string
+	Issuer      string
+	Subject     string
+	Email       *string
+	DisplayName *string
+}
+
+func (m *Module) loadMe(ctx context.Context, p tenant.Principal) (meView, error) {
+	view := meView{Principal: p, TenantID: p.TenantID}
+	err := m.pool.QueryRow(ctx, `
+		SELECT id::text, slug, name FROM tenants WHERE id = $1::uuid
+	`, p.TenantID).Scan(&view.TenantID, &view.Slug, &view.Name)
+	if err != nil {
+		return meView{}, err
+	}
+	err = m.inTenant(ctx, m.pool, p.TenantID, func(tx pgx.Tx) error {
+		fresh, err := scanPrincipal(tx.QueryRow(ctx, `
+			SELECT id::text, tenant_id::text, kind, name, roles
+			FROM principals WHERE id = $1::uuid
+		`, p.ID))
+		if err != nil {
+			return err
+		}
+		view.Principal = fresh
+		var iid, issuer, subject *string
+		var email, display *string
+		err = tx.QueryRow(ctx, `
+			SELECT i.id::text, i.issuer, i.subject, i.email, i.display_name
+			FROM principals pr
+			LEFT JOIN identities i ON i.id = pr.identity_id
+			WHERE pr.id = $1::uuid
+		`, p.ID).Scan(&iid, &issuer, &subject, &email, &display)
+		if err != nil {
+			return err
+		}
+		if iid != nil {
+			view.Identity = &identityView{
+				ID:          *iid,
+				Issuer:      deref(issuer),
+				Subject:     deref(subject),
+				Email:       email,
+				DisplayName: display,
+			}
+		}
+		return nil
+	})
+	return view, err
+}
+
+func deref(s *string) string {
+	if s == nil {
+		return ""
+	}
+	return *s
+}
