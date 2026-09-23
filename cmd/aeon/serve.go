@@ -16,6 +16,7 @@ import (
 	"syscall"
 	"time"
 
+	"github.com/inspr-at/aeon/internal/activity"
 	"github.com/inspr-at/aeon/internal/agentaccounts"
 	"github.com/inspr-at/aeon/internal/agentruns"
 	"github.com/inspr-at/aeon/internal/approvals"
@@ -127,6 +128,7 @@ func serveListener(ctx context.Context, cfg config.Config, ln net.Listener) erro
 			events.New(pool),
 			search.New(pool, embedProvider),
 			views.New(pool),
+			activity.New(pool),
 			imports.New(pool),
 			// R2: agents
 			inbox.New(pool),
