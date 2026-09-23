@@ -64,7 +64,7 @@ func (m *Module) AdmitLaunch(ctx context.Context, p tenant.Principal, authorizat
 		if h.Operation != "deploy" || h.PluginID != "pharos" || h.Result != nil {
 			return fail(409, "not an active Pharos deployment")
 		}
-		enabled, err := plugins.Enabled(ctx, tx, m.registry, "pharos", "deploy")
+		enabled, err := plugins.Enabled(ctx, tx, m.registry, p.TenantID, "pharos", "deploy")
 		if err != nil {
 			return err
 		}
@@ -144,7 +144,7 @@ func (m *Module) ConsumeLaunch(ctx context.Context, p tenant.Principal, authoriz
 		if err != nil {
 			return err
 		}
-		enabled, err := plugins.Enabled(ctx, tx, m.registry, "pharos", "deploy")
+		enabled, err := plugins.Enabled(ctx, tx, m.registry, p.TenantID, "pharos", "deploy")
 		if err != nil {
 			return err
 		}

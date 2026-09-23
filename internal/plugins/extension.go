@@ -28,6 +28,17 @@ func (g Grant) Allows(permission string) bool {
 	return ok
 }
 
+// Narrow returns only requested permissions already present in this grant.
+func (g Grant) Narrow(permissions ...string) Grant {
+	out := grantOf(nil)
+	for _, permission := range permissions {
+		if g.Allows(permission) {
+			out.perms[permission] = struct{}{}
+		}
+	}
+	return out
+}
+
 // Names returns the granted permissions in sorted order.
 func (g Grant) Names() []string {
 	out := make([]string, 0, len(g.perms))

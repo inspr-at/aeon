@@ -42,10 +42,9 @@ type Module struct {
 
 var _ httpapi.Module = (*Module)(nil)
 
-// New exposes the handoff routes. Register Pharos and Janus manifests in the
-// supplied registry with pharos.Register and janus.Register, then mount this
-// module and plugins.New from cmd/aeon. A LaunchChecks provider is required
-// before Pharos can admit a host change.
+// New exposes the handoff routes. Use plugins.Builtin for the shared registry,
+// then mount this module and plugins.NewWithRegistry from cmd/aeon.
+// A LaunchChecks provider is required before Pharos can admit a host change.
 func New(pool *pgxpool.Pool, registry *plugins.Registry, checks ...LaunchChecks) httpapi.Module {
 	var guard LaunchChecks
 	if len(checks) > 0 {

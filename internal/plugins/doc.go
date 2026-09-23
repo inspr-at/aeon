@@ -36,5 +36,7 @@
 //	reg.Seal()
 //	srv.Modules = append(srv.Modules, plugins.NewWithRegistry(pool, reg))
 //
-// Stage handoff calls (*Module).Evaluate, Request, and ApplyResult.
+// Stage handoff uses Enabled and Registry.AuthorizeHandoff for its
+// permission-only boundary and owns the transactional evidence/launch checks.
+// Callers with typed observed facts use Module.Evaluate, Request and ApplyResult.
 package plugins

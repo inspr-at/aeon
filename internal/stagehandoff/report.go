@@ -9,7 +9,6 @@ import (
 	"time"
 
 	"github.com/inspr-at/aeon/internal/events"
-	"github.com/inspr-at/aeon/internal/plugins"
 	"github.com/inspr-at/aeon/internal/tenant"
 	"github.com/jackc/pgx/v5"
 )
@@ -224,11 +223,11 @@ func (m *Module) close(ctx context.Context, tx pgx.Tx, p tenant.Principal, autho
 			}
 		}
 	}
-	step, bound := m.registry.Step(h.PluginID)
+	_, bound := m.registry.Step(h.PluginID)
 	if !bound {
 		return Result{}, fail(503, "stage plugin implementation is unavailable")
 	}
-	if err := step.ApplyResult(ctx, plugins.Call{TenantID: p.TenantID, PrincipalID: p.ID, Capabilities: plugins.Narrow([]string{h.Operation})}, h.Operation); err != nil {
+	if err := m.registry.AuthorizeHandoff(ctx, p, h.PluginID, h.Operation); err != nil {
 		return Result{}, fail(403, "stage plugin refused result")
 	}
 	state := "failed"

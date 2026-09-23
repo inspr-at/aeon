@@ -166,23 +166,19 @@ func (m *Module) create(ctx context.Context, tx pgx.Tx, p tenant.Principal, in R
 	if in.Operation == "apply" && releaseState != "access" {
 		return h, fail(409, "release is not awaiting access")
 	}
-	enabled, err := plugins.Enabled(ctx, tx, m.registry, plugin, in.Operation)
+	enabled, err := plugins.Enabled(ctx, tx, m.registry, p.TenantID, plugin, in.Operation)
 	if err != nil {
 		return h, err
 	}
 	if !enabled {
 		return h, fail(403, "stage plugin is not installed")
 	}
-	step, bound := m.registry.Step(plugin)
+	_, bound := m.registry.Step(plugin)
 	if !bound {
 		return h, fail(503, "stage plugin implementation is unavailable")
 	}
-	call := plugins.Call{TenantID: p.TenantID, PrincipalID: p.ID, Capabilities: plugins.Narrow([]string{in.Operation})}
-	if err := step.Evaluate(ctx, call, in.Operation); err != nil {
+	if err := m.registry.AuthorizeHandoff(ctx, p, plugin, in.Operation); err != nil {
 		return h, fail(403, "stage plugin refused operation")
-	}
-	if err := step.Request(ctx, call, in.Operation); err != nil {
-		return h, fail(403, "stage plugin refused request")
 	}
 	if in.Operation == "deploy" {
 		candidate, err := gateLive(ctx, tx, in.ReleaseNodeID, "candidate")

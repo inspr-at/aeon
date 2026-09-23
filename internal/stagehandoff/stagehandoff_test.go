@@ -12,13 +12,107 @@ import (
 	"github.com/inspr-at/aeon/internal/db"
 	"github.com/inspr-at/aeon/internal/dbtest"
 	"github.com/inspr-at/aeon/internal/plugins"
-	"github.com/inspr-at/aeon/internal/plugins/janus"
-	"github.com/inspr-at/aeon/internal/plugins/pharos"
+	"github.com/inspr-at/aeon/internal/plugins/fence"
 	"github.com/inspr-at/aeon/internal/tenant"
 	"github.com/jackc/pgx/v5"
 )
 
 const emptyDigest = "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855"
+
+func TestHandoffInstallationBoundary(t *testing.T) {
+	m, p, project, release, _ := fixture(t)
+	ctx := t.Context()
+	for _, tc := range []struct {
+		name        string
+		enabled     bool
+		digest      string
+		permissions []string
+		want        bool
+	}{
+		{"narrow prepare permission", true, "", []string{fence.PermStageAccessPrepare}, true},
+		{"disabled", false, "", []string{fence.PermStageAccessPrepare}, false},
+		{"wrong digest", true, emptyDigest, []string{fence.PermStageAccessPrepare}, false},
+		{"wrong operation permission", true, "", []string{fence.PermStageAccessApply}, false},
+		{"legacy permission", true, "", []string{"prepare"}, false},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			plug, _ := m.registry.Lookup("janus")
+			pin := tc.digest
+			if pin == "" {
+				pin = plug.Manifest.DigestSHA256
+			}
+			err := db.InTenant(ctx, m.pool, p.TenantID, func(tx pgx.Tx) error {
+				if _, err := tx.Exec(ctx, `UPDATE plugin_installations SET enabled=$1,manifest_digest_sha256=$2,permissions=$3 WHERE plugin_id='janus'`, tc.enabled, pin, tc.permissions); err != nil {
+					return err
+				}
+				_, err := m.create(ctx, tx, p, RequestWrite{ProjectNodeID: project, ReleaseNodeID: release, Stage: "access", Operation: "prepare", ExpectedJourneyRevision: 1, IdempotencyKey: tc.name}, "janus", []string{"authorization", "credential_handoff"}, "")
+				return err
+			})
+			if tc.want {
+				if err != nil {
+					t.Fatal(err)
+				}
+			} else {
+				var rejected *apiError
+				if !errors.As(err, &rejected) || rejected.code != 403 {
+					t.Fatalf("expected forbidden, got %v", err)
+				}
+			}
+		})
+	}
+	if err := db.InTenant(ctx, m.pool, p.TenantID, func(tx pgx.Tx) error {
+		for _, plugin := range []string{"pharos", "missing"} {
+			ok, err := plugins.Enabled(ctx, tx, m.registry, p.TenantID, plugin, "deploy")
+			if err != nil || ok {
+				t.Fatalf("uninstalled plugin %s: enabled=%v err=%v", plugin, ok, err)
+			}
+		}
+		for _, operation := range []string{"apply", "unknown"} {
+			ok, err := plugins.Enabled(ctx, tx, m.registry, p.TenantID, "janus", operation)
+			if err != nil || ok {
+				t.Fatalf("uninstalled operation %s: enabled=%v err=%v", operation, ok, err)
+			}
+		}
+		ok, err := plugins.Enabled(ctx, tx, m.registry, "11111111-1111-1111-1111-111111111111", "janus", "prepare")
+		if err != nil || ok {
+			t.Fatalf("foreign tenant: enabled=%v err=%v", ok, err)
+		}
+		return nil
+	}); err != nil {
+		t.Fatal(err)
+	}
+}
+
+func TestExistingHandoffCanFinishAfterPluginDisable(t *testing.T) {
+	m, p, project, release, bearer := fixture(t)
+	ctx := t.Context()
+	err := db.InTenant(ctx, m.pool, p.TenantID, func(tx pgx.Tx) error {
+		h, err := m.create(ctx, tx, p, RequestWrite{ProjectNodeID: project, ReleaseNodeID: release, Stage: "access", Operation: "prepare", ExpectedJourneyRevision: 1, IdempotencyKey: "before-disable"}, "janus", []string{"authorization", "credential_handoff"}, "")
+		if err != nil {
+			return err
+		}
+		if _, err := tx.Exec(ctx, `UPDATE plugin_installations SET enabled=false WHERE plugin_id='janus'`); err != nil {
+			return err
+		}
+		yes := true
+		for _, evidence := range []EvidenceWrite{
+			{Sequence: 1, Kind: "authorization", Outcome: "satisfied", ObservedAt: time.Now(), AuthorityEpoch: h.AuthorityEpoch, Authorized: &yes},
+			{Sequence: 2, Kind: "credential_handoff", Outcome: "satisfied", ObservedAt: time.Now(), AuthorityEpoch: h.AuthorityEpoch, CredentialReady: &yes},
+		} {
+			if _, err := m.appendEvidence(ctx, tx, p, bearer, h.ID, evidence); err != nil {
+				return err
+			}
+		}
+		result, err := m.close(ctx, tx, p, bearer, h.ID, ResultWrite{Outcome: "succeeded", TerminalSequence: 2, AuthorityEpoch: h.AuthorityEpoch, PrerequisiteSealSHA256: h.PrerequisiteSealSHA256})
+		if err == nil && result.Outcome != "succeeded" {
+			t.Fatalf("result = %s", result.Outcome)
+		}
+		return err
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+}
 
 func fixture(t *testing.T) (*Module, tenant.Principal, string, string, string) {
 	t.Helper()
@@ -28,17 +122,14 @@ func fixture(t *testing.T) (*Module, tenant.Principal, string, string, string) {
 	if err := fresh.Admin.QueryRow(ctx, `INSERT INTO tenants(slug,name) VALUES('p34','P34') RETURNING id::text`).Scan(&tenantID); err != nil {
 		t.Fatal(err)
 	}
-	registry := plugins.NewRegistry()
-	if err := janus.Register(registry); err != nil {
-		t.Fatal(err)
-	}
-	if err := pharos.Register(registry); err != nil {
+	registry, err := plugins.Builtin()
+	if err != nil {
 		t.Fatal(err)
 	}
 	m := &Module{pool: fresh.App, registry: registry, launchChecks: testLaunchChecks{}}
 	var p tenant.Principal
 	var project, release string
-	err := db.InTenant(ctx, fresh.App, tenantID, func(tx pgx.Tx) error {
+	err = db.InTenant(ctx, fresh.App, tenantID, func(tx pgx.Tx) error {
 		p.TenantID = tenantID
 		p.Kind = tenant.Agent
 		if err := tx.QueryRow(ctx, `INSERT INTO principals(tenant_id,kind,name) VALUES($1::uuid,'agent','Worker') RETURNING id::text`, tenantID).Scan(&p.ID); err != nil {
@@ -70,7 +161,8 @@ func fixture(t *testing.T) (*Module, tenant.Principal, string, string, string) {
 		if _, err := tx.Exec(ctx, `UPDATE journey_projects SET current_release_node_id=$1::uuid WHERE project_node_id=$2::uuid`, release, project); err != nil {
 			return err
 		}
-		man := janus.Manifest()
+		plug, _ := registry.Lookup("janus")
+		man := plug.Manifest
 		if _, err := tx.Exec(ctx, `INSERT INTO plugin_installations(tenant_id,plugin_id,version,manifest_digest_sha256,owner,enabled,permissions,updated_by_principal_id) VALUES($1::uuid,$2,$3,$4,$5,true,$6,$7::uuid)`, tenantID, man.ID, man.Version, man.DigestSHA256, man.Owner, man.Permissions, human); err != nil {
 			return err
 		}
@@ -178,14 +270,18 @@ func TestPrepareHandoffFencingAndEvidence(t *testing.T) {
 }
 func TestRegistryRejectsInvalidManifests(t *testing.T) {
 	r := plugins.NewRegistry()
-	m := janus.Manifest()
+	builtins, err := plugins.Builtin()
+	if err != nil {
+		t.Fatal(err)
+	}
+	m, _ := builtins.Lookup("janus")
 	if err := r.Register(m); err != nil {
 		t.Fatal(err)
 	}
 	if err := r.Register(m); err == nil {
 		t.Fatal("duplicate accepted")
 	}
-	m.ID = "tampered"
+	m.Manifest.ID = "tampered"
 	if err := plugins.NewRegistry().Register(m); err == nil {
 		t.Fatal("digest mismatch accepted")
 	}
@@ -201,7 +297,8 @@ func TestPharosAdmissionAndTenantFence(t *testing.T) {
 		if _, err := tx.Exec(ctx, `UPDATE journey_releases SET version_scheme='inspr-calendar-v2',version='260923000000.0.0' WHERE release_node_id=$1::uuid`, release); err != nil {
 			return err
 		}
-		man := pharos.Manifest()
+		plug, _ := m.registry.Lookup("pharos")
+		man := plug.Manifest
 		if _, err := tx.Exec(ctx, `INSERT INTO plugin_installations(tenant_id,plugin_id,version,manifest_digest_sha256,owner,enabled,permissions,updated_by_principal_id) VALUES($1::uuid,$2,$3,$4,$5,true,$6,$7::uuid)`, p.TenantID, man.ID, man.Version, man.DigestSHA256, man.Owner, man.Permissions, human); err != nil {
 			return err
 		}
