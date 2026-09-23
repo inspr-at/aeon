@@ -15,6 +15,12 @@ const sections: { title: string; rows: { keys: Key[][]; label: string; joiner?: 
     { keys: [[mac ? '⌘' : 'Ctrl', 'K']], label: 'Search everything' },
     { keys: [['?']], label: 'This sheet' },
   ] },
+  { title: 'Outline', rows: [
+    { keys: [[{ icon: 'arrow', label: 'Right arrow' }]], label: 'Expand, or step into the first child' },
+    { keys: [[{ icon: 'arrow-left', label: 'Left arrow' }]], label: 'Collapse, or step out to the parent' },
+    { keys: [['Space']], label: 'Expand or collapse' },
+    { keys: [['n']], label: 'On an epic: new ticket inside it' },
+  ] },
   { title: 'Open ticket', rows: [
     { keys: [['j'], ['k']], label: 'Next and previous ticket, the list follows' },
     { keys: [['e']], label: 'Edit the title' },

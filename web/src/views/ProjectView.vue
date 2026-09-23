@@ -5,7 +5,8 @@ import { onBeforeRouteLeave, onBeforeRouteUpdate, useRoute, useRouter } from 'vu
 import { createNode, listNodes, type ListItem } from '../lib/api'
 import { canWrite } from '../lib/activity'
 import { confirmAction } from '../lib/confirm'
-import { asListItem, keyPrefix, kinds } from '../lib/useTicket'
+import { asListItem, guardedMove, keyPrefix, kinds } from '../lib/useTicket'
+import { useOutline } from '../lib/useOutline'
 import { density } from '../lib/prefs'
 import { toast } from '../lib/toast'
 import { apiParams, effectiveSort, facetOptions, filtersFromQuery, filtersToQuery, groupRows, hasFilters, orderByStatus, totalFrom, WORK_KINDS, type Dimension, type EpicRef, type GroupBy, type ListFilters } from '../lib/ticketList'
@@ -36,6 +37,13 @@ const routeKey = computed(() => project.value?.routeKey ?? projectKey.value)
 const filters = computed(() => filtersFromQuery(route.query))
 const list = useTicketList(projectId, filters)
 const now = ref(Date.now())
+// List or Outline. The full page keeps whichever the ticket was opened from.
+const fullViewQuery = computed(() => !!ticketKey.value && route.query.view === 'full')
+const lastListMode = ref<'list' | 'outline'>(route.query.view === 'outline' ? 'outline' : 'list')
+watch(() => route.query.view, view => { if (view !== 'full') lastListMode.value = view === 'outline' ? 'outline' : 'list' })
+const viewMode = computed<'list' | 'outline'>(() => fullViewQuery.value ? lastListMode.value : route.query.view === 'outline' ? 'outline' : 'list')
+const outlineActive = computed(() => viewMode.value === 'outline')
+const outline = useOutline(projectId, filters, outlineActive, list)
 
 const toolbarWrap = ref<HTMLElement>()
 const stickMark = ref<HTMLElement>()
@@ -52,7 +60,7 @@ const collapsed = ref(new Set<string>())
 const statusMenu = ref<{ row: ListItem; anchor: HTMLElement; from: 'list' | 'panel' } | null>(null)
 const creating = ref(false)
 // Full page: the same ticket workspace in a two-column page instead of the side panel.
-const fullView = computed(() => !!ticketKey.value && route.query.view === 'full')
+const fullView = fullViewQuery
 const me = computed(() => session.identity ? { id: session.identity.principal.id, name: session.identity.principal.name } : null)
 const writable = computed(() => canWrite(session.identity?.principal.roles))
 
@@ -64,6 +72,7 @@ const displayRows = computed(() => {
 const rowsById = computed(() => new Map(list.rows.value.map(row => [row.id, row])))
 const groups = computed(() => groupRows(displayRows.value, filters.value.group, list.facets.value.state))
 const sequence = computed(() => {
+  if (outlineActive.value) return outline.rows.value
   const out: ListItem[] = []
   for (const group of groups.value) {
     const epicRow = group.epic ? rowsById.value.get(group.epic.id) : undefined
@@ -73,7 +82,7 @@ const sequence = computed(() => {
   return out
 })
 const total = computed(() => totalFrom(list.facets.value))
-const showAssignee = computed(() => list.rows.value.some(row => row.assignee))
+const showAssignee = computed(() => (outlineActive.value ? outline.rows.value : list.rows.value).some(row => row.assignee))
 
 // One source for the header: the project summary (work counts). It arrives with
 // the project itself and refreshes after a status change.
@@ -90,7 +99,14 @@ function options(dimension: Dimension) {
 
 // ---------- URL state ----------
 function update(patch: Partial<ListFilters>) {
-  void router.replace({ path: route.path, query: filtersToQuery({ ...filters.value, ...patch }) })
+  const view = route.query.view === 'outline' || route.query.view === 'full' ? { view: route.query.view } : {}
+  void router.replace({ path: route.path, query: { ...filtersToQuery({ ...filters.value, ...patch }), ...view } })
+}
+function setView(mode: 'list' | 'outline') {
+  if (mode === viewMode.value) return
+  creating.value = false
+  const { view: _view, ...query } = route.query
+  void router.replace({ path: route.path, query: mode === 'outline' ? { ...query, view: 'outline' } : query })
 }
 function toggleValue(dimension: Dimension, value: string) {
   const current = filters.value[dimension]
@@ -110,9 +126,17 @@ function toggleGroup(key: string) {
 }
 
 const queryKey = computed(() => projectId.value ? JSON.stringify(apiParams(projectId.value, filters.value)) : '')
-watch(queryKey, (value, old) => {
+// The Outline without filters loads its own levels; the list query then only supplies
+// counts. With filters or Hide closed, the Outline needs the list's whole match set.
+const listLoadMode = computed(() => !outlineActive.value ? 'list' : outline.matchMode.value ? 'all' : 'counts')
+watch([queryKey, listLoadMode], async ([value, mode], old) => {
   if (!value) return
-  void list.load()
+  // Switching views on the same query reuses the rows already loaded.
+  const sameQuery = !!old && old[0] === value
+  if (sameQuery && old![1] !== 'counts' && mode !== 'counts') { if (mode === 'all') void list.loadAll(); return }
+  const load = list.load({ pageSize: mode === 'counts' ? 1 : 200 })
+  if (mode === 'all') void load.then(() => list.loadAll())
+  if (sameQuery) return
   // A new query starts at its first row, with the project header still out of view.
   if (old && scrollRoot.value && toolbarWrap.value && scrollRoot.value.scrollTop > toolbarWrap.value.offsetTop) {
     scrollRoot.value.scrollTop = toolbarWrap.value.offsetTop
@@ -127,7 +151,7 @@ let panelGeneration = 0
 const panelItem = computed(() => {
   const key = ticketKey.value.toLowerCase()
   if (!key) return null
-  return list.rows.value.find(row => row.key.toLowerCase() === key) ?? (fetched.value?.key.toLowerCase() === key ? fetched.value : null)
+  return list.rows.value.find(row => row.key.toLowerCase() === key) ?? outline.findByKey(key) ?? (fetched.value?.key.toLowerCase() === key ? fetched.value : null)
 })
 const panelPosition = computed(() => {
   const item = panelItem.value
@@ -160,6 +184,7 @@ async function resolvePanel() {
 watch([ticketKey, projectId], resolvePanel, { immediate: true })
 watch(panelItem, item => {
   if (!item) return
+  if (outlineActive.value) outline.reveal(item.id)
   if (sequence.value.some(row => row.id === item.id)) {
     cursorId.value = item.id
     if (!fullView.value) void nextTick(() => table.value?.scrollToRow(item.id))
@@ -191,7 +216,10 @@ function openKey(key: string) {
   void router.push(location)
 }
 function openRow(row: ListItem) { cursorId.value = row.id; openKey(row.key) }
-function listQuery() { const { view: _view, ...query } = route.query; return query }
+function listQuery() {
+  const { view, ...query } = route.query
+  return view === 'outline' || (view === 'full' && lastListMode.value === 'outline') ? { ...query, view: 'outline' } : query
+}
 function closePanel() {
   if (!ticketKey.value) return
   const back = !fullView.value && openedFromList && JSON.stringify(route.query) === openedQuery && typeof window.history.state?.back === 'string'
@@ -250,15 +278,22 @@ function chooseStatus(state: string) {
   const menu = statusMenu.value
   statusMenu.value = null
   if (!menu) return
-  void list.setStatus(menu.row, state).then(changed => { if (changed) void projects.load(true) })
+  void list.setStatus(menu.row, state).then(changed => { if (changed) { void projects.load(true); outline.refreshStatsFor(menu.row.id) } })
   if (menu.from === 'panel') menu.anchor.focus()
   else table.value?.focusGrid()
 }
 function openEpic(epic: EpicRef) { openKey(epic.key) }
 
 // ---------- Create and remove ----------
-async function startCreate() {
+async function startCreate(under: ListItem | null = null) {
   if (fullView.value) collapse()
+  if (under && outlineActive.value) {
+    creating.value = false
+    outline.startCreateUnder(under.id)
+    await nextTick(); table.value?.focusCreate()
+    return
+  }
+  outline.startCreateUnder(null)
   creating.value = true
   if (scrollRoot.value && toolbarWrap.value && scrollRoot.value.scrollTop > toolbarWrap.value.offsetTop) scrollRoot.value.scrollTop = toolbarWrap.value.offsetTop
   await nextTick(); table.value?.focusCreate()
@@ -276,6 +311,7 @@ async function quickCreate(draft: QuickDraft): Promise<boolean> {
     const parent = draft.epic ? { ...draft.epic, kind_slug: 'epic' } : { id: current.id, key: current.key, title: current.title, kind_slug: 'project' }
     const created = asListItem(node, kind, parent, { id: current.id, key: current.key, title: current.title })
     list.insertRow(created)
+    outline.insert(created)
     cursorId.value = created.id
     toast(`Created ${node.key}`, { action: { label: 'Open', run: () => openKey(node.key) } })
     void projects.load(true)
@@ -285,9 +321,24 @@ async function quickCreate(draft: QuickDraft): Promise<boolean> {
     return false
   }
 }
-function childCreated(item: ListItem) { list.insertRow(item); void projects.load(true) }
+function childCreated(item: ListItem) { list.insertRow(item); outline.insert(item); void projects.load(true) }
+function childMoved(item: ListItem, fromParent: string | null) {
+  outline.relocate(item, fromParent, fromParent && outline.node(fromParent)?.kind_slug === 'epic' ? fromParent : null)
+}
+function closeCreate() { creating.value = false; outline.startCreateUnder(null) }
+// Drag and drop in the Outline: the same guarded move as the workspace's "Move to another epic".
+async function moveRow(row: ListItem, epic: ListItem | null) {
+  const current = project.value
+  if (!current) return
+  const parent = epic ? { id: epic.id, key: epic.key, title: epic.title, kind_slug: 'epic' } : { id: current.id, key: current.key, title: current.title, kind_slug: 'project' }
+  if (await guardedMove(row, parent, childMoved) === 'ok') {
+    if (epic) outline.setExpanded(epic.id, true)
+    cursorId.value = row.id
+  }
+}
 let skipGuard = false
 function removed(item: ListItem) {
+  outline.remove(item)
   list.removeRow(item.id)
   void projects.load(true)
   skipGuard = true
@@ -318,7 +369,7 @@ async function move(step: number) {
   if (!rows.length) return
   // At the end of what is loaded, fetch the next page first so j and Next keep going.
   const at = rows.findIndex(row => row.id === (ticketKey.value && panelItem.value ? panelItem.value.id : cursorId.value))
-  if (step > 0 && at === rows.length - 1 && list.cursor.value) {
+  if (step > 0 && at === rows.length - 1 && list.cursor.value && !outlineActive.value) {
     await list.loadMore()
     rows = sequence.value
   }
@@ -347,6 +398,7 @@ function keydown(event: KeyboardEvent) {
     return
   }
   const row = sequence.value.find(item => item.id === cursorId.value)
+  if (outlineActive.value && !fullView.value && outlineKey(event, row)) return
   switch (event.key) {
     case 'j': case 'ArrowDown': event.preventDefault(); void move(1); break
     case 'k': case 'ArrowUp': event.preventDefault(); void move(-1); break
@@ -355,12 +407,12 @@ function keydown(event: KeyboardEvent) {
       if (row) { event.preventDefault(); openRow(row) }
       break
     case 'Escape':
-      if (creating.value) { event.preventDefault(); creating.value = false }
+      if (creating.value || outline.createUnder.value) { event.preventDefault(); closeCreate() }
       else if (ticketKey.value) { event.preventDefault(); closePanel() }
       break
     case '/': if (!fullView.value) { event.preventDefault(); toolbar.value?.focusSearch() } break
     case '?': event.preventDefault(); shortcuts.value?.open(); break
-    case 'n': event.preventDefault(); void startCreate(); break
+    case 'n': event.preventDefault(); void startCreate(outlineActive.value && !ticketKey.value && row?.kind_slug === 'epic' ? row : null); break
     case 'e': if (ticketKey.value) { event.preventDefault(); panel.value?.editTitle() } break
     case 's':
       if (ticketKey.value) { event.preventDefault(); panel.value?.openStatus() }
@@ -371,6 +423,29 @@ function keydown(event: KeyboardEvent) {
     case 'c': if (ticketKey.value) { event.preventDefault(); panel.value?.focusComposer() } break
     case 'f': if (ticketKey.value) { event.preventDefault(); if (fullView.value) collapse(); else expand() } break
   }
+}
+
+// Outline keys: right opens or steps into, left closes or steps out, Space toggles.
+function outlineKey(event: KeyboardEvent, row: ListItem | undefined): boolean {
+  if (!['ArrowRight', 'ArrowLeft', ' '].includes(event.key) || !row) return false
+  if (ticketKey.value && panel.value?.el?.contains(document.activeElement)) return false
+  event.preventDefault()
+  const open = outline.isExpanded(row.id), children = outline.hasChildren(row.id)
+  const focusRow = (id: string | null) => {
+    if (!id || !sequence.value.some(item => item.id === id)) return
+    cursorId.value = id
+    void nextTick(() => table.value?.scrollToRow(id))
+  }
+  if (event.key === ' ') { if (children) outline.toggle(row.id) }
+  else if (event.key === 'ArrowRight') {
+    if (children && !open) outline.setExpanded(row.id, true)
+    else if (children) { const index = sequence.value.findIndex(item => item.id === row.id); const next = sequence.value[index + 1]; if (next && next.parent_id === row.id) focusRow(next.id) }
+  } else {
+    if (children && open) outline.setExpanded(row.id, false)
+    else focusRow(outline.parentOf(row.id))
+  }
+  table.value?.focusGrid()
+  return true
 }
 
 // ---------- Layout: sticky toolbar height and stuck state ----------
@@ -449,19 +524,25 @@ watch([project, panelItem], ([current, item]) => {
           ref="toolbar" :filters="filters" :options="options" :total="total" :loading="list.loading.value" :density="density" :stuck="stuck"
           @search="q => update({ q })" @toggle="toggleValue" @clear="dimension => update({ [dimension]: [] })" @clear-all="clearFilters"
           @show-closed="value => update({ showClosed: value })" @group="setGroup" @density="setDensity"
-          @open-sheet="filterSheet?.open()" @need-names="list.resolveNames(options('assignee').map(o => o.value))" @create="startCreate"
+          @open-sheet="filterSheet?.open()" @need-names="list.resolveNames(options('assignee').map(o => o.value))" @create="startCreate()"
+          :view="viewMode" @view="setView" @expand-all="outline.expandAll()" @collapse-all="outline.collapseAll()"
         />
       </div>
 
       <TicketTable
         ref="table" :groups="groups" :group="filters.group" :rows-by-id="rowsById" :cursor-id="cursorId" :open-id="panelItem?.id ?? null"
-        :query="filters.q" :sort="filters.sort" :density="density" :loading="list.loading.value" :loading-more="list.loadingMore.value"
-        :error="list.error.value" :more-error="list.moreError.value" :has-more="!!list.cursor.value" :filtered="filtered" :hiding-closed="!filters.showClosed"
+        :query="filters.q" :sort="filters.sort" :density="density"
+        :loading="outlineActive ? outline.loading.value : list.loading.value" :loading-more="outlineActive ? outline.loadingMoreRoot.value : list.loadingMore.value"
+        :error="outlineActive ? outline.error.value || list.error.value : list.error.value" :more-error="list.moreError.value"
+        :has-more="outlineActive ? outline.hasMoreRoot.value : !!list.cursor.value" :filtered="filtered" :hiding-closed="!filters.showClosed"
         :collapsed="collapsed" :total="total" :project-key="routeKey" :scroll-root="scrollRoot" :now="now" :show-assignee="showAssignee"
-        :creating="creating" :project-id="project.id" :known-states="knownStates" :create="quickCreate" @close-create="creating = false"
+        :creating="creating" :project-id="project.id" :known-states="knownStates" :create="quickCreate" @close-create="closeCreate"
+        :outline="outlineActive ? outline.entries.value : null" :can-drag="outlineActive && writable"
+        @toggle-row="outline.toggle" @toggle-no-epic="outline.noEpicCollapsed.value = !outline.noEpicCollapsed.value"
+        @more-children="id => id === project!.id ? outline.loadMoreRoot() : outline.loadChildren(id, true)" @move="moveRow"
         @open="openRow" @cursor="id => cursorId = id" @sort="sortBy" @status="(row, anchor) => openStatus(row, anchor, 'list')"
         @copy="row => copyKey(row.key)" @new-tab="row => newTab(row.key)" @toggle-group="toggleGroup" @open-epic="openEpic"
-        @retry="list.load()" @more="list.loadMore()" @grid-focus="focusFirst" @clear-filters="clearFilters" @show-closed="update({ showClosed: true })"
+        @retry="outlineActive ? outline.reload() : list.load()" @more="outlineActive ? outline.loadMoreRoot() : list.loadMore()" @grid-focus="focusFirst" @clear-filters="clearFilters" @show-closed="update({ showClosed: true })"
       />
 
       <p class="hint">
@@ -475,12 +556,12 @@ watch([project, panelItem], ([current, item]) => {
         :position="panelPosition" :now="now" :mode="fullView ? 'full' : 'panel'" :project="{ id: project.id, routeKey: project.routeKey }"
         :names="list.names" :me="me" :can-write="writable" :people="people"
         @close="closePanel" @prev="move(-1)" @next="move(1)" @expand="expand" @collapse="collapse" @new-tab="newTab(panelItem?.key ?? ticketKey)"
-        @status="anchor => panelItem && openStatus(panelItem, anchor, 'panel')" @open-key="openRelated" @removed="removed" @created="childCreated" @retry="resolvePanel"
+        @status="anchor => panelItem && openStatus(panelItem, anchor, 'panel')" @open-key="openRelated" @removed="removed" @created="childCreated" @moved="childMoved" @retry="resolvePanel"
       />
       <StatusMenu v-if="statusMenu" :anchor="statusMenu.anchor" :current="statusMenu.row.state" :known-states="knownStates" :ticket-key="statusMenu.row.key" @choose="chooseStatus" @close="closeStatus" />
       <ShortcutSheet ref="shortcuts" />
       <FilterSheet
-        ref="filterSheet" :filters="filters" :options="options" :total="total"
+        ref="filterSheet" :filters="filters" :options="options" :total="total" :view="viewMode" @expand-all="outline.expandAll()" @collapse-all="outline.collapseAll()"
         @toggle="toggleValue" @clear-all="clearFilters" @show-closed="value => update({ showClosed: value })" @group="setGroup"
         @opened="list.resolveNames(options('assignee').map(o => o.value))"
       />

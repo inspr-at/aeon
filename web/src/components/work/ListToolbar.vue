@@ -14,6 +14,7 @@ const props = defineProps<{
   loading: boolean
   density: 'comfortable' | 'compact'
   stuck: boolean
+  view: 'list' | 'outline'
 }>()
 const emit = defineEmits<{
   search: [q: string]
@@ -26,6 +27,9 @@ const emit = defineEmits<{
   openSheet: []
   needNames: []
   create: []
+  view: [value: 'list' | 'outline']
+  expandAll: []
+  collapseAll: []
 }>()
 
 const draft = ref(props.filters.q)
@@ -35,7 +39,7 @@ const narrow = ref(false)
 let resize: ResizeObserver | undefined
 onMounted(() => {
   if (!root.value) return
-  resize = new ResizeObserver(([entry]) => { narrow.value = entry.contentRect.width < 820 })
+  resize = new ResizeObserver(([entry]) => { narrow.value = entry.contentRect.width < 940 })
   resize.observe(root.value)
 })
 const input = ref<HTMLInputElement>()
@@ -52,7 +56,7 @@ onBeforeUnmount(() => { clearTimeout(timer); resize?.disconnect() })
 const active = computed(() => activeDimensions(props.filters))
 const filterCount = computed(() => active.value.reduce((sum, key) => sum + props.filters[key].length, 0) + (props.filters.q ? 1 : 0))
 const groups: { value: GroupBy; label: string }[] = [{ value: 'none', label: 'None' }, { value: 'status', label: 'Status' }, { value: 'epic', label: 'Epic' }]
-const displayLabel = computed(() => props.filters.group === 'none' ? 'Display' : `Grouped by ${props.filters.group}`)
+const displayLabel = computed(() => props.view === 'outline' || props.filters.group === 'none' ? 'Display' : `Grouped by ${props.filters.group}`)
 
 function title(dimension: Dimension) { return DIMENSIONS.find(d => d.key === dimension)!.title }
 function openMenu(dimension: Dimension, event: MouseEvent) {
@@ -89,6 +93,10 @@ defineExpose({ focusSearch, input })
 
 <template>
   <div ref="root" class="toolbar" :class="{ stuck }" role="toolbar" aria-label="Ticket list controls">
+    <div class="seg view-seg" role="radiogroup" aria-label="View">
+      <button type="button" role="radio" :aria-checked="view === 'list'" aria-label="List view" data-tip="List view · flat, sortable, groupable" @click="emit('view', 'list')"><AppIcon name="list" :size="14" /><span class="view-label">List</span></button>
+      <button type="button" role="radio" :aria-checked="view === 'outline'" aria-label="Outline view" data-tip="Outline view · epics, tickets and tasks as a tree" @click="emit('view', 'outline')"><AppIcon name="outline" :size="14" /><span class="view-label">Outline</span></button>
+    </div>
     <label class="search-field list-search">
       <AppIcon name="search" :size="14" />
       <input ref="input" v-model="draft" class="field" type="search" :placeholder="narrow ? 'Search' : 'Search this list'" aria-label="Search tickets in this project" aria-keyshortcuts="/" autocomplete="off" spellcheck="false" @keydown="searchKey" />
@@ -124,13 +132,17 @@ defineExpose({ focusSearch, input })
       <input type="checkbox" :checked="!filters.showClosed" @change="emit('showClosed', !($event.target as HTMLInputElement).checked)" />
       <span>Hide closed</span>
     </label>
-    <button type="button" class="btn sm display-btn" :class="{ on: filters.group !== 'none' }" aria-haspopup="dialog" :aria-expanded="!!displayAnchor" data-tip="Grouping and row height" @click="displayAnchor = displayAnchor ? null : ($event.currentTarget as HTMLElement)">
+    <button
+      type="button" class="btn sm closed-pill" :class="{ on: !filters.showClosed }" :aria-pressed="!filters.showClosed" aria-label="Hide closed tickets"
+      :data-tip="filters.showClosed ? 'Closed tickets are shown\nClick to hide them' : 'Closed tickets are hidden\nClick to show them'" @click="emit('showClosed', !filters.showClosed)"
+    ><AppIcon :name="filters.showClosed ? 'eye' : 'eye-off'" :size="14" />Closed</button>
+    <button type="button" class="btn sm display-btn" :class="{ on: view === 'list' && filters.group !== 'none' }" aria-haspopup="dialog" :aria-expanded="!!displayAnchor" data-tip="Grouping and row height" @click="displayAnchor = displayAnchor ? null : ($event.currentTarget as HTMLElement)">
       <AppIcon name="layers" :size="13" /><span class="display-label">{{ displayLabel }}</span><AppIcon name="chevron" :size="12" class="facet-chevron" />
     </button>
 
     <button type="button" class="btn primary new-btn" aria-label="New ticket" aria-keyshortcuts="n" data-tip="New ticket · n" @click="emit('create')"><AppIcon name="plus" :size="14" /><span class="new-label">New</span></button>
-    <button type="button" class="btn filters-btn" :class="{ on: filterCount }" @click="emit('openSheet')">
-      <AppIcon name="sliders" :size="14" />Filters<span v-if="filterCount" class="facet-count mono">{{ filterCount }}</span>
+    <button type="button" class="btn filters-btn" :class="{ on: filterCount }" aria-label="Filters" @click="emit('openSheet')">
+      <AppIcon name="sliders" :size="14" /><span class="filters-label">Filters</span><span v-if="filterCount" class="facet-count mono">{{ filterCount }}</span>
     </button>
 
     <FacetMenu
@@ -139,10 +151,19 @@ defineExpose({ focusSearch, input })
     />
     <FloatingPanel v-if="displayAnchor" :anchor="displayAnchor" :width="296" align="end" label="Display options" @close="closeDisplay">
       <div class="display-panel">
-        <p class="eyebrow">Group by</p>
-        <div class="seg wide" role="radiogroup" aria-label="Group by">
-          <button v-for="option in groups" :key="option.value" type="button" role="radio" :aria-checked="filters.group === option.value" :data-autofocus="filters.group === option.value ? '' : undefined" @click="emit('group', option.value)">{{ option.label }}</button>
-        </div>
+        <template v-if="view === 'list'">
+          <p class="eyebrow">Group by</p>
+          <div class="seg wide" role="radiogroup" aria-label="Group by">
+            <button v-for="option in groups" :key="option.value" type="button" role="radio" :aria-checked="filters.group === option.value" :data-autofocus="filters.group === option.value ? '' : undefined" @click="emit('group', option.value)">{{ option.label }}</button>
+          </div>
+        </template>
+        <template v-else>
+          <p class="eyebrow">Outline</p>
+          <div class="outline-actions">
+            <button type="button" class="btn sm" data-autofocus @click="emit('expandAll'); closeDisplay(false)"><AppIcon name="expand-all" :size="13" />Expand all</button>
+            <button type="button" class="btn sm" @click="emit('collapseAll'); closeDisplay(false)"><AppIcon name="collapse-all" :size="13" />Collapse all</button>
+          </div>
+        </template>
         <p class="eyebrow">Row height</p>
         <div class="seg wide" role="radiogroup" aria-label="Row height">
           <button type="button" role="radio" :aria-checked="density === 'comfortable'" @click="emit('density', 'comfortable')"><AppIcon name="rows-comfortable" :size="14" />Comfortable</button>
@@ -191,18 +212,31 @@ defineExpose({ focusSearch, input })
 .filters-btn { display: none; }
 .new-btn { height: 32px; padding: 0 14px 0 11px; gap: 6px; }
 .display-panel { display: grid; gap: 8px; padding: 6px 8px 8px; }
-.display-panel .eyebrow + .seg { margin-bottom: 6px; }
+.display-panel .eyebrow + .seg, .outline-actions { margin-bottom: 6px; }
+.outline-actions { display: grid; grid-template-columns: 1fr 1fr; gap: 6px; }
+.view-seg { flex-shrink: 0; }
+.view-seg button { height: 26px; padding: 0 11px; }
 .seg.wide { display: grid; grid-auto-flow: column; grid-auto-columns: 1fr; }
 .seg.wide button { height: 30px; }
 /* Narrow list (docked panel or small window): tighter search, no count. */
+@container toolbar (max-width: 1180px) { .view-label { display: none; } .view-seg button { padding: 0 8px; } }
 @container toolbar (max-width: 1000px) { .list-search { width: 190px; } .count { display: none; } .new-btn { width: 32px; padding: 0; } .new-label { display: none; } }
+@container toolbar (max-width: 920px) { .list-search { width: 150px; } .facet-btn { padding: 0 11px; } .facet-btn:not(.on) .facet-end { display: none; } }
 @container toolbar (max-width: 820px) { .list-search { width: 136px; } .list-search .field { padding-right: 10px; } .facet-btn { padding: 0 11px; } .facet-btn:not(.on) .facet-end { display: none; } }
 @container toolbar (max-width: 900px) { .display-label { display: none; } .display-btn { padding: 0 9px; } }
-@media (max-width: 900px) { .facets, .chips, .display-btn, .closed-switch, .spacer { display: none; } .list-search { flex: 1; width: auto; } .filters-btn { display: inline-flex; } }
+/* Narrowest docked width: a labelled pill replaces the switch and its longer label. */
+.closed-pill { display: none; gap: 6px; padding: 0 11px 0 9px; color: var(--ink-2); }
+.closed-pill.on { color: var(--teal-ink); }
+@container toolbar (max-width: 800px) { .closed-switch { display: none; } .closed-pill { display: inline-flex; } }
+@media (max-width: 900px) { .facets, .chips, .display-btn, .closed-switch, .closed-pill, .spacer { display: none; } .list-search { flex: 1; width: auto; } .filters-btn { display: inline-flex; } }
 @media (max-width: 600px) {
   .toolbar { flex-wrap: nowrap; gap: 8px; padding: 8px 0; }
   .list-search .field { height: 44px; font-size: 16px; }
-  .filters-btn { height: 44px; padding: 0 14px; }
+  .filters-btn { height: 44px; width: 44px; padding: 0; position: relative; }
+  .filters-label { display: none; }
+  .filters-btn .facet-count { position: absolute; top: -2px; right: -2px; }
+  .view-seg { padding: 2px; }
+  .view-seg button { width: 40px; height: 40px; padding: 0; }
   .new-btn { order: 3; width: 44px; height: 44px; padding: 0; }
   .new-label { display: none; }
   .count { display: none; }

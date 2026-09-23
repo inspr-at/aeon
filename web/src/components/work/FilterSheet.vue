@@ -6,8 +6,8 @@ import { plural } from '../../lib/work'
 import AppIcon from '../AppIcon.vue'
 import FacetOptions from './FacetOptions.vue'
 
-defineProps<{ filters: ListFilters; options: (dimension: Dimension) => FacetOption[]; total: number | null }>()
-const emit = defineEmits<{ toggle: [dimension: Dimension, value: string]; clearAll: []; showClosed: [value: boolean]; group: [value: GroupBy]; opened: [] }>()
+withDefaults(defineProps<{ filters: ListFilters; options: (dimension: Dimension) => FacetOption[]; total: number | null; view?: 'list' | 'outline' }>(), { view: 'list' })
+const emit = defineEmits<{ toggle: [dimension: Dimension, value: string]; clearAll: []; showClosed: [value: boolean]; group: [value: GroupBy]; opened: []; expandAll: []; collapseAll: [] }>()
 const dialog = ref<HTMLDialogElement>()
 const doneButton = ref<HTMLButtonElement>()
 let opener: HTMLElement | null = null
@@ -39,7 +39,14 @@ defineExpose({ open, close })
             <span>Hide closed tickets</span>
           </label>
         </div>
-        <div class="sheet-row group-row">
+        <div v-if="view === 'outline'" class="sheet-row group-row">
+          <p class="eyebrow">Outline</p>
+          <div class="outline-actions">
+            <button type="button" class="btn" @click="emit('expandAll'); close()"><AppIcon name="expand-all" :size="14" />Expand all</button>
+            <button type="button" class="btn" @click="emit('collapseAll'); close()"><AppIcon name="collapse-all" :size="14" />Collapse all</button>
+          </div>
+        </div>
+        <div v-else class="sheet-row group-row">
           <p class="eyebrow">Group by</p>
           <div class="seg" role="radiogroup" aria-label="Group by">
             <button v-for="option in groups" :key="option.value" type="button" role="radio" :aria-checked="filters.group === option.value" @click="emit('group', option.value)">{{ option.label }}</button>
@@ -71,6 +78,8 @@ header .btn { height: 44px; }
 .sheet-row { display: flex; align-items: center; justify-content: space-between; gap: 12px; min-height: 52px; padding: 0 8px; border-bottom: 1px solid var(--line); }
 .sheet-row .switch { min-height: 44px; font-size: 14.5px; color: var(--ink); }
 .group-row .seg button { height: 36px; padding: 0 14px; }
+.outline-actions { display: flex; gap: 8px; }
+.outline-actions .btn { height: 40px; }
 .sheet-section { padding: 14px 0 6px; border-bottom: 1px solid var(--line); }
 .sheet-section .eyebrow { padding: 0 8px 6px; }
 .sheet-section :deep(.facet-option) { min-height: 44px; font-size: 15px; }

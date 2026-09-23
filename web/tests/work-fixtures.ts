@@ -16,6 +16,7 @@ export interface MockNode {
 }
 export interface MockOptions {
   conflictAlways?: string
+  delayChildren?: number
   readOnly?: boolean
   failList?: boolean
   failProjects?: boolean
@@ -135,10 +136,17 @@ export async function mockWork(page: Page, data: Fixtures, options: MockOptions 
     const movePath = /^\/api\/nodes\/([^/]+)\/move$/.exec(path)
     if (movePath) {
       const node = data.nodes.find(n => n.id === movePath[1])!
+      // B5: If-Unmodified-Since compared at second precision; 412 carries the current node.
+      const expected = request.headers()['if-unmodified-since']
+      const seconds = (iso: string) => Math.floor(Date.parse(iso) / 1000)
+      if (expected && seconds(expected) !== seconds(node.updated_at)) {
+        const { kind_slug: kind, project: _p, ...current } = node
+        return route.fulfill({ status: 412, json: { error: 'node has changed', node: { ...current, kind_id: `k-${kind}`, position: '0', deleted_at: null } } })
+      }
       node.parent_id = (body as { parent_id: string }).parent_id
       node.updated_at = new Date(now + 90_000).toISOString()
-      const { kind_slug: _k, project: _p, ...rest } = node
-      return route.fulfill({ json: { ...rest, kind_id: 'k-ticket', position: '0', deleted_at: null } })
+      const { kind_slug: kind, project: _p, ...rest } = node
+      return route.fulfill({ json: { ...rest, kind_id: `k-${kind}`, position: '0', deleted_at: null } })
     }
     if (path === '/api/version') return route.fulfill({ json: { version: '260923120000.0.0', scheme: 'inspr-calendar-v2' } })
     if (path === '/api/projects') {
@@ -157,10 +165,17 @@ export async function mockWork(page: Page, data: Fixtures, options: MockOptions 
       if (kinds.length === 1 && kinds[0] === 'project') return route.fulfill({ json: { items: data.projects.map(projectItem), next_cursor: null } })
       if (options.failList) return route.fulfill({ status: 503, json: { error: 'The list is resting' } })
       if (options.delayList) await new Promise(resolve => setTimeout(resolve, options.delayList))
+      if (options.delayChildren && query.get('parent_id') && !data.projects.some(p => p.id === query.get('parent_id'))) await new Promise(resolve => setTimeout(resolve, options.delayChildren))
       const parentFilter = query.get('parent_id')
-      if (parentFilter) return route.fulfill({ json: { items: data.nodes.filter(n => n.parent_id === parentFilter).map(n => item(n, data)), next_cursor: null } })
       const within = query.get('within'), states = listParam(query, 'state'), priorities = listParam(query, 'priority'), assignees = listParam(query, 'assignee'), q = (query.get('q') ?? '').toLowerCase()
-      let rows = data.nodes.filter(n => (!within || n.project === within) && (!kinds.length || kinds.includes(n.kind_slug)))
+      // within: a project, or any node's subtree; parent_id: direct children only.
+      const inside = (n: MockNode) => {
+        if (!within) return true
+        if (data.projects.some(p => p.id === within)) return n.project === within
+        for (let parent = n.parent_id; parent; parent = data.nodes.find(x => x.id === parent)?.parent_id ?? null) if (parent === within) return true
+        return false
+      }
+      let rows = data.nodes.filter(n => inside(n) && (!parentFilter || n.parent_id === parentFilter) && (!kinds.length || kinds.includes(n.kind_slug)))
         .filter(n => !states.length || states.includes(n.state))
         .filter(n => !priorities.length || priorities.includes(typeof n.fields.priority === 'string' ? n.fields.priority : 'none'))
         .filter(n => !assignees.length || assignees.includes(typeof n.fields.assignee === 'string' ? n.fields.assignee : 'none'))
@@ -211,8 +226,8 @@ export async function mockWork(page: Page, data: Fixtures, options: MockOptions 
         if (expected && expected !== node.updated_at) return route.fulfill({ status: 412, json: { error: 'node has changed' } })
         Object.assign(node, body as object, { updated_at: new Date(now + 60_000 + calls.length).toISOString() })
       }
-      const { kind_slug: _kind, project: _project, ...rest } = node
-      return route.fulfill({ json: { ...rest, kind_id: 'k-ticket', position: '0', deleted_at: null } })
+      const { kind_slug: kind, project: _project, ...rest } = node
+      return route.fulfill({ json: { ...rest, kind_id: `k-${kind}`, position: '0', deleted_at: null } })
     }
     if (path === '/api/search') {
       const q = (query.get('q') ?? '').toLowerCase()

@@ -221,7 +221,9 @@ test('move to another epic uses a searchable picker; delete asks and then leaves
   await expect(page.getByRole('listbox', { name: 'Epics' }).getByRole('option')).toHaveCount(1)
   await page.keyboard.press('Enter')
   await expect(ws.getByRole('button', { name: /PHAROS-20/ })).toBeVisible()
-  expect(calls.find(call => call.path.endsWith('/move'))?.body).toEqual({ parent_id: 'n-epic-2', before_id: null })
+  const move = calls.find(call => call.path.endsWith('/move'))!
+  expect(move.body).toEqual({ parent_id: 'n-epic-2', before_id: null })
+  expect(move.headers['if-unmodified-since']).toBe(hour(12))
   await ws.getByRole('button', { name: 'More actions' }).click()
   await page.getByRole('menuitem', { name: 'Delete ticket…' }).click()
   const confirm = page.getByRole('dialog', { name: 'Delete PHAROS-14?' })

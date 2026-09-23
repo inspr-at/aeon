@@ -14,9 +14,10 @@ import StatusMenu from './StatusMenu.vue'
 
 // "New ticket" at the top of the table: type a title, Tab through type,
 // status, priority and epic, Enter creates and the row stays for the next one.
-const props = defineProps<{ projectId: string; knownStates: string[]; showAssignee: boolean; create: (draft: QuickDraft) => Promise<boolean> }>()
+// trailing: how many table columns follow Priority (the epic chip spans them, or joins Priority when none do).
+const props = defineProps<{ projectId: string; knownStates: string[]; trailing: number; create: (draft: QuickDraft) => Promise<boolean>; initialEpic?: { id: string; key: string; title: string } | null; indent?: number }>()
 const emit = defineEmits<{ close: [] }>()
-const draft = reactive<QuickDraft>({ title: '', kind: 'ticket', state: 'new', priority: '', epic: null })
+const draft = reactive<QuickDraft>({ title: '', kind: 'ticket', state: 'new', priority: '', epic: props.initialEpic ?? null })
 const busy = ref(false)
 const input = ref<HTMLInputElement>()
 const menu = ref<{ kind: 'type' | 'status' | 'priority' | 'epic'; anchor: HTMLElement } | null>(null)
@@ -44,11 +45,11 @@ defineExpose({ focus: () => input.value?.focus(), isDirty: () => !!draft.title.t
 </script>
 
 <template>
-  <tr class="create-row" @keydown="keydown">
+  <tr class="create-row" :class="{ nested: !!initialEpic }" @keydown="keydown">
     <td class="c-key"><div class="cell"><span class="new-badge">New</span></div></td>
     <td class="c-title">
-      <div class="cell create-title">
-        <input ref="input" v-model="draft.title" class="create-input" :placeholder="`${kindLabel(draft.kind)} title`" aria-label="New ticket title" :disabled="busy" />
+      <div class="cell create-title" :style="indent ? { paddingLeft: `${indent}px` } : undefined">
+        <input ref="input" v-model="draft.title" class="create-input" :placeholder="initialEpic ? `${kindLabel(draft.kind)} in ${initialEpic.key}` : `${kindLabel(draft.kind)} title`" aria-label="New ticket title" :disabled="busy" />
         <button type="button" class="create-chip" aria-haspopup="menu" :aria-label="`Type: ${kindLabel(draft.kind)}`" @click="open('type', $event)">
           <AppIcon :name="draft.kind === 'epic' ? 'epic' : draft.kind === 'task' ? 'task' : 'ticket'" :size="12" :class="['kind', draft.kind]" />{{ kindLabel(draft.kind) }}<AppIcon name="chevron" :size="11" class="chev" />
         </button>
@@ -58,14 +59,17 @@ defineExpose({ focus: () => input.value?.focus(), isDirty: () => !!draft.title.t
       <div class="cell"><button type="button" class="create-chip" aria-haspopup="menu" :aria-label="`Status: ${statusMeta(draft.state).label}`" @click="open('status', $event)"><StatusIcon :state="draft.state" :size="12" />{{ statusMeta(draft.state).label }}<AppIcon name="chevron" :size="11" class="chev" /></button></div>
     </td>
     <td class="c-prio">
-      <div class="cell"><button type="button" class="create-chip" aria-haspopup="menu" :aria-label="`Priority: ${priorityLabel(draft.priority)}`" @click="open('priority', $event)"><PriorityIcon v-if="draft.priority" :priority="draft.priority" :size="12" /><span v-else class="dash">—</span><span class="chip-text" :class="{ unset: !draft.priority }">{{ draft.priority ? priorityLabel(draft.priority) : 'No priority' }}</span><AppIcon name="chevron" :size="11" class="chev" /></button></div>
+      <div class="cell">
+        <button type="button" class="create-chip" aria-haspopup="menu" :aria-label="`Priority: ${priorityLabel(draft.priority)}`" @click="open('priority', $event)"><PriorityIcon v-if="draft.priority" :priority="draft.priority" :size="12" /><span v-else class="dash">—</span><span class="chip-text" :class="{ unset: !draft.priority }">{{ draft.priority ? priorityLabel(draft.priority) : 'No priority' }}</span><AppIcon name="chevron" :size="11" class="chev" /></button>
+        <button v-if="trailing < 1" type="button" class="create-chip epic-chip" aria-haspopup="dialog" :aria-label="`Epic: ${draft.epic ? draft.epic.title : 'none'}`" :data-tip="draft.epic ? `${draft.epic.key}\n${draft.epic.title}` : 'Choose an epic'" @click="open('epic', $event)"><AppIcon name="epic" :size="12" class="kind" :class="{ epic: !!draft.epic }" /></button>
+      </div>
     </td>
-    <td class="c-epic" :colspan="showAssignee ? 2 : 1">
+    <td v-if="trailing > 0" class="c-epic" :colspan="trailing">
       <div class="cell epic-cell"><button type="button" class="create-chip epic-chip" aria-haspopup="dialog" :aria-label="`Epic: ${draft.epic ? draft.epic.title : 'none'}`" :data-tip="draft.epic ? `${draft.epic.key}\n${draft.epic.title}` : 'Choose an epic'" @click="open('epic', $event)"><AppIcon name="epic" :size="12" class="kind" :class="{ epic: !!draft.epic }" /><span class="chip-text" :class="{ unset: !draft.epic }">{{ draft.epic ? draft.epic.title : 'No epic' }}</span></button></div>
     </td>
   </tr>
   <tr class="create-hint-row" aria-hidden="true">
-    <td :colspan="showAssignee ? 6 : 5"><span class="create-hint"><kbd class="keycap"><AppIcon name="enter" /></kbd> create and keep going · <kbd class="keycap">tab</kbd> type, status, priority, epic · <kbd class="keycap">esc</kbd> close</span></td>
+    <td :colspan="trailing + 4"><span class="create-hint"><kbd class="keycap"><AppIcon name="enter" /></kbd> create and keep going · <kbd class="keycap">tab</kbd> type, status, priority, epic · <kbd class="keycap">esc</kbd> close</span></td>
   </tr>
   <OptionMenu v-if="menu?.kind === 'type'" :anchor="menu.anchor" title="Type" subject="the new ticket" kind="type" :options="kindOptions" :current="draft.kind" @choose="value => choose(() => { draft.kind = value })" @close="close" />
   <StatusMenu v-if="menu?.kind === 'status'" :anchor="menu.anchor" :current="draft.state" :known-states="knownStates" ticket-key="the new ticket" @choose="value => choose(() => { draft.state = value })" @close="close" />
@@ -89,8 +93,9 @@ defineExpose({ focus: () => input.value?.focus(), isDirty: () => !!draft.title.t
 .chev, .dash { color: var(--ink-3); }
 .kind { color: var(--ink-3); }
 .kind.epic { color: var(--gold); }
-.epic-cell { justify-content: flex-end; }
-.epic-chip { max-width: 180px; }
+.c-epic { overflow: hidden; }
+.epic-cell { justify-content: flex-start; }
+.epic-chip { max-width: 100%; min-width: 0; }
 .create-hint-row td { padding: 0 18px 8px; background: var(--row-selected); border-bottom: 1px solid var(--line-2); }
 .create-hint { display: inline-flex; align-items: center; flex-wrap: wrap; gap: 4px; font-size: 11.5px; color: var(--ink-3); }
 @media (max-width: 720px) {
