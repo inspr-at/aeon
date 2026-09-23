@@ -30,6 +30,18 @@ func (m *Module) homeURL() string {
 }
 
 func (m *Module) handleLogin(w http.ResponseWriter, r *http.Request) {
+	slug := strings.TrimSpace(r.URL.Query().Get("tenant"))
+	if slug == "" {
+		slug = m.cfg.BootstrapTenantSlug
+	}
+	if _, err := m.tenantBySlug(r.Context(), slug); err != nil {
+		if slug == m.cfg.BootstrapTenantSlug && errors.Is(err, pgx.ErrNoRows) {
+			writeHTML(w, http.StatusInternalServerError, notReadyPage)
+		} else {
+			writeHTML(w, http.StatusBadRequest, signInFailedPage)
+		}
+		return
+	}
 	_, oc, err := m.oidcProvider(r.Context())
 	if err != nil {
 		writeHTML(w, http.StatusInternalServerError, notReadyPage)
@@ -46,7 +58,7 @@ func (m *Module) handleLogin(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	verifier := oauth2.GenerateVerifier()
-	payload := oidcPayload{State: state, Nonce: nonce, Verifier: verifier, Exp: time.Now().Add(oidcTTL).Unix()}
+	payload := oidcPayload{State: state, Nonce: nonce, Verifier: verifier, Tenant: slug, Exp: time.Now().Add(oidcTTL).Unix()}
 	if err := m.setOIDCCookie(w, payload); err != nil {
 		writeHTML(w, http.StatusInternalServerError, notReadyPage)
 		return
@@ -95,13 +107,8 @@ func (m *Module) handleCallback(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	display := firstNonEmpty(claims.Name, claims.Preferred, claims.Email, idt.Subject)
-	identityID, err := m.upsertIdentity(r.Context(), idt.Issuer, idt.Subject, claims.Email, display)
-	if err != nil {
-		writeHTML(w, http.StatusInternalServerError, notReadyPage)
-		return
-	}
-	tenantID, err := m.bootstrapTenant(r.Context())
-	if errors.Is(err, errNoTenant) {
+	tenantID, err := m.tenantBySlug(r.Context(), payload.Tenant)
+	if errors.Is(err, pgx.ErrNoRows) {
 		writeHTML(w, http.StatusInternalServerError, notReadyPage)
 		return
 	}
@@ -109,7 +116,7 @@ func (m *Module) handleCallback(w http.ResponseWriter, r *http.Request) {
 		writeHTML(w, http.StatusInternalServerError, notReadyPage)
 		return
 	}
-	principal, err := m.ensurePerson(r.Context(), tenantID, identityID, claims.Email, display)
+	principal, identityID, err := m.resolveOIDCPerson(r.Context(), tenantID, payload.Tenant, idt.Issuer, idt.Subject, claims.Email, display)
 	if errors.Is(err, errNotMember) {
 		writeHTML(w, http.StatusForbidden, notMemberPage)
 		return
@@ -166,7 +173,8 @@ func (m *Module) handleDevLogin(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	var body struct {
-		Email string `json:"email"`
+		Email  string `json:"email"`
+		Tenant string `json:"tenant"`
 	}
 	if !readJSON(w, r, &body) {
 		return
@@ -176,8 +184,12 @@ func (m *Module) handleDevLogin(w http.ResponseWriter, r *http.Request) {
 		writeBadRequest(w, "email is required")
 		return
 	}
-	tenantID, err := m.bootstrapTenant(r.Context())
-	if errors.Is(err, errNoTenant) {
+	slug := strings.TrimSpace(body.Tenant)
+	if slug == "" {
+		slug = m.cfg.BootstrapTenantSlug
+	}
+	tenantID, err := m.tenantBySlug(r.Context(), slug)
+	if errors.Is(err, pgx.ErrNoRows) {
 		writeJSON(w, http.StatusInternalServerError, errorJSON{Error: "workspace is not ready"})
 		return
 	}
@@ -187,11 +199,11 @@ func (m *Module) handleDevLogin(w http.ResponseWriter, r *http.Request) {
 	}
 	principal, identityID, err := m.personByEmail(r.Context(), tenantID, email)
 	if errors.Is(err, pgx.ErrNoRows) {
-		if !adminEmail(email, m.cfg.BootstrapAdminEmail) {
+		if slug != m.cfg.BootstrapTenantSlug || !adminEmail(email, m.cfg.BootstrapAdminEmail) {
 			writeJSON(w, http.StatusForbidden, errorJSON{Error: notMemberSentence})
 			return
 		}
-		identityID, err = m.upsertIdentity(r.Context(), devIssuer, strings.ToLower(email), email, email)
+		identityID, err = m.upsertIdentity(r.Context(), tenantID, devIssuer, strings.ToLower(email), email, email)
 		if err != nil {
 			writeInternal(w)
 			return

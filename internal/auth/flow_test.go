@@ -18,7 +18,64 @@ import (
 	"github.com/jackc/pgx/v5/pgxpool"
 
 	"github.com/inspr-at/aeon/internal/tenant"
+	"github.com/inspr-at/aeon/internal/tenantbootstrap"
 )
+
+func TestOIDCTenantSelection(t *testing.T) {
+	reset(t)
+	insertTenant(t, "inspr", "INSPR")
+	insertTenant(t, "augmentoring", "Augmentoring")
+	issuer := startFakeOIDC(t, "aeon-public")
+	if _, err := tenantbootstrap.BindOIDC(t.Context(), appPool, "augmentoring", issuer.issuer, "shared-subject", "Customer", "customer"); err != nil {
+		t.Fatal(err)
+	}
+	mod := newMod(t, Config{Env: envDev, OIDCIssuer: issuer.issuer,
+		OIDCClientID: "aeon-public", SessionKey: bytes.Repeat([]byte{9}, 32),
+		BootstrapTenantSlug: "inspr", BootstrapAdminEmail: "admin@example.com"})
+	app := startApp(t, mod)
+	mod.cfg.PublicURL = app.URL
+	c := newHTTPClient()
+	login, err := c.Get(app.URL + "/api/auth/login?tenant=augmentoring")
+	if err != nil {
+		t.Fatal(err)
+	}
+	login.Body.Close()
+	if login.StatusCode != http.StatusFound {
+		t.Fatalf("login %d", login.StatusCode)
+	}
+	q := assertAuthURL(t, app.URL, login.Header.Get("Location"))
+	issuer.allow("selected", q.Get("code_challenge"), q.Get("nonce"), "shared-subject", "admin@example.com", "Customer", false)
+	status, _, _ := do(t, c, http.MethodGet, callbackURL(app.URL, "selected", q.Get("state")), "", nil)
+	if status != http.StatusFound {
+		t.Fatalf("callback %d", status)
+	}
+	status, body, _ := do(t, c, http.MethodGet, app.URL+"/api/me", "", nil)
+	if status != http.StatusOK {
+		t.Fatalf("me %d %s", status, body)
+	}
+	var me meJSON
+	if err := json.Unmarshal(body, &me); err != nil {
+		t.Fatal(err)
+	}
+	if me.Tenant.Slug != "augmentoring" || len(me.Principal.Roles) != 1 || me.Principal.Roles[0] != "customer" {
+		t.Fatalf("wrong tenant membership: %+v", me)
+	}
+	other := newHTTPClient()
+	login, err = other.Get(app.URL + "/api/auth/login?tenant=inspr")
+	if err != nil {
+		t.Fatal(err)
+	}
+	login.Body.Close()
+	q = assertAuthURL(t, app.URL, login.Header.Get("Location"))
+	issuer.allow("unbound", q.Get("code_challenge"), q.Get("nonce"), "shared-subject", "customer@example.com", "Customer", false)
+	status, _, _ = do(t, other, http.MethodGet, callbackURL(app.URL, "unbound", q.Get("state")), "", nil)
+	if status != http.StatusForbidden {
+		t.Fatalf("cross-tenant sign-in %d", status)
+	}
+	if status, _, _ := do(t, other, http.MethodGet, app.URL+"/api/me", "", nil); status != http.StatusUnauthorized {
+		t.Fatalf("cross-tenant session %d", status)
+	}
+}
 
 func TestOIDCSessionLifecycle(t *testing.T) {
 	reset(t)
@@ -71,7 +128,7 @@ func TestOIDCSessionLifecycle(t *testing.T) {
 	if status != http.StatusForbidden || !strings.Contains(string(body), notMemberSentence) {
 		t.Fatalf("stranger %d %s", status, body)
 	}
-	if n := scalar(t, adminPool, `SELECT count(*) FROM identities`); n != 1 {
+	if n := scalar(t, adminPool, `SELECT count(*) FROM identities`); n != 0 {
 		t.Fatalf("identities %d", n)
 	}
 	if n := scalar(t, adminPool, `SELECT count(*) FROM principals`); n != 0 {

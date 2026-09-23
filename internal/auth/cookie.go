@@ -30,6 +30,7 @@ type oidcPayload struct {
 	State    string `json:"s"`
 	Nonce    string `json:"n"`
 	Verifier string `json:"v"`
+	Tenant   string `json:"t"`
 	Exp      int64  `json:"e"`
 }
 
@@ -67,7 +68,7 @@ func (m *Module) open(raw string) (oidcPayload, error) {
 	if err := json.Unmarshal(body, &p); err != nil {
 		return oidcPayload{}, errBadCookie
 	}
-	if p.State == "" || p.Nonce == "" || p.Verifier == "" || !time.Now().Before(time.Unix(p.Exp, 0)) {
+	if p.State == "" || p.Nonce == "" || p.Verifier == "" || p.Tenant == "" || !time.Now().Before(time.Unix(p.Exp, 0)) {
 		return oidcPayload{}, errBadCookie
 	}
 	return p, nil

@@ -83,4 +83,17 @@
 //
 // report.Writes is the number of projection rows inserted or updated.
 // A second successful call returns Writes == 0 and appends no events.
+//
+// For PMA, the coordinator can wire a separate operator command backed by
+// NewPMAAdapter and PostgresWriter (this package does not edit cmd/aeon):
+//
+//	aeon import pma --source-instance NAME --source-url URL \
+//	    --api-key-file FILE --tenant augmentoring [--project KEY] \
+//	    [--dry-run] [--concurrency N] [--delay DURATION]
+//
+// Source access and target tenant must be confirmed by the operator before
+// running a live import. Dry-run still reads the source but writes nothing.
+// The source ID combines the explicit instance name and a source URL digest;
+// records with the same classic key from a different source ID are rejected
+// in one tenant, while the same numeric ID remains independent in another.
 package importer
