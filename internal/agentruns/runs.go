@@ -1,0 +1,327 @@
+// SPDX-License-Identifier: AGPL-3.0-only
+
+package agentruns
+
+import (
+	"context"
+	"net/http"
+	"time"
+
+	"github.com/inspr-at/aeon/internal/httpapi"
+	"github.com/inspr-at/aeon/internal/tenant"
+	"github.com/inspr-at/aeon/internal/workorders"
+	"github.com/jackc/pgx/v5"
+	"github.com/jackc/pgx/v5/pgxpool"
+)
+
+type Run struct {
+	ID             string     `json:"id"`
+	OrderID        string     `json:"work_order_id"`
+	AgentID        string     `json:"agent_principal_id"`
+	ProfileID      *string    `json:"model_profile_id"`
+	AccountID      *string    `json:"account_id"`
+	Status         string     `json:"status"`
+	RequestedModel *string    `json:"requested_model"`
+	EffectiveModel *string    `json:"effective_model"`
+	ModelEvidence  string     `json:"model_evidence"`
+	InputTokens    int64      `json:"input_tokens"`
+	OutputTokens   int64      `json:"output_tokens"`
+	Cost           int64      `json:"cost_micros"`
+	StartedAt      *time.Time `json:"started_at"`
+	EndedAt        *time.Time `json:"ended_at"`
+	CreatedAt      time.Time  `json:"created_at"`
+	DaemonID       *string    `json:"-"`
+	Generation     *string    `json:"-"`
+}
+
+// UsageRecorder lets the account module settle its own allowance projections
+// atomically with accepted telemetry. It runs once for each new sequence, never
+// for replay, inside the existing tenant transaction. It must not commit or
+// start a second transaction. The coordinator supplies it when mounting both
+// modules. A nil recorder performs no account settlement; production wiring
+// must supply the account module's recorder when account allowances are enabled.
+type UsageRecorder func(context.Context, pgx.Tx, tenant.Principal, Run, Telemetry) error
+type module struct {
+	pool  *pgxpool.Pool
+	usage UsageRecorder
+}
+
+// New returns the /api/runs and /api/work-orders/{id}/runs module. The optional
+// recorder integrates account settlement without importing another worker's
+// package. Mount behind auth.Middleware; see doc.go for scopes and fencing.
+func New(pool *pgxpool.Pool, recorder ...UsageRecorder) httpapi.Module {
+	m := &module{pool: pool}
+	if len(recorder) > 0 {
+		m.usage = recorder[0]
+	}
+	return m
+}
+func (m *module) Mount(mux *http.ServeMux) {
+	for _, route := range []struct {
+		pattern, scope string
+		agent          bool
+		status         int
+		fn             func(*http.Request, pgx.Tx, tenant.Principal) (any, error)
+	}{
+		{"POST /api/work-orders/{workOrderId}/runs", "run.create", false, 201, m.create},
+		{"GET /api/runs/queued", "run.read", true, 200, m.queued},
+		{"GET /api/runs/{runId}", "run.read", false, 200, m.get},
+		{"POST /api/runs/{runId}/claim", "run.claim", true, 200, m.claim},
+		{"POST /api/runs/{runId}/telemetry", "run.telemetry", true, 200, m.telemetry},
+	} {
+		mux.HandleFunc(route.pattern, workorders.Endpoint(m.pool, route.scope, route.agent, route.status, route.fn))
+	}
+}
+
+const columns = `id::text,work_order_id::text,agent_principal_id::text,model_profile_id::text,account_id::text,status,
+ requested_model,effective_model,model_evidence,input_tokens,output_tokens,cost_micros,started_at,ended_at,created_at,daemon_id,daemon_generation`
+
+func scan(row pgx.Row) (Run, error) {
+	var v Run
+	err := row.Scan(&v.ID, &v.OrderID, &v.AgentID, &v.ProfileID, &v.AccountID, &v.Status, &v.RequestedModel, &v.EffectiveModel, &v.ModelEvidence, &v.InputTokens, &v.OutputTokens, &v.Cost, &v.StartedAt, &v.EndedAt, &v.CreatedAt, &v.DaemonID, &v.Generation)
+	return v, err
+}
+func load(ctx context.Context, tx pgx.Tx, id string, lock bool) (Run, error) {
+	q := `SELECT ` + columns + ` FROM agent_runs WHERE id=$1`
+	if lock {
+		q += ` FOR UPDATE`
+	}
+	return scan(tx.QueryRow(ctx, q, id))
+}
+
+// Lock order: work_orders -> agent_runs -> account/reservation rows. All work
+// budget writers follow this order, including telemetry for different runs.
+func lockRun(ctx context.Context, tx pgx.Tx, id string) (Run, workorders.Order, error) {
+	r, err := load(ctx, tx, id, false)
+	if err != nil {
+		return r, workorders.Order{}, err
+	}
+	o, err := workorders.Load(ctx, tx, r.OrderID, true)
+	if err != nil {
+		return r, o, err
+	}
+	r, err = load(ctx, tx, id, true)
+	return r, o, err
+}
+func (m *module) get(r *http.Request, tx pgx.Tx, p tenant.Principal) (any, error) {
+	v, err := load(r.Context(), tx, r.PathValue("runId"), false)
+	if err != nil {
+		return nil, err
+	}
+	if p.Kind == tenant.Agent && v.AgentID != p.ID {
+		return nil, workorders.Fail(403, "run belongs to another agent")
+	}
+	return v, nil
+}
+func (m *module) queued(r *http.Request, tx pgx.Tx, p tenant.Principal) (any, error) {
+	limit, err := workorders.Limit(r)
+	if err != nil {
+		return nil, err
+	}
+	rows, err := tx.Query(r.Context(), `SELECT `+columns+` FROM agent_runs WHERE agent_principal_id=$1 AND status='queued'
+	 AND EXISTS(SELECT 1 FROM work_orders w JOIN nodes n ON n.tenant_id=w.tenant_id AND n.id=w.node_id
+	 WHERE w.node_id=agent_runs.work_order_id AND w.status IN ('ready','running') AND n.deleted_at IS NULL)
+	 ORDER BY created_at,id LIMIT $2`, p.ID, limit)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	out := []Run{}
+	for rows.Next() {
+		v, err := scan(rows)
+		if err != nil {
+			return nil, err
+		}
+		out = append(out, v)
+	}
+	return out, rows.Err()
+}
+func (m *module) create(r *http.Request, tx pgx.Tx, p tenant.Principal) (any, error) {
+	var in struct {
+		Agent   string `json:"agent_principal_id"`
+		Profile string `json:"model_profile_id"`
+	}
+	if err := workorders.Decode(r, &in); err != nil {
+		return nil, err
+	}
+	if !workorders.UUID(in.Agent) || !workorders.UUID(in.Profile) {
+		return nil, workorders.Fail(400, "agent and model profile required")
+	}
+	ctx := r.Context()
+	o, err := workorders.Load(ctx, tx, r.PathValue("workOrderId"), true)
+	if err != nil {
+		return nil, err
+	}
+	if err = workorders.CanEdit(p, o); err != nil {
+		return nil, err
+	}
+	if p.Kind == tenant.Agent && in.Agent != p.ID {
+		return nil, workorders.Fail(403, "agents may create only their own runs")
+	}
+	if o.Assignee != nil && *o.Assignee != in.Agent {
+		return nil, workorders.Fail(409, "run agent must match order assignee")
+	}
+	if err = dispatchable(ctx, tx, o); err != nil {
+		return nil, err
+	}
+	var model string
+	if err = tx.QueryRow(ctx, `SELECT model FROM model_profiles WHERE id=$1 AND enabled`, in.Profile).Scan(&model); err != nil {
+		return nil, err
+	}
+	v, err := scan(tx.QueryRow(ctx, `INSERT INTO agent_runs(tenant_id,work_order_id,agent_principal_id,model_profile_id,requested_model) VALUES($1,$2,$3,$4,$5) RETURNING `+columns, p.TenantID, o.NodeID, in.Agent, in.Profile, model))
+	if err != nil {
+		return nil, err
+	}
+	return v, workorders.Record(ctx, tx, p, o.NodeID, "run.created", nil, v)
+}
+func dispatchable(ctx context.Context, tx pgx.Tx, o workorders.Order) error {
+	if o.Status != "ready" && o.Status != "running" {
+		return workorders.Fail(409, "work order is not ready for dispatch")
+	}
+	full, err := workorders.Exhausted(ctx, tx, o)
+	if err != nil {
+		return err
+	}
+	if full {
+		return workorders.Fail(409, "work-order budget exhausted")
+	}
+	return nil
+}
+
+func claimPermission(ctx context.Context, tx pgx.Tx, p tenant.Principal, v Run) error {
+	if p.ID == v.AgentID {
+		return nil
+	}
+	var allowed bool
+	err := tx.QueryRow(ctx, `SELECT EXISTS(SELECT 1 FROM agent_permission_grants
+	 WHERE agent_principal_id=$1 AND scope='run.claim' AND resource_kind='run' AND resource_id=$2
+	 AND revoked_at IS NULL AND valid_until>clock_timestamp())`, p.ID, v.ID).Scan(&allowed)
+	if err != nil {
+		return err
+	}
+	if !allowed {
+		return workorders.Fail(403, "assigned agent or live run.claim grant required")
+	}
+	return nil
+}
+
+func (m *module) claim(r *http.Request, tx pgx.Tx, p tenant.Principal) (any, error) {
+	var in struct {
+		Daemon       string   `json:"daemon_id"`
+		Generation   string   `json:"daemon_generation"`
+		Reservations []string `json:"reservation_ids"`
+	}
+	if err := workorders.Decode(r, &in); err != nil {
+		return nil, err
+	}
+	if !identifier(in.Daemon) || !identifier(in.Generation) || len(in.Reservations) == 0 || len(in.Reservations) > 100 {
+		return nil, workorders.Fail(400, "daemon, generation and reservations required")
+	}
+	seen := map[string]bool{}
+	for _, id := range in.Reservations {
+		if !workorders.UUID(id) || seen[id] {
+			return nil, workorders.Fail(400, "invalid or duplicate reservation")
+		}
+		seen[id] = true
+	}
+	ctx := r.Context()
+	v, o, err := lockRun(ctx, tx, r.PathValue("runId"))
+	if err != nil {
+		return nil, err
+	}
+	if err = claimPermission(ctx, tx, p, v); err != nil {
+		return nil, err
+	}
+	if v.AccountID == nil {
+		return nil, workorders.Fail(409, "account reservation required")
+	}
+	if (v.DaemonID != nil && *v.DaemonID != in.Daemon) || (v.Generation != nil && *v.Generation != in.Generation) {
+		return nil, workorders.Fail(409, "daemon generation conflict")
+	}
+	// Ownership is authenticated by the account's enrolling principal, not by
+	// caller-supplied daemon strings. A delegated daemon needs a live grant too.
+	var owner, daemon, state string
+	var generation *string
+	var fresh bool
+	var compatible bool
+	err = tx.QueryRow(ctx, `SELECT a.registered_by_principal_id::text,a.daemon_id,a.state,a.last_daemon_generation,
+	 coalesce(a.last_probe_ok AND a.last_probe_at>clock_timestamp()-interval '2 minutes',false),
+	 EXISTS(SELECT 1 FROM model_profiles m WHERE m.id=$2 AND m.harness=a.harness)
+	 FROM agent_accounts a WHERE a.id=$1 FOR UPDATE`, *v.AccountID, v.ProfileID).Scan(&owner, &daemon, &state, &generation, &fresh, &compatible)
+	if err != nil {
+		return nil, err
+	}
+	if owner != p.ID || daemon != in.Daemon {
+		return nil, workorders.Fail(403, "daemon account owner required")
+	}
+	if generation == nil || *generation != in.Generation {
+		return nil, workorders.Fail(409, "account daemon generation changed")
+	}
+	// Validate the exact reservation set, including on retry; never let a caller
+	// replace or omit a window from the account module's atomic reservation.
+	rows, err := tx.Query(ctx, `SELECT r.id::text,r.state,w.account_id::text,w.starts_at<=clock_timestamp() AND w.ends_at>clock_timestamp()
+	 FROM account_reservations r JOIN account_allowance_windows w ON w.tenant_id=r.tenant_id AND w.id=r.window_id
+	 WHERE r.run_id=$1 ORDER BY w.id,r.id FOR UPDATE OF w,r`, v.ID)
+	if err != nil {
+		return nil, err
+	}
+	count := 0
+	valid := true
+	active := true
+	for rows.Next() {
+		var id, state, account string
+		var current bool
+		if err = rows.Scan(&id, &state, &account, &current); err != nil {
+			rows.Close()
+			return nil, err
+		}
+		count++
+		valid = valid && seen[id] && account == *v.AccountID
+		active = active && state == "active" && current
+	}
+	rows.Close()
+	if err = rows.Err(); err != nil {
+		return nil, err
+	}
+	if !valid || count != len(seen) {
+		return nil, workorders.Fail(409, "reservation set mismatch")
+	}
+	if v.Status != "queued" {
+		if v.DaemonID != nil && v.Generation != nil {
+			return v, nil
+		}
+		return nil, workorders.Fail(409, "run cannot be claimed")
+	}
+	if !active || !fresh || state != "available" || !compatible {
+		return nil, workorders.Fail(409, "reservation or daemon probe is not eligible")
+	}
+	if o.Assignee != nil && *o.Assignee != v.AgentID {
+		return nil, workorders.Fail(409, "work-order assignment changed")
+	}
+	if err = dispatchable(ctx, tx, o); err != nil {
+		return nil, err
+	}
+	before := v
+	v, err = scan(tx.QueryRow(ctx, `UPDATE agent_runs SET status='starting',daemon_id=$2,daemon_generation=$3,started_at=clock_timestamp() WHERE id=$1 RETURNING `+columns, v.ID, in.Daemon, in.Generation))
+	if err != nil {
+		return nil, err
+	}
+	if o.Status == "ready" {
+		if _, err = tx.Exec(ctx, `UPDATE work_orders SET status='running',revision=revision+1,updated_at=clock_timestamp() WHERE node_id=$1`, o.NodeID); err != nil {
+			return nil, err
+		}
+		after, err := workorders.Load(ctx, tx, o.NodeID, false)
+		if err != nil {
+			return nil, err
+		}
+		if err = workorders.Record(ctx, tx, p, o.NodeID, "work_order.started", o, after); err != nil {
+			return nil, err
+		}
+	}
+	return v, workorders.Record(ctx, tx, p, o.NodeID, "run.claimed", before, struct {
+		Run          Run      `json:"run"`
+		Daemon       string   `json:"daemon_id"`
+		Generation   string   `json:"daemon_generation"`
+		Reservations []string `json:"reservation_ids"`
+	}{v, in.Daemon, in.Generation, in.Reservations})
+}
