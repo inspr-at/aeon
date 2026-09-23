@@ -9,9 +9,21 @@
 // compatibility mode: the same verbs, PAIMOS_URL / PAIMOS_API_KEY, and the
 // classic text shapes documented by the paimos CLI.
 //
-// Served compatibility verbs (issue, knowledge for the seeded kinds, search,
-// model resolve, onboard, session start, tell, listen, message target) talk
-// only to the configured Aeon instance. Commands the doctrine still names
-// that have no Aeon resource are listed in unsupportedCompat and exit 3
-// before any network call.
+// Served compatibility verbs (issue, knowledge for memory, runbook, guideline,
+// external-system and related-project, search, model resolve, onboard,
+// session start, tell, listen, message target, anchors scan/verify, skill
+// render, and sync check) talk only to the configured Aeon instance, except
+// anchors scan/verify, which read and write the repo-side index
+// .paimos/anchors.json and do not open a network connection. skill render
+// builds the canonical agent artifact from the project node and its knowledge
+// children, passes it through a harness adapter (claude-code, codex, grok, pi,
+// cursor), and writes a file whose paimos-managed header lets sync check
+// detect drift. run-agent watch and baseline-batch report-built stay in
+// unsupportedCompat and exit 3 before any network call: watch is an
+// operator-local vendor process, and report-built is replaced by stage handoffs.
+//
+// This package exports no httpapi.Module and no plugins.Plugin. The nine
+// starter kinds stay as they are. external_system and related_project are
+// ensured through POST /api/kinds on first use (kind.created); the
+// coordinator already mounts the nodes module that writes the entries.
 package cli

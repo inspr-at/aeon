@@ -12,15 +12,11 @@ package cli
 // and does not open a network connection.
 
 const (
-	reasonAnchors = "anchor scan and verify read a repo index file; Aeon has no anchor resource"
-
-	reasonSkill = "skill render writes a harness artifact; Aeon has no skill-render resource"
+	reasonHarness = "Aeon has no harness-session control plane; work orders and agent runs do not register, bind, heartbeat, drain or stop a vendor session"
 
 	reasonRunAgent = "run-agent watch is an operator-local vendor process; Aeon work orders do not spawn one"
 
 	reasonBaseline = "baseline-batch report-built is replaced by stage handoffs and is not a compat verb"
-
-	reasonSync = "sync check diffs a local knowledge cache; Aeon has no sync verb"
 
 	reasonAgentd = "paimos-agentd serve is a separate operator binary (cmd/aeon-agentd), not an aeon subcommand"
 
@@ -34,13 +30,14 @@ const (
 
 	reasonDeliveries = "message deliveries is the classic redacted delivery log; Aeon inbox targets have no delivery ledger"
 
-	reasonKnowledgeKind = "Aeon seeds memory, runbook and guideline nodes; external-system and related-project are not node kinds"
+	reasonBundle = "session start --bundle full and --format files need the classic knowledge bundle cache; Aeon session start emits the agent and session id only"
+
+	reasonKnowledgeKind = "Aeon knowledge types are memory, runbook, guideline, external-system, and related-project"
 
 	reasonExpectsReply = "tell --expects-reply and --action-request open a classic obligation; Aeon inbox send has no held reply"
 )
 
-// unsupportedCompat is the table of doctrine invocations RunMessaging does not serve.
-// The legacy Run entry point remains until the coordinator wires P5.4.
+// unsupportedCompat is the table of doctrine invocations Aeon does not serve.
 // Args is what follows the program name. An empty Args row is a separate
 // binary and is not executed.
 var unsupportedCompat = []struct {
@@ -48,14 +45,8 @@ var unsupportedCompat = []struct {
 	Args   []string
 	Reason string
 }{
-	{"anchors scan", []string{"anchors", "scan"}, reasonAnchors},
-	{"anchors verify", []string{"anchors", "verify"}, reasonAnchors},
-	{"skill render", []string{"skill", "render", "ops"}, reasonSkill},
 	{"run-agent watch", []string{"run-agent", "watch"}, reasonRunAgent},
 	{"baseline-batch report-built", []string{"baseline-batch", "report-built"}, reasonBaseline},
-	{"sync check", []string{"sync", "check"}, reasonSync},
 	{"paimos-agentd serve", nil, reasonAgentd},
 	{"listen --follow", []string{"listen", "--project", "AEON", "--follow"}, reasonListenFollow},
-	{"knowledge external-system", []string{"knowledge", "create", "--type", "external-system", "--slug", "x", "--project", "AEON", "--title", "X"}, reasonKnowledgeKind},
-	{"knowledge related-project", []string{"knowledge", "get", "related-project", "x", "--project", "AEON"}, reasonKnowledgeKind},
 }
