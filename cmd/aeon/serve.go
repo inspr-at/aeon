@@ -6,13 +6,6 @@ import (
 	"context"
 	"errors"
 	"fmt"
-	"github.com/inspr-at/aeon/internal/embedding"
-	"github.com/inspr-at/aeon/internal/events"
-	"github.com/inspr-at/aeon/internal/imports"
-	"github.com/inspr-at/aeon/internal/nodes"
-	"github.com/inspr-at/aeon/internal/relations"
-	"github.com/inspr-at/aeon/internal/search"
-	"github.com/inspr-at/aeon/internal/views"
 	"io"
 	"io/fs"
 	"log/slog"
@@ -22,6 +15,22 @@ import (
 	"os/signal"
 	"syscall"
 	"time"
+
+	"github.com/inspr-at/aeon/internal/agentaccounts"
+	"github.com/inspr-at/aeon/internal/agentruns"
+	"github.com/inspr-at/aeon/internal/approvals"
+	"github.com/inspr-at/aeon/internal/embedding"
+	"github.com/inspr-at/aeon/internal/events"
+	"github.com/inspr-at/aeon/internal/imports"
+	"github.com/inspr-at/aeon/internal/inbox"
+	"github.com/inspr-at/aeon/internal/modelregistry"
+	"github.com/inspr-at/aeon/internal/nodes"
+	"github.com/inspr-at/aeon/internal/relations"
+	"github.com/inspr-at/aeon/internal/search"
+	"github.com/inspr-at/aeon/internal/tenant"
+	"github.com/inspr-at/aeon/internal/views"
+	"github.com/inspr-at/aeon/internal/workorders"
+	"github.com/jackc/pgx/v5"
 
 	"github.com/inspr-at/aeon/internal/auth"
 
@@ -86,6 +95,8 @@ func serveListener(ctx context.Context, cfg config.Config, ln net.Listener) erro
 	if embedProvider != nil {
 		go embedding.NewWorker(pool, embedProvider, embedding.Options{}).Run(ctx)
 	}
+	// R2: webhook wake for inbox deliveries.
+	go inbox.NewWorker(pool, inbox.WorkerOptions{}).Run(ctx)
 	api := &httpapi.Server{
 		Pool: pool,
 		Web:  webFS,
@@ -97,6 +108,13 @@ func serveListener(ctx context.Context, cfg config.Config, ln net.Listener) erro
 			search.New(pool, embedProvider),
 			views.New(pool),
 			imports.New(pool),
+			// R2: agents
+			inbox.New(pool),
+			workorders.New(pool),
+			agentruns.New(pool, settleUsage),
+			approvals.New(pool),
+			modelregistry.New(pool),
+			agentaccounts.New(pool),
 		},
 		Middleware: []func(http.Handler) http.Handler{authMod.Middleware},
 	}
@@ -158,4 +176,9 @@ func resolveWeb(cfg config.Config) (fs.FS, error) {
 		return fsys, nil
 	}
 	return nil, nil
+}
+
+// settleUsage lets finished runs settle their account allowance projections (R2).
+func settleUsage(ctx context.Context, tx pgx.Tx, p tenant.Principal, run agentruns.Run, _ agentruns.Telemetry) error {
+	return agentaccounts.Settle(ctx, tx, p, run.ID)
 }
