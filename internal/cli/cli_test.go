@@ -214,40 +214,42 @@ func TestCompatibilityVerbs(t *testing.T) {
 		code int
 		want string
 	}{
-		{[]string{"paimos", "issue", "list", "-p", "AEON", "--status", "backlog"}, 3, "issue list arrives in R1"},
-		{[]string{"aeon", "issue", "get", "AEON-18"}, 3, "issue get arrives in R1"},
 		{[]string{"aeon", "issue", "get", "18"}, 2, "ambiguous bare issue number"},
-		{[]string{"aeon", "issue", "create", "-p", "AEON", "--title", "CLI", "--description", "body"}, 3, "issue create arrives in R1"},
 		{[]string{"aeon", "issue", "create", "--title", "missing project"}, 2, "--project is required"},
-		{[]string{"aeon", "issue", "update", "AEON-18", "--status", "in-progress"}, 3, "issue update arrives in R1"},
-		{[]string{"aeon", "issue", "comment", "AEON-18", "--body", "noted"}, 3, "issue comment arrives in R1"},
-		{[]string{"aeon", "issue", "search", "calendar", "-p", "AEON"}, 3, "search arrives in R1"},
-		{[]string{"aeon", "knowledge", "list", "--project", "AEON", "--type", "guideline"}, 3, "knowledge list arrives in R1"},
-		{[]string{"aeon", "knowledge", "get", "guideline", "adr-001", "--project", "AEON"}, 3, "knowledge get arrives in R1"},
-		{[]string{"aeon", "knowledge", "create", "--type", "memory", "--slug", "note", "--project", "AEON", "--title", "Note"}, 3, "knowledge create arrives in R1"},
-		{[]string{"aeon", "knowledge", "update", "runbook", "ship", "--project", "AEON", "--title", "Ship"}, 3, "knowledge update arrives in R1"},
-		{[]string{"aeon", "search", "nodes"}, 3, "search arrives in R1"},
-		{[]string{"aeon", "model", "resolve", "build", "--author-family", "xai"}, 3, "model resolve is not yet available"},
-		{[]string{"aeon", "onboard", "--project", "AEON"}, 3, "onboard arrives in R1"},
+		{[]string{"aeon", "issue", "create", "-p", "AEON", "--title", "CLI", "--dry-run"}, 0, ""},
+		{[]string{"aeon", "issue", "update", "AEON-18"}, 2, "nothing to update"},
+		{[]string{"aeon", "issue", "comment", "AEON-18"}, 2, "--body or --body-file is required"},
+		{[]string{"aeon", "knowledge", "list"}, 2, "--project is required"},
+		{[]string{"aeon", "knowledge", "create", "--type", "nope", "--slug", "n", "--project", "AEON", "--title", "N"}, 2, "unknown knowledge type"},
+		{[]string{"aeon", "model", "resolve", "review-gate"}, 2, "review-gate requires --author-family"},
+		{[]string{"aeon", "model", "resolve", "nope"}, 2, "unknown model role"},
+		{[]string{"aeon", "onboard"}, 2, "--project is required"},
+		{[]string{"aeon", "session", "start", "--agent", "worker"}, 2, "--project is required"},
 		{[]string{"aeon", "issue", "list", "--nope"}, 2, "unknown flag"},
 		{[]string{"aeon", "issue"}, 2, "requires a subcommand"},
 	}
 	for _, tc := range cases {
 		code, out, errOut := runCLI(tc.args, "")
+		if tc.code == 0 {
+			if code != 0 || !strings.Contains(out, "dry-run:") {
+				t.Errorf("%v code %d out %q err %q", tc.args, code, out, errOut)
+			}
+			continue
+		}
 		if code != tc.code || !strings.Contains(errOut, tc.want) {
 			t.Errorf("%v code %d out %q err %q, want %d %q", tc.args, code, out, errOut, tc.code, tc.want)
 		}
 	}
 
-	code, _, errOut := runCLI([]string{"aeon", "--json", "issue", "get", "AEON-18"}, "")
+	code, _, errOut := runCLI([]string{"paimos", "--json", "harness", "register"}, "")
 	if code != 3 {
-		t.Fatalf("json code %d", code)
+		t.Fatalf("json code %d err %s", code, errOut)
 	}
 	var body map[string]string
 	if err := json.Unmarshal([]byte(errOut), &body); err != nil {
 		t.Fatal(err)
 	}
-	if body["error"] != "issue get arrives in R1" {
+	if body["error"] != reasonHarness {
 		t.Fatalf("json error %q", body["error"])
 	}
 }

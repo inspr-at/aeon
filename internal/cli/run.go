@@ -20,8 +20,9 @@ import (
 )
 
 // Run executes the CLI. args[0] is the program name. Exit status 0 is success,
-// 1 is a runtime or API failure, 2 is usage, and 3 means the verb arrives in R1
-// or is an explicit not-yet stub.
+// 1 is a runtime or API failure, 2 is usage, and 3 means the verb is not
+// served yet (see unsupportedCompat). MCP tools that still lack a handler
+// report the same with "arrives in R1".
 func Run(args []string, stdin io.Reader, stdout, stderr io.Writer) int {
 	rt := &runtime{stdin: stdin, stdout: stdout, stderr: stderr, program: "aeon"}
 	if len(args) > 0 {
@@ -63,6 +64,7 @@ type runtime struct {
 	sessionID  string
 	help       bool
 	version    bool
+	kinds      *kindTable
 }
 
 func (rt *runtime) execute(args []string) error {
@@ -129,29 +131,35 @@ func redact(msg, secret string) string {
 }
 
 func (rt *runtime) root() *Command {
+	subs := []*Command{
+		rt.cmdAuth(),
+		rt.cmdWhoami(""),
+		rt.cmdIssue(),
+		rt.cmdKnowledge(),
+		rt.cmdSearch("search"),
+		rt.cmdModel(),
+		rt.cmdOnboard(),
+		rt.cmdSession(),
+		rt.cmdTell(),
+		rt.cmdListen(),
+		rt.cmdMessage(),
+		rt.cmdMCP(),
+		{
+			Name:  "version",
+			Short: "Print the calendar version",
+			Use:   "version",
+			run: func(args []string) error {
+				fmt.Fprintln(rt.stdout, version.Version)
+				return nil
+			},
+		},
+	}
+	subs = append(subs, rt.compatStubs()...)
 	return &Command{
 		Short: "Agents-first command line for PAIMOS AEON",
 		Long:  "Named instances and the default live in ~/.aeon/config.yaml. Agent API keys are stored next to that file and are never printed.",
 		Use:   "<command> [flags]",
-		subs: []*Command{
-			rt.cmdAuth(),
-			rt.cmdWhoami(""),
-			rt.cmdIssue(),
-			rt.cmdKnowledge(),
-			rt.cmdSearch("search"),
-			rt.cmdModel(),
-			rt.cmdOnboard(),
-			rt.cmdMCP(),
-			{
-				Name:  "version",
-				Short: "Print the calendar version",
-				Use:   "version",
-				run: func(args []string) error {
-					fmt.Fprintln(rt.stdout, version.Version)
-					return nil
-				},
-			},
-		},
+		subs:  subs,
 	}
 }
 

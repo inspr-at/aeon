@@ -16,10 +16,6 @@ func usagef(format string, args ...any) error {
 	return &exitError{code: 2, msg: fmt.Sprintf(format, args...)}
 }
 
-func arrives(command string) error {
-	return &exitError{code: 3, msg: command + " arrives in R1"}
-}
-
 func notYet(msg string) error {
 	return &exitError{code: 3, msg: msg}
 }
