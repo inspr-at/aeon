@@ -56,4 +56,9 @@
 // The coordinator alone wires modules into cmd/aeon and reconciles later
 // contract changes. Each builder consumes tenant.PrincipalFrom, db.InTenant,
 // and httpapi.Module from R0; no builder edits those shared packages.
+//
+// New returns an httpapi.Module for /api/kinds and /api/nodes. The coordinator
+// mounts that module; this package does not wire cmd/aeon. Every mutation calls
+// Writer.WriteEvent inside db.InTenant. A nil Writer selects SQLWriter, which
+// inserts the event row until internal/events exposes its writer.
 package nodes
