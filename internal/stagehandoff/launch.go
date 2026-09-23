@@ -1,0 +1,198 @@
+// SPDX-License-Identifier: AGPL-3.0-only
+package stagehandoff
+
+import (
+	"context"
+	"errors"
+	"net/http"
+	"time"
+
+	"github.com/inspr-at/aeon/internal/db"
+	"github.com/inspr-at/aeon/internal/events"
+	"github.com/inspr-at/aeon/internal/plugins"
+	"github.com/inspr-at/aeon/internal/tenant"
+	"github.com/jackc/pgx/v5"
+	"github.com/jackc/pgx/v5/pgxpool"
+)
+
+// LaunchReadiness is fresh, value-free Pharos policy evidence. The provider
+// checks artifact review, current backup and host readiness from its own
+// bounded integration before the service issues one launch admission.
+type LaunchReadiness struct {
+	ReviewedArtifactDigestSHA256 string
+	BackupReady                  bool
+	HostReady                    bool
+	ObservedAt                   time.Time
+}
+type LaunchChecks interface {
+	CheckLaunch(context.Context, string, string, string, Artifact) (LaunchReadiness, error)
+}
+
+// LaunchAdmission is a one-use in-process authority for a reviewed artifact.
+// Pharos must consume it before any host change and bind reported deployment
+// evidence to the same artifact identity.
+type LaunchAdmission struct {
+	ID                   string
+	HandoffID            string
+	BindingDigestSHA256  string
+	ArtifactDigestSHA256 string
+	AuthorityEpoch       int64
+	ExpiresAt            time.Time
+	ConsumedAt           *time.Time
+}
+
+// NewService gives the coordinator both an httpapi.Module and the narrow
+// admission methods used by the in-process Pharos adapter. The coordinator
+// supplies a LaunchChecks provider for current artifact review, backup and host
+// readiness. A nil provider fails closed at admission.
+func NewService(pool *pgxpool.Pool, registry *plugins.Registry, checks LaunchChecks) *Module {
+	return &Module{pool: pool, registry: registry, launchChecks: checks}
+}
+func launchBinding(h Handoff, a Artifact) string {
+	return digest(h.ContextDigest, h.PrerequisiteSealSHA256, a.VersionScheme, a.Version, a.ReleaseChannel, a.DigestSHA256, a.CommitDigest, a.ManifestCoordinate, a.ManifestDigestSHA256)
+}
+func (m *Module) AdmitLaunch(ctx context.Context, p tenant.Principal, authorization, handoffID string, a Artifact) (LaunchAdmission, error) {
+	var out LaunchAdmission
+	if !uuidRE.MatchString(handoffID) || !hexRE.MatchString(a.DigestSHA256) || !hexRE.MatchString(a.ManifestDigestSHA256) || a.VersionScheme == "" || a.Version == "" || a.ReleaseChannel == "" || a.ReleaseSequence < 1 || a.CommitDigest == "" || a.ManifestCoordinate == "" {
+		return out, fail(400, "invalid launch artifact")
+	}
+	err := db.InTenant(ctx, m.pool, p.TenantID, func(tx pgx.Tx) error {
+		h, err := loadHandoff(ctx, tx, handoffID, true)
+		if err != nil {
+			return err
+		}
+		if h.Operation != "deploy" || h.PluginID != "pharos" || h.Result != nil {
+			return fail(409, "not an active Pharos deployment")
+		}
+		enabled, err := plugins.Enabled(ctx, tx, m.registry, "pharos", "deploy")
+		if err != nil {
+			return err
+		}
+		if !enabled {
+			return fail(403, "Pharos is disabled")
+		}
+		allowed, err := agentAllowed(ctx, tx, p, authorization, h)
+		if err != nil {
+			return err
+		}
+		if !allowed {
+			return fail(403, "live agent grant required")
+		}
+		current, err := current(ctx, tx, h)
+		if err != nil {
+			return err
+		}
+		if !current {
+			return fail(409, "handoff is stale")
+		}
+		for _, gate := range []string{"candidate", "deploy"} {
+			ok, err := gateLive(ctx, tx, h.ReleaseNodeID, gate)
+			if err != nil {
+				return err
+			}
+			if !ok {
+				return fail(403, "stage gate is not approved")
+			}
+		}
+		var scheme, version *string
+		var number int64
+		err = tx.QueryRow(ctx, `SELECT version_scheme,version,number FROM journey_releases WHERE release_node_id=$1::uuid`, h.ReleaseNodeID).Scan(&scheme, &version, &number)
+		if err != nil {
+			return err
+		}
+		if scheme == nil || version == nil || *scheme != a.VersionScheme || *version != a.Version || number != a.ReleaseSequence {
+			return fail(409, "artifact does not match reviewed release version")
+		}
+		if m.launchChecks == nil {
+			return fail(409, "Pharos launch checks are unavailable")
+		}
+		readiness, err := m.launchChecks.CheckLaunch(ctx, p.TenantID, h.ProjectNodeID, h.ReleaseNodeID, a)
+		if err != nil {
+			return fail(409, "Pharos launch checks refused")
+		}
+		if readiness.ReviewedArtifactDigestSHA256 != a.DigestSHA256 || !readiness.BackupReady || !readiness.HostReady || readiness.ObservedAt.IsZero() || time.Since(readiness.ObservedAt) > 5*time.Minute || readiness.ObservedAt.After(time.Now().Add(time.Minute)) {
+			return fail(409, "Pharos launch checks are stale or incomplete")
+		}
+		binding := launchBinding(h, a)
+		err = tx.QueryRow(ctx, `INSERT INTO stage_launch_admissions(tenant_id,handoff_id,binding_digest_sha256,artifact_digest_sha256,authority_epoch,expires_at) VALUES($1::uuid,$2::uuid,$3,$4,$5,$6) RETURNING id::text,expires_at`, p.TenantID, h.ID, binding, a.DigestSHA256, h.AuthorityEpoch, h.ExpiresAt).Scan(&out.ID, &out.ExpiresAt)
+		if err != nil {
+			return err
+		}
+		out.HandoffID = h.ID
+		out.BindingDigestSHA256 = binding
+		out.ArtifactDigestSHA256 = a.DigestSHA256
+		out.AuthorityEpoch = h.AuthorityEpoch
+		_, err = events.Append(ctx, tx, p, events.Change{Type: "stage_handoff.launch_admitted", NodeID: &h.ReleaseNodeID, After: map[string]any{"handoff_id": h.ID, "admission_id": out.ID}})
+		return err
+	})
+	return out, err
+}
+func (m *Module) ConsumeLaunch(ctx context.Context, p tenant.Principal, authorization, admissionID string) error {
+	if !uuidRE.MatchString(admissionID) {
+		return fail(404, "admission not found")
+	}
+	return db.InTenant(ctx, m.pool, p.TenantID, func(tx pgx.Tx) error {
+		var id string
+		err := tx.QueryRow(ctx, `SELECT handoff_id::text FROM stage_launch_admissions WHERE id=$1::uuid`, admissionID).Scan(&id)
+		if errors.Is(err, pgx.ErrNoRows) {
+			return fail(404, "admission not found")
+		}
+		if err != nil {
+			return err
+		}
+		h, err := loadHandoff(ctx, tx, id, true)
+		if err != nil {
+			return err
+		}
+		enabled, err := plugins.Enabled(ctx, tx, m.registry, "pharos", "deploy")
+		if err != nil {
+			return err
+		}
+		if !enabled {
+			return fail(403, "Pharos is disabled")
+		}
+		for _, gate := range []string{"candidate", "deploy"} {
+			live, err := gateLive(ctx, tx, h.ReleaseNodeID, gate)
+			if err != nil {
+				return err
+			}
+			if !live {
+				return fail(403, "stage gate is no longer approved")
+			}
+		}
+		allowed, err := agentAllowed(ctx, tx, p, authorization, h)
+		if err != nil {
+			return err
+		}
+		if !allowed {
+			return fail(403, "live agent grant required")
+		}
+		current, err := current(ctx, tx, h)
+		if err != nil {
+			return err
+		}
+		if !current {
+			return fail(409, "handoff is stale")
+		}
+		tag, err := tx.Exec(ctx, `UPDATE stage_launch_admissions SET consumed_at=now() WHERE id=$1::uuid AND handoff_id=$2::uuid AND authority_epoch=$3 AND consumed_at IS NULL AND expires_at>now()`, admissionID, id, h.AuthorityEpoch)
+		if err != nil {
+			return err
+		}
+		if tag.RowsAffected() != 1 {
+			return fail(409, "launch admission is spent or expired")
+		}
+		_, err = events.Append(ctx, tx, p, events.Change{Type: "stage_handoff.launch_consumed", NodeID: &h.ReleaseNodeID, After: map[string]any{"handoff_id": h.ID, "admission_id": admissionID}})
+		return err
+	})
+}
+func consumedAdmission(ctx context.Context, tx pgx.Tx, h Handoff, a Artifact) error {
+	var ok bool
+	err := tx.QueryRow(ctx, `SELECT EXISTS(SELECT 1 FROM stage_launch_admissions WHERE handoff_id=$1::uuid AND binding_digest_sha256=$2 AND artifact_digest_sha256=$3 AND authority_epoch=$4 AND consumed_at IS NOT NULL AND expires_at>now())`, h.ID, launchBinding(h, a), a.DigestSHA256, h.AuthorityEpoch).Scan(&ok)
+	if err != nil {
+		return err
+	}
+	if !ok {
+		return fail(http.StatusConflict, "deployment lacks consumed launch admission")
+	}
+	return nil
+}
