@@ -1,63 +1,60 @@
 // SPDX-License-Identifier: AGPL-3.0-only
 
-package db
+package db_test
 
 import (
 	"context"
-	"crypto/rand"
-	"encoding/hex"
+	"embed"
 	"fmt"
-	"net/url"
-	"os"
+	"io/fs"
+	"sort"
 	"strings"
 	"testing"
 
 	"github.com/jackc/pgx/v5"
-	"github.com/jackc/pgx/v5/pgxpool"
+
+	"github.com/inspr-at/aeon/internal/db"
+	"github.com/inspr-at/aeon/internal/dbtest"
 )
 
-const (
-	rlsRole     = "aeon_p02_rls"
-	rlsPassword = "aeon_p02_rls"
-)
+//go:embed migrations/*.sql
+var migrationFiles embed.FS
 
-func testDatabaseURL(t *testing.T) string {
+func migrationNames(t *testing.T) []string {
 	t.Helper()
-	raw := os.Getenv("AEON_TEST_DATABASE_URL")
-	if raw == "" {
-		t.Fatal("AEON_TEST_DATABASE_URL is not set")
-	}
-	return raw
-}
-
-func testPool(t *testing.T) *pgxpool.Pool {
-	t.Helper()
-	ctx := context.Background()
-	pool, err := Open(ctx, testDatabaseURL(t))
+	entries, err := fs.ReadDir(migrationFiles, "migrations")
 	if err != nil {
 		t.Fatal(err)
 	}
-	t.Cleanup(pool.Close)
-	return pool
+	names := make([]string, 0, len(entries))
+	for _, e := range entries {
+		if e.IsDir() {
+			continue
+		}
+		names = append(names, e.Name())
+	}
+	sort.Strings(names)
+	if len(names) == 0 {
+		t.Fatal("no embedded migrations")
+	}
+	return names
 }
 
 func TestMigrationsApplyAndReapply(t *testing.T) {
 	ctx := context.Background()
-	if err := testPool(t).Ping(ctx); err != nil {
+	fresh := dbtest.Open(t)
+	if err := fresh.Admin.Ping(ctx); err != nil {
 		t.Fatal(err)
 	}
-	again, err := Open(ctx, testDatabaseURL(t))
+	again, err := db.Open(ctx, fresh.URL)
 	if err != nil {
 		t.Fatal(err)
 	}
 	t.Cleanup(again.Close)
 
+	names := migrationNames(t)
 	var n int
 	if err := again.QueryRow(ctx, `SELECT count(*) FROM schema_migrations`).Scan(&n); err != nil {
-		t.Fatal(err)
-	}
-	names, err := migrationNames()
-	if err != nil {
 		t.Fatal(err)
 	}
 	if n != len(names) {
@@ -68,8 +65,8 @@ func TestMigrationsApplyAndReapply(t *testing.T) {
 	if err := again.QueryRow(ctx, `SELECT coalesce(string_agg(version, ',' ORDER BY version), '') FROM schema_migrations`).Scan(&versions); err != nil {
 		t.Fatal(err)
 	}
-	if versions != "0001_tenants.sql,0002_identities.sql,0003_principals.sql" {
-		t.Fatalf("versions %s", versions)
+	if versions != strings.Join(names, ",") {
+		t.Fatalf("versions %s, want %s", versions, strings.Join(names, ","))
 	}
 
 	var vector int
@@ -91,23 +88,18 @@ func TestMigrationsApplyAndReapply(t *testing.T) {
 	var qual, check string
 	if err := again.QueryRow(ctx, `
 		SELECT pg_get_expr(polqual, polrelid), pg_get_expr(polwithcheck, polrelid)
-		FROM pg_policy WHERE polname = 'tenant_isolation'`).Scan(&qual, &check); err != nil {
+		FROM pg_policy
+		WHERE polrelid = 'public.principals'::regclass AND polname = 'tenant_isolation'`).Scan(&qual, &check); err != nil {
 		t.Fatal(err)
 	}
 	if !strings.Contains(qual, "aeon.tenant_id") || !strings.Contains(check, "aeon.tenant_id") {
 		t.Fatalf("policy qual=%s check=%s", qual, check)
 	}
 
-	suffix := randSuffix(t)
 	var tenantID string
-	if err := again.QueryRow(ctx, `INSERT INTO tenants (slug, name) VALUES ($1, 'DDL') RETURNING id::text`, "p02-ddl-"+suffix).Scan(&tenantID); err != nil {
+	if err := again.QueryRow(ctx, `INSERT INTO tenants (slug, name) VALUES ('p02-ddl', 'DDL') RETURNING id::text`).Scan(&tenantID); err != nil {
 		t.Fatal(err)
 	}
-	t.Cleanup(func() {
-		_, _ = again.Exec(context.Background(), `DELETE FROM principals WHERE tenant_id = $1::uuid`, tenantID)
-		_, _ = again.Exec(context.Background(), `DELETE FROM identities WHERE issuer = $1`, "p02-ddl-"+suffix)
-		_, _ = again.Exec(context.Background(), `DELETE FROM tenants WHERE id = $1::uuid`, tenantID)
-	})
 
 	var roles []string
 	if err := again.QueryRow(ctx, `
@@ -124,8 +116,7 @@ func TestMigrationsApplyAndReapply(t *testing.T) {
 
 	var ident string
 	if err := again.QueryRow(ctx, `
-		INSERT INTO identities (issuer, subject) VALUES ($1, 'sub') RETURNING id::text`,
-		"p02-ddl-"+suffix).Scan(&ident); err != nil {
+		INSERT INTO identities (issuer, subject) VALUES ('p02-ddl', 'sub') RETURNING id::text`).Scan(&ident); err != nil {
 		t.Fatal(err)
 	}
 	if _, err := again.Exec(ctx, `
@@ -146,23 +137,19 @@ func TestMigrationsApplyAndReapply(t *testing.T) {
 
 func TestEnsureTenant(t *testing.T) {
 	ctx := context.Background()
-	if err := EnsureTenant(ctx, nil, "", "Name"); err == nil {
+	if err := db.EnsureTenant(ctx, nil, "", "Name"); err == nil {
 		t.Fatal("expected empty slug to fail")
 	}
-	pool := testPool(t)
-	slug := "p02-ensure-" + randSuffix(t)
-	if err := EnsureTenant(ctx, pool, slug, "First"); err != nil {
+	pool := dbtest.Open(t).Admin
+	if err := db.EnsureTenant(ctx, pool, "p02-ensure", "First"); err != nil {
 		t.Fatal(err)
 	}
-	if err := EnsureTenant(ctx, pool, slug, "Second"); err != nil {
+	if err := db.EnsureTenant(ctx, pool, "p02-ensure", "Second"); err != nil {
 		t.Fatal(err)
 	}
-	t.Cleanup(func() {
-		_, _ = pool.Exec(context.Background(), `DELETE FROM tenants WHERE slug = $1`, slug)
-	})
 	var name string
 	var n int
-	if err := pool.QueryRow(ctx, `SELECT name, count(*) OVER () FROM tenants WHERE slug = $1`, slug).Scan(&name, &n); err != nil {
+	if err := pool.QueryRow(ctx, `SELECT name, count(*) OVER () FROM tenants WHERE slug = 'p02-ensure'`).Scan(&name, &n); err != nil {
 		t.Fatal(err)
 	}
 	if name != "First" || n != 1 {
@@ -172,43 +159,20 @@ func TestEnsureTenant(t *testing.T) {
 
 func TestRLSIsolatesPrincipals(t *testing.T) {
 	ctx := context.Background()
-	admin := testPool(t)
-	if err := ensureRLSRole(ctx, admin); err != nil {
-		t.Fatal(err)
-	}
+	fresh := dbtest.Open(t)
+	admin := fresh.Admin
+	rls := fresh.App
 
-	var owner string
-	if err := admin.QueryRow(ctx, `SELECT tableowner FROM pg_tables WHERE schemaname = 'public' AND tablename = 'principals'`).Scan(&owner); err != nil {
-		t.Fatal(err)
-	}
-	if owner == rlsRole {
-		if err := admin.QueryRow(ctx, `SELECT current_user`).Scan(&owner); err != nil {
-			t.Fatal(err)
-		}
-	}
-	if _, err := admin.Exec(ctx, fmt.Sprintf(`ALTER TABLE principals OWNER TO %s`, pgx.Identifier{rlsRole}.Sanitize())); err != nil {
-		t.Fatal(err)
-	}
-	t.Cleanup(func() {
-		_, _ = admin.Exec(context.Background(), fmt.Sprintf(`ALTER TABLE principals OWNER TO %s`, pgx.Identifier{owner}.Sanitize()))
-	})
-
-	suffix := randSuffix(t)
 	var tenantA, tenantB string
-	if err := admin.QueryRow(ctx, `INSERT INTO tenants (slug, name) VALUES ($1, 'A') RETURNING id::text`, "p02-rls-a-"+suffix).Scan(&tenantA); err != nil {
+	if err := admin.QueryRow(ctx, `INSERT INTO tenants (slug, name) VALUES ('p02-rls-a', 'A') RETURNING id::text`).Scan(&tenantA); err != nil {
 		t.Fatal(err)
 	}
-	if err := admin.QueryRow(ctx, `INSERT INTO tenants (slug, name) VALUES ($1, 'B') RETURNING id::text`, "p02-rls-b-"+suffix).Scan(&tenantB); err != nil {
+	if err := admin.QueryRow(ctx, `INSERT INTO tenants (slug, name) VALUES ('p02-rls-b', 'B') RETURNING id::text`).Scan(&tenantB); err != nil {
 		t.Fatal(err)
 	}
-	t.Cleanup(func() {
-		_, _ = admin.Exec(context.Background(), `DELETE FROM principals WHERE tenant_id = ANY($1::uuid[])`, []string{tenantA, tenantB})
-		_, _ = admin.Exec(context.Background(), `DELETE FROM tenants WHERE id = ANY($1::uuid[])`, []string{tenantA, tenantB})
-	})
 
-	rls := rlsPool(t)
 	var idA, idB string
-	if err := InTenant(ctx, rls, tenantA, func(tx pgx.Tx) error {
+	if err := db.InTenant(ctx, rls, tenantA, func(tx pgx.Tx) error {
 		var setting string
 		if err := tx.QueryRow(ctx, `SELECT current_setting('aeon.tenant_id', true)`).Scan(&setting); err != nil {
 			return err
@@ -218,22 +182,22 @@ func TestRLSIsolatesPrincipals(t *testing.T) {
 		}
 		return tx.QueryRow(ctx, `
 			INSERT INTO principals (tenant_id, kind, name, roles)
-			VALUES ($1::uuid, 'person', $2, $3) RETURNING id::text`,
-			tenantA, "p02-rls-a-"+suffix, []string{"member"}).Scan(&idA)
+			VALUES ($1::uuid, 'person', 'p02-rls-a', $2) RETURNING id::text`,
+			tenantA, []string{"member"}).Scan(&idA)
 	}); err != nil {
 		t.Fatal(err)
 	}
-	if err := InTenant(ctx, rls, tenantB, func(tx pgx.Tx) error {
+	if err := db.InTenant(ctx, rls, tenantB, func(tx pgx.Tx) error {
 		return tx.QueryRow(ctx, `
 			INSERT INTO principals (tenant_id, kind, name)
-			VALUES ($1::uuid, 'agent', $2) RETURNING id::text`,
-			tenantB, "p02-rls-b-"+suffix).Scan(&idB)
+			VALUES ($1::uuid, 'agent', 'p02-rls-b') RETURNING id::text`,
+			tenantB).Scan(&idB)
 	}); err != nil {
 		t.Fatal(err)
 	}
 
 	var visibleA, hiddenB int
-	if err := InTenant(ctx, rls, tenantA, func(tx pgx.Tx) error {
+	if err := db.InTenant(ctx, rls, tenantA, func(tx pgx.Tx) error {
 		if err := tx.QueryRow(ctx, `SELECT count(*) FROM principals WHERE id = $1::uuid`, idA).Scan(&visibleA); err != nil {
 			return err
 		}
@@ -246,7 +210,7 @@ func TestRLSIsolatesPrincipals(t *testing.T) {
 	}
 
 	var visibleB int
-	if err := InTenant(ctx, rls, tenantB, func(tx pgx.Tx) error {
+	if err := db.InTenant(ctx, rls, tenantB, func(tx pgx.Tx) error {
 		return tx.QueryRow(ctx, `SELECT count(*) FROM principals WHERE id = $1::uuid`, idA).Scan(&visibleB)
 	}); err != nil {
 		t.Fatal(err)
@@ -255,7 +219,7 @@ func TestRLSIsolatesPrincipals(t *testing.T) {
 		t.Fatalf("tenant B sees tenant A principal")
 	}
 
-	err := InTenant(ctx, rls, tenantA, func(tx pgx.Tx) error {
+	err := db.InTenant(ctx, rls, tenantA, func(tx pgx.Tx) error {
 		_, err := tx.Exec(ctx, `INSERT INTO principals (tenant_id, kind, name) VALUES ($1::uuid, 'person', 'sneak')`, tenantB)
 		return err
 	})
@@ -278,74 +242,4 @@ func TestRLSIsolatesPrincipals(t *testing.T) {
 	if adminSees != 2 {
 		t.Fatalf("superuser sees %d principals, want 2", adminSees)
 	}
-}
-
-func ensureRLSRole(ctx context.Context, admin *pgxpool.Pool) error {
-	var exists bool
-	if err := admin.QueryRow(ctx, `SELECT EXISTS (SELECT 1 FROM pg_roles WHERE rolname = $1)`, rlsRole).Scan(&exists); err != nil {
-		return err
-	}
-	stmt := `CREATE ROLE ` + rlsRole + ` WITH LOGIN NOSUPERUSER NOBYPASSRLS NOCREATEDB NOCREATEROLE PASSWORD '` + rlsPassword + `'`
-	if exists {
-		stmt = `ALTER ROLE ` + rlsRole + ` WITH LOGIN NOSUPERUSER NOBYPASSRLS NOCREATEDB NOCREATEROLE PASSWORD '` + rlsPassword + `'`
-	}
-	if _, err := admin.Exec(ctx, stmt); err != nil {
-		return err
-	}
-	var super, bypass bool
-	if err := admin.QueryRow(ctx, `SELECT rolsuper, rolbypassrls FROM pg_roles WHERE rolname = $1`, rlsRole).Scan(&super, &bypass); err != nil {
-		return err
-	}
-	if super || bypass {
-		return fmt.Errorf("role %s still bypasses RLS", rlsRole)
-	}
-	var dbname string
-	if err := admin.QueryRow(ctx, `SELECT current_database()`).Scan(&dbname); err != nil {
-		return err
-	}
-	dbIdent := pgx.Identifier{dbname}.Sanitize()
-	if _, err := admin.Exec(ctx, fmt.Sprintf(`GRANT CONNECT ON DATABASE %s TO %s`, dbIdent, rlsRole)); err != nil {
-		return err
-	}
-	if _, err := admin.Exec(ctx, `GRANT USAGE ON SCHEMA public TO `+rlsRole); err != nil {
-		return err
-	}
-	if _, err := admin.Exec(ctx, `GRANT SELECT, INSERT, UPDATE, DELETE ON tenants, identities, principals TO `+rlsRole); err != nil {
-		return err
-	}
-	_, err := admin.Exec(ctx, `GRANT REFERENCES ON tenants, identities TO `+rlsRole)
-	return err
-}
-
-func rlsPool(t *testing.T) *pgxpool.Pool {
-	t.Helper()
-	raw := testDatabaseURL(t)
-	u, err := url.Parse(raw)
-	if err != nil {
-		t.Fatal(err)
-	}
-	u.User = url.UserPassword(rlsRole, rlsPassword)
-	cfg, err := pgxpool.ParseConfig(u.String())
-	if err != nil {
-		t.Fatal(err)
-	}
-	cfg.MaxConns = 1
-	pool, err := pgxpool.NewWithConfig(context.Background(), cfg)
-	if err != nil {
-		t.Fatal(err)
-	}
-	t.Cleanup(pool.Close)
-	if err := pool.Ping(context.Background()); err != nil {
-		t.Fatal(err)
-	}
-	return pool
-}
-
-func randSuffix(t *testing.T) string {
-	t.Helper()
-	var b [4]byte
-	if _, err := rand.Read(b[:]); err != nil {
-		t.Fatal(err)
-	}
-	return hex.EncodeToString(b[:])
 }

@@ -6,7 +6,6 @@ import (
 	"bytes"
 	"context"
 	"encoding/json"
-	"fmt"
 	"io"
 	"io/fs"
 	"log/slog"
@@ -18,7 +17,7 @@ import (
 	"time"
 
 	"github.com/inspr-at/aeon/internal/config"
-	"github.com/inspr-at/aeon/internal/db"
+	"github.com/inspr-at/aeon/internal/dbtest"
 	"github.com/inspr-at/aeon/web"
 )
 
@@ -73,20 +72,16 @@ func TestResolveWeb(t *testing.T) {
 }
 
 func TestServeShutdownAndBootstrap(t *testing.T) {
-	raw := os.Getenv("AEON_TEST_DATABASE_URL")
-	if raw == "" {
-		t.Fatal("AEON_TEST_DATABASE_URL is not set")
-	}
+	fresh := dbtest.Open(t)
 	ln, err := net.Listen("tcp", "127.0.0.1:0")
 	if err != nil {
 		t.Fatal(err)
 	}
-	slug := fmt.Sprintf("p02-boot-%d", time.Now().UnixNano())
 	cfg := config.Config{
-		DatabaseURL:         raw,
+		DatabaseURL:         fresh.URL,
 		Env:                 "dev",
 		PublicURL:           "http://127.0.0.1",
-		BootstrapTenantSlug: slug,
+		BootstrapTenantSlug: "p02-boot",
 		BootstrapTenantName: "Boot",
 	}
 	ctx, cancel := context.WithCancel(context.Background())
@@ -115,16 +110,8 @@ func TestServeShutdownAndBootstrap(t *testing.T) {
 		t.Fatalf("health %d %s", resp.StatusCode, body)
 	}
 
-	pool, err := db.Open(context.Background(), raw)
-	if err != nil {
-		t.Fatal(err)
-	}
-	t.Cleanup(pool.Close)
-	t.Cleanup(func() {
-		_, _ = pool.Exec(context.Background(), `DELETE FROM tenants WHERE slug = $1`, slug)
-	})
 	var name string
-	if err := pool.QueryRow(context.Background(), `SELECT name FROM tenants WHERE slug = $1`, slug).Scan(&name); err != nil {
+	if err := fresh.Admin.QueryRow(context.Background(), `SELECT name FROM tenants WHERE slug = 'p02-boot'`).Scan(&name); err != nil {
 		t.Fatal(err)
 	}
 	if name != "Boot" {

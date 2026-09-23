@@ -3,16 +3,14 @@
 package httpapi
 
 import (
-	"context"
 	"encoding/json"
 	"net/http"
 	"net/http/httptest"
-	"os"
 	"strings"
 	"testing"
 	"testing/fstest"
 
-	"github.com/inspr-at/aeon/internal/db"
+	"github.com/inspr-at/aeon/internal/dbtest"
 	"github.com/inspr-at/aeon/internal/version"
 )
 
@@ -178,16 +176,7 @@ func TestHandlersAndMiddleware(t *testing.T) {
 }
 
 func TestHealthDatabase(t *testing.T) {
-	raw := os.Getenv("AEON_TEST_DATABASE_URL")
-	if raw == "" {
-		t.Fatal("AEON_TEST_DATABASE_URL is not set")
-	}
-	pool, err := db.Open(context.Background(), raw)
-	if err != nil {
-		t.Fatal(err)
-	}
-	t.Cleanup(pool.Close)
-
+	pool := dbtest.Open(t).Admin
 	rec := get(t, (&Server{Pool: pool}).Handler(), "/api/health", "")
 	if rec.Code != http.StatusOK {
 		t.Fatalf("status %d body %s", rec.Code, rec.Body.String())

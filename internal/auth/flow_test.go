@@ -469,7 +469,7 @@ func TestAgentKeyRLS(t *testing.T) {
 	`).Scan(&owner, &rls, &force); err != nil {
 		t.Fatal(err)
 	}
-	if owner != "aeon_app" || !rls || !force {
+	if owner != appRole || !rls || !force {
 		t.Fatalf("owner %s rls %v force %v", owner, rls, force)
 	}
 	var using, check string

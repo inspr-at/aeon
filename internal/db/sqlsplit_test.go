@@ -3,6 +3,7 @@
 package db
 
 import (
+	"sort"
 	"strings"
 	"testing"
 )
@@ -41,9 +42,22 @@ func TestSplitCoreMigrations(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	// Core migrations come first and in order; later packages add their own ranges.
-	if len(names) < 3 || strings.Join(names[:3], ",") != "0001_tenants.sql,0002_identities.sql,0003_principals.sql" {
-		t.Fatalf("migrations: %v", names)
+	if len(names) == 0 {
+		t.Fatal("no embedded migrations")
+	}
+	sorted := append([]string(nil), names...)
+	sort.Strings(sorted)
+	if strings.Join(sorted, "\n") != strings.Join(names, "\n") {
+		t.Fatalf("migrations not sorted: %v", names)
+	}
+	for _, name := range names {
+		body, err := migrationFiles.ReadFile("migrations/" + name)
+		if err != nil {
+			t.Fatal(err)
+		}
+		if len(splitSQL(string(body))) == 0 {
+			t.Fatalf("%s has no statements", name)
+		}
 	}
 	body, err := migrationFiles.ReadFile("migrations/0003_principals.sql")
 	if err != nil {
