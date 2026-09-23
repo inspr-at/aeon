@@ -11,6 +11,7 @@ import (
 // Report describes one snapshot. All fetched work fields are mapped or retained.
 type Report struct {
 	Counts         map[string]int `json:"counts"`
+	Skipped        []SkippedItem  `json:"skipped"`
 	UnmappedFields []string       `json:"unmapped_fields"`
 	Created        int            `json:"created"`
 	Updated        int            `json:"updated"`
@@ -44,7 +45,10 @@ func (i Importer) Run(ctx context.Context, tenant, project string, dryRun bool) 
 }
 
 func Analyze(s Snapshot) Report {
-	r := Report{Counts: map[string]int{"users": len(s.Users), "projects": len(s.Projects)}, UnmappedFields: []string{}}
+	r := Report{Counts: map[string]int{"users": len(s.Users), "projects": len(s.Projects), "skipped": len(s.Skipped), "skipped_projects": 0, "skipped_issues": 0}, Skipped: append([]SkippedItem{}, s.Skipped...), UnmappedFields: []string{}}
+	for _, item := range s.Skipped {
+		r.Counts["skipped_"+item.Type+"s"]++
+	}
 	for _, p := range s.Projects {
 		for _, issue := range p.Issues {
 			typ := stringField(issue, "type")

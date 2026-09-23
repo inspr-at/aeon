@@ -49,7 +49,11 @@
 // survive either in node fields or in import event payloads. Dry runs perform
 // the same source reads and return an empty unmapped_fields array. Source GETs
 // are capped at four concurrently by default; --concurrency and --delay can
-// lower pressure on classic PPM.
+// lower pressure on classic PPM. A project whose issues or knowledge endpoint
+// returns 404 is skipped. An issue whose detail endpoint returns 404 is also
+// skipped. The report lists each skipped item with its type, source ID, request
+// path and HTTP status; counts includes skipped, skipped_projects and
+// skipped_issues. Other source HTTP errors abort the import.
 //
 // Reruns update nodes only when imported content changes and deduplicate
 // auxiliary events. Native writes are serialized per tenant and source with a
