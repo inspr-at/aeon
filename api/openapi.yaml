@@ -331,13 +331,50 @@ paths:
           $ref: '#/components/responses/Error'
         '409':
           $ref: '#/components/responses/Error'
+  /projects:
+    get:
+      operationId: listProjects
+      security: *auth
+      parameters:
+        - {name: include_archived, in: query, schema: {type: boolean, default: false}}
+      responses:
+        '200':
+          description: Projects with subtree state counts and last activity
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  items:
+                    type: array
+                    items:
+                      type: object
+                      properties:
+                        id: {type: string, format: uuid}
+                        key: {type: string}
+                        title: {type: string}
+                        state: {type: string}
+                        open: {type: integer}
+                        in_progress: {type: integer}
+                        done: {type: integer}
+                        total: {type: integer}
+                        last_activity: {type: string, format: date-time}
+        '400':
+          $ref: '#/components/responses/Error'
   /nodes:
     get:
       operationId: listNodes
       security: *auth
       parameters:
         - {name: kind_id, in: query, schema: {type: string, format: uuid}}
-        - {name: state, in: query, schema: {type: string}}
+        - {name: kind, in: query, description: Repeatable or comma-separated kind slugs or IDs, schema: {type: array, items: {type: string}}}
+        - {name: state, in: query, description: Repeatable or comma-separated states, schema: {type: array, items: {type: string}}}
+        - {name: priority, in: query, description: Repeatable or comma-separated priorities, schema: {type: array, items: {type: string}}}
+        - {name: assignee, in: query, description: Repeatable or comma-separated principal IDs or none, schema: {type: array, items: {type: string}}}
+        - {name: q, in: query, schema: {type: string}}
+        - {name: within, in: query, description: Descendants of this node, excluding itself, schema: {type: string, format: uuid}}
+        - {name: hide_closed, in: query, schema: {type: boolean, default: false}}
+        - {name: facets, in: query, description: Repeatable or comma-separated state,kind,priority,assignee, schema: {type: array, items: {type: string}}}
         - {name: parent_id, in: query, schema: {type: string, format: uuid}}
         - {name: include_descendants, in: query, schema: {type: boolean, default: false}}
         - {$ref: '#/components/parameters/Sort'}
@@ -2368,9 +2405,43 @@ components:
         items:
           type: array
           items:
-            $ref: '#/components/schemas/Node'
+            $ref: '#/components/schemas/NodeListItem'
         next_cursor:
           type: [string, 'null']
+        facets:
+          type: object
+          description: Requested counts over the filtered result before pagination
+          additionalProperties:
+            type: object
+            additionalProperties: {type: integer}
+    NodeListItem:
+      allOf:
+        - $ref: '#/components/schemas/Node'
+        - type: object
+          required: [kind_slug, kind_label, priority, assignee, parent, children_count, project]
+          properties:
+            kind_slug: {type: string}
+            kind_label: {type: string}
+            priority: {type: [string, 'null']}
+            assignee:
+              type: [object, 'null']
+              properties:
+                id: {type: string, format: uuid}
+                name: {type: string}
+            parent:
+              type: [object, 'null']
+              properties:
+                id: {type: string, format: uuid}
+                key: {type: string}
+                title: {type: string}
+                kind_slug: {type: string}
+            children_count: {type: integer, minimum: 0}
+            project:
+              type: [object, 'null']
+              properties:
+                id: {type: string, format: uuid}
+                key: {type: string}
+                title: {type: string}
     TreeEntry:
       type: object
       required: [node, depth]
@@ -2641,7 +2712,7 @@ components:
       schema:
         type: integer
         minimum: 1
-        maximum: 200
+        maximum: 500
         default: 50
     Cursor:
       name: cursor
@@ -2654,7 +2725,7 @@ components:
       in: query
       schema:
         type: string
-        enum: [position, updated_at, created_at, key, title]
+        description: Comma-separated sort keys; prefix a key with - for descending order. Keys are position, updated_at, created_at, key, title, state, priority, kind.
         default: position
     Direction:
       name: direction

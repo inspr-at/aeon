@@ -4,42 +4,81 @@ package nodes
 
 import (
 	"context"
+	"crypto/sha256"
+	"encoding/hex"
 	"encoding/json"
-	"fmt"
 	"net/http"
+	"regexp"
 	"strconv"
 	"strings"
+	"time"
 
 	"github.com/jackc/pgx/v5"
 )
 
-type nodePage struct {
-	Items      []nodeJSON `json:"items"`
-	NextCursor *string    `json:"next_cursor"`
+type listPerson struct {
+	ID   string `json:"id"`
+	Name string `json:"name"`
 }
-
+type listParent struct {
+	ID       string `json:"id"`
+	Key      string `json:"key"`
+	Title    string `json:"title"`
+	KindSlug string `json:"kind_slug"`
+}
+type listProject struct {
+	ID    string `json:"id"`
+	Key   string `json:"key"`
+	Title string `json:"title"`
+}
+type listItem struct {
+	nodeJSON
+	KindSlug      string       `json:"kind_slug"`
+	KindLabel     string       `json:"kind_label"`
+	Priority      *string      `json:"priority"`
+	Assignee      *listPerson  `json:"assignee"`
+	Parent        *listParent  `json:"parent"`
+	ChildrenCount int          `json:"children_count"`
+	Project       *listProject `json:"project"`
+}
+type nodePage struct {
+	Items      []listItem                `json:"items"`
+	NextCursor *string                   `json:"next_cursor"`
+	Facets     map[string]map[string]int `json:"facets,omitempty"`
+}
 type treeEntry struct {
 	Node  nodeJSON `json:"node"`
 	Depth int      `json:"depth"`
 }
-
 type treePage struct {
 	Items      []treeEntry `json:"items"`
 	NextCursor *string     `json:"next_cursor"`
 }
-
-type listQuery struct {
-	KindID      *string
-	State       *string
-	ParentSet   bool
-	ParentID    *string
-	Descendants bool
-	Sort        string
-	Direction   string
-	Limit       int
-	Cursor      string
+type sortKey struct {
+	Name string `json:"name"`
+	Desc bool   `json:"desc"`
 }
-
+type listQuery struct {
+	KindID      *string   `json:"kind_id"`
+	Kinds       []string  `json:"kinds"`
+	States      []string  `json:"states"`
+	Priorities  []string  `json:"priorities"`
+	Assignees   []string  `json:"assignees"`
+	Q           string    `json:"q"`
+	Within      *string   `json:"within"`
+	ParentSet   bool      `json:"parent_set"`
+	ParentID    *string   `json:"parent_id"`
+	Descendants bool      `json:"descendants"`
+	HideClosed  bool      `json:"hide_closed"`
+	Sort        []sortKey `json:"sort"`
+	FacetNames  []string  `json:"facets"`
+	Limit       int       `json:"limit"`
+	Cursor      string    `json:"-"`
+}
+type listCursor struct {
+	Hash string `json:"hash"`
+	ID   string `json:"id"`
+}
 type treeQuery struct {
 	RootID   *string
 	DepthSet bool
@@ -48,13 +87,9 @@ type treeQuery struct {
 	Cursor   string
 }
 
-var sortCols = map[string]string{
-	"position":   "n.position",
-	"updated_at": "n.updated_at",
-	"created_at": "n.created_at",
-	"key":        "n.key",
-	"title":      "n.title",
-}
+var validSort = map[string]bool{"key": true, "title": true, "state": true, "priority": true, "kind": true, "updated_at": true, "created_at": true, "position": true}
+var validFacet = map[string]bool{"state": true, "kind": true, "priority": true, "assignee": true}
+var slugOrID = regexp.MustCompile(`^[a-z][a-z0-9_]*$`)
 
 func (m *Module) handleListNodes(w http.ResponseWriter, r *http.Request) {
 	p, ok := requirePrincipal(w, r)
@@ -73,7 +108,6 @@ func (m *Module) handleListNodes(w http.ResponseWriter, r *http.Request) {
 	}
 	writeJSON(w, http.StatusOK, page)
 }
-
 func (m *Module) handleTree(w http.ResponseWriter, r *http.Request) {
 	p, ok := requirePrincipal(w, r)
 	if !ok {
@@ -91,67 +125,332 @@ func (m *Module) handleTree(w http.ResponseWriter, r *http.Request) {
 	}
 	writeJSON(w, http.StatusOK, page)
 }
-
-func parseListQuery(r *http.Request) (listQuery, error) {
+func commaValues(values []string) []string {
+	out := []string{}
+	seen := map[string]bool{}
+	for _, raw := range values {
+		for _, part := range strings.Split(raw, ",") {
+			v := strings.TrimSpace(part)
+			if !seen[v] {
+				out = append(out, v)
+				seen[v] = true
+			}
+		}
+	}
+	return out
+}
+func queryList(r *http.Request, name string) ([]string, error) {
 	q := r.URL.Query()
-	out := listQuery{Sort: "position", Direction: "asc", Limit: 50}
-	if q.Has("kind_id") {
-		id, ok := parseUUID(q.Get("kind_id"))
+	if !q.Has(name) {
+		return nil, nil
+	}
+	values := commaValues(q[name])
+	for _, v := range values {
+		if v == "" {
+			return nil, badRequest("invalid " + name)
+		}
+	}
+	return values, nil
+}
+func queryBool(r *http.Request, name string) (bool, error) {
+	if !r.URL.Query().Has(name) {
+		return false, nil
+	}
+	switch r.URL.Query().Get(name) {
+	case "true":
+		return true, nil
+	case "false":
+		return false, nil
+	default:
+		return false, badRequest("invalid " + name)
+	}
+}
+func parseListQuery(r *http.Request) (listQuery, error) {
+	v := r.URL.Query()
+	out := listQuery{Limit: 50}
+	if v.Has("kind_id") {
+		id, ok := parseUUID(v.Get("kind_id"))
 		if !ok {
-			return listQuery{}, badRequest("invalid kind_id")
+			return out, badRequest("invalid kind_id")
 		}
 		out.KindID = &id
 	}
-	if q.Has("state") {
-		state := q.Get("state")
-		if !nonBlank(state) {
-			return listQuery{}, badRequest("invalid state")
-		}
-		out.State = &state
+	var err error
+	if out.Kinds, err = queryList(r, "kind"); err != nil {
+		return out, err
 	}
-	if q.Has("parent_id") {
-		id, ok := parseUUID(q.Get("parent_id"))
+	for _, kind := range out.Kinds {
+		if _, ok := parseUUID(kind); !ok && !slugOrID.MatchString(kind) {
+			return out, badRequest("invalid kind")
+		}
+	}
+	if out.States, err = queryList(r, "state"); err != nil {
+		return out, err
+	}
+	if out.Priorities, err = queryList(r, "priority"); err != nil {
+		return out, err
+	}
+	if out.Assignees, err = queryList(r, "assignee"); err != nil {
+		return out, err
+	}
+	for _, a := range out.Assignees {
+		if a != "none" {
+			if _, ok := parseUUID(a); !ok {
+				return out, badRequest("invalid assignee")
+			}
+		}
+	}
+	if out.FacetNames, err = queryList(r, "facets"); err != nil {
+		return out, err
+	}
+	for _, f := range out.FacetNames {
+		if !validFacet[f] {
+			return out, badRequest("invalid facets")
+		}
+	}
+	out.Q = strings.TrimSpace(v.Get("q"))
+	if v.Has("within") {
+		id, ok := parseUUID(v.Get("within"))
 		if !ok {
-			return listQuery{}, badRequest("invalid parent_id")
+			return out, badRequest("invalid within")
+		}
+		out.Within = &id
+	}
+	if v.Has("parent_id") {
+		id, ok := parseUUID(v.Get("parent_id"))
+		if !ok {
+			return out, badRequest("invalid parent_id")
 		}
 		out.ParentSet = true
 		out.ParentID = &id
 	}
-	if q.Has("include_descendants") {
-		switch q.Get("include_descendants") {
-		case "true":
-			out.Descendants = true
-		case "false":
-			out.Descendants = false
-		default:
-			return listQuery{}, badRequest("invalid include_descendants")
+	if out.Descendants, err = queryBool(r, "include_descendants"); err != nil {
+		return out, err
+	}
+	if out.HideClosed, err = queryBool(r, "hide_closed"); err != nil {
+		return out, err
+	}
+	if out.Descendants && !out.ParentSet && out.Within == nil {
+		return out, badRequest("include_descendants requires parent_id")
+	}
+	if out.Within != nil && (out.ParentSet || v.Has("include_descendants")) {
+		return out, badRequest("within conflicts with parent_id and include_descendants")
+	}
+	direction := "asc"
+	if v.Has("direction") {
+		direction = v.Get("direction")
+		if direction != "asc" && direction != "desc" {
+			return out, badRequest("invalid direction")
 		}
 	}
-	if out.Descendants && !out.ParentSet {
-		return listQuery{}, badRequest("include_descendants requires parent_id")
+	sortRaw := "position"
+	if v.Has("sort") {
+		sortRaw = v.Get("sort")
 	}
-	if q.Has("sort") {
-		sort := q.Get("sort")
-		if _, ok := sortCols[sort]; !ok {
-			return listQuery{}, badRequest("invalid sort")
+	for _, s := range strings.Split(sortRaw, ",") {
+		s = strings.TrimSpace(s)
+		desc := direction == "desc"
+		if strings.HasPrefix(s, "-") {
+			s = strings.TrimPrefix(s, "-")
+			desc = true
 		}
-		out.Sort = sort
-	}
-	if q.Has("direction") {
-		switch q.Get("direction") {
-		case "asc", "desc":
-			out.Direction = q.Get("direction")
-		default:
-			return listQuery{}, badRequest("invalid direction")
+		if !validSort[s] {
+			return out, badRequest("invalid sort")
 		}
+		out.Sort = append(out.Sort, sortKey{s, desc})
 	}
-	limit, err := parseLimit(q.Get("limit"), q.Has("limit"))
+	out.Limit, err = parseLimit(v.Get("limit"), v.Has("limit"))
 	if err != nil {
-		return listQuery{}, err
+		return out, err
 	}
-	out.Limit = limit
-	out.Cursor = q.Get("cursor")
+	out.Cursor = v.Get("cursor")
 	return out, nil
+}
+func listFingerprint(q listQuery) string {
+	q.Cursor = ""
+	raw, _ := json.Marshal(q)
+	sum := sha256.Sum256(raw)
+	return hex.EncodeToString(sum[:])
+}
+func (m *Module) listNodes(ctx context.Context, tenantID string, q listQuery) (nodePage, error) {
+	var mark *listCursor
+	if q.Cursor != "" {
+		env, err := openCursor(q.Cursor)
+		if err != nil {
+			return nodePage{}, err
+		}
+		if env.T != "list" {
+			return nodePage{}, badRequest("cursor does not match this query")
+		}
+		var c listCursor
+		if json.Unmarshal(env.P, &c) != nil || c.Hash != listFingerprint(q) {
+			return nodePage{}, badRequest("cursor does not match this query")
+		}
+		if _, ok := parseUUID(c.ID); !ok {
+			return nodePage{}, badRequest("invalid cursor")
+		}
+		mark = &c
+	}
+	page := nodePage{Items: []listItem{}}
+	err := m.tx(ctx, tenantID, func(ctx context.Context, tx pgx.Tx) error {
+		var anchor any
+		if mark != nil {
+			anchor = mark.ID
+		}
+		sql, args := listSQL(q, anchor)
+		rows, err := tx.Query(ctx, sql, args...)
+		if err != nil {
+			return dbErr("list nodes", err)
+		}
+		for rows.Next() {
+			var item listItem
+			var fields, position string
+			var assigneeID, assigneeName, parentID, parentKey, parentTitle, parentKind, projectID, projectKey, projectTitle *string
+			err = rows.Scan(&item.ID, &item.Key, &item.KindID, &item.Title, &item.Body, &fields, &item.State, &item.ParentID, &position, &item.CreatedAt, &item.UpdatedAt, &item.DeletedAt, &item.KindSlug, &item.KindLabel, &item.Priority, &assigneeID, &assigneeName, &parentID, &parentKey, &parentTitle, &parentKind, &item.ChildrenCount, &projectID, &projectKey, &projectTitle)
+			if err != nil {
+				rows.Close()
+				return err
+			}
+			item.Fields = json.RawMessage(fields)
+			item.Position = trimDecimal(position)
+			if assigneeID != nil {
+				item.Assignee = &listPerson{*assigneeID, *assigneeName}
+			}
+			if parentID != nil {
+				item.Parent = &listParent{*parentID, *parentKey, *parentTitle, *parentKind}
+			}
+			if projectID != nil {
+				item.Project = &listProject{*projectID, *projectKey, *projectTitle}
+			}
+			page.Items = append(page.Items, item)
+		}
+		err = rows.Err()
+		rows.Close()
+		if err != nil {
+			return err
+		}
+		if len(page.Items) > q.Limit {
+			last := page.Items[q.Limit-1]
+			page.Items = page.Items[:q.Limit]
+			cursor, err := encodeTyped("list", listCursor{listFingerprint(q), last.ID})
+			if err != nil {
+				return err
+			}
+			page.NextCursor = &cursor
+		}
+		if len(q.FacetNames) > 0 {
+			page.Facets = map[string]map[string]int{}
+			for _, f := range q.FacetNames {
+				page.Facets[f] = map[string]int{}
+			}
+			sql, args = facetSQL(q)
+			rows, err = tx.Query(ctx, sql, args...)
+			if err != nil {
+				return dbErr("list facets", err)
+			}
+			for rows.Next() {
+				var name, value string
+				var count int
+				if err = rows.Scan(&name, &value, &count); err != nil {
+					rows.Close()
+					return err
+				}
+				page.Facets[name][value] = count
+			}
+			err = rows.Err()
+			rows.Close()
+			if err != nil {
+				return err
+			}
+		}
+		return nil
+	})
+	return page, err
+}
+func listFilterSQL(q listQuery) (string, []any) {
+	// One tenant transaction supplies RLS to every table in the CTE.
+	array := func(values []string) []string {
+		if values == nil {
+			return []string{}
+		}
+		return values
+	}
+	args := []any{q.KindID, array(q.Kinds), array(q.States), array(q.Priorities), array(q.Assignees), q.Q, q.Within, q.ParentSet, q.ParentID, q.Descendants, q.HideClosed}
+	return `WITH RECURSIVE scope(id) AS (
+        SELECT id FROM nodes WHERE tenant_id=current_setting('aeon.tenant_id')::uuid AND deleted_at IS NULL AND id=coalesce($7::uuid, CASE WHEN $8::bool AND $10::bool THEN $9::uuid ELSE NULL::uuid END)
+        UNION ALL SELECT c.id FROM scope s CROSS JOIN LATERAL (
+            SELECT id FROM nodes WHERE tenant_id=current_setting('aeon.tenant_id')::uuid AND parent_id=s.id AND deleted_at IS NULL OFFSET 0
+        ) c
+    ), filtered AS (
+        SELECT n.id FROM nodes n JOIN node_kinds k ON k.id=n.kind_id AND k.tenant_id=n.tenant_id
+        WHERE n.deleted_at IS NULL
+        AND ($1::uuid IS NULL OR n.kind_id=$1::uuid)
+        AND (cardinality($2::text[])=0 OR k.slug=ANY($2::text[]) OR n.kind_id::text=ANY($2::text[]))
+        AND (cardinality($3::text[])=0 OR n.state=ANY($3::text[]))
+        AND (cardinality($4::text[])=0 OR coalesce(nullif(n.fields->>'priority',''),'none')=ANY($4::text[]))
+        AND (cardinality($5::text[])=0 OR coalesce(nullif(n.fields->>'assignee',''),'none')=ANY($5::text[]))
+        AND ($6::text='' OR n.key ILIKE '%'||$6::text||'%' OR n.title ILIKE '%'||$6::text||'%')
+        AND ($7::uuid IS NULL OR (n.id IN (SELECT id FROM scope) AND n.id<>$7::uuid))
+        AND ($7::uuid IS NOT NULL OR NOT $8::bool OR (CASE WHEN $10::bool THEN n.id IN (SELECT id FROM scope) AND n.id<>$9::uuid ELSE n.parent_id IS NOT DISTINCT FROM $9::uuid END))
+        AND (NOT $11::bool OR n.state NOT IN ('done','cancelled','archived','delivered','accepted'))
+    )`, args
+}
+func listOrder(q listQuery) string {
+	parts := []string{}
+	if q.Q != "" {
+		parts = append(parts, "CASE WHEN n.key ILIKE $6::text||'%' THEN 0 ELSE 1 END ASC")
+	}
+	for _, key := range q.Sort {
+		dir := "ASC"
+		if key.Desc {
+			dir = "DESC"
+		}
+		switch key.Name {
+		case "key":
+			parts = append(parts, `regexp_replace(n.key,'-[0-9]+$','') `+dir, `substring(n.key from '-([0-9]+)$')::numeric `+dir)
+		case "state":
+			parts = append(parts, `CASE WHEN n.state IN ('new','backlog','in_progress','active','qa','accepted','done','cancelled','archived') THEN 0 ELSE 1 END ASC`, `CASE n.state WHEN 'new' THEN 0 WHEN 'backlog' THEN 1 WHEN 'in_progress' THEN 2 WHEN 'active' THEN 2 WHEN 'qa' THEN 3 WHEN 'accepted' THEN 4 WHEN 'done' THEN 5 WHEN 'cancelled' THEN 6 WHEN 'archived' THEN 7 ELSE 8 END `+dir, "n.state "+dir)
+		case "priority":
+			parts = append(parts, `CASE coalesce(nullif(n.fields->>'priority',''),'none') WHEN 'high' THEN 0 WHEN 'medium' THEN 1 WHEN 'low' THEN 2 WHEN 'none' THEN 3 ELSE 4 END `+dir, `coalesce(n.fields->>'priority','') `+dir)
+		case "kind":
+			parts = append(parts, "k.slug "+dir)
+		default:
+			parts = append(parts, "n."+key.Name+" "+dir)
+		}
+	}
+	return strings.Join(append(parts, "n.id ASC"), ",")
+}
+func listSQL(q listQuery, anchor any) (string, []any) {
+	prefix, args := listFilterSQL(q)
+	args = append(args, anchor, q.Limit+1)
+	sql := prefix + `, ordered AS (SELECT n.id,row_number() OVER (ORDER BY ` + listOrder(q) + `) AS rn FROM filtered f JOIN nodes n ON n.id=f.id JOIN node_kinds k ON k.id=n.kind_id),
+    selected AS (SELECT id,rn FROM ordered WHERE rn>coalesce((SELECT rn FROM ordered WHERE id=$12::uuid),0) ORDER BY rn LIMIT $13)
+    SELECT ` + nodeCols + `,k.slug,k.label,nullif(n.fields->>'priority',''),p.id::text,p.name,
+           par.id::text,par.key,par.title,pk.slug,
+           (SELECT count(*)::int FROM nodes c WHERE c.parent_id=n.id AND c.deleted_at IS NULL),
+           project.id::text,project.key,project.title
+    FROM selected s JOIN nodes n ON n.id=s.id JOIN node_kinds k ON k.id=n.kind_id
+    LEFT JOIN principals p ON p.tenant_id=n.tenant_id AND p.id::text=n.fields->>'assignee'
+    LEFT JOIN nodes par ON par.id=n.parent_id AND par.deleted_at IS NULL
+    LEFT JOIN node_kinds pk ON pk.id=par.kind_id
+    LEFT JOIN LATERAL (
+        WITH RECURSIVE ancestors AS (
+            SELECT n.id,n.parent_id,n.kind_id,n.key,n.title,0 AS depth
+            UNION ALL SELECT a.id,a.parent_id,a.kind_id,a.key,a.title,anc.depth+1 FROM nodes a JOIN ancestors anc ON a.id=anc.parent_id WHERE a.deleted_at IS NULL
+        ) SELECT a.id,a.key,a.title FROM ancestors a JOIN node_kinds ak ON ak.id=a.kind_id WHERE ak.slug='project' ORDER BY a.depth LIMIT 1
+    ) project ON true
+    ORDER BY s.rn`
+	return sql, args
+}
+func facetSQL(q listQuery) (string, []any) {
+	prefix, args := listFilterSQL(q)
+	sql := prefix + `, facet_values AS (
+    SELECT 'state' AS name,n.state AS value FROM filtered f JOIN nodes n ON n.id=f.id
+    UNION ALL SELECT 'kind',k.slug FROM filtered f JOIN nodes n ON n.id=f.id JOIN node_kinds k ON k.id=n.kind_id
+    UNION ALL SELECT 'priority',coalesce(nullif(n.fields->>'priority',''),'none') FROM filtered f JOIN nodes n ON n.id=f.id
+    UNION ALL SELECT 'assignee',coalesce(nullif(n.fields->>'assignee',''),'none') FROM filtered f JOIN nodes n ON n.id=f.id
+    ) SELECT name,value,count(*)::int FROM facet_values WHERE name=ANY($12::text[]) GROUP BY name,value`
+	return sql, append(args, q.FacetNames)
 }
 
 func parseTreeQuery(r *http.Request) (treeQuery, error) {
@@ -186,132 +485,10 @@ func parseLimit(raw string, present bool) (int, error) {
 		return 50, nil
 	}
 	n, err := strconv.Atoi(raw)
-	if err != nil || n < 1 || n > 200 {
+	if err != nil || n < 1 || n > 500 {
 		return 0, badRequest("invalid limit")
 	}
 	return n, nil
-}
-
-func (m *Module) listNodes(ctx context.Context, tenantID string, q listQuery) (nodePage, error) {
-	var mark *listMark
-	if q.Cursor != "" {
-		env, err := openCursor(q.Cursor)
-		if err != nil {
-			return nodePage{}, err
-		}
-		if env.T != "list" {
-			return nodePage{}, badRequest("cursor does not match this query")
-		}
-		var decoded listMark
-		if err := json.Unmarshal(env.P, &decoded); err != nil {
-			return nodePage{}, badRequest("invalid cursor")
-		}
-		if !listMarkMatches(decoded, q) {
-			return nodePage{}, badRequest("cursor does not match this query")
-		}
-		if _, ok := parseUUID(decoded.ID); !ok || decoded.Value == "" {
-			return nodePage{}, badRequest("invalid cursor")
-		}
-		mark = &decoded
-	}
-	page := nodePage{Items: []nodeJSON{}}
-	err := m.tx(ctx, tenantID, func(ctx context.Context, tx pgx.Tx) error {
-		sql, args := listSQL(q, mark)
-		rows, err := tx.Query(ctx, sql, args...)
-		if err != nil {
-			return dbErr("list nodes", err)
-		}
-		defer rows.Close()
-		var items []nodeJSON
-		for rows.Next() {
-			node, err := scanNode(rows)
-			if err != nil {
-				return err
-			}
-			items = append(items, node)
-		}
-		if err := rows.Err(); err != nil {
-			return err
-		}
-		if len(items) > q.Limit {
-			last := items[q.Limit-1]
-			items = items[:q.Limit]
-			encoded, err := encodeTyped("list", listMark{
-				KindID: q.KindID, State: q.State, ParentSet: q.ParentSet, ParentID: q.ParentID,
-				Descendants: q.Descendants, Sort: q.Sort, Direction: q.Direction,
-				Value: cursorValue(last, q.Sort), ID: last.ID,
-			})
-			if err != nil {
-				return err
-			}
-			page.NextCursor = &encoded
-		}
-		if items == nil {
-			items = []nodeJSON{}
-		}
-		page.Items = items
-		return nil
-	})
-	return page, err
-}
-
-func listMarkMatches(mark listMark, q listQuery) bool {
-	return sameString(mark.KindID, q.KindID) &&
-		sameString(mark.State, q.State) &&
-		mark.ParentSet == q.ParentSet &&
-		sameString(mark.ParentID, q.ParentID) &&
-		mark.Descendants == q.Descendants &&
-		mark.Sort == q.Sort &&
-		mark.Direction == q.Direction
-}
-
-func listSQL(q listQuery, mark *listMark) (string, []any) {
-	args := []any{q.ParentSet, q.ParentID, q.Descendants, q.KindID, q.State}
-	var b strings.Builder
-	b.WriteString(`
-		WITH RECURSIVE scope AS (
-			SELECT n.id
-			FROM nodes n
-			WHERE n.deleted_at IS NULL
-			  AND ($1::bool = false OR n.parent_id IS NOT DISTINCT FROM $2::uuid)
-			UNION ALL
-			SELECT c.id
-			FROM nodes c
-			JOIN scope s ON c.parent_id = s.id
-			WHERE $3::bool = true AND c.deleted_at IS NULL
-		)
-		SELECT ` + nodeCols + `
-		FROM nodes n
-		WHERE n.deleted_at IS NULL
-		  AND n.id IN (SELECT id FROM scope)
-		  AND ($4::uuid IS NULL OR n.kind_id = $4::uuid)
-		  AND ($5::text IS NULL OR n.state = $5::text)`)
-	if mark != nil {
-		col := sortCols[q.Sort]
-		op := ">"
-		if q.Direction == "desc" {
-			op = "<"
-		}
-		cast := "::text"
-		switch q.Sort {
-		case "position":
-			cast = "::numeric"
-		case "updated_at", "created_at":
-			cast = "::timestamptz"
-		}
-		args = append(args, mark.Value, mark.ID)
-		v := len(args) - 1
-		id := len(args)
-		fmt.Fprintf(&b, ` AND (%s %s $%d%s OR (%s = $%d%s AND n.id %s $%d::uuid))`,
-			col, op, v, cast, col, v, cast, op, id)
-	}
-	dir := "ASC"
-	if q.Direction == "desc" {
-		dir = "DESC"
-	}
-	args = append(args, q.Limit+1)
-	fmt.Fprintf(&b, " ORDER BY %s %s, n.id %s LIMIT $%d", sortCols[q.Sort], dir, dir, len(args))
-	return b.String(), args
 }
 
 func (m *Module) nodeTree(ctx context.Context, tenantID string, q treeQuery) (treePage, error) {
@@ -436,4 +613,77 @@ func trimPath(in []string) []string {
 		out[i] = trimDecimal(s)
 	}
 	return out
+}
+
+type projectSummary struct {
+	ID           string    `json:"id"`
+	Key          string    `json:"key"`
+	Title        string    `json:"title"`
+	State        string    `json:"state"`
+	Open         int       `json:"open"`
+	InProgress   int       `json:"in_progress"`
+	Done         int       `json:"done"`
+	Total        int       `json:"total"`
+	LastActivity time.Time `json:"last_activity"`
+}
+type projectPage struct {
+	Items []projectSummary `json:"items"`
+}
+
+func (m *Module) handleListProjects(w http.ResponseWriter, r *http.Request) {
+	p, ok := requirePrincipal(w, r)
+	if !ok {
+		return
+	}
+	includeArchived, err := queryBool(r, "include_archived")
+	if err != nil {
+		writeErr(w, err)
+		return
+	}
+	page := projectPage{Items: []projectSummary{}}
+	err = m.tx(r.Context(), p.TenantID, func(ctx context.Context, tx pgx.Tx) error {
+		rows, err := tx.Query(ctx, `
+            WITH RECURSIVE projects AS (
+                SELECT n.id,n.key,n.title,n.state,n.updated_at
+                FROM nodes n JOIN node_kinds k ON k.id=n.kind_id AND k.tenant_id=n.tenant_id
+                WHERE n.tenant_id=current_setting('aeon.tenant_id')::uuid AND n.deleted_at IS NULL AND k.slug='project' AND ($1::bool OR n.state<>'archived')
+            ), subtree AS (
+                SELECT p.id AS project_id,p.id AS node_id,n.parent_id,n.state,n.updated_at,0 AS depth
+                FROM projects p JOIN nodes n ON n.id=p.id
+                UNION ALL
+                SELECT s.project_id,c.id,c.parent_id,c.state,c.updated_at,s.depth+1
+                FROM subtree s CROSS JOIN LATERAL (
+                    SELECT id,parent_id,state,updated_at FROM nodes
+                    WHERE tenant_id=current_setting('aeon.tenant_id')::uuid AND parent_id=s.node_id AND deleted_at IS NULL OFFSET 0
+                ) c
+            )
+            SELECT p.id::text,p.key,p.title,p.state,
+                count(*) FILTER (WHERE s.depth>0 AND s.state NOT IN ('in_progress','active','qa','accepted','delivered','done','cancelled','archived'))::int AS open,
+                count(*) FILTER (WHERE s.depth>0 AND s.state IN ('in_progress','active','qa'))::int AS in_progress,
+                count(*) FILTER (WHERE s.depth>0 AND s.state IN ('accepted','delivered','done','cancelled','archived'))::int AS done,
+                count(*) FILTER (WHERE s.depth>0)::int AS total,
+                max(s.updated_at) AS last_activity
+            FROM projects p JOIN subtree s ON s.project_id=p.id
+            GROUP BY p.id,p.key,p.title,p.state
+            ORDER BY last_activity DESC,p.id`, includeArchived)
+		if err != nil {
+			return dbErr("list projects", err)
+		}
+		for rows.Next() {
+			var item projectSummary
+			if err := rows.Scan(&item.ID, &item.Key, &item.Title, &item.State, &item.Open, &item.InProgress, &item.Done, &item.Total, &item.LastActivity); err != nil {
+				rows.Close()
+				return err
+			}
+			page.Items = append(page.Items, item)
+		}
+		err = rows.Err()
+		rows.Close()
+		return err
+	})
+	if err != nil {
+		writeErr(w, err)
+		return
+	}
+	writeJSON(w, http.StatusOK, page)
 }
