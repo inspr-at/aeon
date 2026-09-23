@@ -39,6 +39,10 @@ import (
 	"github.com/jackc/pgx/v5"
 
 	"github.com/inspr-at/aeon/internal/auth"
+	"github.com/inspr-at/aeon/internal/business/costunits"
+	"github.com/inspr-at/aeon/internal/business/crm"
+	"github.com/inspr-at/aeon/internal/business/hours"
+	"github.com/inspr-at/aeon/internal/business/quotes"
 
 	"github.com/inspr-at/aeon/internal/config"
 	"github.com/inspr-at/aeon/internal/db"
@@ -93,10 +97,15 @@ func serveListener(ctx context.Context, cfg config.Config, ln net.Listener) erro
 		return err
 	}
 	// R1: embeddings are optional; without AEON_EMBEDDING_URL search is lexical only.
-	pluginRegistry, err := plugins.Builtin()
+	pluginRegistry, err := plugins.Builtin(costunits.Plugin, crm.Plugin, quotes.ManifestPlugin, hours.Plugin)
 	if err != nil {
 		_ = ln.Close()
 		return fmt.Errorf("plugins: %w", err)
+	}
+	quotesMod, err := quotes.New(pool, pluginRegistry)
+	if err != nil {
+		_ = ln.Close()
+		return fmt.Errorf("quotes: %w", err)
 	}
 	embedProvider, err := embedding.FromEnv()
 	if err != nil {
@@ -134,6 +143,11 @@ func serveListener(ctx context.Context, cfg config.Config, ln net.Listener) erro
 			plugins.NewWithRegistry(pool, pluginRegistry),
 			// No LaunchChecks provider yet: stage launch admission fails closed.
 			stagehandoff.New(pool, pluginRegistry),
+			// R4: business plugins
+			costunits.New(pool, pluginRegistry),
+			crm.New(pool, pluginRegistry),
+			quotesMod,
+			hours.New(pool, pluginRegistry),
 		},
 		Middleware: []func(http.Handler) http.Handler{authMod.Middleware},
 	}

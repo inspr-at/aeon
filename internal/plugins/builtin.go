@@ -12,10 +12,12 @@ import (
 	"github.com/inspr-at/aeon/internal/plugins/pharos"
 )
 
-// Builtin returns a sealed registry containing Pharos and Janus.
-func Builtin() (*Registry, error) {
+// Builtin returns a sealed registry containing Pharos, Janus and any extra
+// first-party plugins. Extra plugins live in packages that import this one, so
+// cmd/aeon passes their constructors in.
+func Builtin(extra ...func() (Plugin, error)) (*Registry, error) {
 	reg := NewRegistry()
-	for _, build := range []func() (Plugin, error){pharosPlugin, janusPlugin} {
+	for _, build := range append([]func() (Plugin, error){pharosPlugin, janusPlugin}, extra...) {
 		plug, err := build()
 		if err != nil {
 			return nil, err

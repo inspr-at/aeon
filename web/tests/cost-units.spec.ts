@@ -68,7 +68,7 @@ test('admin records an exact decimal rate', async ({ page }) => {
 test('a member does not get the rate form', async ({ page }) => {
   const calls = await setup(page, { admin: false })
   await page.goto('/business/cost-units')
-  await expect(page.getByText('PAI-101')).toBeVisible()
+  await expect(page.getByRole('button', { name: /PAI-101/ })).toBeVisible()
   await expect(page.getByRole('button', { name: 'Record rate' })).toHaveCount(0)
   expect(calls.some(call => call.method === 'POST')).toBe(false)
 })

@@ -14,6 +14,8 @@ export const router = createRouter({
     { path: '/business', component: () => import('./views/business/BusinessHome.vue'), meta: { title: 'Business' } },
     { path: '/business/crm', component: () => import('./views/business/CRMView.vue'), meta: { title: 'Organisations' } },
     { path: '/business/quotes', component: () => import('./views/business/QuotesView.vue'), meta: { title: 'Quotes' } },
+    { path: '/business/costs', alias: '/business/cost-units', component: () => import('./views/business/CostUnitsView.vue'), meta: { title: 'Cost units' } },
+    { path: '/business/hours', component: () => import('./views/business/HoursView.vue'), meta: { title: 'Hours' } },
     { path: '/crm', redirect: '/business/crm' },
     { path: '/agents', component: () => import('./views/AgentsView.vue'), meta: { title: 'Agents' } },
     { path: '/runs/:runId?', component: () => import('./views/RunsView.vue'), meta: { title: 'Sessions & runs' } },
