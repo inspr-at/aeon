@@ -41,9 +41,11 @@ const rendered = computed(() => markdown.render(props.body))
 .markdown-body :deep(li) { margin: .2em 0; }
 .markdown-body :deep(li > p) { margin: 0; }
 .markdown-body :deep(li::marker) { color: var(--ink-3); }
-.markdown-body :deep(.task-list-item) { list-style: none; margin-left: -1.4em; display: block; }
+/* Task lists hang: the box sits in its own column, centred on the first line's
+   x-height, and wrapped lines align with the text, not under the box. */
+.markdown-body :deep(.task-list-item) { position: relative; display: block; list-style: none; margin-left: -1.4em; padding-left: 22px; }
 .markdown-body :deep(.task-box) {
-  appearance: none; display: inline-grid; place-items: center; vertical-align: -2px; width: 14px; height: 14px; margin: 0 6px 0 0; border-radius: 4px;
+  appearance: none; position: absolute; left: 0; top: calc(.825em + .08em - 7px); display: grid; place-items: center; width: 14px; height: 14px; margin: 0; border-radius: 4px;
   background: var(--field-bg); box-shadow: inset 0 0 0 1.5px var(--line-2);
 }
 .markdown-body :deep(.task-box:checked) { background: var(--st-ok); box-shadow: none; }

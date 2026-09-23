@@ -56,9 +56,16 @@ export function useTicketList(projectId: Ref<string | null>, filters: Ref<ListFi
     dimensionFacets.value = Object.fromEntries(settled.flatMap(result => result.status === 'fulfilled' ? [result.value] : []))
   }
 
-  async function loadMore() {
+  // One next-page request at a time; callers that need the page await the same promise.
+  let moreRequest: Promise<void> | null = null
+  function loadMore(): Promise<void> {
+    if (loadingMore.value && moreRequest) return moreRequest
+    moreRequest = fetchMore().finally(() => { moreRequest = null })
+    return moreRequest
+  }
+  async function fetchMore() {
     const within = projectId.value
-    if (!within || !cursor.value || loading.value || loadingMore.value) return
+    if (!within || !cursor.value || loading.value) return
     const request = generation
     loadingMore.value = true; moreError.value = ''
     try {
@@ -136,6 +143,24 @@ export function useTicketList(projectId: Ref<string | null>, filters: Ref<ListFi
   }
 
   function invalidate() { generation++ }
+  // Created and deleted work shows up at once, before the next reload.
+  function insertRow(item: ListItem) {
+    if (rows.value.some(row => row.id === item.id)) return
+    rows.value = [item, ...rows.value]
+    const kind = facets.value.kind
+    if (kind) kind[item.kind_slug] = (kind[item.kind_slug] ?? 0) + 1
+    const state = facets.value.state
+    if (state) state[item.state] = (state[item.state] ?? 0) + 1
+  }
+  function removeRow(id: string) {
+    const row = rows.value.find(item => item.id === id)
+    if (!row) return
+    rows.value = rows.value.filter(item => item.id !== id)
+    const kind = facets.value.kind
+    if (kind?.[row.kind_slug]) kind[row.kind_slug]--
+    const state = facets.value.state
+    if (state?.[row.state]) state[row.state]--
+  }
 
-  return { rows, cursor, loading, loadingMore, error, moreError, facets, names, loadedOnce, load, loadMore, counts, resolveNames, setStatus, invalidate }
+  return { rows, cursor, loading, loadingMore, error, moreError, facets, names, loadedOnce, load, loadMore, counts, resolveNames, setStatus, invalidate, insertRow, removeRow }
 }

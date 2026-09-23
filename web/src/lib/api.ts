@@ -63,7 +63,7 @@ export interface SavedView extends ViewWrite {
 }
 export interface NodeCreate {
   kind_id: string; title: string; body?: string; fields?: Record<string, unknown>
-  state?: string; parent_id?: string | null; before_id?: string | null
+  state?: string; parent_id?: string | null; before_id?: string | null; key_prefix?: string
 }
 export type NodePatch = Partial<Pick<WorkNode, 'title' | 'body' | 'fields' | 'state'>>
 
@@ -114,7 +114,7 @@ export type Facets = Record<string, Record<string, number>>
 export interface ListPage extends Page<ListItem> { facets?: Facets }
 export interface ListQuery {
   within?: string; kind?: string[]; state?: string[]; priority?: string[]; assignee?: string[]
-  q?: string; hide_closed?: boolean; facets?: string[]; sort?: string; cursor?: string; limit?: number
+  q?: string; hide_closed?: boolean; facets?: string[]; sort?: string; cursor?: string; limit?: number; parent_id?: string
 }
 // Work (ticket, task, epic) counts: open = new and backlog, in_progress = in progress and QA,
 // done = done, delivered and accepted; cancelled is separate; total counts every work state.
@@ -132,6 +132,25 @@ function listQuery(params: ListQuery): string {
 }
 export const listNodes = (params: ListQuery) => json<ListPage>(`/nodes${listQuery(params)}`)
 export const getProjects = (includeArchived = false) => json<{ items: ProjectSummary[] }>(`/projects${includeArchived ? '?include_archived=true' : ''}`)
+// B2 ticket activity and comments.
+export type ChangeField = 'status' | 'priority' | 'assignee' | 'title' | 'parent'
+export interface ActivityChange { field: ChangeField; from: string | null; to: string | null }
+export interface ActivityItem {
+  id: string; at: string; type: 'comment' | 'change' | 'created'
+  author: { id: string | null; name: string }
+  body_markdown?: string; changes?: ActivityChange[]
+}
+export const getActivity = (nodeId: string, cursor?: string | null) =>
+  json<{ items: ActivityItem[]; next_cursor: string | null }>(`/nodes/${idPath(nodeId)}/activity${query({ limit: 50, cursor: cursor ?? undefined })}`)
+export const createComment = (nodeId: string, body_markdown: string) => json<ActivityItem>(`/nodes/${idPath(nodeId)}/comments`, 'POST', { body_markdown })
+export const updateComment = (nodeId: string, commentId: string, body_markdown: string) =>
+  json<ActivityItem>(`/nodes/${idPath(nodeId)}/comments/${idPath(commentId)}`, 'PATCH', { body_markdown })
+export const deleteComment = (nodeId: string, commentId: string) => json<void>(`/nodes/${idPath(nodeId)}/comments/${idPath(commentId)}`, 'DELETE')
+
+export type RelationType = 'blocks' | 'relates' | 'implements' | 'cites' | 'duplicates' | 'customer_of' | 'contact_for'
+export interface Relation { id: string; source_node_id: string; target_node_id: string; type: RelationType; created_at: string }
+export const getRelations = (nodeId: string) => json<{ items: Relation[]; next_cursor: string | null }>(`/relations${query({ node_id: nodeId, limit: 100 })}`)
+
 export const getViews = () => json<{ items: SavedView[] }>('/views')
 export const createView = (body: ViewWrite) => json<SavedView>('/views', 'POST', body)
 export const updateView = (id: string, body: Partial<ViewWrite>) => json<SavedView>(`/views/${idPath(id)}`, 'PATCH', body)

@@ -15,8 +15,18 @@ const sections: { title: string; rows: { keys: Key[][]; label: string; joiner?: 
     { keys: [[mac ? '⌘' : 'Ctrl', 'K']], label: 'Search everything' },
     { keys: [['?']], label: 'This sheet' },
   ] },
-  { title: 'Side panel', rows: [
+  { title: 'Open ticket', rows: [
     { keys: [['j'], ['k']], label: 'Next and previous ticket, the list follows' },
+    { keys: [['e']], label: 'Edit the title' },
+    { keys: [['s']], label: 'Status' },
+    { keys: [['p']], label: 'Priority' },
+    { keys: [['a']], label: 'Assignee' },
+    { keys: [['c']], label: 'Write a comment' },
+    { keys: [['f']], label: 'Full page and back' },
+    { keys: [[mac ? '⌘' : 'Ctrl', { icon: 'enter', label: 'Enter' }]], label: 'Save a description, notes or comment' },
+  ] },
+  { title: 'Create', rows: [
+    { keys: [['n']], label: 'New ticket at the top of the list' },
   ] },
   { title: 'Menus', rows: [
     { keys: [['1'], ['8']], joiner: 'to', label: 'Choose a status in the status menu' },

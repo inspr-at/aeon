@@ -1,0 +1,97 @@
+<!-- SPDX-License-Identifier: AGPL-3.0-only -->
+<script setup lang="ts">
+import { ref } from 'vue'
+import AppIcon from '../AppIcon.vue'
+import FloatingPanel from './FloatingPanel.vue'
+
+const props = defineProps<{
+  ticketKey: string; kind: string | null; position: { index: number; count: number } | null
+  mode: 'panel' | 'full'; canWrite: boolean; canMove: boolean
+}>()
+const emit = defineEmits<{
+  copyKey: []; copyLink: []; prev: []; next: []; expand: []; collapse: []; newTab: []; close: []; move: [anchor: HTMLElement]; delete: []
+}>()
+const moreAnchor = ref<HTMLElement | null>(null)
+const moreButton = ref<HTMLButtonElement>()
+function toggleMore(event: MouseEvent) { moreAnchor.value = moreAnchor.value ? null : event.currentTarget as HTMLElement }
+function closeMore(restore: boolean) { moreAnchor.value = null; if (restore) moreButton.value?.focus() }
+function pick(action: 'copyKey' | 'copyLink' | 'delete') {
+  moreAnchor.value = null
+  if (action === 'copyKey') emit('copyKey')
+  else if (action === 'copyLink') emit('copyLink')
+  else emit('delete')
+}
+function pickMove() { const anchor = moreButton.value ?? null; moreAnchor.value = null; if (anchor) emit('move', anchor) }
+function menuKeys(event: KeyboardEvent) {
+  const items = [...(event.currentTarget as HTMLElement).querySelectorAll<HTMLButtonElement>('button:not(:disabled)')]
+  const index = items.indexOf(document.activeElement as HTMLButtonElement)
+  if (event.key === 'ArrowDown' || event.key === 'ArrowUp') {
+    event.preventDefault(); event.stopPropagation()
+    items[event.key === 'ArrowDown' ? Math.min(items.length - 1, index + 1) : Math.max(0, index - 1)]?.focus()
+  }
+}
+defineExpose({ closeMore })
+void props
+</script>
+
+<template>
+  <header class="panel-bar" :class="mode">
+    <button v-if="mode === 'full'" type="button" class="icon-btn sm flat" aria-label="Back to the list" data-tip="Back to the list · Esc" @click="emit('close')"><AppIcon name="chevron-left" :size="16" /></button>
+    <button type="button" class="key-chip" :aria-label="`Copy ${ticketKey}`" :data-tip="`Copy ${ticketKey}`" @click="emit('copyKey')">
+      <AppIcon v-if="kind" :name="kind === 'epic' ? 'epic' : kind === 'task' ? 'task' : 'ticket'" :size="12" :class="kind" />
+      <span>{{ ticketKey }}</span>
+      <AppIcon name="copy" :size="11" class="copy-glyph" />
+    </button>
+    <span v-if="position" class="position mono">{{ position.index + 1 }} / {{ position.count }}</span>
+    <div class="nav">
+      <button type="button" class="icon-btn sm flat" aria-label="Previous ticket" aria-keyshortcuts="k" data-tip="Previous · k" :disabled="!position || position.index === 0" @click="emit('prev')"><AppIcon name="chevron-up" :size="15" /></button>
+      <button type="button" class="icon-btn sm flat" aria-label="Next ticket" aria-keyshortcuts="j" data-tip="Next · j" :disabled="!position || position.index >= position.count - 1" @click="emit('next')"><AppIcon name="chevron" :size="15" /></button>
+    </div>
+    <span class="spacer" />
+    <button v-if="mode === 'panel'" type="button" class="icon-btn sm flat wide-only" aria-label="Open as full page" data-tip="Full page · f" @click="emit('expand')"><AppIcon name="expand" :size="14" /></button>
+    <button v-else type="button" class="icon-btn sm flat wide-only" aria-label="Show beside the list" data-tip="Side panel · f" @click="emit('collapse')"><AppIcon name="collapse" :size="14" /></button>
+    <button type="button" class="icon-btn sm flat wide-only" aria-label="Open in a new tab" data-tip="Open in new tab" @click="emit('newTab')"><AppIcon name="external" :size="14" /></button>
+    <button ref="moreButton" type="button" class="icon-btn sm flat" aria-label="More actions" aria-haspopup="menu" :aria-expanded="!!moreAnchor" data-tip="More" @click="toggleMore"><AppIcon name="more" :size="15" /></button>
+    <button v-if="mode === 'panel'" type="button" class="icon-btn sm flat" aria-label="Close ticket details" aria-keyshortcuts="Escape" data-tip="Close · Esc" @click="emit('close')"><AppIcon name="close" :size="15" /></button>
+    <FloatingPanel v-if="moreAnchor" :anchor="moreAnchor" :width="220" align="end" :label="`Actions for ${ticketKey}`" @close="closeMore">
+      <div class="more-menu" role="menu" :aria-label="`Actions for ${ticketKey}`" @keydown="menuKeys">
+        <button type="button" role="menuitem" class="menu-item" data-autofocus @click="pick('copyLink')"><AppIcon name="link" :size="14" />Copy link</button>
+        <button type="button" role="menuitem" class="menu-item" @click="pick('copyKey')"><AppIcon name="copy" :size="14" />Copy key</button>
+        <button v-if="canMove" type="button" role="menuitem" class="menu-item" :disabled="!canWrite" @click="pickMove"><AppIcon name="epic" :size="14" />Move to another epic…</button>
+        <div class="menu-sep" role="separator" />
+        <button type="button" role="menuitem" class="menu-item danger" :disabled="!canWrite" @click="pick('delete')"><AppIcon name="trash" :size="14" />Delete {{ kind === 'epic' ? 'epic' : kind === 'task' ? 'task' : 'ticket' }}…</button>
+      </div>
+    </FloatingPanel>
+  </header>
+</template>
+
+<style scoped>
+.panel-bar { display: flex; align-items: center; gap: 6px; height: 52px; padding: 0 10px 0 14px; border-bottom: 1px solid var(--line); flex-shrink: 0; }
+.panel-bar.full { padding-left: 8px; }
+.key-chip { display: inline-flex; flex-shrink: 0; align-items: center; gap: 6px; height: 26px; white-space: nowrap; padding: 0 9px 0 10px; border: 0; border-radius: 7px; background: var(--chip-teal-bg); box-shadow: inset 0 0 0 1px var(--chip-teal-line); color: var(--teal-ink); font: 600 12px/1 var(--mono); letter-spacing: .03em; font-variant-ligatures: none; }
+.key-chip:hover { box-shadow: inset 0 0 0 1px var(--teal); }
+.key-chip:active { filter: brightness(.97); }
+.key-chip:focus-visible { box-shadow: var(--focus-ring); }
+.key-chip .epic { color: var(--gold); }
+.copy-glyph { opacity: .45; }
+.key-chip:hover .copy-glyph { opacity: .9; }
+.position { margin-left: 6px; font-size: 11.5px; color: var(--ink-3); }
+.nav { display: inline-flex; gap: 2px; margin-left: 2px; }
+.nav .icon-btn:disabled { opacity: .35; }
+.spacer { flex: 1; }
+.more-menu { display: grid; gap: 1px; }
+.menu-item { display: flex; align-items: center; gap: 10px; width: 100%; height: 34px; padding: 0 10px; border: 0; border-radius: 8px; background: transparent; color: var(--ink); font-size: 13.5px; text-align: left; }
+.menu-item svg { color: var(--ink-2); }
+@media (hover: hover) { .menu-item:hover:not(:disabled) { background: var(--row-hover); } }
+.menu-item:focus-visible { background: var(--row-selected); box-shadow: inset 0 0 0 1px var(--glass-rim); }
+.menu-item.danger, .menu-item.danger svg { color: var(--danger); }
+.menu-item.danger:hover:not(:disabled) { background: var(--danger-bg); }
+.menu-sep { height: 1px; margin: 4px 6px; background: var(--line); }
+@media (max-width: 720px) {
+  .panel-bar { height: 56px; padding: 0 6px 0 12px; }
+  .panel-bar .icon-btn { width: 44px; height: 44px; }
+  .position { display: none; }
+  .wide-only { display: none; }
+  .nav { gap: 0; }
+}
+</style>

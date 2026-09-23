@@ -1,11 +1,14 @@
 <!-- SPDX-License-Identifier: AGPL-3.0-only -->
 <script setup lang="ts">
 import { computed, nextTick, onBeforeUnmount, onMounted, ref, watch } from 'vue'
-import { useRoute, useRouter } from 'vue-router'
-import { listNodes, type ListItem } from '../lib/api'
+import { onBeforeRouteLeave, onBeforeRouteUpdate, useRoute, useRouter } from 'vue-router'
+import { createNode, listNodes, type ListItem } from '../lib/api'
+import { canWrite } from '../lib/activity'
+import { confirmAction } from '../lib/confirm'
+import { asListItem, keyPrefix, kinds } from '../lib/useTicket'
 import { density } from '../lib/prefs'
 import { toast } from '../lib/toast'
-import { apiParams, effectiveSort, facetOptions, filtersFromQuery, filtersToQuery, groupRows, hasFilters, orderByStatus, totalFrom, type Dimension, type EpicRef, type GroupBy, type ListFilters } from '../lib/ticketList'
+import { apiParams, effectiveSort, facetOptions, filtersFromQuery, filtersToQuery, groupRows, hasFilters, orderByStatus, totalFrom, WORK_KINDS, type Dimension, type EpicRef, type GroupBy, type ListFilters } from '../lib/ticketList'
 import { useTicketList } from '../lib/useTicketList'
 import { absoluteTime, cycleSort, relativeTime, statusMeta, type SortField } from '../lib/work'
 import { useProjects } from '../stores/projects'
@@ -16,8 +19,9 @@ import ListToolbar from '../components/work/ListToolbar.vue'
 import ShortcutSheet from '../components/work/ShortcutSheet.vue'
 import StatusIcon from '../components/work/StatusIcon.vue'
 import StatusMenu from '../components/work/StatusMenu.vue'
-import TicketPanel from '../components/work/TicketPanel.vue'
 import TicketTable from '../components/work/TicketTable.vue'
+import TicketWorkspace from '../components/work/TicketWorkspace.vue'
+import type { QuickDraft } from '../components/work/QuickCreateRow.vue'
 
 const route = useRoute()
 const router = useRouter()
@@ -37,7 +41,7 @@ const toolbarWrap = ref<HTMLElement>()
 const stickMark = ref<HTMLElement>()
 const toolbar = ref<InstanceType<typeof ListToolbar>>()
 const table = ref<InstanceType<typeof TicketTable>>()
-const panel = ref<InstanceType<typeof TicketPanel>>()
+const panel = ref<InstanceType<typeof TicketWorkspace>>()
 const shortcuts = ref<InstanceType<typeof ShortcutSheet>>()
 const filterSheet = ref<InstanceType<typeof FilterSheet>>()
 const scrollRoot = ref<HTMLElement | null>(null)
@@ -46,6 +50,11 @@ const stuck = ref(false)
 const cursorId = ref<string | null>(null)
 const collapsed = ref(new Set<string>())
 const statusMenu = ref<{ row: ListItem; anchor: HTMLElement; from: 'list' | 'panel' } | null>(null)
+const creating = ref(false)
+// Full page: the same ticket workspace in a two-column page instead of the side panel.
+const fullView = computed(() => !!ticketKey.value && route.query.view === 'full')
+const me = computed(() => session.identity ? { id: session.identity.principal.id, name: session.identity.principal.name } : null)
+const writable = computed(() => canWrite(session.identity?.principal.roles))
 
 // ---------- Rows, groups and keyboard order ----------
 const displayRows = computed(() => {
@@ -124,7 +133,9 @@ const panelPosition = computed(() => {
   const item = panelItem.value
   if (!item) return null
   const index = sequence.value.findIndex(row => row.id === item.id)
-  return index === -1 ? null : { index, count: sequence.value.length }
+  // While more pages exist, count the whole list (its total), not just what is loaded.
+  const count = list.cursor.value && total.value ? Math.max(total.value, sequence.value.length) : sequence.value.length
+  return index === -1 ? null : { index, count }
 })
 async function resolvePanel() {
   const key = ticketKey.value
@@ -147,14 +158,27 @@ async function resolvePanel() {
   }
 }
 watch([ticketKey, projectId], resolvePanel, { immediate: true })
-watch(panelItem, (item, old) => {
+watch(panelItem, item => {
   if (!item) return
   if (sequence.value.some(row => row.id === item.id)) {
     cursorId.value = item.id
-    void nextTick(() => table.value?.scrollToRow(item.id))
+    if (!fullView.value) void nextTick(() => table.value?.scrollToRow(item.id))
   }
-  if (item.id !== old?.id) panel.value?.resetScroll()
 })
+
+// People who can be assigned: everyone assigned somewhere in this project, and you.
+const projectPeople = ref<string[]>([])
+watch(projectId, async id => {
+  projectPeople.value = []
+  if (!id) return
+  try {
+    const page = await listNodes({ within: id, kind: WORK_KINDS, facets: ['assignee'], limit: 1 })
+    const ids = Object.keys(page.facets?.assignee ?? {}).filter(value => value !== 'none')
+    await list.resolveNames(ids)
+    if (projectId.value === id) projectPeople.value = ids
+  } catch { /* the menu still offers you and Unassigned */ }
+}, { immediate: true })
+const people = computed(() => projectPeople.value.map(id => ({ id, name: list.names.get(id) ?? 'Someone' })))
 
 let openedFromList = false
 let openedQuery = ''
@@ -167,13 +191,45 @@ function openKey(key: string) {
   void router.push(location)
 }
 function openRow(row: ListItem) { cursorId.value = row.id; openKey(row.key) }
+function listQuery() { const { view: _view, ...query } = route.query; return query }
 function closePanel() {
   if (!ticketKey.value) return
-  const back = openedFromList && JSON.stringify(route.query) === openedQuery && typeof window.history.state?.back === 'string'
+  const back = !fullView.value && openedFromList && JSON.stringify(route.query) === openedQuery && typeof window.history.state?.back === 'string'
   openedFromList = false
   if (back) router.back()
-  else void router.replace({ path: `/p/${encodeURIComponent(routeKey.value)}`, query: route.query })
+  else void router.replace({ path: `/p/${encodeURIComponent(routeKey.value)}`, query: listQuery() })
   void nextTick(() => table.value?.focusGrid())
+}
+let expandedFromPanel = false
+let listScroll = 0
+function expand() {
+  if (!ticketKey.value || fullView.value) return
+  expandedFromPanel = true
+  void router.push({ path: route.path, query: { ...route.query, view: 'full' } })
+}
+// The full page starts at its top; going back returns to the same place in the list.
+watch(fullView, async (full, was) => {
+  const root = scrollRoot.value
+  if (!root) return
+  if (full && !was) { listScroll = root.scrollTop; await nextTick(); root.scrollTop = 0 }
+  else if (!full && was) { await nextTick(); root.scrollTop = listScroll; if (panelItem.value) table.value?.scrollToRow(panelItem.value.id) }
+})
+function collapse() {
+  if (!fullView.value) return
+  if (expandedFromPanel && typeof window.history.state?.back === 'string') router.back()
+  else void router.replace({ path: route.path, query: listQuery() })
+  expandedFromPanel = false
+}
+// Related tickets can live in another project: open them where they belong.
+async function openRelated(key: string) {
+  if (key.split('-')[0] === routeKey.value || list.rows.value.some(row => row.key === key)) { openKey(key); return }
+  try {
+    const page = await listNodes({ q: key, limit: 25 })
+    const owner = page.items.find(item => item.key === key)?.project
+    const target = owner ? projects.byId(owner.id) : undefined
+    if (target && target.id !== projectId.value) { void router.push(`/p/${encodeURIComponent(target.routeKey)}/${encodeURIComponent(key)}`); return }
+  } catch { /* fall back to this project, where the panel explains */ }
+  openKey(key)
 }
 watch(ticketKey, key => { if (!key) openedFromList = false })
 
@@ -199,6 +255,56 @@ function chooseStatus(state: string) {
   else table.value?.focusGrid()
 }
 function openEpic(epic: EpicRef) { openKey(epic.key) }
+
+// ---------- Create and remove ----------
+async function startCreate() {
+  if (fullView.value) collapse()
+  creating.value = true
+  if (scrollRoot.value && toolbarWrap.value && scrollRoot.value.scrollTop > toolbarWrap.value.offsetTop) scrollRoot.value.scrollTop = toolbarWrap.value.offsetTop
+  await nextTick(); table.value?.focusCreate()
+}
+async function quickCreate(draft: QuickDraft): Promise<boolean> {
+  const current = project.value
+  if (!current) return false
+  try {
+    const kind = (await kinds()).find(candidate => candidate.slug === draft.kind)
+    if (!kind) throw new Error('this workspace has no such type')
+    const node = await createNode({
+      kind_id: kind.id, title: draft.title, state: draft.state, fields: draft.priority ? { priority: draft.priority } : {},
+      parent_id: draft.epic?.id ?? current.id, key_prefix: keyPrefix(current.routeKey),
+    })
+    const parent = draft.epic ? { ...draft.epic, kind_slug: 'epic' } : { id: current.id, key: current.key, title: current.title, kind_slug: 'project' }
+    const created = asListItem(node, kind, parent, { id: current.id, key: current.key, title: current.title })
+    list.insertRow(created)
+    cursorId.value = created.id
+    toast(`Created ${node.key}`, { action: { label: 'Open', run: () => openKey(node.key) } })
+    void projects.load(true)
+    return true
+  } catch (e) {
+    toast(`The ticket was not created: ${e instanceof Error ? e.message : 'unknown error'}`, { tone: 'error' })
+    return false
+  }
+}
+function childCreated(item: ListItem) { list.insertRow(item); void projects.load(true) }
+let skipGuard = false
+function removed(item: ListItem) {
+  list.removeRow(item.id)
+  void projects.load(true)
+  skipGuard = true
+  void router.replace({ path: `/p/${encodeURIComponent(routeKey.value)}`, query: listQuery() }).finally(() => { skipGuard = false })
+}
+
+// ---------- Unsaved changes ----------
+function dirty() { return !!panel.value?.isDirty() }
+async function confirmDiscard() {
+  if (skipGuard || !dirty()) return true
+  return confirmAction({ title: 'Discard unsaved changes?', body: 'You have edits in this ticket that are not saved yet.', confirmLabel: 'Discard changes', danger: true })
+}
+onBeforeRouteUpdate(async (to, from) => {
+  if (to.params.ticketKey !== from.params.ticketKey || to.params.projectKey !== from.params.projectKey) return confirmDiscard()
+})
+onBeforeRouteLeave(async () => (await confirmDiscard()) && (!table.value?.createDirty() || skipGuard || confirmAction({ title: 'Discard the new ticket?', body: 'Its title has not been created yet.', confirmLabel: 'Discard', danger: true })))
+function beforeUnload(event: BeforeUnloadEvent) { if (dirty() || table.value?.createDirty()) { event.preventDefault(); event.returnValue = '' } }
 function setDensity(value: 'comfortable' | 'compact') { density.value = value }
 // Tabbing into the table lands on a visible row, not on an invisible container.
 function focusFirst() { if (!cursorId.value && sequence.value.length) cursorId.value = sequence.value[0].id }
@@ -207,16 +313,29 @@ function focusFirst() { if (!cursorId.value && sequence.value.length) cursorId.v
 function typing(target: EventTarget | null) {
   return target instanceof HTMLElement && (target.isContentEditable || ['INPUT', 'TEXTAREA', 'SELECT'].includes(target.tagName))
 }
-function move(step: number) {
-  const rows = sequence.value
+async function move(step: number) {
+  let rows = sequence.value
   if (!rows.length) return
-  const index = rows.findIndex(row => row.id === cursorId.value)
+  // At the end of what is loaded, fetch the next page first so j and Next keep going.
+  const at = rows.findIndex(row => row.id === (ticketKey.value && panelItem.value ? panelItem.value.id : cursorId.value))
+  if (step > 0 && at === rows.length - 1 && list.cursor.value) {
+    await list.loadMore()
+    rows = sequence.value
+  }
+  // With a ticket open, move from that ticket; the cursor follows only once the move happens
+  // (an unsaved-changes guard may keep the current ticket open).
+  const from = ticketKey.value && panelItem.value ? panelItem.value.id : cursorId.value
+  const index = rows.findIndex(row => row.id === from)
   const next = index === -1 ? (step > 0 ? 0 : rows.length - 1) : Math.max(0, Math.min(rows.length - 1, index + step))
   const row = rows[next]
+  if (ticketKey.value) {
+    openKey(row.key)
+    if (!fullView.value && !panel.value?.el?.contains(document.activeElement)) table.value?.focusGrid()
+    return
+  }
   cursorId.value = row.id
   void nextTick(() => table.value?.scrollToRow(row.id))
-  if (ticketKey.value) openKey(row.key)
-  if (!panel.value?.el?.contains(document.activeElement)) table.value?.focusGrid()
+  table.value?.focusGrid()
 }
 function keydown(event: KeyboardEvent) {
   if (event.defaultPrevented || event.metaKey || event.ctrlKey || event.altKey) return
@@ -224,22 +343,33 @@ function keydown(event: KeyboardEvent) {
   const target = event.target as HTMLElement | null
   if (target?.closest?.('.floating') || document.querySelector('.floating')) return
   if (typing(target)) {
-    if (event.key === 'ArrowDown' && target === toolbar.value?.input) { event.preventDefault(); target.blur(); move(cursorId.value ? 0 : 1) }
+    if (event.key === 'ArrowDown' && target === toolbar.value?.input) { event.preventDefault(); target.blur(); void move(cursorId.value ? 0 : 1) }
     return
   }
   const row = sequence.value.find(item => item.id === cursorId.value)
   switch (event.key) {
-    case 'j': case 'ArrowDown': event.preventDefault(); move(1); break
-    case 'k': case 'ArrowUp': event.preventDefault(); move(-1); break
+    case 'j': case 'ArrowDown': event.preventDefault(); void move(1); break
+    case 'k': case 'ArrowUp': event.preventDefault(); void move(-1); break
     case 'Enter': case 'o':
       if (event.key === 'Enter' && target?.closest('button, a, summary')) return
       if (row) { event.preventDefault(); openRow(row) }
       break
     case 'Escape':
-      if (ticketKey.value) { event.preventDefault(); closePanel() }
+      if (creating.value) { event.preventDefault(); creating.value = false }
+      else if (ticketKey.value) { event.preventDefault(); closePanel() }
       break
-    case '/': event.preventDefault(); toolbar.value?.focusSearch(); break
+    case '/': if (!fullView.value) { event.preventDefault(); toolbar.value?.focusSearch() } break
     case '?': event.preventDefault(); shortcuts.value?.open(); break
+    case 'n': event.preventDefault(); void startCreate(); break
+    case 'e': if (ticketKey.value) { event.preventDefault(); panel.value?.editTitle() } break
+    case 's':
+      if (ticketKey.value) { event.preventDefault(); panel.value?.openStatus() }
+      else if (row) { const anchor = document.querySelector<HTMLElement>(`#row-${row.id} .status-btn`); if (anchor) { event.preventDefault(); openStatus(row, anchor, 'list') } }
+      break
+    case 'p': if (ticketKey.value) { event.preventDefault(); panel.value?.openPriority() } break
+    case 'a': if (ticketKey.value) { event.preventDefault(); panel.value?.openAssignee() } break
+    case 'c': if (ticketKey.value) { event.preventDefault(); panel.value?.focusComposer() } break
+    case 'f': if (ticketKey.value) { event.preventDefault(); if (fullView.value) collapse(); else expand() } break
   }
 }
 
@@ -251,6 +381,7 @@ onMounted(() => {
   scrollRoot.value = document.getElementById('main')
   void projects.load()
   window.addEventListener('keydown', keydown)
+  window.addEventListener('beforeunload', beforeUnload)
   clock = setInterval(() => { now.value = Date.now() }, 60_000)
 })
 // The toolbar only exists once the project is known, so observe it when it appears.
@@ -268,6 +399,7 @@ watch([stickMark, scrollRoot], ([element, root]) => {
 }, { flush: 'post' })
 onBeforeUnmount(() => {
   window.removeEventListener('keydown', keydown)
+  window.removeEventListener('beforeunload', beforeUnload)
   clearInterval(clock)
   resize?.disconnect()
   stick?.disconnect()
@@ -284,8 +416,9 @@ watch([project, panelItem], ([current, item]) => {
 </script>
 
 <template>
-  <section class="project-page" :class="{ 'panel-open': !!ticketKey }" :style="{ '--toolbar-h': `${toolbarHeight}px` }" :aria-labelledby="project ? 'project-title' : undefined">
+  <section class="project-page" :class="{ 'panel-open': !!ticketKey && !fullView, 'full-view': fullView }" :style="{ '--toolbar-h': `${toolbarHeight}px` }" :aria-labelledby="project ? 'project-title' : undefined">
     <template v-if="project">
+      <div v-show="!fullView" class="list-view">
       <header class="project-head">
         <div class="head-main">
           <div class="title-line">
@@ -316,7 +449,7 @@ watch([project, panelItem], ([current, item]) => {
           ref="toolbar" :filters="filters" :options="options" :total="total" :loading="list.loading.value" :density="density" :stuck="stuck"
           @search="q => update({ q })" @toggle="toggleValue" @clear="dimension => update({ [dimension]: [] })" @clear-all="clearFilters"
           @show-closed="value => update({ showClosed: value })" @group="setGroup" @density="setDensity"
-          @open-sheet="filterSheet?.open()" @need-names="list.resolveNames(options('assignee').map(o => o.value))"
+          @open-sheet="filterSheet?.open()" @need-names="list.resolveNames(options('assignee').map(o => o.value))" @create="startCreate"
         />
       </div>
 
@@ -325,6 +458,7 @@ watch([project, panelItem], ([current, item]) => {
         :query="filters.q" :sort="filters.sort" :density="density" :loading="list.loading.value" :loading-more="list.loadingMore.value"
         :error="list.error.value" :more-error="list.moreError.value" :has-more="!!list.cursor.value" :filtered="filtered" :hiding-closed="!filters.showClosed"
         :collapsed="collapsed" :total="total" :project-key="routeKey" :scroll-root="scrollRoot" :now="now" :show-assignee="showAssignee"
+        :creating="creating" :project-id="project.id" :known-states="knownStates" :create="quickCreate" @close-create="creating = false"
         @open="openRow" @cursor="id => cursorId = id" @sort="sortBy" @status="(row, anchor) => openStatus(row, anchor, 'list')"
         @copy="row => copyKey(row.key)" @new-tab="row => newTab(row.key)" @toggle-group="toggleGroup" @open-epic="openEpic"
         @retry="list.load()" @more="list.loadMore()" @grid-focus="focusFirst" @clear-filters="clearFilters" @show-closed="update({ showClosed: true })"
@@ -334,11 +468,14 @@ watch([project, panelItem], ([current, item]) => {
         <kbd class="keycap">j</kbd><kbd class="keycap">k</kbd> move · <kbd class="keycap"><AppIcon name="enter" /></kbd> open · <kbd class="keycap">/</kbd> search ·
         <button type="button" class="hint-link" @click="shortcuts?.open()"><kbd class="keycap">?</kbd> all shortcuts</button>
       </p>
+      </div>
 
-      <TicketPanel
-        v-if="ticketKey" ref="panel" :item="panelItem" :ticket-key="ticketKey.toUpperCase()" :loading="panelLoading" :error="panelError" :position="panelPosition" :now="now"
-        @close="closePanel" @prev="move(-1)" @next="move(1)" @new-tab="newTab(panelItem?.key ?? ticketKey)" @copy="copyKey(panelItem?.key ?? ticketKey.toUpperCase())"
-        @status="anchor => panelItem && openStatus(panelItem, anchor, 'panel')" @open-parent="openKey" @retry="resolvePanel"
+      <TicketWorkspace
+        v-if="ticketKey" ref="panel" :item="panelItem" :ticket-key="ticketKey.toUpperCase()" :resolving="panelLoading" :resolve-error="panelError"
+        :position="panelPosition" :now="now" :mode="fullView ? 'full' : 'panel'" :project="{ id: project.id, routeKey: project.routeKey }"
+        :names="list.names" :me="me" :can-write="writable" :people="people"
+        @close="closePanel" @prev="move(-1)" @next="move(1)" @expand="expand" @collapse="collapse" @new-tab="newTab(panelItem?.key ?? ticketKey)"
+        @status="anchor => panelItem && openStatus(panelItem, anchor, 'panel')" @open-key="openRelated" @removed="removed" @created="childCreated" @retry="resolvePanel"
       />
       <StatusMenu v-if="statusMenu" :anchor="statusMenu.anchor" :current="statusMenu.row.state" :known-states="knownStates" :ticket-key="statusMenu.row.key" @choose="chooseStatus" @close="closeStatus" />
       <ShortcutSheet ref="shortcuts" />
@@ -392,6 +529,7 @@ watch([project, panelItem], ([current, item]) => {
 .hint .keycap + .keycap { margin-left: 2px; }
 .hint-link { display: inline-flex; align-items: center; gap: 5px; padding: 0; border: 0; background: transparent; color: var(--ink-3); font-size: 12px; }
 .hint-link:hover { color: var(--teal-ink); }
+.project-page.full-view { padding-top: 12px; }
 /* Wide screens dock the ticket panel: the list reflows beside it instead of under it. */
 @media (min-width: 1100px) {
   .project-page.panel-open { width: 100%; margin: 0; padding-right: calc(var(--panel-w) + 22px); }

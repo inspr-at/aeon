@@ -15,6 +15,8 @@ export interface MockNode {
   created_at: string; updated_at: string
 }
 export interface MockOptions {
+  conflictAlways?: string
+  readOnly?: boolean
   failList?: boolean
   failProjects?: boolean
   delayList?: number
@@ -51,7 +53,22 @@ export function fixtures(options: MockOptions = {}) {
   for (let index = 0; index < (options.bigProject ?? 0); index++) {
     add({ id: `n-big-${index}`, key: `AEON-${100 + index}`, kind_slug: 'ticket', title: `Generated ticket ${index + 1}`, state: 'backlog', project: 'p-aeon', fields: { priority: 'medium' }, updated_at: ago(index + 1) })
   }
-  return { projects, nodes, people: [me, mira] }
+  const activity: Record<string, { id: string; at: string; type: 'comment' | 'change' | 'created'; author: { id: string | null; name: string }; body_markdown?: string; changes?: { field: string; from: string | null; to: string | null }[] }[]> = {
+    // Newest first, like the API.
+    'n-1': [
+      { id: '9', at: ago(0.5), type: 'comment', author: { id: mira.id, name: mira.name }, body_markdown: 'Token rotation is **done**; cleanup next.' },
+      { id: '8', at: ago(0.9), type: 'comment', author: { id: me.id, name: me.name }, body_markdown: 'Picked this up. `a => b` stays literal.' },
+      { id: '8a', at: ago(2), type: 'comment', author: { id: me.id, name: me.name }, body_markdown: 'I work on this — session: cursor-harbor-fleet (70648dfe-5a0c-4a6f-86f4-dab0870dde5c); role: builder; model: grok-4.6; started: 2026-09-23T10:00:00Z\n\nDelegated via Cursor CLI; coordinator owns the merge.' },
+      { id: '7', at: ago(26), type: 'change', author: { id: me.id, name: me.name }, changes: [{ field: 'status', from: 'backlog', to: 'in-progress' }] },
+      { id: '6', at: ago(26.02), type: 'change', author: { id: me.id, name: me.name }, changes: [{ field: 'status', from: 'new', to: 'backlog' }, { field: 'priority', from: 'medium', to: 'high' }] },
+      { id: '5', at: ago(24 * 20), type: 'created', author: { id: me.id, name: me.name } },
+    ],
+  }
+  const relations = [
+    { id: 'r-1', source_node_id: 'n-4', target_node_id: 'n-1', type: 'blocks', created_at: ago(40) },
+    { id: 'r-2', source_node_id: 'n-1', target_node_id: 'n-5', type: 'relates', created_at: ago(40) },
+  ]
+  return { projects, nodes, people: [me, mira], activity, relations, counter: { next: 100 } }
 }
 
 export type Fixtures = ReturnType<typeof fixtures>
@@ -91,7 +108,38 @@ export async function mockWork(page: Page, data: Fixtures, options: MockOptions 
     let body: unknown = null
     try { body = request.postDataJSON() } catch { body = request.postData() }
     calls.push({ path, method, query, body, headers: request.headers() })
-    if (path === '/api/me') return route.fulfill({ json: { principal: { id: me.id, name: me.name }, tenant: { id: 't1', name: 'INSPR Studio' } } })
+    if (path === '/api/me') return route.fulfill({ json: { principal: { id: me.id, name: me.name, roles: options.readOnly ? ['viewer'] : ['member'] }, tenant: { id: 't1', name: 'INSPR Studio' } } })
+    if (path === '/api/kinds') return route.fulfill({ json: { items: ['epic', 'ticket', 'task', 'project'].map(slug => ({ id: `k-${slug}`, slug, label: slug[0].toUpperCase() + slug.slice(1), short_prefix: slug.slice(0, 3).toUpperCase(), icon: slug, allowed_child_kinds: null, field_schema: {} })) } })
+    if (path === '/api/relations') return route.fulfill({ json: { items: data.relations.filter(r => r.source_node_id === query.get('node_id') || r.target_node_id === query.get('node_id')), next_cursor: null } })
+    const activityPath = /^\/api\/nodes\/([^/]+)\/(activity|comments)(?:\/(\d+))?$/.exec(path)
+    if (activityPath) {
+      const [, nodeId, part, commentId] = activityPath
+      const list = (data.activity[nodeId] ??= [{ id: `c-${nodeId}`, at: ago(24 * 20), type: 'created', author: { id: me.id, name: me.name } }])
+      if (part === 'activity') return route.fulfill({ json: { items: list, next_cursor: null } })
+      const text = (body as { body_markdown?: string } | null)?.body_markdown ?? ''
+      if (method === 'POST') { const item = { id: String(1000 + calls.length), at: new Date(now).toISOString(), type: 'comment' as const, author: { id: me.id, name: me.name }, body_markdown: text }; list.unshift(item); return route.fulfill({ status: 201, json: item }) }
+      const index = list.findIndex(item => item.id === commentId)
+      if (index === -1) return route.fulfill({ status: 404, json: { error: 'comment not found' } })
+      if (method === 'PATCH') { list[index] = { ...list[index], body_markdown: text }; return route.fulfill({ json: list[index] }) }
+      if (method === 'DELETE') { list.splice(index, 1); return route.fulfill({ status: 204 }) }
+    }
+    if (path === '/api/nodes' && method === 'POST') {
+      const input = body as { kind_id: string; title: string; state?: string; fields?: Record<string, unknown>; parent_id?: string; key_prefix?: string }
+      const parent = data.nodes.find(n => n.id === input.parent_id)
+      const project = parent?.project ?? data.projects.find(p => p.id === input.parent_id)?.id ?? 'p-pharos'
+      const node = { id: `n-new-${data.counter.next}`, key: `${input.key_prefix ?? 'TKT'}-${data.counter.next++}`, kind_slug: input.kind_id.slice(2), title: input.title, body: '', state: input.state ?? 'open', fields: input.fields ?? {}, parent_id: input.parent_id ?? null, project, created_at: new Date(now).toISOString(), updated_at: new Date(now).toISOString() }
+      data.nodes.push(node)
+      const { kind_slug: _k, project: _p, ...rest } = node
+      return route.fulfill({ status: 201, json: { ...rest, kind_id: input.kind_id, position: '0', deleted_at: null } })
+    }
+    const movePath = /^\/api\/nodes\/([^/]+)\/move$/.exec(path)
+    if (movePath) {
+      const node = data.nodes.find(n => n.id === movePath[1])!
+      node.parent_id = (body as { parent_id: string }).parent_id
+      node.updated_at = new Date(now + 90_000).toISOString()
+      const { kind_slug: _k, project: _p, ...rest } = node
+      return route.fulfill({ json: { ...rest, kind_id: 'k-ticket', position: '0', deleted_at: null } })
+    }
     if (path === '/api/version') return route.fulfill({ json: { version: '260923120000.0.0', scheme: 'inspr-calendar-v2' } })
     if (path === '/api/projects') {
       if (options.failProjects) return route.fulfill({ status: 503, json: { error: 'Projects are resting' } })
@@ -109,6 +157,8 @@ export async function mockWork(page: Page, data: Fixtures, options: MockOptions 
       if (kinds.length === 1 && kinds[0] === 'project') return route.fulfill({ json: { items: data.projects.map(projectItem), next_cursor: null } })
       if (options.failList) return route.fulfill({ status: 503, json: { error: 'The list is resting' } })
       if (options.delayList) await new Promise(resolve => setTimeout(resolve, options.delayList))
+      const parentFilter = query.get('parent_id')
+      if (parentFilter) return route.fulfill({ json: { items: data.nodes.filter(n => n.parent_id === parentFilter).map(n => item(n, data)), next_cursor: null } })
       const within = query.get('within'), states = listParam(query, 'state'), priorities = listParam(query, 'priority'), assignees = listParam(query, 'assignee'), q = (query.get('q') ?? '').toLowerCase()
       let rows = data.nodes.filter(n => (!within || n.project === within) && (!kinds.length || kinds.includes(n.kind_slug)))
         .filter(n => !states.length || states.includes(n.state))
@@ -143,6 +193,16 @@ export async function mockWork(page: Page, data: Fixtures, options: MockOptions 
     if (path.startsWith('/api/nodes/')) {
       const id = decodeURIComponent(path.split('/')[3]), node = data.nodes.find(n => n.id === id)
       if (!node) return route.fulfill({ status: 404, json: { error: 'Not found' } })
+      if (method === 'DELETE') {
+        if (data.nodes.some(n => n.parent_id === id)) return route.fulfill({ status: 409, json: { error: 'node has children' } })
+        data.nodes.splice(data.nodes.indexOf(node), 1)
+        return route.fulfill({ status: 204 })
+      }
+      if (method === 'PATCH' && options.readOnly) return route.fulfill({ status: 403, json: { error: 'forbidden' } })
+      if (method === 'PATCH' && options.conflictAlways === id) {
+        node.updated_at = new Date(now + 45_000 + calls.length).toISOString(); node.title = 'Renamed by Mira'
+        return route.fulfill({ status: 412, json: { error: 'node has changed' } })
+      }
       if (method === 'PATCH') {
         if (options.failPatch) return route.fulfill({ status: 422, json: { error: 'State is not allowed here' } })
         // Someone else saved this node after the list was read.
