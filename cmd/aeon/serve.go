@@ -1,0 +1,120 @@
+// SPDX-License-Identifier: AGPL-3.0-only
+
+package main
+
+import (
+	"context"
+	"errors"
+	"fmt"
+	"io"
+	"io/fs"
+	"log/slog"
+	"net"
+	"net/http"
+	"os"
+	"os/signal"
+	"syscall"
+	"time"
+
+	"github.com/inspr-at/aeon/internal/config"
+	"github.com/inspr-at/aeon/internal/db"
+	"github.com/inspr-at/aeon/internal/httpapi"
+	"github.com/inspr-at/aeon/web"
+)
+
+func serve() error {
+	cfg, err := config.FromEnv()
+	if err != nil {
+		return err
+	}
+	ctx, stop := signal.NotifyContext(context.Background(), syscall.SIGTERM, syscall.SIGINT)
+	defer stop()
+
+	ln, err := net.Listen("tcp", cfg.Addr)
+	if err != nil {
+		return fmt.Errorf("listen: %w", err)
+	}
+	return serveListener(ctx, cfg, ln)
+}
+
+func serveListener(ctx context.Context, cfg config.Config, ln net.Listener) error {
+	setupLogger(cfg.Env)
+
+	pool, err := db.Open(ctx, cfg.DatabaseURL)
+	if err != nil {
+		_ = ln.Close()
+		return err
+	}
+	defer pool.Close()
+
+	if err := db.EnsureTenant(ctx, pool, cfg.BootstrapTenantSlug, cfg.BootstrapTenantName); err != nil {
+		_ = ln.Close()
+		return err
+	}
+
+	webFS, err := resolveWeb(cfg)
+	if err != nil {
+		_ = ln.Close()
+		return err
+	}
+
+	api := &httpapi.Server{Pool: pool, Web: webFS}
+	srv := &http.Server{
+		Handler:           api.Handler(),
+		ReadHeaderTimeout: 10 * time.Second,
+		IdleTimeout:       time.Minute,
+	}
+
+	errCh := make(chan error, 1)
+	go func() {
+		err := srv.Serve(ln)
+		if errors.Is(err, http.ErrServerClosed) {
+			errCh <- nil
+			return
+		}
+		errCh <- err
+	}()
+
+	slog.Info("aeon listening", "addr", ln.Addr().String(), "env", cfg.Env, "public_url", cfg.PublicURL)
+
+	select {
+	case err := <-errCh:
+		return err
+	case <-ctx.Done():
+		slog.Info("shutting down")
+		sctx, cancel := context.WithTimeout(context.Background(), 15*time.Second)
+		defer cancel()
+		if err := srv.Shutdown(sctx); err != nil {
+			return err
+		}
+		return <-errCh
+	}
+}
+
+func setupLogger(env string) {
+	slog.SetDefault(slog.New(loggerHandler(env, os.Stdout)))
+}
+
+func loggerHandler(env string, w io.Writer) slog.Handler {
+	if env == "prod" {
+		return slog.NewJSONHandler(w, nil)
+	}
+	return slog.NewTextHandler(w, nil)
+}
+
+func resolveWeb(cfg config.Config) (fs.FS, error) {
+	if cfg.WebDir != "" {
+		info, err := os.Stat(cfg.WebDir)
+		if err != nil {
+			return nil, fmt.Errorf("AEON_WEB_DIR: %w", err)
+		}
+		if !info.IsDir() {
+			return nil, fmt.Errorf("AEON_WEB_DIR %s is not a directory", cfg.WebDir)
+		}
+		return os.DirFS(cfg.WebDir), nil
+	}
+	if fsys, ok := web.Static(); ok {
+		return fsys, nil
+	}
+	return nil, nil
+}

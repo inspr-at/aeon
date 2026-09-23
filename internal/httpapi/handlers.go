@@ -1,0 +1,36 @@
+// SPDX-License-Identifier: AGPL-3.0-only
+
+package httpapi
+
+import (
+	"log/slog"
+	"net/http"
+
+	"github.com/inspr-at/aeon/internal/version"
+)
+
+type healthBody struct {
+	Status string `json:"status"`
+	DB     string `json:"db"`
+}
+
+type versionBody struct {
+	Version string `json:"version"`
+	Scheme  string `json:"scheme"`
+}
+
+func (s *Server) handleHealth(w http.ResponseWriter, r *http.Request) {
+	dbState := "down"
+	if s.Pool != nil {
+		if err := s.Pool.Ping(r.Context()); err != nil {
+			slog.Error("database ping failed", "err", err)
+		} else {
+			dbState = "ok"
+		}
+	}
+	WriteJSON(w, http.StatusOK, healthBody{Status: "ok", DB: dbState})
+}
+
+func (s *Server) handleVersion(w http.ResponseWriter, _ *http.Request) {
+	WriteJSON(w, http.StatusOK, versionBody{Version: version.Version, Scheme: version.Scheme})
+}
