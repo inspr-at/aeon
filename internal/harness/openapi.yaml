@@ -1,0 +1,163 @@
+# SPDX-License-Identifier: AGPL-3.0-only
+# P5.3 fragment for coordinator reconciliation into api/openapi.yaml.
+# All paths require the existing Aeon tenant identity. Agent key scopes are
+# harness.read, harness.write, harness.worker and harness.control respectively.
+paths:
+  /api/projects/{projectId}/harness-sessions:
+    get:
+      operationId: listHarnessSessions
+      parameters:
+        - $ref: '#/components/parameters/projectId'
+      responses:
+        '200': {description: Public non-secret generations}
+    post:
+      operationId: registerHarnessSession
+      parameters:
+        - $ref: '#/components/parameters/projectId'
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: {$ref: '#/components/schemas/HarnessRegistration'}
+      responses:
+        '201': {description: Registered or exact active replay}
+  /api/projects/{projectId}/harness-sessions/orchestrator:
+    get:
+      operationId: resolveHarnessOrchestrator
+      parameters:
+        - $ref: '#/components/parameters/projectId'
+      responses:
+        '200': {description: Resolved, ambiguous or unset}
+  /api/projects/{projectId}/harness-sessions/{sessionId}:
+    get:
+      operationId: getHarnessSession
+      parameters:
+        - $ref: '#/components/parameters/projectId'
+        - $ref: '#/components/parameters/sessionId'
+      responses:
+        '200': {description: Public non-secret generation}
+  /api/projects/{projectId}/harness-sessions/{sessionId}/binding:
+    patch:
+      operationId: bindHarnessSession
+      parameters:
+        - $ref: '#/components/parameters/projectId'
+        - $ref: '#/components/parameters/sessionId'
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: {$ref: '#/components/schemas/HarnessBinding'}
+      responses:
+        '200': {description: Revisioned hierarchy and ticket binding}
+  /api/projects/{projectId}/harness-sessions/{sessionId}/heartbeat:
+    post:
+      operationId: heartbeatHarnessSession
+      parameters:
+        - $ref: '#/components/parameters/projectId'
+        - $ref: '#/components/parameters/sessionId'
+        - $ref: '#/components/parameters/workerLease'
+      responses:
+        '200': {description: Updated heartbeat and phase}
+  /api/projects/{projectId}/harness-sessions/{sessionId}/yield:
+    post:
+      operationId: yieldHarnessSession
+      parameters:
+        - $ref: '#/components/parameters/projectId'
+        - $ref: '#/components/parameters/sessionId'
+        - $ref: '#/components/parameters/workerLease'
+      responses:
+        '200': {description: Claimed typed owned controls}
+  /api/projects/{projectId}/harness-sessions/{sessionId}/drain:
+    post:
+      operationId: drainHarnessInbox
+      parameters:
+        - $ref: '#/components/parameters/projectId'
+        - $ref: '#/components/parameters/sessionId'
+        - $ref: '#/components/parameters/workerLease'
+      responses:
+        '200': {description: Leased FIFO inbox message}
+  /api/projects/{projectId}/harness-sessions/{sessionId}/complete-delivery:
+    post:
+      operationId: completeHarnessDelivery
+      parameters:
+        - $ref: '#/components/parameters/projectId'
+        - $ref: '#/components/parameters/sessionId'
+        - $ref: '#/components/parameters/workerLease'
+      responses:
+        '200': {description: Exact leased delivery acknowledged}
+  /api/projects/{projectId}/harness-sessions/{sessionId}/controls/interrupt:
+    post:
+      operationId: interruptHarnessSession
+      parameters:
+        - $ref: '#/components/parameters/projectId'
+        - $ref: '#/components/parameters/sessionId'
+      responses:
+        '201': {description: Pending typed interrupt}
+  /api/projects/{projectId}/harness-sessions/{sessionId}/controls/stop:
+    post:
+      operationId: stopHarnessSession
+      parameters:
+        - $ref: '#/components/parameters/projectId'
+        - $ref: '#/components/parameters/sessionId'
+      responses:
+        '201': {description: Pending typed stop}
+  /api/projects/{projectId}/harness-sessions/{sessionId}/controls/{controlId}:
+    get:
+      operationId: getHarnessControl
+      parameters:
+        - $ref: '#/components/parameters/projectId'
+        - $ref: '#/components/parameters/sessionId'
+        - $ref: '#/components/parameters/controlId'
+      responses:
+        '200': {description: Scoped typed control state and outcome}
+  /api/projects/{projectId}/harness-sessions/{sessionId}/controls/{controlId}/complete:
+    post:
+      operationId: completeHarnessControl
+      parameters:
+        - $ref: '#/components/parameters/projectId'
+        - $ref: '#/components/parameters/sessionId'
+        - $ref: '#/components/parameters/controlId'
+        - $ref: '#/components/parameters/workerLease'
+      responses:
+        '200': {description: Exact claimed control completion}
+  /api/projects/{projectId}/harness-sessions/{sessionId}/stop:
+    post:
+      operationId: markHarnessStopped
+      parameters:
+        - $ref: '#/components/parameters/projectId'
+        - $ref: '#/components/parameters/sessionId'
+        - $ref: '#/components/parameters/workerLease'
+      responses:
+        '200': {description: Closed immutable generation}
+components:
+  parameters:
+    projectId: {name: projectId, in: path, required: true, schema: {type: string, format: uuid}}
+    sessionId: {name: sessionId, in: path, required: true, schema: {type: string, format: uuid}}
+    controlId: {name: controlId, in: path, required: true, schema: {type: string, format: uuid}}
+    workerLease: {name: X-Aeon-Worker-Lease, in: header, required: true, schema: {type: string}, description: Private per-generation proof; never returned or logged}
+  schemas:
+    HarnessRegistration:
+      type: object
+      required: [agent_principal_id, harness, host, management_mode, role, harness_session_ref, worker_lease]
+      properties:
+        agent_principal_id: {type: string, format: uuid}
+        run_id: {type: [string, 'null'], format: uuid}
+        ticket_node_id: {type: [string, 'null'], format: uuid}
+        work_order_id: {type: [string, 'null'], format: uuid}
+        parent_harness_session_id: {type: [string, 'null'], format: uuid}
+        harness: {type: string, enum: [codex, claude, pi, cursor, grok]}
+        host: {type: string, maxLength: 128}
+        management_mode: {type: string, enum: [managed, unmanaged]}
+        role: {type: string, enum: [coordinator, worker]}
+        work_shape: {type: string, enum: [unknown, ship, scout]}
+        advertised_capabilities: {type: array, items: {type: string, enum: [inbox, status, steer, interrupt, stop]}}
+        harness_session_ref: {type: string, writeOnly: true}
+        worker_lease: {type: string, writeOnly: true}
+    HarnessBinding:
+      type: object
+      required: [expected_revision, parent_harness_session_id, ticket_node_id, work_shape]
+      properties:
+        expected_revision: {type: integer, minimum: 1}
+        parent_harness_session_id: {type: [string, 'null'], format: uuid}
+        ticket_node_id: {type: [string, 'null'], format: uuid}
+        work_shape: {type: string, enum: [unknown, ship, scout]}
