@@ -152,7 +152,7 @@ func (w PostgresWriter) Write(ctx context.Context, s Snapshot, tenantSlug string
 			if parentID == "" {
 				continue
 			}
-			if err := setParent(ctx, tx, tenantID, actor, issueIDs[iid], parentID); err != nil {
+			if _, err := setParent(ctx, tx, tenantID, actor, issueIDs[iid], parentID); err != nil {
 				return fmt.Errorf("parent for %d: %w", iid, err)
 			}
 		}
@@ -165,40 +165,27 @@ func (w PostgresWriter) Write(ctx context.Context, s Snapshot, tenantSlug string
 				sourceID, _ := intField(rel, "source_id")
 				targetID, _ := intField(rel, "target_id")
 				typ := stringField(rel, "type")
-				if err := importEvent(ctx, tx, tenantID, actor, nodeID, "import.relation", s.SourceID, rel, "id", typ+":"+strconv.FormatInt(sourceID, 10)+":"+strconv.FormatInt(targetID, 10)); err != nil {
+				ref, err := importEvent(ctx, tx, tenantID, actor, nodeID, "import.relation", s.SourceID, rel, "id", typ+":"+strconv.FormatInt(sourceID, 10)+":"+strconv.FormatInt(targetID, 10))
+				if err != nil {
 					return err
 				}
-				src, dst := issueIDs[sourceID], issueIDs[targetID]
-				if src == "" || dst == "" {
-					continue
+				wrote, err := applyClassicRelation(ctx, tx, tenantID, actor, classicRelation{
+					Type:         typ,
+					SourceNodeID: issueIDs[sourceID],
+					TargetNodeID: issueIDs[targetID],
+					ClassicRef:   ref,
+				})
+				if err != nil {
+					return fmt.Errorf("relation %s %d→%d: %w", typ, sourceID, targetID, err)
 				}
-				if typ == "parent" {
-					if err := setParent(ctx, tx, tenantID, actor, dst, src); err != nil {
-						return err
-					}
-					continue
-				}
-				mapped := map[string]string{"depends_on": "blocks", "relates": "relates", "duplicates": "duplicates", "cites": "cites"}[typ]
-				if mapped != "" {
-					if typ == "depends_on" {
-						src, dst = dst, src // dependency blocks dependent
-					}
-					if mapped == "relates" && src > dst {
-						src, dst = dst, src
-					}
-					if src != dst {
-						if _, err := tx.Exec(ctx, `INSERT INTO node_relations(tenant_id,source_node_id,target_node_id,type) VALUES($1,$2,$3,$4) ON CONFLICT(tenant_id,source_node_id,target_node_id,type) DO NOTHING`, tenantID, src, dst, mapped); err != nil {
-							return err
-						}
-					}
-				}
+				r.Writes += wrote
 			}
 			for _, group := range []struct {
 				typ  string
 				rows []Record
 			}{{"import.comment", d.Comments}, {"import.history", d.History}, {"import.attachment", d.Attachments}} {
 				for _, record := range group.rows {
-					if err := importEvent(ctx, tx, tenantID, actor, nodeID, group.typ, s.SourceID, record, "id", ""); err != nil {
+					if _, err := importEvent(ctx, tx, tenantID, actor, nodeID, group.typ, s.SourceID, record, "id", ""); err != nil {
 						return err
 					}
 				}
@@ -232,12 +219,17 @@ func importUsers(ctx context.Context, tx pgx.Tx, tenantID string, s Snapshot) (s
 		}
 		users[id] = principalID
 	}
+	actor, err := ensureImportActor(ctx, tx, tenantID)
+	return actor, users, err
+}
+
+func ensureImportActor(ctx context.Context, tx pgx.Tx, tenantID string) (string, error) {
 	var actor string
 	err := tx.QueryRow(ctx, `SELECT id FROM principals WHERE tenant_id=$1 AND kind='agent' AND name='Classic Paimos importer' ORDER BY created_at LIMIT 1`, tenantID).Scan(&actor)
 	if errors.Is(err, pgx.ErrNoRows) {
 		err = tx.QueryRow(ctx, `INSERT INTO principals(tenant_id,kind,name,roles) VALUES($1,'agent','Classic Paimos importer',ARRAY['importer']) RETURNING id`, tenantID).Scan(&actor)
 	}
-	return actor, users, err
+	return actor, err
 }
 
 func upsertNode(ctx context.Context, tx pgx.Tx, tenantID, sourceID, kindID, key, title, body, state, parentID string, original, refs Record, actor string, project bool) (string, bool, bool, error) {
@@ -309,34 +301,37 @@ func rawSnapshot(b []byte) any {
 	return json.RawMessage(b)
 }
 
-func setParent(ctx context.Context, tx pgx.Tx, tenantID, actor, childID, parentID string) error {
+func setParent(ctx context.Context, tx pgx.Tx, tenantID, actor, childID, parentID string) (bool, error) {
 	var before, after []byte
 	if err := tx.QueryRow(ctx, `SELECT to_jsonb(nodes) FROM nodes WHERE tenant_id=$1 AND id=$2`, tenantID, childID).Scan(&before); err != nil {
-		return err
+		return false, err
 	}
 	changed, err := tx.Exec(ctx, `UPDATE nodes SET parent_id=$3 WHERE tenant_id=$1 AND id=$2 AND parent_id IS DISTINCT FROM $3`, tenantID, childID, parentID)
 	if err != nil {
-		return err
+		return false, err
 	}
 	if changed.RowsAffected() == 0 {
-		return nil
+		return false, nil
 	}
 	if err := tx.QueryRow(ctx, `SELECT to_jsonb(nodes) FROM nodes WHERE tenant_id=$1 AND id=$2`, tenantID, childID).Scan(&after); err != nil {
-		return err
+		return false, err
 	}
 	_, err = events.Append(ctx, tx, tenant.Principal{TenantID: tenantID, ID: actor}, events.Change{
 		NodeID: &childID, Type: "import.parent_changed",
 		Before: json.RawMessage(before), After: json.RawMessage(after),
 	})
-	return err
+	if err != nil {
+		return false, err
+	}
+	return true, nil
 }
 
-func importEvent(ctx context.Context, tx pgx.Tx, tenantID, actor, nodeID, typ, sourceID string, record Record, idField, suffix string) error {
+func importEvent(ctx context.Context, tx pgx.Tx, tenantID, actor, nodeID, typ, sourceID string, record Record, idField, suffix string) (string, error) {
 	id, ok := intField(record, idField)
 	ref := sourceID + ":" + typ + ":" + strconv.FormatInt(id, 10)
 	if !ok {
 		if suffix == "" {
-			return fmt.Errorf("%s record missing id", typ)
+			return "", fmt.Errorf("%s record missing id", typ)
 		}
 		ref = sourceID + ":" + typ + ":" + suffix
 	}
@@ -345,19 +340,27 @@ func importEvent(ctx context.Context, tx pgx.Tx, tenantID, actor, nodeID, typ, s
 	if typ == "import.comment" || typ == "import.attachment" {
 		canonical, err := jsonValue(record)
 		if err != nil {
-			return err
+			return "", err
 		}
 		hash := sha256.Sum256(canonical)
 		ref += fmt.Sprintf(":%x", hash[:16])
 	}
 	var exists bool
 	if err := tx.QueryRow(ctx, `SELECT EXISTS(SELECT 1 FROM events WHERE tenant_id=$1 AND type=$2 AND after ? 'classic_ref' AND after->>'classic_ref'=$3)`, tenantID, typ, ref).Scan(&exists); err != nil {
-		return err
+		return "", err
 	}
 	if exists {
-		return nil
+		return ref, nil
 	}
 	payload := Record{"classic_ref": ref, "record": record}
+	// The mapped Aeon type is not a substitute for the classic type. Keep both
+	// the verbatim record and an explicit copy so a later replay can see it
+	// without interpreting the mapped link.
+	if typ == "import.relation" {
+		if classic := stringField(record, "type"); classic != "" {
+			payload["classic_type"] = classic
+		}
+	}
 	at := classicTime(stringField(record, "created_at"))
 	if at == nil {
 		at = classicTime(stringField(record, "changed_at"))
@@ -365,7 +368,7 @@ func importEvent(ctx context.Context, tx pgx.Tx, tenantID, actor, nodeID, typ, s
 	_, err := events.Append(ctx, tx, tenant.Principal{TenantID: tenantID, ID: actor}, events.Change{
 		NodeID: &nodeID, Type: typ, After: payload, At: at,
 	})
-	return err
+	return ref, err
 }
 func issueBody(r Record) string {
 	if v := stringField(r, "description"); v != "" {

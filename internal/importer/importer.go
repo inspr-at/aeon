@@ -15,6 +15,10 @@ type Report struct {
 	UnmappedFields []string       `json:"unmapped_fields"`
 	Created        int            `json:"created"`
 	Updated        int            `json:"updated"`
+	// Writes counts projection rows inserted or updated while applying classic
+	// relations (node links, parents, journey release membership). A replay
+	// that finds those rows already applied returns zero.
+	Writes int `json:"writes"`
 }
 
 type Writer interface {
