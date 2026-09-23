@@ -1,0 +1,170 @@
+// SPDX-License-Identifier: AGPL-3.0-only
+import { test, expect, type Page } from '@playwright/test'
+import { mkdir } from 'node:fs/promises'
+
+const canonical = '260923120000.0.0'
+const identity = { principal: { id: 'person-1', name: 'Markus Barta', email: 'markus@barta.com' }, tenant: { id: 'tenant-1', name: 'INSPR Studio' } }
+
+async function mockAPI(page: Page, options: { signedIn?: boolean; devMode?: boolean; version?: string; sessionFailure?: boolean; logoutFailure?: boolean; loginFailure?: boolean } = {}) {
+  let signedIn = options.signedIn ?? true
+  const calls: { path: string; method: string; body: string | null }[] = []
+  await page.route('**/api/**', async route => {
+    const request = route.request()
+    const path = new URL(request.url()).pathname
+    calls.push({ path, method: request.method(), body: request.postData() })
+    if (path === '/api/version') return route.fulfill({ json: { version: options.version ?? canonical, scheme: 'inspr-calendar-v2' } })
+    if (path === '/api/me') {
+      if (options.sessionFailure) return route.fulfill({ status: 503, json: { error: 'Unavailable' } })
+      return route.fulfill({ status: signedIn ? 200 : 401, json: { ...(signedIn ? identity : { error: 'Unauthorized' }), dev_mode: options.devMode ?? false } })
+    }
+    if (path === '/api/auth/logout') {
+      if (options.logoutFailure) return route.fulfill({ status: 503, json: { error: 'Unavailable' } })
+      signedIn = false
+      return route.fulfill({ status: 204 })
+    }
+    if (path === '/api/auth/dev-login') {
+      if (options.loginFailure) return route.fulfill({ status: 403, json: { error: 'Forbidden' } })
+      signedIn = true
+      return route.fulfill({ status: 204 })
+    }
+    if (path === '/api/auth/login') return route.fulfill({ contentType: 'text/html', body: '<h1>INSPR sign-in</h1>' })
+    return route.fulfill({ status: 404, json: {} })
+  })
+  return calls
+}
+
+async function noOverflow(page: Page) {
+  expect(await page.evaluate(() => {
+    const main = document.querySelector('main')!
+    return {
+      documentX: document.documentElement.scrollWidth > innerWidth,
+      documentY: document.documentElement.scrollHeight > innerHeight,
+      mainY: main.scrollHeight > main.clientHeight + 1,
+      mainX: main.scrollWidth > main.clientWidth + 1,
+    }
+  })).toEqual({ documentX: false, documentY: false, mainY: false, mainX: false })
+}
+
+for (const viewport of [{ width: 1280, height: 720 }, { width: 390, height: 844 }]) {
+  for (const colorScheme of ['light', 'dark'] as const) {
+    for (const screen of ['home', 'signin', 'signin-dev', '404'] as const) {
+      test(`${screen} ${viewport.width} ${colorScheme}`, async ({ page }) => {
+        const errors: string[] = []
+        page.on('pageerror', error => errors.push(error.message))
+        await page.setViewportSize(viewport)
+        await page.emulateMedia({ colorScheme })
+        await mockAPI(page, { signedIn: screen === 'home' || screen === '404', devMode: screen === 'signin-dev' })
+        await page.goto(screen === '404' ? '/missing' : screen.startsWith('signin') ? '/signin' : '/')
+        await expect(page.locator('h1')).toBeVisible()
+        await expect(page.locator('footer [data-version-view="pretty"]')).toBeVisible()
+        await page.evaluate(() => document.fonts.ready)
+        await noOverflow(page)
+        expect(await page.locator('header').evaluate(el => el.getBoundingClientRect().height)).toBe(64)
+        for (const control of await page.locator('button:visible, a:visible:not(.skip-link), input:visible, [role="button"]:visible').all()) {
+          const bounds = await control.boundingBox()
+          expect(bounds!.height).toBeGreaterThanOrEqual(44)
+          expect(bounds!.width).toBeGreaterThanOrEqual(44)
+        }
+        await mkdir('/tmp/aeon-p05-shots', { recursive: true })
+        await page.screenshot({ path: `/tmp/aeon-p05-shots/${screen}-${viewport.width}-${colorScheme}.png`, fullPage: true })
+        expect(errors).toEqual([])
+      })
+    }
+  }
+}
+
+test('401 redirects, production hides email sign-in, INSPR navigates to login', async ({ page }) => {
+  await mockAPI(page, { signedIn: false })
+  await page.goto('/')
+  await expect(page).toHaveURL('/signin')
+  await expect(page.getByLabel('Email address')).toHaveCount(0)
+  await page.getByRole('link', { name: 'Sign in with INSPR' }).click()
+  await expect(page).toHaveURL('/api/auth/login')
+})
+
+test('server-authorized email login and account logout use POST', async ({ page }) => {
+  const calls = await mockAPI(page, { signedIn: false, devMode: true })
+  await page.goto('/signin')
+  await page.getByLabel('Email address').fill('markus@barta.com')
+  await page.getByRole('button', { name: 'Continue with email' }).click()
+  await expect(page).toHaveURL('/')
+  await expect(page.getByRole('heading', { name: 'INSPR Studio' })).toBeVisible()
+  await page.getByRole('button', { name: 'Account for Markus Barta' }).click()
+  await expect(page.getByRole('button', { name: 'Sign out', exact: true })).toBeFocused()
+  await page.keyboard.press('Escape')
+  await expect(page.getByRole('button', { name: 'Account for Markus Barta' })).toBeFocused()
+  await page.keyboard.press('Enter')
+  await page.getByRole('button', { name: 'Sign out', exact: true }).click()
+  await expect(page).toHaveURL('/signin')
+  expect(calls).toContainEqual({ path: '/api/auth/dev-login', method: 'POST', body: JSON.stringify({ email: 'markus@barta.com' }) })
+  expect(calls).toContainEqual({ path: '/api/auth/logout', method: 'POST', body: null })
+})
+
+test('session outages show retry rather than authenticated content', async ({ page }) => {
+  await mockAPI(page, { sessionFailure: true })
+  await page.goto('/')
+  await expect(page.getByRole('alert')).toContainText('couldn’t reach your workspace')
+  await expect(page.getByRole('heading', { name: 'INSPR Studio' })).toHaveCount(0)
+  await page.unroute('**/api/**')
+  await mockAPI(page)
+  await page.getByRole('button', { name: 'Try again' }).click()
+  await expect(page.getByRole('heading', { name: 'INSPR Studio' })).toBeVisible()
+})
+
+test('failed sign-out retains identity and allows retry', async ({ page }) => {
+  await mockAPI(page, { logoutFailure: true })
+  await page.goto('/')
+  await page.getByRole('button', { name: 'Account for Markus Barta' }).click()
+  await page.getByRole('button', { name: 'Sign out', exact: true }).click()
+  await expect(page.getByRole('alert')).toContainText('Sign out didn’t complete')
+  await expect(page).toHaveURL('/')
+})
+
+test('failed dev login remains on sign-in with an accessible error', async ({ page }) => {
+  await mockAPI(page, { signedIn: false, devMode: true, loginFailure: true })
+  await page.goto('/signin')
+  await page.getByLabel('Email address').fill('markus@barta.com')
+  await page.getByRole('button', { name: 'Continue with email' }).click()
+  await expect(page.getByRole('alert')).toContainText('Sign in didn’t complete')
+  await expect(page).toHaveURL('/signin')
+})
+
+test('theme follows the OS and explicit choice wins without hover layout shift', async ({ page }) => {
+  await page.emulateMedia({ colorScheme: 'dark' })
+  await mockAPI(page)
+  await page.goto('/')
+  const theme = page.getByRole('button', { name: 'Switch to light theme' })
+  await expect(theme).toBeVisible()
+  const before = await theme.boundingBox()
+  await theme.hover()
+  expect(await theme.boundingBox()).toEqual(before)
+  await theme.click()
+  await expect(page.locator('html')).toHaveAttribute('data-theme', 'light')
+  await page.emulateMedia({ colorScheme: 'light' })
+  await page.emulateMedia({ colorScheme: 'dark' })
+  await expect(page.getByRole('button', { name: 'Switch to dark theme' })).toBeVisible()
+  expect(await page.evaluate(() => getComputedStyle(document.documentElement).getPropertyValue('--canvas').trim())).toBe('#f7f6f2')
+})
+
+test('version uses Pretty mode, keyboard reveal, exact clipboard and one request', async ({ page, context }) => {
+  await context.grantPermissions(['clipboard-read', 'clipboard-write'])
+  const calls = await mockAPI(page, { signedIn: false })
+  await page.goto('/signin')
+  const version = page.locator('footer').getByRole('button', { name: `Copy version ${canonical}` })
+  await expect(version).toHaveAttribute('data-version-view', 'pretty')
+  const before = await version.boundingBox()
+  await version.focus()
+  await expect(version).toHaveAttribute('data-version-view', 'technical')
+  expect(await version.boundingBox()).toEqual(before)
+  await page.keyboard.press('Enter')
+  await expect(version).toHaveAttribute('data-copy-state', 'copied')
+  expect(await page.evaluate(() => navigator.clipboard.readText())).toBe(canonical)
+  expect(calls.filter(call => call.path === '/api/version')).toHaveLength(1)
+})
+
+test('dev version remains plain text', async ({ page }) => {
+  await mockAPI(page, { signedIn: false, version: 'dev' })
+  await page.goto('/signin')
+  await expect(page.locator('.version-coordinate')).toHaveText(['dev', 'dev'])
+  await expect(page.locator('.version-coordinate[role="button"]')).toHaveCount(0)
+})
