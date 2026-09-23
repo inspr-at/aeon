@@ -9,8 +9,9 @@
     "preview": "vite preview",
     "typecheck": "vue-tsc -b --noEmit",
     "prebuild": "node ../scripts/verify-release.mjs",
-    "test": "playwright test",
-    "test:unit": "node --experimental-strip-types --test tests/api.test.ts"
+    "test": "playwright test -c playwright.ui.config.ts",
+    "test:unit": "node --experimental-strip-types --test tests/api.test.ts",
+    "e2e": "playwright test"
   },
   "dependencies": {
     "pinia": "^4.0.3",
