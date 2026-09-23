@@ -156,7 +156,7 @@ func (m *module) read(ctx context.Context, p tenant.Principal, node string, limi
 // Fetch only referenced principals. Classic identity subjects include the
 // source instance, so equal numeric user IDs from different sources cannot mix.
 func readPeople(ctx context.Context, tx pgx.Tx, tenantID string, evs []activityEvent) (map[string]Author, error) {
-	ids, subjects := []string{}, []string{}
+	ids, subjects, aliases := []string{}, []string{}, []string{}
 	for _, e := range evs {
 		ids = append(ids, e.actor)
 		source := sourceOf(e)
@@ -166,14 +166,30 @@ func readPeople(ctx context.Context, tx pgx.Tx, tenantID string, evs []activityE
 					subjects = append(subjects, source+":"+*v)
 				}
 			}
-			if v := scalar(object(r["fields"])["assignee"]); v != nil {
-				ids = append(ids, *v)
+			for _, key := range []string{"author", "author_name", "changed_by_name", "created_by_name", "agent_name"} {
+				if name := textValue(r[key]); name != "" && source != "" {
+					aliases = append(aliases, source+":"+name)
+				}
+			}
+			for _, key := range []string{"assignee", "assignee_id", "created_by"} {
+				if v := scalar(object(r["fields"])[key]); v != nil {
+					ids = append(ids, *v)
+				}
 			}
 		}
 	}
 	rows, err := tx.Query(ctx, `SELECT p.id::text,p.name,CASE WHEN i.issuer='paimos-classic' THEN i.subject ELSE '' END
 	 FROM principals p LEFT JOIN identities i ON i.id=p.identity_id
-	 WHERE p.tenant_id=$1 AND (p.id::text=ANY($2::text[]) OR (i.issuer='paimos-classic' AND i.subject=ANY($3::text[])))`, tenantID, ids, subjects)
+	 WHERE p.tenant_id=$1 AND (p.id::text=ANY($2::text[]) OR (i.issuer='paimos-classic' AND i.subject=ANY($3::text[])))
+ UNION ALL
+ SELECT p.id::text,p.name,'username:'||aliases.alias FROM principals p JOIN (
+   SELECT min(after->'principal'->>'id') AS principal_id,
+     (after->'classic'->>'source_id')||':'||(after->'classic'->>'username') AS alias
+   FROM events WHERE tenant_id=$1 AND type IN ('import.user_created','import.user_updated')
+   GROUP BY (after->'classic'->>'source_id')||':'||(after->'classic'->>'username')
+   HAVING count(DISTINCT after->'principal'->>'id')=1
+ ) aliases ON aliases.principal_id=p.id::text
+ WHERE p.tenant_id=$1 AND aliases.alias=ANY($4::text[])`, tenantID, ids, subjects, aliases)
 	if err != nil {
 		return nil, err
 	}
@@ -254,6 +270,11 @@ func project(evs []activityEvent, people map[string]Author) []Item {
 			if e.typ == "import.node_created" {
 				r := object(object(e.after["fields"])["classic"])
 				item.Author = classicAuthor(r, sourceOf(e), people, "created_by", "created_by_name")
+				if id := textValue(object(e.after["fields"])["created_by"]); id != "" {
+					if author, ok := people[id]; ok {
+						item.Author = author
+					}
+				}
 				if at, err := time.Parse(time.RFC3339Nano, textValue(e.after["created_at"])); err == nil {
 					item.At = at
 				}
@@ -312,6 +333,9 @@ func classicAuthor(r record, source string, people map[string]Author, idKey stri
 	}
 	for _, key := range nameKeys {
 		if name := textValue(r[key]); name != "" {
+			if author, ok := people["username:"+source+":"+name]; ok {
+				return author
+			}
 			return Author{Name: name}
 		}
 	}
