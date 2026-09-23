@@ -71,7 +71,7 @@ func (w PostgresWriter) Write(ctx context.Context, s Snapshot, tenantSlug string
 				return err
 			}
 			key := "PRJ-" + strconv.FormatInt(pid, 10)
-			id, created, updated, err := upsertNode(ctx, tx, tenantID, s.SourceID, kind, key, stringField(p.Record, "name"), stringField(p.Record, "description"), stringField(p.Record, "status"), "", p.Record, principalRefs(p.Record, users, "product_owner"), actor)
+			id, created, updated, err := upsertNode(ctx, tx, tenantID, s.SourceID, kind, key, stringField(p.Record, "name"), stringField(p.Record, "description"), stringField(p.Record, "status"), "", p.Record, principalRefs(p.Record, users, "product_owner"), actor, true)
 			if err != nil {
 				return fmt.Errorf("project %d: %w", pid, err)
 			}
@@ -99,7 +99,7 @@ func (w PostgresWriter) Write(ctx context.Context, s Snapshot, tenantSlug string
 			if err != nil {
 				return err
 			}
-			id, created, updated, err := upsertNode(ctx, tx, tenantID, s.SourceID, kind, key, stringField(item, "title"), issueBody(item), stringField(item, "status"), "", item, principalRefs(item, users, "assignee_id", "created_by", "accepted_by", "deleted_by"), actor)
+			id, created, updated, err := upsertNode(ctx, tx, tenantID, s.SourceID, kind, key, stringField(item, "title"), issueBody(item), stringField(item, "status"), "", item, principalRefs(item, users, "assignee_id", "created_by", "accepted_by", "deleted_by"), actor, false)
 			if err != nil {
 				return fmt.Errorf("orphan issue %d: %w", iid, err)
 			}
@@ -127,7 +127,7 @@ func (w PostgresWriter) Write(ctx context.Context, s Snapshot, tenantSlug string
 				if err != nil {
 					return err
 				}
-				id, created, updated, err := upsertNode(ctx, tx, tenantID, s.SourceID, kind, key, stringField(item, "title"), issueBody(item), stringField(item, "status"), projectIDs[pid], item, principalRefs(item, users, "assignee_id", "created_by", "accepted_by", "deleted_by"), actor)
+				id, created, updated, err := upsertNode(ctx, tx, tenantID, s.SourceID, kind, key, stringField(item, "title"), issueBody(item), stringField(item, "status"), projectIDs[pid], item, principalRefs(item, users, "assignee_id", "created_by", "accepted_by", "deleted_by"), actor, false)
 				if err != nil {
 					return fmt.Errorf("issue %s: %w", key, err)
 				}
@@ -240,14 +240,14 @@ func importUsers(ctx context.Context, tx pgx.Tx, tenantID string, s Snapshot) (s
 	return actor, users, err
 }
 
-func upsertNode(ctx context.Context, tx pgx.Tx, tenantID, sourceID, kindID, key, title, body, state, parentID string, original, refs Record, actor string) (string, bool, bool, error) {
+func upsertNode(ctx context.Context, tx pgx.Tx, tenantID, sourceID, kindID, key, title, body, state, parentID string, original, refs Record, actor string, project bool) (string, bool, bool, error) {
 	if title == "" {
 		return "", false, false, errors.New("title is empty")
 	}
 	if state == "" {
 		state = "open"
 	}
-	fields := Record{"classic": Record{"source_id": sourceID, "record": original, "principals": refs}}
+	fields := mappedFields(original, refs, sourceID, project)
 	bodyJSON, err := jsonValue(fields)
 	if err != nil {
 		return "", false, false, err
