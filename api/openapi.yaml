@@ -38,7 +38,10 @@ paths:
     get:
       operationId: authLogin
       summary: Start the OIDC authorization-code flow with PKCE
+      description: The optional tenant slug is bound into signed OIDC state. A callback opens a session only for a principal explicitly mapped into that tenant.
       security: []
+      parameters:
+        - {name: tenant, in: query, schema: {type: string, pattern: '^[a-z][a-z0-9-]*$'}}
       responses:
         "302":
           description: Redirect to the identity provider
@@ -52,6 +55,7 @@ paths:
     get:
       operationId: authCallback
       summary: Finish sign-in and start a session
+      description: Resolve the tenant from signed state, then the OIDC issuer and subject to a person principal in that tenant; never choose a tenant by email alone.
       security: []
       parameters:
         - {name: code, in: query, schema: {type: string}}
@@ -1123,6 +1127,201 @@ paths:
         '200': {description: Installation, content: {application/json: {schema: {$ref: '#/components/schemas/PluginInstallation'}}}}
         '403': {$ref: '#/components/responses/Error'}
         '409': {$ref: '#/components/responses/Error'}
+  /cost-units/{costUnitId}/rates:
+    get:
+      operationId: listCostUnitRates
+      summary: List effective-dated rates for a cost-unit node
+      security: *auth
+      parameters: [{name: costUnitId, in: path, required: true, schema: {type: string, format: uuid}}]
+      responses:
+        '200': {description: Rates, content: {application/json: {schema: {type: array, items: {$ref: '#/components/schemas/CostUnitRate'}}}}}
+        '404': {$ref: '#/components/responses/Error'}
+    post:
+      operationId: createCostUnitRate
+      summary: Add a rate interval
+      description: Admin person only. Intervals for one cost unit, unit and currency may not overlap. Historical quote and hour snapshots retain their amounts.
+      security: [{session: []}]
+      parameters: [{name: costUnitId, in: path, required: true, schema: {type: string, format: uuid}}]
+      requestBody: {required: true, content: {application/json: {schema: {$ref: '#/components/schemas/CostUnitRateWrite'}}}}
+      responses:
+        '201': {description: Rate, content: {application/json: {schema: {$ref: '#/components/schemas/CostUnitRate'}}}}
+        '409': {$ref: '#/components/responses/Error'}
+  /crm/contacts/{contactId}/principals:
+    post:
+      operationId: bindCRMContactPrincipal
+      summary: Bind an OIDC person principal to a contact node
+      description: Admin person only. Acceptance requires this explicit binding; email equality grants no authority.
+      security: [{session: []}]
+      parameters: [{name: contactId, in: path, required: true, schema: {type: string, format: uuid}}]
+      requestBody: {required: true, content: {application/json: {schema: {$ref: '#/components/schemas/CRMContactPrincipalWrite'}}}}
+      responses:
+        '201': {description: Binding, content: {application/json: {schema: {$ref: '#/components/schemas/CRMContactPrincipal'}}}}
+        '409': {$ref: '#/components/responses/Error'}
+  /quotes:
+    get:
+      operationId: listQuotes
+      summary: List quote projections
+      security: *auth
+      parameters:
+        - {name: project_node_id, in: query, schema: {type: string, format: uuid}}
+        - {name: customer_org_node_id, in: query, schema: {type: string, format: uuid}}
+      responses:
+        '200': {description: Quotes, content: {application/json: {schema: {type: array, items: {$ref: '#/components/schemas/BusinessQuote'}}}}}
+    post:
+      operationId: createQuote
+      summary: Create a quote node and projection
+      description: Requires an enabled business_quotes installation and matching organisation/project links. The node key comes from R1.
+      security: *auth
+      requestBody: {required: true, content: {application/json: {schema: {$ref: '#/components/schemas/QuoteCreate'}}}}
+      responses:
+        '201': {description: Quote, content: {application/json: {schema: {$ref: '#/components/schemas/BusinessQuote'}}}}
+        '403': {$ref: '#/components/responses/Error'}
+  /quotes/{quoteId}:
+    get:
+      operationId: getQuote
+      summary: Get quote projection
+      security: *auth
+      parameters: [{name: quoteId, in: path, required: true, schema: {type: string, format: uuid}}]
+      responses:
+        '200': {description: Quote, content: {application/json: {schema: {$ref: '#/components/schemas/BusinessQuote'}}}}
+        '404': {$ref: '#/components/responses/Error'}
+  /quotes/{quoteId}/versions:
+    get:
+      operationId: listQuoteVersions
+      summary: List frozen versions of a quote
+      security: *auth
+      parameters: [{name: quoteId, in: path, required: true, schema: {type: string, format: uuid}}]
+      responses:
+        '200': {description: Versions, content: {application/json: {schema: {type: array, items: {$ref: '#/components/schemas/QuoteVersion'}}}}}
+        '404': {$ref: '#/components/responses/Error'}
+    post:
+      operationId: createQuoteVersion
+      summary: Freeze a new offer version and its line items
+      description: Locks the quote and checks expected_revision. Rate, quantity, currency and cost-unit references are copied into a content digest; later rate changes do not rewrite this version.
+      security: *auth
+      parameters: [{name: quoteId, in: path, required: true, schema: {type: string, format: uuid}}]
+      requestBody: {required: true, content: {application/json: {schema: {$ref: '#/components/schemas/QuoteVersionWrite'}}}}
+      responses:
+        '201': {description: Version, content: {application/json: {schema: {$ref: '#/components/schemas/QuoteVersion'}}}}
+        '409': {$ref: '#/components/responses/Error'}
+  /quotes/{quoteId}/versions/{version}:
+    get:
+      operationId: getQuoteVersion
+      summary: Read one frozen quote version
+      security: *auth
+      parameters:
+        - {name: quoteId, in: path, required: true, schema: {type: string, format: uuid}}
+        - {name: version, in: path, required: true, schema: {type: integer, minimum: 1}}
+      responses:
+        '200': {description: Version, content: {application/json: {schema: {$ref: '#/components/schemas/QuoteVersion'}}}}
+        '404': {$ref: '#/components/responses/Error'}
+  /quotes/{quoteId}/versions/{version}/issue:
+    post:
+      operationId: issueQuoteVersion
+      summary: Issue the current frozen offer to its recipient
+      description: Issuing records an event and makes this exact digest eligible for customer acceptance.
+      security: [{session: []}]
+      parameters:
+        - {name: quoteId, in: path, required: true, schema: {type: string, format: uuid}}
+        - {name: version, in: path, required: true, schema: {type: integer, minimum: 1}}
+      responses:
+        '200': {description: Issued quote, content: {application/json: {schema: {$ref: '#/components/schemas/BusinessQuote'}}}}
+        '409': {$ref: '#/components/responses/Error'}
+  /quotes/{quoteId}/versions/{version}/accept:
+    post:
+      operationId: acceptQuoteVersion
+      summary: Customer approves one issued quote version
+      description: Signed-in person must be bound to the version's recipient contact. expected_content_sha256 fences stale offers. Agents cannot accept.
+      security: [{session: []}]
+      parameters:
+        - {name: quoteId, in: path, required: true, schema: {type: string, format: uuid}}
+        - {name: version, in: path, required: true, schema: {type: integer, minimum: 1}}
+      requestBody: {required: true, content: {application/json: {schema: {$ref: '#/components/schemas/QuoteAcceptanceWrite'}}}}
+      responses:
+        '201': {description: Acceptance, content: {application/json: {schema: {$ref: '#/components/schemas/QuoteAcceptance'}}}}
+        '403': {$ref: '#/components/responses/Error'}
+        '409': {$ref: '#/components/responses/Error'}
+  /quotes/{quoteId}/versions/{version}/export:
+    get:
+      operationId: exportQuoteVersion
+      summary: Render a frozen quote as Markdown or PDF
+      description: Pure view of stored version and lines. Export has no independent mutable offer state or acceptance authority.
+      security: *auth
+      parameters:
+        - {name: quoteId, in: path, required: true, schema: {type: string, format: uuid}}
+        - {name: version, in: path, required: true, schema: {type: integer, minimum: 1}}
+        - {name: format, in: query, required: true, schema: {type: string, enum: [markdown, pdf]}}
+      responses:
+        '200': {description: Rendered offer, content: {text/markdown: {schema: {type: string}}, application/pdf: {schema: {type: string, format: binary}}}}
+        '404': {$ref: '#/components/responses/Error'}
+  /time-periods:
+    get:
+      operationId: listTimePeriods
+      summary: List time periods
+      security: *auth
+      parameters: [{name: principal_id, in: query, schema: {type: string, format: uuid}}]
+      responses:
+        '200': {description: Periods, content: {application/json: {schema: {type: array, items: {$ref: '#/components/schemas/TimePeriod'}}}}}
+    post:
+      operationId: createTimePeriod
+      summary: Open a time period for one principal
+      security: *auth
+      requestBody: {required: true, content: {application/json: {schema: {$ref: '#/components/schemas/TimePeriodWrite'}}}}
+      responses:
+        '201': {description: Period, content: {application/json: {schema: {$ref: '#/components/schemas/TimePeriod'}}}}
+        '409': {$ref: '#/components/responses/Error'}
+  /time-periods/{periodId}:
+    get:
+      operationId: getTimePeriod
+      summary: Read a time period and its approval state
+      security: *auth
+      parameters: [{name: periodId, in: path, required: true, schema: {type: string, format: uuid}}]
+      responses:
+        '200': {description: Period, content: {application/json: {schema: {$ref: '#/components/schemas/TimePeriod'}}}}
+        '404': {$ref: '#/components/responses/Error'}
+  /time-periods/{periodId}/approve:
+    post:
+      operationId: approveTimePeriod
+      summary: Person approves the exact set of entries in a period
+      description: Admin person only. Lock period, hash ordered entry IDs and values, then write approval and event atomically. Approved periods cannot gain entries.
+      security: [{session: []}]
+      parameters: [{name: periodId, in: path, required: true, schema: {type: string, format: uuid}}]
+      requestBody: {required: true, content: {application/json: {schema: {$ref: '#/components/schemas/TimePeriodApprovalWrite'}}}}
+      responses:
+        '200': {description: Approved period, content: {application/json: {schema: {$ref: '#/components/schemas/TimePeriod'}}}}
+        '409': {$ref: '#/components/responses/Error'}
+  /time-entries:
+    get:
+      operationId: listTimeEntries
+      summary: List time entries with period, principal or node filters
+      security: *auth
+      parameters:
+        - {name: period_id, in: query, schema: {type: string, format: uuid}}
+        - {name: principal_id, in: query, schema: {type: string, format: uuid}}
+        - {name: node_id, in: query, schema: {type: string, format: uuid}}
+      responses:
+        '200': {description: Entries, content: {application/json: {schema: {type: array, items: {$ref: '#/components/schemas/TimeEntry'}}}}}
+    post:
+      operationId: createTimeEntry
+      summary: Record principal time against a node
+      description: Manual entries require the acting principal or an admin person. Agent-run entries derive principal, work-order node and terminal interval from R2 telemetry; one entry per run.
+      security: *auth
+      requestBody: {required: true, content: {application/json: {schema: {$ref: '#/components/schemas/TimeEntryWrite'}}}}
+      responses:
+        '201': {description: Entry, content: {application/json: {schema: {$ref: '#/components/schemas/TimeEntry'}}}}
+        '409': {$ref: '#/components/responses/Error'}
+  /nodes/{nodeId}/time-totals:
+    get:
+      operationId: getNodeTimeTotals
+      summary: Sum hours and cost for a node subtree
+      description: Traverses live descendants inside db.InTenant. Returns separate totals by currency; no implicit conversion.
+      security: *auth
+      parameters:
+        - {name: nodeId, in: path, required: true, schema: {type: string, format: uuid}}
+        - {name: approved_only, in: query, schema: {type: boolean, default: false}}
+      responses:
+        '200': {description: Totals, content: {application/json: {schema: {$ref: '#/components/schemas/TimeTotals'}}}}
+        '404': {$ref: '#/components/responses/Error'}
 components:
   securitySchemes:
     session: {type: apiKey, in: cookie, name: aeon_session}
@@ -1454,6 +1653,153 @@ components:
       allOf:
         - {$ref: '#/components/schemas/PluginInstallationWrite'}
         - {type: object, required: [plugin_id, version, updated_at], properties: {plugin_id: {type: string}, version: {type: string}, updated_at: {type: string, format: date-time}}}
+    CostUnitRateWrite:
+      type: object
+      additionalProperties: false
+      required: [unit, currency, internal_amount, bill_amount, effective_from]
+      properties:
+        unit: {type: string, enum: [hour, day, item]}
+        currency: {type: string, pattern: '^[A-Z]{3}$'}
+        internal_amount: {type: number, minimum: 0}
+        bill_amount: {type: number, minimum: 0}
+        effective_from: {type: string, format: date}
+        effective_until: {type: [string, 'null'], format: date}
+    CostUnitRate:
+      allOf:
+        - {$ref: '#/components/schemas/CostUnitRateWrite'}
+        - {type: object, required: [id, cost_unit_node_id, created_by_principal_id, created_at], properties: {id: {type: string, format: uuid}, cost_unit_node_id: {type: string, format: uuid}, created_by_principal_id: {type: string, format: uuid}, created_at: {type: string, format: date-time}}}
+    CRMContactPrincipalWrite:
+      type: object
+      additionalProperties: false
+      required: [principal_id]
+      properties:
+        principal_id: {type: string, format: uuid}
+    CRMContactPrincipal:
+      allOf:
+        - {$ref: '#/components/schemas/CRMContactPrincipalWrite'}
+        - {type: object, required: [contact_node_id, bound_by_principal_id, bound_at], properties: {contact_node_id: {type: string, format: uuid}, bound_by_principal_id: {type: string, format: uuid}, bound_at: {type: string, format: date-time}}}
+    QuoteCreate:
+      type: object
+      additionalProperties: false
+      required: [title, project_node_id, customer_org_node_id]
+      properties:
+        title: {type: string, minLength: 1}
+        project_node_id: {type: string, format: uuid}
+        customer_org_node_id: {type: string, format: uuid}
+    BusinessQuote:
+      type: object
+      required: [quote_node_id, project_node_id, customer_org_node_id, current_version, state, revision]
+      properties:
+        quote_node_id: {type: string, format: uuid}
+        project_node_id: {type: string, format: uuid}
+        customer_org_node_id: {type: string, format: uuid}
+        current_version: {type: integer, minimum: 0}
+        state: {type: string, enum: [draft, issued, accepted, void]}
+        revision: {type: integer, minimum: 1}
+    QuoteLineWrite:
+      type: object
+      additionalProperties: false
+      required: [description, cost_unit_node_id, unit, quantity, tax_rate]
+      properties:
+        description: {type: string, minLength: 1}
+        cost_unit_node_id: {type: string, format: uuid}
+        unit: {type: string, enum: [hour, day, item]}
+        quantity: {type: number, exclusiveMinimum: 0}
+        tax_rate: {type: number, minimum: 0, maximum: 1}
+    QuoteLine:
+      allOf:
+        - {$ref: '#/components/schemas/QuoteLineWrite'}
+        - {type: object, required: [position, rate_amount, net_amount], properties: {position: {type: integer, minimum: 0}, rate_amount: {type: number, minimum: 0}, net_amount: {type: number, minimum: 0}}}
+    QuoteVersionWrite:
+      type: object
+      additionalProperties: false
+      required: [expected_revision, recipient_contact_node_id, currency, title, terms_markdown, lines]
+      properties:
+        expected_revision: {type: integer, minimum: 1}
+        recipient_contact_node_id: {type: string, format: uuid}
+        currency: {type: string, pattern: '^[A-Z]{3}$'}
+        title: {type: string, minLength: 1}
+        terms_markdown: {type: string}
+        lines: {type: array, minItems: 1, items: {$ref: '#/components/schemas/QuoteLineWrite'}}
+    QuoteVersion:
+      type: object
+      required: [quote_node_id, version, recipient_contact_node_id, currency, title, terms_markdown, lines, subtotal, tax_total, total, content_sha256, created_by_principal_id, created_at]
+      properties:
+        quote_node_id: {type: string, format: uuid}
+        version: {type: integer, minimum: 1}
+        recipient_contact_node_id: {type: string, format: uuid}
+        currency: {type: string, pattern: '^[A-Z]{3}$'}
+        title: {type: string}
+        terms_markdown: {type: string}
+        lines: {type: array, items: {$ref: '#/components/schemas/QuoteLine'}}
+        subtotal: {type: number, minimum: 0}
+        tax_total: {type: number, minimum: 0}
+        total: {type: number, minimum: 0}
+        content_sha256: {type: string, pattern: '^[0-9a-f]{64}$'}
+        created_by_principal_id: {type: string, format: uuid}
+        created_at: {type: string, format: date-time}
+    QuoteAcceptanceWrite:
+      type: object
+      additionalProperties: false
+      required: [expected_content_sha256]
+      properties:
+        expected_content_sha256: {type: string, pattern: '^[0-9a-f]{64}$'}
+    QuoteAcceptance:
+      type: object
+      required: [quote_node_id, version, customer_principal_id, recipient_contact_node_id, accepted_content_sha256, accepted_at, event_id]
+      properties:
+        quote_node_id: {type: string, format: uuid}
+        version: {type: integer, minimum: 1}
+        customer_principal_id: {type: string, format: uuid}
+        recipient_contact_node_id: {type: string, format: uuid}
+        accepted_content_sha256: {type: string, pattern: '^[0-9a-f]{64}$'}
+        accepted_at: {type: string, format: date-time}
+        event_id: {type: integer, minimum: 1}
+    TimePeriodWrite:
+      type: object
+      additionalProperties: false
+      required: [principal_id, starts_at, ends_at]
+      properties:
+        principal_id: {type: string, format: uuid}
+        starts_at: {type: string, format: date-time}
+        ends_at: {type: string, format: date-time}
+    TimePeriod:
+      allOf:
+        - {$ref: '#/components/schemas/TimePeriodWrite'}
+        - {type: object, required: [id, state, revision], properties: {id: {type: string, format: uuid}, state: {type: string, enum: [open, approved]}, revision: {type: integer, minimum: 1}, approval: {type: [object, 'null'], properties: {approved_by_principal_id: {type: string, format: uuid}, entries_sha256: {type: string}, total_seconds: {type: integer}, event_id: {type: integer}}}}}
+    TimePeriodApprovalWrite:
+      type: object
+      additionalProperties: false
+      required: [expected_revision, expected_entries_sha256]
+      properties:
+        expected_revision: {type: integer, minimum: 1}
+        expected_entries_sha256: {type: string, pattern: '^[0-9a-f]{64}$'}
+    TimeEntryWrite:
+      type: object
+      additionalProperties: false
+      required: [period_id, cost_unit_node_id, currency, source]
+      properties:
+        period_id: {type: string, format: uuid}
+        cost_unit_node_id: {type: string, format: uuid}
+        currency: {type: string, pattern: '^[A-Z]{3}$'}
+        source: {type: string, enum: [manual, agent_run]}
+        principal_id: {type: string, format: uuid, description: Required for manual entries; derived from run for agent_run}
+        node_id: {type: string, format: uuid, description: Required for manual entries; work-order node for agent_run}
+        started_at: {type: string, format: date-time, description: Required for manual entries; derived from run for agent_run}
+        ended_at: {type: string, format: date-time, description: Required for manual entries; derived from run for agent_run}
+        agent_run_id: {type: string, format: uuid, description: Required only for agent_run}
+        note: {type: string}
+    TimeEntry:
+      allOf:
+        - {$ref: '#/components/schemas/TimeEntryWrite'}
+        - {type: object, required: [id, principal_id, node_id, started_at, ended_at, duration_seconds, rate_amount, currency, amount], properties: {id: {type: string, format: uuid}, duration_seconds: {type: integer, minimum: 1}, rate_amount: {type: number, minimum: 0}, currency: {type: string, pattern: '^[A-Z]{3}$'}, amount: {type: number, minimum: 0}}}
+    TimeTotals:
+      type: object
+      required: [node_id, duration_seconds, amounts]
+      properties:
+        node_id: {type: string, format: uuid}
+        duration_seconds: {type: integer, minimum: 0}
+        amounts: {type: array, items: {type: object, required: [currency, amount], properties: {currency: {type: string, pattern: '^[A-Z]{3}$'}, amount: {type: number, minimum: 0}}}}
     InboxSend:
       type: object
       required: [recipient_principal_id, body, idempotency_key]
@@ -2054,7 +2400,7 @@ components:
             $ref: '#/components/schemas/Kind'
     RelationType:
       type: string
-      enum: [blocks, relates, implements, cites, duplicates]
+      enum: [blocks, relates, implements, cites, duplicates, customer_of, contact_for]
     RelationCreate:
       type: object
       required: [source_node_id, target_node_id, type]
