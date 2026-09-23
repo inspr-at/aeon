@@ -193,7 +193,7 @@ onBeforeUnmount(() => { generation++; metadataGeneration++; clearTimeout(refresh
       </div>
       <NodeSidebar v-if="selected" ref="sidebar" :node-id="selected" @close="closeDetails" @changed="changed" />
     </div>
-    <SearchPalette ref="palette" @select="select" />
+    <SearchPalette ref="palette" @select="node => select(node.id)" />
     <dialog ref="createDialog" class="create-dialog" aria-labelledby="create-title" @cancel.prevent="closeCreate">
       <header><h2 id="create-title">Create a node</h2><button class="icon-button" aria-label="Close create node" :disabled="creating" @click="closeCreate"><AppIcon name="close" /></button></header>
       <form @submit.prevent="create">

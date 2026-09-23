@@ -32,7 +32,7 @@ onBeforeUnmount(() => { if (host.value) disposeVersion(host.value) })
 </template>
 
 <style scoped>
-.version-display { display: inline-flex; align-items: center; min-height: 44px; font: 12px/1.5 var(--mono); color: var(--ink-2); }
+.version-display { display: inline-flex; align-items: center; min-height: 44px; font: 500 12.5px/1.5 var(--mono); color: var(--ink); font-variant-ligatures: none; }
 .version-coordinate { height: 44px; min-height: 44px; min-width: 44px; line-height: 44px; }
-.version-fallback { font-size: 11px; }
+.version-fallback { font-size: 11.5px; color: var(--ink-2); }
 </style>

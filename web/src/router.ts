@@ -1,21 +1,25 @@
 // SPDX-License-Identifier: AGPL-3.0-only
 import { createRouter, createWebHistory } from 'vue-router'
 import { useSession } from './stores/session'
-import HomeView from './views/HomeView.vue'
+import ProjectsView from './views/ProjectsView.vue'
 import SignInView from './views/SignInView.vue'
 import NotFoundView from './views/NotFoundView.vue'
 
 export const router = createRouter({
   history: createWebHistory(),
   routes: [
-    { path: '/', component: HomeView, meta: { title: 'Workspace' } },
-    { path: '/projects/:projectId', component: () => import('./views/JourneyView.vue'), meta: { title: 'Journey' } },
-    { path: '/projects/:projectId/journey/:stage', component: () => import('./views/JourneyView.vue'), meta: { title: 'Journey' } },
-    { path: '/business', component: () => import('./views/business/BusinessHome.vue'), meta: { title: 'Business' } },
-    { path: '/business/crm', component: () => import('./views/business/CRMView.vue'), meta: { title: 'Organisations' } },
-    { path: '/business/quotes', component: () => import('./views/business/QuotesView.vue'), meta: { title: 'Quotes' } },
-    { path: '/business/costs', alias: '/business/cost-units', component: () => import('./views/business/CostUnitsView.vue'), meta: { title: 'Cost units' } },
-    { path: '/business/hours', component: () => import('./views/business/HoursView.vue'), meta: { title: 'Hours' } },
+    { path: '/', component: ProjectsView, meta: { title: 'Projects' } },
+    // One record for the list and its open ticket, so opening the panel never remounts the list.
+    { path: '/p/:projectKey/:ticketKey?', component: () => import('./views/ProjectView.vue'), meta: { title: 'Project' } },
+    // Earlier workspace tree and list, kept reachable but unlinked.
+    { path: '/workspace', component: () => import('./views/HomeView.vue'), meta: { title: 'Workspace', legacySearch: true, fill: true } },
+    { path: '/projects/:projectId', component: () => import('./views/JourneyView.vue'), meta: { title: 'Journey', fill: true } },
+    { path: '/projects/:projectId/journey/:stage', component: () => import('./views/JourneyView.vue'), meta: { title: 'Journey', fill: true } },
+    { path: '/business', component: () => import('./views/business/BusinessHome.vue'), meta: { title: 'Business', fill: true } },
+    { path: '/business/crm', component: () => import('./views/business/CRMView.vue'), meta: { title: 'Organisations', fill: true } },
+    { path: '/business/quotes', component: () => import('./views/business/QuotesView.vue'), meta: { title: 'Quotes', fill: true } },
+    { path: '/business/costs', alias: '/business/cost-units', component: () => import('./views/business/CostUnitsView.vue'), meta: { title: 'Cost units', fill: true } },
+    { path: '/business/hours', component: () => import('./views/business/HoursView.vue'), meta: { title: 'Hours', fill: true } },
     { path: '/crm', redirect: '/business/crm' },
     { path: '/agents', component: () => import('./views/AgentsView.vue'), meta: { title: 'Agents' } },
     { path: '/runs/:runId?', component: () => import('./views/RunsView.vue'), meta: { title: 'Sessions & runs' } },

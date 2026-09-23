@@ -116,5 +116,5 @@ textarea { font: 13px/1.6 var(--mono); resize: vertical; }
 .error, .notice { margin-bottom: 16px; }
 .notice { color: var(--warn); }
 summary { cursor: pointer; min-height: 44px; padding: 10px 0; }
-@media (max-width: 900px) { .node-sidebar { position: fixed; inset: 64px 0 52px; z-index: 4; border-left: 0; } }
+@media (max-width: 900px) { .node-sidebar { position: fixed; inset: var(--header-h) 0 0; z-index: 4; border-left: 0; } }
 </style>
