@@ -43,7 +43,7 @@ function move(event: KeyboardEvent) {
 <style scoped>
 .facet-options { display: grid; gap: 1px; }
 .facet-option { display: flex; align-items: center; gap: 10px; min-height: 32px; padding: 0 10px; border-radius: 8px; font-size: 13.5px; cursor: pointer; }
-.facet-option:hover { background: var(--row-hover); }
+@media (hover: hover) { .facet-option:hover { background: var(--row-hover); } }
 .facet-option:focus-within { background: var(--row-selected); }
 .facet-option:active { background: var(--row-selected); }
 .facet-option.muted .option-label { color: var(--ink-3); }

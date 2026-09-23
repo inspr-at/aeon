@@ -71,10 +71,10 @@ export class APIError extends Error {
   readonly status: number
   constructor(status: number, message: string) { super(message); this.status = status }
 }
-async function json<T>(path: string, method = 'GET', body?: unknown): Promise<T> {
+async function json<T>(path: string, method = 'GET', body?: unknown, headers: Record<string, string> = {}): Promise<T> {
   const response = await api(path, {
     method,
-    ...(body === undefined ? {} : { headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(body) }),
+    ...(body === undefined ? { headers } : { headers: { 'Content-Type': 'application/json', ...headers }, body: JSON.stringify(body) }),
   })
   if (!response.ok) {
     const data = await response.json().catch(() => ({}))
@@ -96,7 +96,9 @@ export const getNodes = (params: NodeQuery = {}) => json<Page<WorkNode>>(`/nodes
 export const getTree = (params: { root_id?: string; cursor?: string; limit?: number } = {}) => json<Page<TreeEntry>>(`/nodes/tree${query(params)}`)
 export const getNode = (id: string) => json<WorkNode>(`/nodes/${idPath(id)}`)
 export const createNode = (body: NodeCreate) => json<WorkNode>('/nodes', 'POST', body)
-export const updateNode = (id: string, body: NodePatch) => json<WorkNode>(`/nodes/${idPath(id)}`, 'PATCH', body)
+// ifUnmodifiedSince is the node's updated_at as read; a newer server copy answers 412.
+export const updateNode = (id: string, body: NodePatch, options: { ifUnmodifiedSince?: string } = {}) =>
+  json<WorkNode>(`/nodes/${idPath(id)}`, 'PATCH', body, options.ifUnmodifiedSince ? { 'If-Unmodified-Since': options.ifUnmodifiedSince } : {})
 export const moveNode = (id: string, parent_id: string | null, before_id?: string | null) => json<WorkNode>(`/nodes/${idPath(id)}/move`, 'POST', { parent_id, before_id })
 export const deleteNode = (id: string) => json<void>(`/nodes/${idPath(id)}`, 'DELETE')
 export const searchNodes = (q: string, params: { kind_id?: string; state?: string; cursor?: string; limit?: number } = {}) => json<Page<SearchHit>>(`/search${query({ q, ...params })}`)
@@ -114,9 +116,11 @@ export interface ListQuery {
   within?: string; kind?: string[]; state?: string[]; priority?: string[]; assignee?: string[]
   q?: string; hide_closed?: boolean; facets?: string[]; sort?: string; cursor?: string; limit?: number
 }
+// Work (ticket, task, epic) counts: open = new and backlog, in_progress = in progress and QA,
+// done = done, delivered and accepted; cancelled is separate; total counts every work state.
 export interface ProjectSummary {
   id: string; key: string; title: string; state: string
-  open: number; in_progress: number; done: number; total: number; last_activity: string
+  open: number; in_progress: number; done: number; cancelled?: number; total: number; last_activity: string
 }
 function listQuery(params: ListQuery): string {
   const values: Record<string, string | number | boolean | undefined> = {}

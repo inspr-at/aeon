@@ -1,6 +1,6 @@
 // SPDX-License-Identifier: AGPL-3.0-only
 import { reactive, ref, type Ref } from 'vue'
-import { getNode, listNodes, updateNode, type Facets, type ListItem } from './api'
+import { APIError, getNode, listNodes, updateNode, type Facets, type ListItem } from './api'
 import { activeDimensions, apiParams, DIMENSIONS, WORK_KINDS, type Dimension, type ListFilters } from './ticketList'
 import { toast } from './toast'
 import { normaliseState, statusMeta } from './work'
@@ -99,32 +99,39 @@ export function useTicketList(projectId: Ref<string | null>, filters: Ref<ListFi
     state[to] = (state[to] ?? 0) + 1
   }
 
-  // Optimistic status change: the row updates at once, the server confirms.
-  // R1 PATCH has no revision token, so the row's updated_at is compared with
-  // the server first; a newer server copy wins and the change is not written.
-  async function setStatus(row: ListItem, state: string, options: { undo?: boolean } = {}): Promise<void> {
+  // Optimistic status change: the row updates at once and the server confirms.
+  // The PATCH carries the row's updated_at as If-Unmodified-Since; a newer
+  // server copy answers 412, nothing is written, and the latest version is shown.
+  async function setStatus(row: ListItem, state: string, options: { undo?: boolean } = {}): Promise<boolean> {
     const target = rows.value.find(item => item.id === row.id) ?? row
     const before = { state: target.state, updated_at: target.updated_at }
-    if (normaliseState(before.state) === normaliseState(state)) return
+    if (normaliseState(before.state) === normaliseState(state)) return false
     target.state = state
     shiftFacet(before.state, state)
     try {
-      const latest = await getNode(target.id)
-      if (latest.updated_at !== before.updated_at) {
-        shiftFacet(state, latest.state)
-        Object.assign(target, { title: latest.title, body: latest.body, fields: latest.fields, state: latest.state, updated_at: latest.updated_at })
-        toast(`${target.key} was changed elsewhere, so your status change was not saved. The latest version is shown.`, { tone: 'error' })
-        return
-      }
-      const saved = await updateNode(target.id, { state })
+      const saved = await updateNode(target.id, { state }, { ifUnmodifiedSince: before.updated_at })
       Object.assign(target, { state: saved.state, updated_at: saved.updated_at })
       if (!options.undo) {
         toast(`${target.key} is now ${statusMeta(saved.state).label}`, { action: { label: 'Undo', run: () => void setStatus(target, before.state, { undo: true }) } })
       }
+      return true
     } catch (e) {
+      if (e instanceof APIError && e.status === 412) {
+        try {
+          const latest = await getNode(target.id)
+          shiftFacet(state, latest.state)
+          Object.assign(target, { title: latest.title, body: latest.body, fields: latest.fields, state: latest.state, updated_at: latest.updated_at })
+        } catch {
+          shiftFacet(state, before.state)
+          Object.assign(target, before)
+        }
+        toast(`${target.key} was changed elsewhere, so your status change was not saved. The latest version is shown.`, { tone: 'error' })
+        return false
+      }
       shiftFacet(state, before.state)
       Object.assign(target, before)
       toast(`${target.key} keeps its status: ${message(e)}`, { tone: 'error', action: { label: 'Retry', run: () => void setStatus(target, state, options) } })
+      return false
     }
   }
 

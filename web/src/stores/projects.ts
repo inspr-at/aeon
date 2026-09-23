@@ -9,6 +9,8 @@ export interface Project extends ProjectSummary {
   description: string
   archived: boolean
   frozen: boolean
+  cancelled: number
+  percent: number
 }
 
 // Projects are few and change rarely: one summaries request plus one list of the
@@ -32,6 +34,9 @@ export const useProjects = defineStore('projects', () => {
       description: detail?.description ?? '',
       archived: state === 'archived' || state === 'deleted',
       frozen: state === 'frozen',
+      cancelled: summary.cancelled ?? 0,
+      // Cancelled work leaves the scope: progress is done out of what is still meant to ship.
+      percent: summary.total - (summary.cancelled ?? 0) > 0 ? Math.round((summary.done / (summary.total - (summary.cancelled ?? 0))) * 100) : 0,
     }
   }))
 

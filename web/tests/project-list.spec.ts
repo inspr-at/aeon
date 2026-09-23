@@ -147,6 +147,7 @@ test('status changes are optimistic, confirmed by PATCH and can be undone', asyn
   await expect(row(page, 'PHAROS-11').locator('.status-btn')).toHaveText('QA')
   await expect(page.getByText('PHAROS-11 is now QA')).toBeVisible()
   await expect.poll(() => calls.find(call => call.method === 'PATCH')?.body).toEqual({ state: 'qa' })
+  expect(calls.find(call => call.method === 'PATCH')!.headers['if-unmodified-since']).toBe(new Date(Date.parse('2026-09-23T12:00:00Z') - 3_600_000).toISOString())
   await page.getByRole('button', { name: 'Undo' }).click()
   await expect(row(page, 'PHAROS-11').locator('.status-btn')).toHaveText('In progress')
   await expect.poll(() => calls.filter(call => call.method === 'PATCH').at(-1)?.body).toEqual({ state: 'in-progress' })
@@ -171,7 +172,10 @@ test('a status changed elsewhere is not overwritten', async ({ page }) => {
   await expect(page.getByText('PHAROS-12 was changed elsewhere')).toBeVisible()
   await expect(row(page, 'PHAROS-12').locator('.status-btn')).toHaveText('Backlog')
   await expect(row(page, 'PHAROS-12')).toContainText('(edited elsewhere)')
-  expect(calls.filter(call => call.method === 'PATCH')).toHaveLength(0)
+  const patches = calls.filter(call => call.method === 'PATCH')
+  expect(patches).toHaveLength(1)
+  expect(patches[0].headers['if-unmodified-since']).toBeTruthy()
+  await expect(page.getByText('PHAROS-12 is now Done')).toHaveCount(0)
 })
 
 test('a rejected status change rolls back and explains why', async ({ page }) => {
@@ -304,14 +308,15 @@ test('the Assignee column appears only when someone in the result is assigned', 
   await expect(rows(page).first().locator('td')).toHaveCount(5)
 })
 
-test('project header counts every spelling of a status in the right bucket', async ({ page }) => {
+test('project header shows the project summary counts, cancelled work out of scope', async ({ page }) => {
   await mockWork(page, fixtures())
   await page.goto('/p/PHAROS')
   const stats = page.locator('.head-stats')
   await expect(stats).toContainText('3 open')
   await expect(stats).toContainText('2 in progress')
-  await expect(stats).toContainText('2 done')
-  await expect(stats).toContainText('29%')
+  await expect(stats).toContainText('1 done')
+  await expect(stats).toContainText('17%')
+  await expect(stats.locator('.progress-line')).toHaveAttribute('data-tip', '1 of 6 done · 1 cancelled')
 })
 
 test('wide screens dock the side panel beside the list; narrow ones overlay it', async ({ page }) => {

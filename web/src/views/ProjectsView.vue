@@ -31,7 +31,7 @@ let clock: ReturnType<typeof setInterval> | undefined
 
 const sort = computed<SortKey>(() => SORTS.some(s => s.value === route.query.sort) ? route.query.sort as SortKey : 'activity')
 const sortLabel = computed(() => SORTS.find(s => s.value === sort.value)!.label)
-function percent(project: Project) { return project.total ? Math.round((project.done / project.total) * 100) : 0 }
+function percent(project: Project) { return project.percent }
 const compare: Record<SortKey, (a: Project, b: Project) => number> = {
   activity: (a, b) => Date.parse(b.last_activity) - Date.parse(a.last_activity),
   name: (a, b) => a.title.localeCompare(b.title, 'en', { sensitivity: 'base' }),
@@ -170,7 +170,7 @@ onBeforeUnmount(() => { window.removeEventListener('keydown', keydown); clearInt
               <span class="stat" :class="{ zero: !project.open }"><StatusIcon state="new" :size="11" />{{ project.open.toLocaleString('en-GB') }}</span>
               <span class="stat" :class="{ zero: !project.in_progress }"><StatusIcon state="in_progress" :size="11" />{{ project.in_progress.toLocaleString('en-GB') }}</span>
               <span class="stat" :class="{ zero: !project.done }"><StatusIcon state="done" :size="11" />{{ project.done.toLocaleString('en-GB') }}</span>
-              <span class="progress" :data-tip="`${project.done.toLocaleString('en-GB')} of ${project.total.toLocaleString('en-GB')} done`">
+              <span class="progress" :data-tip="`${project.done.toLocaleString('en-GB')} of ${(project.total - project.cancelled).toLocaleString('en-GB')} done${project.cancelled ? ` · ${project.cancelled} cancelled` : ''}`">
                 <span class="bar"><i :style="{ width: `${percent(project)}%` }" /></span>
                 <span class="mono pct">{{ project.total ? `${percent(project)}%` : '—' }}</span>
               </span>
@@ -190,7 +190,7 @@ onBeforeUnmount(() => { window.removeEventListener('keydown', keydown); clearInt
 </template>
 
 <style scoped>
-.projects-page { width: min(1180px, 100%); margin: 0 auto; padding: 30px 28px 40px; }
+.projects-page { width: 100%; max-width: 1600px; margin: 0 auto; padding: 22px 28px 40px; }
 .page-head { margin-bottom: 20px; }
 .page-head h1 { margin-top: 6px; }
 .summary { margin-top: 6px; font-size: 13.5px; color: var(--ink-2); min-height: 20px; }
@@ -214,14 +214,14 @@ onBeforeUnmount(() => { window.removeEventListener('keydown', keydown); clearInt
 .menu-item:active { background: var(--row-selected); }
 .tick { color: var(--teal); }
 
-.project-grid { display: grid; grid-template-columns: max-content minmax(0, 1fr) max-content max-content max-content 150px max-content 14px; column-gap: 18px; }
+.project-grid { display: grid; grid-template-columns: max-content minmax(0, 1fr) max-content max-content max-content minmax(150px, 200px) max-content 14px; column-gap: 20px; }
 .projects-head, .project-list, .project-list > li, .project-row { display: grid; grid-template-columns: subgrid; grid-column: 1 / -1; align-items: center; }
 .projects-head { height: 34px; padding: 0 20px; border-bottom: 1px solid var(--line); font: 500 10.5px/1 var(--mono); letter-spacing: .14em; text-transform: uppercase; color: var(--ink-3); font-variant-ligatures: none; white-space: nowrap; }
 .head-project { grid-column: 1 / 3; }
 .num, .right { text-align: right; }
 .project-list { margin: 0; padding: 6px 0; list-style: none; }
 .project-row { position: relative; min-height: 60px; margin: 0 6px; padding: 8px 14px; border-radius: 10px; color: var(--ink); text-decoration: none; }
-.project-row:hover { background: var(--row-hover); }
+@media (hover: hover) { .project-row:hover { background: var(--row-hover); } }
 .project-row:active { background: var(--row-selected); }
 .project-row:focus-visible { background: var(--row-selected); box-shadow: inset 3px 0 0 var(--row-accent), 0 0 0 1px var(--glass-rim); }
 .project-row.archived { opacity: .72; }
@@ -263,7 +263,7 @@ onBeforeUnmount(() => { window.removeEventListener('keydown', keydown); clearInt
   .projects-head > :nth-child(6), .activity { visibility: hidden; }
 }
 @media (max-width: 760px) {
-  .projects-page { padding: 18px 12px 28px; }
+  .projects-page { padding: 14px 12px 28px; }
   .page-head { margin-bottom: 14px; padding: 0 4px; }
   .projects-toolbar { flex-wrap: wrap; gap: 10px 14px; padding: 12px; }
   .project-search { width: 100%; }

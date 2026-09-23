@@ -55,7 +55,7 @@ export function fixtures(options: MockOptions = {}) {
 }
 
 export type Fixtures = ReturnType<typeof fixtures>
-export interface Call { path: string; method: string; query: URLSearchParams; body: unknown }
+export interface Call { path: string; method: string; query: URLSearchParams; body: unknown; headers: Record<string, string> }
 
 function item(node: MockNode, data: Fixtures) {
   const kindIds: Record<string, string> = { epic: 'k-epic', ticket: 'k-ticket', task: 'k-task', project: 'k-project' }
@@ -90,17 +90,18 @@ export async function mockWork(page: Page, data: Fixtures, options: MockOptions 
     const request = route.request(), url = new URL(request.url()), path = url.pathname, method = request.method(), query = url.searchParams
     let body: unknown = null
     try { body = request.postDataJSON() } catch { body = request.postData() }
-    calls.push({ path, method, query, body })
+    calls.push({ path, method, query, body, headers: request.headers() })
     if (path === '/api/me') return route.fulfill({ json: { principal: { id: me.id, name: me.name }, tenant: { id: 't1', name: 'INSPR Studio' } } })
     if (path === '/api/version') return route.fulfill({ json: { version: '260923120000.0.0', scheme: 'inspr-calendar-v2' } })
     if (path === '/api/projects') {
       if (options.failProjects) return route.fulfill({ status: 503, json: { error: 'Projects are resting' } })
       const archived = query.get('include_archived') === 'true'
+      // B3 semantics: work kinds only; open = new/backlog, in_progress = in progress/QA,
+      // done = done/delivered/accepted, cancelled separate.
       return route.fulfill({ json: { items: data.projects.filter(p => archived || p.state !== 'archived').map(p => {
-        const inside = data.nodes.filter(n => n.project === p.id)
-        const done = inside.filter(n => CLOSED.includes(n.state)).length
-        const progress = inside.filter(n => ['in_progress', 'active', 'qa'].includes(n.state)).length
-        return { id: p.id, key: p.key, title: p.title, state: p.state, open: inside.length - done - progress, in_progress: progress, done, total: inside.length, last_activity: p.last }
+        const inside = data.nodes.filter(n => n.project === p.id).map(n => normal(n.state))
+        const count = (states: string[]) => inside.filter(state => states.includes(state)).length
+        return { id: p.id, key: p.key, title: p.title, state: p.state, open: count(['new', 'backlog']), in_progress: count(['in_progress', 'qa']), done: count(['done', 'delivered', 'accepted']), cancelled: count(['cancelled']), total: inside.length, last_activity: p.last }
       }) } })
     }
     if (path === '/api/nodes' && method === 'GET') {
@@ -144,9 +145,11 @@ export async function mockWork(page: Page, data: Fixtures, options: MockOptions 
       if (!node) return route.fulfill({ status: 404, json: { error: 'Not found' } })
       if (method === 'PATCH') {
         if (options.failPatch) return route.fulfill({ status: 422, json: { error: 'State is not allowed here' } })
-        Object.assign(node, body as object, { updated_at: new Date(now + 60_000).toISOString() })
-      } else if (options.conflictOn === id) {
-        node.updated_at = new Date(now + 30_000).toISOString(); node.title = `${node.title} (edited elsewhere)`
+        // Someone else saved this node after the list was read.
+        if (options.conflictOn === id && !node.title.endsWith('(edited elsewhere)')) { node.updated_at = new Date(now + 30_000).toISOString(); node.title = `${node.title} (edited elsewhere)` }
+        const expected = request.headers()['if-unmodified-since']
+        if (expected && expected !== node.updated_at) return route.fulfill({ status: 412, json: { error: 'node has changed' } })
+        Object.assign(node, body as object, { updated_at: new Date(now + 60_000 + calls.length).toISOString() })
       }
       const { kind_slug: _kind, project: _project, ...rest } = node
       return route.fulfill({ json: { ...rest, kind_id: 'k-ticket', position: '0', deleted_at: null } })

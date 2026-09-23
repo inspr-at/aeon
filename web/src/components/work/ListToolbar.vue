@@ -1,6 +1,6 @@
 <!-- SPDX-License-Identifier: AGPL-3.0-only -->
 <script setup lang="ts">
-import { computed, onBeforeUnmount, ref, watch } from 'vue'
+import { computed, onBeforeUnmount, onMounted, ref, watch } from 'vue'
 import { DIMENSIONS, activeDimensions, type Dimension, type FacetOption, type GroupBy, type ListFilters } from '../../lib/ticketList'
 import { plural } from '../../lib/work'
 import AppIcon from '../AppIcon.vue'
@@ -28,6 +28,15 @@ const emit = defineEmits<{
 }>()
 
 const draft = ref(props.filters.q)
+const root = ref<HTMLElement>()
+// A narrow toolbar (docked panel, small window) gets a placeholder that fits.
+const narrow = ref(false)
+let resize: ResizeObserver | undefined
+onMounted(() => {
+  if (!root.value) return
+  resize = new ResizeObserver(([entry]) => { narrow.value = entry.contentRect.width < 820 })
+  resize.observe(root.value)
+})
 const input = ref<HTMLInputElement>()
 const open = ref<{ dimension: Dimension; anchor: HTMLElement } | null>(null)
 const displayAnchor = ref<HTMLElement | null>(null)
@@ -37,7 +46,7 @@ watch(draft, value => {
   clearTimeout(timer)
   timer = setTimeout(() => { if (value.trim() !== props.filters.q) emit('search', value.trim()) }, 220)
 })
-onBeforeUnmount(() => clearTimeout(timer))
+onBeforeUnmount(() => { clearTimeout(timer); resize?.disconnect() })
 
 const active = computed(() => activeDimensions(props.filters))
 const filterCount = computed(() => active.value.reduce((sum, key) => sum + props.filters[key].length, 0) + (props.filters.q ? 1 : 0))
@@ -78,12 +87,12 @@ defineExpose({ focusSearch, input })
 </script>
 
 <template>
-  <div class="toolbar" :class="{ stuck }" role="toolbar" aria-label="Ticket list controls">
+  <div ref="root" class="toolbar" :class="{ stuck }" role="toolbar" aria-label="Ticket list controls">
     <label class="search-field list-search">
       <AppIcon name="search" :size="14" />
-      <input ref="input" v-model="draft" class="field" type="search" placeholder="Search this list" aria-label="Search tickets in this project" aria-keyshortcuts="/" autocomplete="off" spellcheck="false" @keydown="searchKey" />
-      <kbd v-if="!draft" class="keycap slash" aria-hidden="true">/</kbd>
-      <button v-else type="button" class="clear-q" aria-label="Clear search" @click="clearSearch"><AppIcon name="close" :size="12" /></button>
+      <input ref="input" v-model="draft" class="field" type="search" :placeholder="narrow ? 'Search' : 'Search this list'" aria-label="Search tickets in this project" aria-keyshortcuts="/" autocomplete="off" spellcheck="false" @keydown="searchKey" />
+      <kbd v-if="!draft && !narrow" class="keycap slash" aria-hidden="true">/</kbd>
+      <button v-if="draft" type="button" class="clear-q" aria-label="Clear search" @click="clearSearch"><AppIcon name="close" :size="12" /></button>
     </label>
 
     <div class="facets">
@@ -184,7 +193,7 @@ defineExpose({ focusSearch, input })
 .seg.wide button { height: 30px; }
 /* Narrow list (docked panel or small window): tighter search, no count. */
 @container toolbar (max-width: 1000px) { .list-search { width: 190px; } .count { display: none; } }
-@container toolbar (max-width: 820px) { .list-search { width: 150px; } .facet-btn { padding: 0 11px; } .facet-btn:not(.on) .facet-end { display: none; } }
+@container toolbar (max-width: 820px) { .list-search { width: 136px; } .list-search .field { padding-right: 10px; } .facet-btn { padding: 0 11px; } .facet-btn:not(.on) .facet-end { display: none; } }
 @container toolbar (max-width: 680px) { .display-label { display: none; } .display-btn { padding: 0 9px; } }
 @media (max-width: 900px) { .facets, .chips, .display-btn, .closed-switch, .spacer { display: none; } .list-search { flex: 1; width: auto; } .filters-btn { display: inline-flex; } }
 @media (max-width: 600px) {

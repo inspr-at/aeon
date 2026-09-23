@@ -1,7 +1,7 @@
 // SPDX-License-Identifier: AGPL-3.0-only
 import { test } from 'node:test'
 import assert from 'node:assert/strict'
-import { cycleSort, stateBuckets, descriptionLine, highlight, initials, parseSort, priorityLabel, projectRouteKey, relativeTime, serializeSort, statusMeta, statusOptions } from '../src/lib/work.ts'
+import { cycleSort, descriptionLine, highlight, initials, parseSort, priorityLabel, projectRouteKey, relativeTime, serializeSort, statusMeta, statusOptions } from '../src/lib/work.ts'
 import { apiParams, effectiveSort, epicOf, facetOptions, filtersFromQuery, filtersToQuery, groupRows, orderByStatus, totalFrom } from '../src/lib/ticketList.ts'
 import type { ListItem } from '../src/lib/api.ts'
 
@@ -13,7 +13,6 @@ test('statuses read the same in every spelling and carry product labels', () => 
   assert.equal(statusMeta('done').closed, true)
   assert.equal(statusMeta('on_hold').label, 'On hold')
   assert.deepEqual(statusOptions(['in-progress']).map(o => o.value), ['new', 'backlog', 'in-progress', 'qa', 'accepted', 'delivered', 'done', 'cancelled'])
-  assert.deepEqual(stateBuckets({ 'in-progress': 9, qa: 8, new: 1, backlog: 4, done: 270, cancelled: 8 }), { open: 5, progress: 17, done: 278, total: 300 })
   assert.equal(statusOptions([]).find(o => o.meta.key === 'progress')!.value, 'in_progress')
 })
 

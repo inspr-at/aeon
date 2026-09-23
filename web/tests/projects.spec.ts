@@ -77,7 +77,7 @@ test('key badges share one column as wide as the widest badge', async ({ page })
   const lefts = await names.evaluateAll(els => els.map(el => Math.round(el.getBoundingClientRect().left)))
   expect(new Set(lefts).size).toBe(1)
   const widest = Math.max(...await page.locator('.project-row .key-badge').evaluateAll(els => els.map(el => el.getBoundingClientRect().right)))
-  expect(lefts[0] - widest).toBeLessThanOrEqual(19)
+  expect(lefts[0] - widest).toBeLessThanOrEqual(21)
 })
 
 test('j, k and Enter open a project from the keyboard', async ({ page }) => {

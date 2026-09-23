@@ -132,7 +132,7 @@ onBeforeUnmount(() => { document.removeEventListener('pointerdown', outside); wi
 
 <style scoped>
 .app-header {
-  position: relative; z-index: 20; height: var(--header-h); padding: 0 20px 0 18px; display: flex; align-items: center; gap: 14px;
+  position: relative; z-index: 20; height: var(--header-h); padding: 0 28px; display: flex; align-items: center; gap: 14px;
   background: var(--glass-2); border-bottom: 1px solid var(--glass-edge); box-shadow: 0 1px 0 var(--line);
   backdrop-filter: blur(16px) saturate(1.2); -webkit-backdrop-filter: blur(16px) saturate(1.2);
 }
@@ -187,7 +187,7 @@ onBeforeUnmount(() => { document.removeEventListener('pointerdown', outside); wi
 .menu-version .eyebrow { margin: 0; }
 @media (max-width: 900px) { .search-pill { width: 180px; } }
 @media (max-width: 600px) {
-  .app-header { gap: 8px; padding: 0 10px 0 10px; }
+  .app-header { gap: 8px; padding: 0 12px; }
   .lockup { min-height: 44px; min-width: 44px; justify-content: center; }
   .lockup.compact .wordmark { display: none; }
   .wordmark { font-size: 11.5px; letter-spacing: .22em; }

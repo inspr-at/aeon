@@ -193,11 +193,11 @@ defineExpose({ focusGrid, scrollToRow, el: grid })
                     <span v-if="epicChip(row)!.kind_slug === 'epic'" class="parent-title">{{ epicChip(row)!.title }}</span>
                     <span v-else class="parent-title mono">{{ epicChip(row)!.key }}</span>
                   </span>
-                  <span class="row-actions">
-                    <button type="button" class="icon-btn sm flat" :aria-label="`Copy ${row.key}`" :data-tip="`Copy ${row.key}`" @click.stop="emit('copy', row)"><AppIcon name="copy" :size="13" /></button>
-                    <button type="button" class="icon-btn sm flat" :aria-label="`Open ${row.key} in a new tab`" data-tip="Open in new tab" @click.stop="emit('newTab', row)"><AppIcon name="external" :size="13" /></button>
-                  </span>
                 </div>
+                <span class="row-actions">
+                  <button type="button" class="icon-btn sm flat" :aria-label="`Copy ${row.key}`" :data-tip="`Copy ${row.key}`" @click.stop="emit('copy', row)"><AppIcon name="copy" :size="13" /></button>
+                  <button type="button" class="icon-btn sm flat" :aria-label="`Open ${row.key} in a new tab`" data-tip="Open in new tab" @click.stop="emit('newTab', row)"><AppIcon name="external" :size="13" /></button>
+                </span>
               </td>
               <td class="c-status">
                 <div class="cell"><button type="button" class="status-btn" :aria-label="`Status: ${statusMeta(row.state).label}. Change status of ${row.key}`" aria-haspopup="menu" @click.stop="statusClick($event, row)">
@@ -206,7 +206,7 @@ defineExpose({ focusGrid, scrollToRow, el: grid })
                 </button></div>
               </td>
               <td class="c-prio">
-                <div class="cell">
+                <div class="cell" :data-tip="row.priority && row.priority !== 'none' ? priorityLabel(row.priority) : 'No priority'">
                   <template v-if="row.priority && row.priority !== 'none'"><PriorityIcon :priority="row.priority" /><span class="prio-label">{{ priorityLabel(row.priority) }}</span></template>
                   <span v-else class="empty" aria-label="No priority">—</span>
                 </div>
@@ -293,7 +293,7 @@ thead .c-updated .th-sort { flex-direction: row-reverse; }
 .ticket-row td:first-child { padding-left: 18px; }
 .cell { display: flex; align-items: center; gap: 8px; min-width: 0; height: calc(var(--row-h) - 1px); line-height: 18px; white-space: nowrap; }
 .c-updated .cell { justify-content: flex-end; }
-.ticket-row:hover td { background: var(--row-hover); }
+@media (hover: hover) { .ticket-row:hover td { background: var(--row-hover); } }
 .ticket-row.cursor td, .ticket-row.open td { background: var(--row-selected); }
 .ticket-row.cursor td:first-child, .ticket-row.open td:first-child { box-shadow: inset 3px 0 0 var(--row-accent); }
 tbody.dim { opacity: .55; }
@@ -314,7 +314,13 @@ tbody:last-of-type .ticket-row:last-child td { border-bottom: 0; }
 .parent-chip.epic svg { color: var(--gold); opacity: .85; }
 .parent-chip .mono { font-size: 11px; }
 .parent-title { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
-.row-actions { display: inline-flex; gap: 2px; margin-left: auto; flex-shrink: 0; visibility: hidden; }
+/* Row actions float over the end of the title cell instead of reserving space in every
+   row; the title fades out beneath them, whatever the row tint underneath. */
+td.c-title { position: relative; }
+.row-actions { position: absolute; top: 50%; right: 8px; display: inline-flex; gap: 2px; transform: translateY(-50%); visibility: hidden; }
+.ticket-row:hover .title-cell, .ticket-row.cursor .title-cell, td.c-title:focus-within .title-cell {
+  -webkit-mask-image: linear-gradient(to left, transparent 56px, #000 84px); mask-image: linear-gradient(to left, transparent 56px, #000 84px);
+}
 .ticket-row:hover .row-actions, .ticket-row.cursor .row-actions, .row-actions:focus-within { visibility: visible; }
 .row-actions .icon-btn { width: 24px; height: 24px; color: var(--ink-3); }
 .row-actions .icon-btn:hover { color: var(--teal-ink); }
@@ -373,6 +379,8 @@ tbody:last-of-type .ticket-row:last-child td { border-bottom: 0; }
    then Assignee and Updated step aside. */
 @container tickets (max-width: 980px) { th.c-assignee { width: 124px; } th.c-prio { width: 100px; } }
 @container tickets (max-width: 900px) { .c-assignee { display: none; } }
+/* Below ~820px Priority keeps only its icon (label in the tooltip); Status keeps its label. */
+@container tickets (max-width: 820px) { th.c-prio { width: 84px; } th.c-prio .th-sort { letter-spacing: .06em; } .prio-label { display: none; } th.c-key { width: 108px; } }
 @container tickets (max-width: 740px) { .c-updated { display: none; } .parent-chip { max-width: 140px; } }
 
 @media (max-width: 720px) {
@@ -396,6 +404,7 @@ tbody:last-of-type .ticket-row:last-child td { border-bottom: 0; }
   .parent-chip { max-width: calc(100% - 22px); margin-left: 22px; }
   .child-count { display: none; }
   .row-actions { display: none; }
+  .ticket-row .title-cell { -webkit-mask-image: none !important; mask-image: none !important; }
   .status-btn { height: 24px; margin-left: 0; padding: 0 8px 0 6px; background: var(--chip-bg); box-shadow: inset 0 0 0 1px var(--chip-line); font-size: 12px; }
   .prio-label { display: none; }
   .ghost { display: grid; }

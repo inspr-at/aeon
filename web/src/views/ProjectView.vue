@@ -7,7 +7,7 @@ import { density } from '../lib/prefs'
 import { toast } from '../lib/toast'
 import { apiParams, effectiveSort, facetOptions, filtersFromQuery, filtersToQuery, groupRows, hasFilters, orderByStatus, totalFrom, type Dimension, type EpicRef, type GroupBy, type ListFilters } from '../lib/ticketList'
 import { useTicketList } from '../lib/useTicketList'
-import { absoluteTime, cycleSort, relativeTime, stateBuckets, statusMeta, type SortField } from '../lib/work'
+import { absoluteTime, cycleSort, relativeTime, statusMeta, type SortField } from '../lib/work'
 import { useProjects } from '../stores/projects'
 import { useSession } from '../stores/session'
 import AppIcon from '../components/AppIcon.vue'
@@ -66,24 +66,11 @@ const sequence = computed(() => {
 const total = computed(() => totalFrom(list.facets.value))
 const showAssignee = computed(() => list.rows.value.some(row => row.assignee))
 
-// Header counts come from the project's own state facet, so every spelling of a
-// status lands in the right bucket whatever the summary endpoint reports.
-const stateCounts = ref<Record<string, number> | null>(null)
-let countGeneration = 0
-async function loadCounts() {
-  const within = projectId.value
-  if (!within) return
-  const request = ++countGeneration
-  try {
-    const page = await listNodes({ within, facets: ['state'], limit: 1 })
-    if (request === countGeneration) stateCounts.value = page.facets?.state ?? null
-  } catch { /* the summary counts stay in place */ }
-}
-watch(projectId, () => { stateCounts.value = null; void loadCounts() }, { immediate: true })
+// One source for the header: the project summary (work counts). It arrives with
+// the project itself and refreshes after a status change.
 const counts = computed(() => {
-  if (stateCounts.value) return stateBuckets(stateCounts.value)
   const p = project.value
-  return p ? { open: p.open, progress: p.in_progress, done: p.done, total: p.total } : null
+  return p ? { open: p.open, progress: p.in_progress, done: p.done, cancelled: p.cancelled, total: p.total, percent: p.percent } : null
 })
 const knownStates = computed(() => Object.keys(list.facets.value.state ?? {}))
 const filtered = computed(() => hasFilters(filters.value))
@@ -207,7 +194,7 @@ function chooseStatus(state: string) {
   const menu = statusMenu.value
   statusMenu.value = null
   if (!menu) return
-  void list.setStatus(menu.row, state).then(loadCounts)
+  void list.setStatus(menu.row, state).then(changed => { if (changed) void projects.load(true) })
   if (menu.from === 'panel') menu.anchor.focus()
   else table.value?.focusGrid()
 }
@@ -293,7 +280,7 @@ watch([project, panelItem], ([current, item]) => {
   document.title = item ? `${item.key} ${item.title} · PAIMOS AEON` : `${current.routeKey} ${current.title} · PAIMOS AEON`
 }, { immediate: true })
 
-const progress = computed(() => counts.value && counts.value.total ? Math.round((counts.value.done / counts.value.total) * 100) : 0)
+
 </script>
 
 <template>
@@ -315,9 +302,9 @@ const progress = computed(() => counts.value && counts.value.total ? Math.round(
             <span class="stat"><StatusIcon state="in_progress" :size="11" /><b>{{ counts.progress.toLocaleString('en-GB') }}</b> in progress</span>
             <span class="stat"><StatusIcon state="done" :size="11" /><b>{{ counts.done.toLocaleString('en-GB') }}</b> done</span>
           </div>
-          <div class="progress-line">
-            <span class="bar"><i :style="{ width: `${progress}%` }" /></span>
-            <span class="mono pct">{{ progress }}%</span>
+          <div class="progress-line" :data-tip="`${counts.done.toLocaleString('en-GB')} of ${(counts.total - counts.cancelled).toLocaleString('en-GB')} done${counts.cancelled ? ` · ${counts.cancelled} cancelled` : ''}`">
+            <span class="bar"><i :style="{ width: `${counts.percent}%` }" /></span>
+            <span class="mono pct">{{ counts.percent }}%</span>
           </div>
           <p class="activity">Active <time :datetime="project.last_activity" :data-tip="absoluteTime(project.last_activity)">{{ relativeTime(project.last_activity, { now, long: true }) }}</time></p>
         </div>
@@ -381,7 +368,7 @@ const progress = computed(() => counts.value && counts.value.total ? Math.round(
 </template>
 
 <style scoped>
-.project-page { width: min(1480px, 100%); margin: 0 auto; padding: 22px 28px 12px; }
+.project-page { width: 100%; max-width: 1600px; margin: 0 auto; padding: 22px 28px 12px; }
 .project-head { display: flex; align-items: flex-end; justify-content: space-between; gap: 32px; padding: 4px 0 14px; }
 .head-main { min-width: 0; flex: 1; }
 .title-line { display: flex; align-items: center; gap: 12px; min-width: 0; }
