@@ -378,3 +378,33 @@ func TestHistorySourcesDoNotMix(t *testing.T) {
 		t.Fatalf("source crossover: %+v", items)
 	}
 }
+
+func TestStoredClassicUserNamesAndNativeAuthor(t *testing.T) {
+	f := setup(t)
+	var mapped string
+	f.tx(func(tx pgx.Tx) error {
+		var identity string
+		if err := tx.QueryRow(t.Context(), `INSERT INTO identities(issuer,subject,display_name) VALUES('paimos-classic','source:7','Markus Barta') RETURNING id::text`).Scan(&identity); err != nil {
+			return err
+		}
+		return tx.QueryRow(t.Context(), `INSERT INTO principals(tenant_id,kind,identity_id,name) VALUES($1,'person',$2,'Markus Barta') RETURNING id::text`, f.p.TenantID, identity).Scan(&mapped)
+	})
+	at := time.Now()
+	f.event("import.user_created", at, nil, record{"principal": record{"id": mapped}, "classic": record{"source_id": "source", "id": json.Number("7"), "username": "mba"}})
+	f.event("import.comment", at, nil, imported("import.comment", "1", record{"id": json.Number("1"), "author": "mba", "body": "By username"}))
+	f.event("import.comment", at, nil, imported("import.comment", "2", record{"id": json.Number("2"), "author_id": json.Number("7"), "author": "mba", "body": "By ID"}))
+	f.event("import.node_created", at, nil, record{"fields": record{"created_by": mapped, "classic": record{"source_id": "source", "created_by_name": "unmapped"}}})
+	page := f.page("")
+	if len(page.Items) != 3 {
+		t.Fatalf("items: %+v", page.Items)
+	}
+	for _, item := range page.Items {
+		if item.Author.ID == nil || *item.Author.ID != mapped || item.Author.Name != "Markus Barta" {
+			t.Fatalf("mapped author: %+v", item.Author)
+		}
+	}
+	// A username in a different source cannot claim the stored mapping.
+	if got := classicAuthor(record{"author": "mba"}, "other-source", map[string]Author{"username:source:mba": {ID: &mapped, Name: "Markus Barta"}}, "author_id", "author"); got.ID != nil {
+		t.Fatal("cross-source author mapping")
+	}
+}

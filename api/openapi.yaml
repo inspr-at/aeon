@@ -339,7 +339,7 @@ paths:
         - {name: include_archived, in: query, schema: {type: boolean, default: false}}
       responses:
         '200':
-          description: Projects with subtree state counts and last activity
+          description: Projects with counts of live descendant ticket, task and epic nodes (including descendants below non-work kinds) and last activity. Open counts new/backlog, in_progress counts in_progress/qa, done counts done/delivered/accepted, and cancelled is separate. Total includes all work states.
           content:
             application/json:
               schema:
@@ -357,6 +357,7 @@ paths:
                         open: {type: integer}
                         in_progress: {type: integer}
                         done: {type: integer}
+                        cancelled: {type: integer}
                         total: {type: integer}
                         last_activity: {type: string, format: date-time}
         '400':
@@ -430,7 +431,17 @@ paths:
           $ref: '#/components/responses/Error'
     patch:
       operationId: updateNode
-      description: Key, kind, and parent are immutable here; use move for parent.
+      description: |
+        Key, kind, and parent are immutable here; use move for parent.
+        Optional optimistic concurrency compares If-Unmodified-Since to the exact
+        updated_at value while holding the node row lock in the write transaction.
+        A stale value returns 412 without changing the node or appending an event.
+        Omission preserves unconditional patch behavior.
+      parameters:
+        - name: If-Unmodified-Since
+          in: header
+          description: Exact RFC3339 timestamp from Node.updated_at, including fractional seconds. HTTP dates are also accepted and compared at full stored precision; prefer updated_at to avoid precision loss.
+          schema: {type: string}
       security: *auth
       requestBody:
         $ref: '#/components/requestBodies/NodePatch'
@@ -440,6 +451,8 @@ paths:
         '400':
           $ref: '#/components/responses/Error'
         '404':
+          $ref: '#/components/responses/Error'
+        '412':
           $ref: '#/components/responses/Error'
         '422':
           $ref: '#/components/responses/Error'
