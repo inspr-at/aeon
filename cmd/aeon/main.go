@@ -19,9 +19,10 @@ func main() {
 	case "version":
 		fmt.Println(version.Version)
 	case "serve":
-		// P0.2 (AEON-7) implements the server.
-		fmt.Fprintln(os.Stderr, "serve: not implemented yet")
-		os.Exit(1)
+		if err := serve(); err != nil {
+			fmt.Fprintln(os.Stderr, "serve:", err)
+			os.Exit(1)
+		}
 	default:
 		fmt.Fprintf(os.Stderr, "unknown command %q\n", os.Args[1])
 		os.Exit(2)

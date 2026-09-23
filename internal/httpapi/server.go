@@ -5,7 +5,9 @@
 package httpapi
 
 import (
+	"io/fs"
 	"net/http"
+	"sync"
 
 	"github.com/jackc/pgx/v5/pgxpool"
 )
@@ -21,4 +23,44 @@ type Server struct {
 	Pool       *pgxpool.Pool
 	Middleware []func(http.Handler) http.Handler // applied outermost-first to /api
 	Modules    []Module
+	// Web is the SPA filesystem (AEON_WEB_DIR or the webembed dist).
+	// Nil serves a placeholder page.
+	Web fs.FS
+
+	once    sync.Once
+	handler http.Handler
+}
+
+// Handler composes routes. Mux is the /api mux; modules register full paths
+// such as "GET /api/auth/login". Middleware wraps /api only, outermost first.
+// Recover, request id and security headers wrap every response.
+// Call Handler once, after Modules, Middleware and Web are set.
+func (s *Server) Handler() http.Handler {
+	s.once.Do(s.build)
+	return s.handler
+}
+
+func (s *Server) build() {
+	if s.Mux == nil {
+		s.Mux = http.NewServeMux()
+	}
+	s.Mux.HandleFunc("GET /api/health", s.handleHealth)
+	s.Mux.HandleFunc("GET /api/version", s.handleVersion)
+	for _, m := range s.Modules {
+		m.Mount(s.Mux)
+	}
+	s.Mux.HandleFunc("/api/", handleNotFound)
+	s.Mux.HandleFunc("/api", handleNotFound)
+
+	var api http.Handler = s.Mux
+	for i := len(s.Middleware) - 1; i >= 0; i-- {
+		api = s.Middleware[i](api)
+	}
+	api = commonMiddleware(api)
+
+	root := http.NewServeMux()
+	root.Handle("/api/", api)
+	root.Handle("/api", api)
+	root.Handle("/", commonMiddleware(spaHandler(s.Web)))
+	s.handler = root
 }
