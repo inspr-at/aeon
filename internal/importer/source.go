@@ -11,6 +11,7 @@ import (
 	"net/http"
 	"net/url"
 	"os"
+	"sort"
 	"strconv"
 	"strings"
 	"sync"
@@ -32,9 +33,33 @@ type Snapshot struct {
 	Projects []Project
 	Orphans  []Record
 	Details  map[int64]Details
+	Skipped  []SkippedItem
 }
 
 type Details struct{ Relations, Comments, History, Attachments []Record }
+
+// SkippedItem records a source record that disappeared during the snapshot.
+type SkippedItem struct {
+	Type   string `json:"type"`
+	ID     int64  `json:"id"`
+	Path   string `json:"path"`
+	Status int    `json:"status"`
+}
+
+type sourceHTTPError struct {
+	method string
+	path   string
+	status int
+}
+
+func (e *sourceHTTPError) Error() string {
+	return fmt.Sprintf("source %s %s returned HTTP %d", e.method, e.path, e.status)
+}
+
+func isNotFound(err error) bool {
+	var httpErr *sourceHTTPError
+	return errors.As(err, &httpErr) && httpErr.status == http.StatusNotFound
+}
 
 // Source is deliberately read-only. The client below only sends GET requests.
 type Source interface {
@@ -92,7 +117,7 @@ func (s *HTTPSource) get(ctx context.Context, path string, out any) error {
 	case s.limit <- struct{}{}:
 		defer func() { <-s.limit }()
 	case <-ctx.Done():
-		return ctx.Err()
+		return fmt.Errorf("source GET %s: %w", path, ctx.Err())
 	}
 	s.mu.Lock()
 	wait := time.Until(s.nextRequest)
@@ -103,7 +128,7 @@ func (s *HTTPSource) get(ctx context.Context, path string, out any) error {
 		case <-timer.C:
 		case <-ctx.Done():
 			s.mu.Unlock()
-			return ctx.Err()
+			return fmt.Errorf("source GET %s: %w", path, ctx.Err())
 		}
 	}
 	s.nextRequest = time.Now().Add(s.delay)
@@ -117,22 +142,22 @@ func (s *HTTPSource) get(ctx context.Context, path string, out any) error {
 	u.RawPath = ""
 	req, err := http.NewRequestWithContext(ctx, http.MethodGet, u.String(), nil)
 	if err != nil {
-		return fmt.Errorf("source request: %w", err)
+		return fmt.Errorf("source GET %s: invalid request", path)
 	}
 	req.Header.Set("Authorization", "Bearer "+s.key)
 	req.Header.Set("Accept", "application/json")
 	resp, err := s.client.Do(req)
 	if err != nil {
-		return errors.New("source GET failed")
+		return fmt.Errorf("source GET %s failed", path)
 	}
 	defer resp.Body.Close()
-	if resp.StatusCode != http.StatusOK {
-		return fmt.Errorf("source GET returned HTTP %d", resp.StatusCode)
+	if resp.StatusCode < http.StatusOK || resp.StatusCode >= http.StatusMultipleChoices {
+		return &sourceHTTPError{method: http.MethodGet, path: path, status: resp.StatusCode}
 	}
 	dec := json.NewDecoder(io.LimitReader(resp.Body, 64<<20))
 	dec.UseNumber()
 	if err := dec.Decode(out); err != nil {
-		return fmt.Errorf("decode source JSON: %w", err)
+		return fmt.Errorf("decode source GET %s JSON: %w", path, err)
 	}
 	return nil
 }
@@ -159,20 +184,36 @@ func (s *HTTPSource) Read(ctx context.Context, projectKey string) (Snapshot, err
 		return snap, err
 	}
 	snap.Users = append(users, deletedUsers...)
+	selectedFound := false
+	skippedProjects := map[int64]bool{}
+	skippedIssues := map[int64]bool{}
 	for _, p := range projects {
 		if projectKey != "" && stringField(p, "key") != projectKey {
 			continue
 		}
+		selectedFound = true
 		id, ok := intField(p, "id")
 		if !ok {
 			return snap, errors.New("project missing id")
 		}
 		var issues []Record
-		if err := s.get(ctx, "/projects/"+strconv.FormatInt(id, 10)+"/issues", &issues); err != nil {
+		issuesPath := "/projects/" + strconv.FormatInt(id, 10) + "/issues"
+		if err := s.get(ctx, issuesPath, &issues); err != nil {
+			if isNotFound(err) {
+				snap.Skipped = append(snap.Skipped, SkippedItem{Type: "project", ID: id, Path: issuesPath, Status: http.StatusNotFound})
+				skippedProjects[id] = true
+				continue
+			}
 			return snap, err
 		}
 		var knowledge []Record
-		if err := s.get(ctx, "/projects/"+strconv.FormatInt(id, 10)+"/knowledge", &knowledge); err != nil {
+		knowledgePath := "/projects/" + strconv.FormatInt(id, 10) + "/knowledge"
+		if err := s.get(ctx, knowledgePath, &knowledge); err != nil {
+			if isNotFound(err) {
+				snap.Skipped = append(snap.Skipped, SkippedItem{Type: "project", ID: id, Path: knowledgePath, Status: http.StatusNotFound})
+				skippedProjects[id] = true
+				continue
+			}
 			return snap, err
 		}
 		seen := map[int64]bool{}
@@ -190,7 +231,14 @@ func (s *HTTPSource) Read(ctx context.Context, projectKey string) (Snapshot, err
 				continue
 			}
 			var full Record
-			if err := s.get(ctx, "/issues/"+strconv.FormatInt(kid, 10), &full); err != nil {
+			issuePath := "/issues/" + strconv.FormatInt(kid, 10)
+			if err := s.get(ctx, issuePath, &full); err != nil {
+				if isNotFound(err) {
+					snap.Skipped = append(snap.Skipped, SkippedItem{Type: "issue", ID: kid, Path: issuePath, Status: http.StatusNotFound})
+					skippedIssues[kid] = true
+					seen[kid] = true
+					continue
+				}
 				return snap, err
 			}
 			// Knowledge API has slug/body/metadata, issue API has preserved issue_key.
@@ -204,7 +252,7 @@ func (s *HTTPSource) Read(ctx context.Context, projectKey string) (Snapshot, err
 		}
 		snap.Projects = append(snap.Projects, Project{Record: p, Issues: issues})
 	}
-	if projectKey != "" && len(snap.Projects) == 0 {
+	if projectKey != "" && !selectedFound {
 		return snap, fmt.Errorf("project %q not found", projectKey)
 	}
 	if projectKey == "" {
@@ -235,8 +283,14 @@ func (s *HTTPSource) Read(ctx context.Context, projectKey string) (Snapshot, err
 				if known[iid] {
 					continue
 				}
+				if skippedIssues[iid] {
+					continue
+				}
 				known[iid] = true
 				if pid, ok := intField(issue, "project_id"); ok {
+					if skippedProjects[pid] {
+						continue
+					}
 					if n, found := byProject[pid]; found {
 						snap.Projects[n].Issues = append(snap.Projects[n].Issues, issue)
 						continue
@@ -263,8 +317,14 @@ func (s *HTTPSource) Read(ctx context.Context, projectKey string) (Snapshot, err
 			if known[iid] {
 				continue
 			}
+			if skippedIssues[iid] {
+				continue
+			}
 			known[iid] = true
 			if pid, ok := intField(issue, "project_id"); ok {
+				if skippedProjects[pid] {
+					continue
+				}
 				if n, found := byProject[pid]; found {
 					snap.Projects[n].Issues = append(snap.Projects[n].Issues, issue)
 					continue
@@ -272,7 +332,7 @@ func (s *HTTPSource) Read(ctx context.Context, projectKey string) (Snapshot, err
 			}
 			snap.Orphans = append(snap.Orphans, issue)
 		}
-	} else {
+	} else if len(snap.Projects) > 0 {
 		var trash []Record
 		if err := s.get(ctx, "/issues/trash", &trash); err != nil {
 			return snap, err
@@ -293,6 +353,9 @@ func (s *HTTPSource) Read(ctx context.Context, projectKey string) (Snapshot, err
 				return snap, errors.New("trash issue missing id")
 			}
 			if !known[iid] {
+				if skippedIssues[iid] {
+					continue
+				}
 				snap.Projects[0].Issues = append(snap.Projects[0].Issues, issue)
 				known[iid] = true
 			}
@@ -309,6 +372,7 @@ func (s *HTTPSource) Read(ctx context.Context, projectKey string) (Snapshot, err
 	errCh := make(chan error, 1)
 	var wg sync.WaitGroup
 	var detailsMu sync.Mutex
+	var skippedMu sync.Mutex
 	for n := 0; n < s.concurrency && n < len(allIssues); n++ {
 		wg.Add(1)
 		go func() {
@@ -316,6 +380,16 @@ func (s *HTTPSource) Read(ctx context.Context, projectKey string) (Snapshot, err
 			for issue := range jobs {
 				id, detail, err := s.readDetails(workCtx, issue)
 				if err != nil {
+					if isNotFound(err) {
+						var httpErr *sourceHTTPError
+						_ = errors.As(err, &httpErr)
+						iid, _ := intField(issue, "id")
+						skippedMu.Lock()
+						snap.Skipped = append(snap.Skipped, SkippedItem{Type: "issue", ID: iid, Path: httpErr.path, Status: httpErr.status})
+						skippedIssues[iid] = true
+						skippedMu.Unlock()
+						continue
+					}
 					select {
 					case errCh <- err:
 					default:
@@ -347,6 +421,33 @@ sendLoop:
 	if err := ctx.Err(); err != nil {
 		return snap, err
 	}
+	for n := range snap.Projects {
+		kept := snap.Projects[n].Issues[:0]
+		for _, issue := range snap.Projects[n].Issues {
+			id, _ := intField(issue, "id")
+			if !skippedIssues[id] {
+				kept = append(kept, issue)
+			}
+		}
+		snap.Projects[n].Issues = kept
+	}
+	keptOrphans := snap.Orphans[:0]
+	for _, issue := range snap.Orphans {
+		id, _ := intField(issue, "id")
+		if !skippedIssues[id] {
+			keptOrphans = append(keptOrphans, issue)
+		}
+	}
+	snap.Orphans = keptOrphans
+	sort.Slice(snap.Skipped, func(i, j int) bool {
+		if snap.Skipped[i].Type != snap.Skipped[j].Type {
+			return snap.Skipped[i].Type < snap.Skipped[j].Type
+		}
+		if snap.Skipped[i].ID != snap.Skipped[j].ID {
+			return snap.Skipped[i].ID < snap.Skipped[j].ID
+		}
+		return snap.Skipped[i].Path < snap.Skipped[j].Path
+	})
 	return snap, nil
 }
 

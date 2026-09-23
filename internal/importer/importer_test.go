@@ -8,6 +8,7 @@ import (
 	"net/http/httptest"
 	"os"
 	"path/filepath"
+	"reflect"
 	"strconv"
 	"strings"
 	"sync"
@@ -296,4 +297,114 @@ func TestSourceRequestCapAndDelay(t *testing.T) {
 			t.Fatalf("request spacing = %s", gap)
 		}
 	}
+}
+
+func TestSourceSkipsDeletedProjectAndPurgedIssues(t *testing.T) {
+	routes := map[string]string{
+		"/api/projects?status=all":       `[{"id":3,"key":"PAI","name":"Paimos","status":"active"}]`,
+		"/api/projects?status=deleted":   `[{"id":4,"key":"OLD","name":"Old","status":"deleted"}]`,
+		"/api/users":                     `[]`,
+		"/api/users?status=deleted":      `[]`,
+		"/api/projects/3/issues":         `[{"id":10,"project_id":3,"issue_key":"PAI-10","type":"ticket","title":"Kept","status":"open"},{"id":11,"project_id":3,"issue_key":"PAI-11","type":"ticket","title":"Purged","status":"open"}]`,
+		"/api/projects/3/knowledge":      `[{"id":12,"project_id":3,"type":"memory","title":"Purged knowledge"}]`,
+		"/api/issues/10/relations":       `[]`,
+		"/api/issues/10/comments":        `[]`,
+		"/api/issues/10/history":         `[]`,
+		"/api/issues/10/attachments":     `[]`,
+		"/api/issues?limit=100&offset=0": `{"issues":[{"id":13,"project_id":4,"issue_key":"OLD-13","type":"ticket","title":"Deleted project issue","status":"open"}],"has_more":false}`,
+		"/api/issues/trash":              `[]`,
+	}
+	source, closeServer := fakeSourceRoutes(t, routes, nil)
+	defer closeServer()
+	report, err := (Importer{Source: source}).Run(context.Background(), "test", "", true)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if report.Counts["projects"] != 1 || report.Counts["ticket"] != 1 || report.Counts["skipped"] != 3 || report.Counts["skipped_projects"] != 1 || report.Counts["skipped_issues"] != 2 {
+		t.Fatalf("wrong counts: %+v", report.Counts)
+	}
+	want := []SkippedItem{
+		{Type: "issue", ID: 11, Path: "/issues/11/relations", Status: 404},
+		{Type: "issue", ID: 12, Path: "/issues/12", Status: 404},
+		{Type: "project", ID: 4, Path: "/projects/4/issues", Status: 404},
+	}
+	if !reflect.DeepEqual(report.Skipped, want) {
+		t.Fatalf("skipped = %+v, want %+v", report.Skipped, want)
+	}
+	encoded, err := json.Marshal(report)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !strings.Contains(string(encoded), `"skipped_projects":1`) || !strings.Contains(string(encoded), `"path":"/issues/11/relations"`) {
+		t.Fatalf("skips absent from JSON report: %s", encoded)
+	}
+}
+
+func TestSourceKnowledge404SkipsProject(t *testing.T) {
+	routes := map[string]string{
+		"/api/projects?status=all":     `[{"id":3,"key":"PAI","name":"Paimos","status":"active"}]`,
+		"/api/projects?status=deleted": `[]`,
+		"/api/users":                   `[]`,
+		"/api/users?status=deleted":    `[]`,
+		"/api/projects/3/issues":       `[]`,
+	}
+	source, closeServer := fakeSourceRoutes(t, routes, nil)
+	defer closeServer()
+	report, err := (Importer{Source: source}).Run(context.Background(), "test", "PAI", true)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if report.Counts["projects"] != 0 || !reflect.DeepEqual(report.Skipped, []SkippedItem{{Type: "project", ID: 3, Path: "/projects/3/knowledge", Status: 404}}) {
+		t.Fatalf("unexpected report: %+v", report)
+	}
+}
+
+func TestSourceNon404AbortsWithSafeMethodAndPath(t *testing.T) {
+	routes := map[string]string{
+		"/api/projects?status=all":     `[{"id":3,"key":"PAI","name":"Paimos","status":"active"}]`,
+		"/api/projects?status=deleted": `[]`,
+		"/api/users":                   `[]`,
+		"/api/users?status=deleted":    `[]`,
+	}
+	source, closeServer := fakeSourceRoutes(t, routes, map[string]int{"/api/projects/3/issues": 500})
+	defer closeServer()
+	_, err := (Importer{Source: source}).Run(context.Background(), "test", "", true)
+	if err == nil || err.Error() != "source GET /projects/3/issues returned HTTP 500" {
+		t.Fatalf("unexpected source error: %v", err)
+	}
+	if strings.Contains(err.Error(), "fake-key") || strings.Contains(err.Error(), "/api/") {
+		t.Fatalf("source error leaked request detail: %v", err)
+	}
+}
+
+func fakeSourceRoutes(t *testing.T, routes map[string]string, statuses map[string]int) (*HTTPSource, func()) {
+	t.Helper()
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if r.Method != http.MethodGet || r.Header.Get("Authorization") != "Bearer fake-key" {
+			t.Error("unexpected source request method or authorization")
+			w.WriteHeader(http.StatusBadRequest)
+			return
+		}
+		path := r.URL.RequestURI()
+		if status := statuses[path]; status != 0 {
+			w.WriteHeader(status)
+			return
+		}
+		body, ok := routes[path]
+		if !ok {
+			w.WriteHeader(http.StatusNotFound)
+			return
+		}
+		_, _ = w.Write([]byte(body))
+	}))
+	file := filepath.Join(t.TempDir(), "api-key")
+	if err := os.WriteFile(file, []byte("fake-key"), 0600); err != nil {
+		t.Fatal(err)
+	}
+	source, err := NewHTTPSource(server.URL, file, server.Client())
+	if err != nil {
+		server.Close()
+		t.Fatal(err)
+	}
+	return source, server.Close
 }
