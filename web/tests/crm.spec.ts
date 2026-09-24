@@ -403,6 +403,30 @@ test('a note rewrite is a draft first; applying it shows the difference and can 
   await expect(notes.locator('.notes-body')).toContainText('Invoices go to accounting, not to Jana.')
 })
 
+test('AI notes are honestly disabled when no model is configured', async ({ page }) => {
+  const { calls } = await setup(page)
+  await page.goto(`/business/customers/${HOFER}`)
+  const notes = page.getByRole('region', { name: 'Notes' })
+  await expect(notes.getByRole('button', { name: 'Suggest with AI' })).toBeDisabled()
+  await expect(notes).toContainText('No model is configured for AI note rewriting.')
+  await expect(notes.getByRole('button', { name: 'Propose a rewrite' })).toBeEnabled()
+  expect(calls.some(c => c.path.endsWith('/note-ai/generate'))).toBe(false)
+})
+
+test('AI generates only a review proposal and admin applies it separately', async ({ page }) => {
+  const { calls } = await setup(page, { aiEnabled: true })
+  await page.goto(`/business/customers/${HOFER}`)
+  const notes = page.getByRole('region', { name: 'Notes' })
+  await notes.getByRole('button', { name: 'Suggest with AI' }).click()
+  await expect(notes.getByRole('region', { name: 'Proposed rewrite' })).toContainText('Draft, not applied')
+  await expect(notes.locator('.notes-body')).toContainText('Invoices go to accounting, not to Jana.')
+  expect(calls.find(c => c.path.endsWith('/note-ai/generate'))?.body).toEqual({ expected_revision: 3 })
+  await notes.getByRole('button', { name: 'Review and apply…' }).click()
+  await expect(page.getByRole('dialog', { name: 'Apply this rewrite?' })).toBeVisible()
+  await page.getByRole('button', { name: 'Apply rewrite' }).click()
+  await expect(notes.locator('.notes-body')).toContainText('Invoices go to Max Brandl in accounting.')
+})
+
 test('a proposal made before another change can no longer be applied as it is', async ({ page }) => {
   await setup(page)
   await page.goto(`/business/customers/${HOFER}`)
@@ -514,7 +538,7 @@ test('Manage parts: a workspace that never had Customers enables Quotes, which b
   await expect(page.getByText('Quotes is enabled, with Customers.')).toBeVisible()
   const puts = calls.filter(c => c.method === 'PUT' && c.path.startsWith('/api/plugins/'))
   expect(puts.map(c => c.path)).toEqual(['/api/plugins/business_costs/installation', '/api/plugins/business_crm/installation', '/api/plugins/business_quotes/installation'])
-  expect(puts[1].body).toEqual({ manifest_digest_sha256: 'cd'.repeat(32), enabled: true, permissions: ['integrations.call', 'nodes.contribute', 'steps.apply', 'views.provide'] })
+  expect(puts[1].body).toEqual({ manifest_digest_sha256: 'cd'.repeat(32), enabled: true, permissions: ['integrations.call', 'nodes.contribute', 'steps.apply', 'tools.invoke', 'views.provide'] })
   const kinds = calls.filter(c => c.method === 'POST' && c.path === '/api/kinds')
   expect(kinds.map(c => (c.body as { slug: string }).slug)).toEqual(['organisation', 'contact', 'quote'])
   // The organisation kind takes the plugin's own field schema.

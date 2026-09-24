@@ -42,9 +42,10 @@ var (
 )
 
 type module struct {
-	pool      *pgxpool.Pool
-	reg       *plugins.Registry
-	providers map[string]Provider
+	pool          *pgxpool.Pool
+	reg           *plugins.Registry
+	providers     map[string]Provider
+	noteGenerator NoteGenerator
 }
 
 // New returns the CRM HTTP module. reg is the sealed registry that contains
@@ -73,6 +74,8 @@ func (m *module) Mount(mux *http.ServeMux) {
 	mux.HandleFunc("PUT /api/crm/projects/{projectId}/cooperation", m.putCooperation)
 	mux.HandleFunc("GET /api/crm/projects/{projectId}/cooperation", m.getCooperation)
 	mux.HandleFunc("POST /api/crm/organisations/{organisationId}/note-rewrite", m.draftNote)
+	mux.HandleFunc("GET /api/crm/organisations/{organisationId}/note-ai", m.noteAIStatus)
+	mux.HandleFunc("POST /api/crm/organisations/{organisationId}/note-ai/generate", m.generateNote)
 	mux.HandleFunc("POST /api/crm/organisations/{organisationId}/note-rewrite/{draftId}/apply", m.applyNote)
 	mux.HandleFunc("GET /api/crm/providers", m.listProviders)
 	mux.HandleFunc("PUT /api/crm/providers/{providerId}/config", m.putProviderConfig)

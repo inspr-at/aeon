@@ -1,6 +1,7 @@
 <!-- SPDX-License-Identifier: AGPL-3.0-only -->
 <script setup lang="ts">
-import { computed, nextTick, ref } from 'vue'
+import { computed, nextTick, ref, watch } from 'vue'
+import { api } from '../../lib/api'
 import { applyNote, draftNote, errorText, statusOf, undoLatest, type Customer, type NoteProposal } from '../../lib/crm'
 import { toast } from '../../lib/toast'
 import { useCustomers } from '../../stores/customers'
@@ -24,11 +25,44 @@ const composing = ref(false)
 const text = ref('')
 const busy = ref(false)
 const error = ref('')
+const aiAvailable = ref(false)
+const aiReason = ref('Checking AI note rewriting…')
 const editor = ref<InstanceType<typeof MarkdownEditor>>()
 const dialog = ref<HTMLDialogElement>()
 const applyButton = ref<HTMLButtonElement>()
 const section = ref<HTMLElement>()
 let opener: HTMLElement | null = null
+
+watch(() => [props.customer.id, props.customer.revision, props.admin], async () => {
+  aiAvailable.value = false
+  aiReason.value = 'Checking AI note rewriting…'
+  if (!props.admin) return
+  try {
+    const response = await api(`/crm/organisations/${encodeURIComponent(props.customer.id)}/note-ai`)
+    if (!response.ok) throw new Error('unavailable')
+    const state = await response.json() as { enabled: boolean; reason?: string }
+    aiAvailable.value = state.enabled
+    aiReason.value = state.reason ?? ''
+  } catch { aiReason.value = 'AI note rewriting is unavailable.' }
+}, { immediate: true })
+
+async function generateProposal() {
+  if (busy.value || !aiAvailable.value) return
+  busy.value = true; error.value = ''
+  try {
+    const response = await api(`/crm/organisations/${encodeURIComponent(props.customer.id)}/note-ai/generate`, {
+      method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ expected_revision: props.customer.revision }),
+    })
+    if (!response.ok) {
+      const body = await response.json().catch(() => ({})) as { message?: string }
+      throw new Error(body.message || 'AI note rewriting is unavailable. The notes were not changed.')
+    }
+    const draft = await response.json() as NoteProposal
+    store.setProposal(props.customer.id, { ...draft, base_revision: props.customer.revision, base_text: notes.value })
+    toast('AI proposal saved. Review the difference before applying it.')
+  } catch (e) { error.value = errorText(e, 'AI note rewriting is unavailable.') }
+  finally { busy.value = false }
+}
 
 async function compose(from = notes.value) {
   text.value = from; error.value = ''; composing.value = true
@@ -103,15 +137,20 @@ function backdrop(event: MouseEvent) { if (event.target === dialog.value) closeR
         <h2 id="notes-title">Notes</h2>
         <p class="card-lead">For your team. Quotes never show them.</p>
       </div>
-      <button v-if="admin && !locked && !composing && !proposal" type="button" class="btn sm" @click="compose()"><AppIcon name="edit" :size="13" />Propose a rewrite</button>
+      <div v-if="admin && !locked && !composing && !proposal" class="note-actions">
+        <button type="button" class="btn sm" @click="compose()"><AppIcon name="edit" :size="13" />Propose a rewrite</button>
+        <button type="button" class="btn sm" :disabled="!aiAvailable || busy" :title="aiReason || undefined" :aria-describedby="!aiAvailable ? 'note-ai-reason' : undefined" @click="generateProposal"><AppIcon name="sparkle" :size="13" />{{ busy ? 'Generating…' : 'Suggest with AI' }}</button>
+      </div>
     </header>
 
     <div v-if="!composing" class="notes-body">
       <MarkdownBody v-if="notes.trim()" :body="notes" />
       <p v-else class="empty-line">No notes yet.{{ admin ? ' Propose a first version; it applies once you confirm it.' : '' }}</p>
     </div>
+    <p v-if="admin && !aiAvailable && !composing && !proposal" id="note-ai-reason" class="f-note">{{ aiReason }}</p>
+    <p v-if="error && !composing" class="f-error" role="alert"><AppIcon name="alert" :size="14" />{{ error }}</p>
 
-    <div v-else class="composer">
+    <div v-if="composing" class="composer">
       <MarkdownEditor ref="editor" v-model="text" label="Proposed notes" :saving="busy" save-label="Save proposal" :min-rows="6" @save="saveProposal" @cancel="composing = false" />
       <p class="f-note"><AppIcon name="info" :size="12" />A proposal is a draft. Nothing changes until an admin applies it and sees the difference first.</p>
       <p v-if="error" class="f-error" role="alert"><AppIcon name="alert" :size="14" />{{ error }}</p>
@@ -148,6 +187,7 @@ function backdrop(event: MouseEvent) { if (event.target === dialog.value) closeR
 </template>
 
 <style scoped>
+.note-actions { display: flex; flex-wrap: wrap; gap: 8px; }
 .notes:focus-visible { box-shadow: var(--shadow), var(--focus-ring); }
 .notes:focus { outline: none; }
 .notes-body { font-size: 14px; }

@@ -23,10 +23,16 @@
 // adapters and disabled integration grant, manual CRM continues to work.
 // Search errors remain isolated; import and sync are explicit admin actions.
 // Note rewriting creates a persisted proposal; only a separate admin apply
-// action changes customer_notes, fenced by the customer revision.
+// action changes customer_notes, fenced by the customer revision. Optional AI
+// generation invokes the declared crm_note_optimize agent tool after resolving
+// an enabled tenant scout model profile. The host supplies NoteGenerator;
+// absent adapter, tool permission, notes or model route disables the action.
+// Generation emits only a draft and safe model/usage metadata, never note text
+// into tenant-wide events. No vendor credentials are handled by CRM.
 //
-// Coordinator wiring: register PluginWithProviders(providers) before Seal,
-// mount NewWithProviders(pool, reg, providers), and pass
+// Coordinator wiring: register PluginWithProvidersAndNoteGenerator(providers,
+// generator) before Seal, mount NewWithProvidersAndNoteGenerator(pool, reg,
+// providers, generator), and pass
 // events.WithUndoHandlers(crm.UndoHandlers(reg)) to events.New. For manual-only
 // installations, Plugin() and New(pool, reg) expose the same manifest and HTTP
 // module. The coordinator alone edits cmd/aeon, plugins/builtin.go and the web
