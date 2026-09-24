@@ -42,8 +42,9 @@ var (
 )
 
 type module struct {
-	pool *pgxpool.Pool
-	reg  *plugins.Registry
+	pool      *pgxpool.Pool
+	reg       *plugins.Registry
+	providers map[string]Provider
 }
 
 // New returns the CRM HTTP module. reg is the sealed registry that contains
@@ -54,6 +55,30 @@ func New(pool *pgxpool.Pool, reg *plugins.Registry) httpapi.Module {
 
 func (m *module) Mount(mux *http.ServeMux) {
 	mux.HandleFunc("POST /api/crm/contacts/{contactId}/principals", m.bind)
+	mux.HandleFunc("GET /api/crm/organisations", m.listCustomers)
+	mux.HandleFunc("POST /api/crm/organisations", m.createCustomer)
+	mux.HandleFunc("GET /api/crm/organisations/{organisationId}", m.getCustomer)
+	mux.HandleFunc("PATCH /api/crm/organisations/{organisationId}", m.updateCustomer)
+	mux.HandleFunc("DELETE /api/crm/organisations/{organisationId}", m.deleteCustomer)
+	mux.HandleFunc("GET /api/crm/organisations/{organisationId}/contacts", m.listContacts)
+	mux.HandleFunc("POST /api/crm/organisations/{organisationId}/contacts", m.createContact)
+	mux.HandleFunc("GET /api/crm/contacts/{contactId}", m.getContact)
+	mux.HandleFunc("PATCH /api/crm/contacts/{contactId}", m.updateContact)
+	mux.HandleFunc("DELETE /api/crm/contacts/{contactId}", m.deleteContact)
+	mux.HandleFunc("POST /api/crm/organisations/{organisationId}/primary-contact", m.promoteContact)
+	mux.HandleFunc("POST /api/crm/organisations/{organisationId}/number/reformat", m.reformatNumber)
+	mux.HandleFunc("GET /api/crm/organisations/{organisationId}/related", m.related)
+	mux.HandleFunc("PUT /api/crm/documents/{attachmentId}/metadata", m.putDocumentMetadata)
+	mux.HandleFunc("PUT /api/crm/projects/{projectId}/customer", m.setProjectCustomer)
+	mux.HandleFunc("PUT /api/crm/projects/{projectId}/cooperation", m.putCooperation)
+	mux.HandleFunc("GET /api/crm/projects/{projectId}/cooperation", m.getCooperation)
+	mux.HandleFunc("POST /api/crm/organisations/{organisationId}/note-rewrite", m.draftNote)
+	mux.HandleFunc("POST /api/crm/organisations/{organisationId}/note-rewrite/{draftId}/apply", m.applyNote)
+	mux.HandleFunc("GET /api/crm/providers", m.listProviders)
+	mux.HandleFunc("PUT /api/crm/providers/{providerId}/config", m.putProviderConfig)
+	mux.HandleFunc("GET /api/crm/providers/search", m.searchProviders)
+	mux.HandleFunc("POST /api/crm/providers/{providerId}/import", m.importProvider)
+	mux.HandleFunc("POST /api/crm/organisations/{organisationId}/sync", m.syncProvider)
 }
 
 func (m *module) bind(w http.ResponseWriter, r *http.Request) {

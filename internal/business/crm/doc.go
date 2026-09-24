@@ -1,34 +1,34 @@
 // SPDX-License-Identifier: AGPL-3.0-only
 
-// Package crm is the business_crm plugin (R4, migration 0401).
+// Package crm implements the business_crm plugin and QP2 backend.
 //
-// Organisations and contacts remain ordinary R1 nodes. This package adds the
-// explicit contact-principal binding and the compiled manifest. Graph links
-// stay on POST /api/relations; customer_of and contact_for are checked for
-// live kind and direction there. Email equality never binds a principal and
-// never grants quote acceptance.
+// Customers and contacts are R1 organisation/contact nodes. CRM handlers keep
+// their full typed fields, addresses and exact minor-unit rates in node fields.
+// crm_organisation_profiles and crm_contact_profiles add revisions and one
+// primary contact; the contact_for relation remains the graph link. Database
+// triggers create profiles for generic node/relation creation and advance CRM
+// revisions after generic node edits. A matching email never creates a
+// principal binding; POST /crm/contacts/{id}/principals remains explicit.
+// Deletion soft-deletes contacts and customers with an event per change. Quotes
+// of any state and live linked projects prevent customer deletion. Customer
+// numbers are allocated by the QP1 quote service on first offer; this module
+// displays them and delegates guarded legacy conversion to QP1. Sender setup
+// is the revisioned /api/quotes/settings service; CRM does not keep a second
+// sender record. Amounts in CRM are integer minor units.
 //
-// Coordinator wiring. Register the manifest before Seal, then mount the
-// module. Do not edit internal/plugins/builtin.go or cmd/aeon from this
-// package:
+// Optional providers are compiled host adapters. NewHTTPProvider and
+// NewHubSpotProvider require a host-supplied HTTPS origin and secret resolver;
+// the tenant API stores only an opaque secret reference and cannot choose an
+// outbound URL or credential. NewWithProviders mounts those adapters. With no
+// adapters and disabled integration grant, manual CRM continues to work.
+// Search errors remain isolated; import and sync are explicit admin actions.
+// Note rewriting creates a persisted proposal; only a separate admin apply
+// action changes customer_notes, fenced by the customer revision.
 //
-//	plug, err := crm.Plugin()
-//	if err != nil { ... }
-//	if err := reg.Register(plug); err != nil { ... }
-//	reg.Seal()
-//	srv.Modules = append(srv.Modules, crm.New(pool, reg))
-//
-// The Vue view is web/src/views/business/CRMView.vue. Register it in
-// web/src/router.ts (this package does not edit that file):
-//
-//	{ path: '/crm', component: () => import('./views/business/CRMView.vue'), meta: { title: 'CRM' } }
-//
-// Manifest id business_crm. Permissions are only nodes.contribute,
-// views.provide and steps.apply. Kinds are organisation and contact, the view
-// id is crm, and the crm_bind step declares observed_state and person_decision.
-// crm_bind is bound to steps.apply. The host calls plugins.Enabled for that
-// operation inside the tenant transaction and checks again after locking the
-// contact. A plugin result does not grant the binding: only an admin person
-// session does, and only by writing the row. A repeat of the same contact and
-// principal returns the existing row and appends no event.
+// Coordinator wiring: register PluginWithProviders(providers) before Seal,
+// mount NewWithProviders(pool, reg, providers), and pass
+// events.WithUndoHandlers(crm.UndoHandlers(reg)) to events.New. For manual-only
+// installations, Plugin() and New(pool, reg) expose the same manifest and HTTP
+// module. The coordinator alone edits cmd/aeon, plugins/builtin.go and the web
+// router. An existing installation must upgrade to the new manifest digest.
 package crm
