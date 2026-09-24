@@ -1,0 +1,405 @@
+// SPDX-License-Identifier: AGPL-3.0-only
+
+package public
+
+import (
+	"encoding/json"
+	"fmt"
+	"net/http"
+	"net/http/httptest"
+	"os"
+	"strings"
+	"sync"
+	"testing"
+
+	"github.com/inspr-at/aeon/internal/attachments"
+	"github.com/inspr-at/aeon/internal/business/quotes"
+	"github.com/inspr-at/aeon/internal/business/quotes/confirmation"
+	"github.com/inspr-at/aeon/internal/db"
+	"github.com/inspr-at/aeon/internal/dbtest"
+	"github.com/inspr-at/aeon/internal/events"
+	"github.com/inspr-at/aeon/internal/plugins"
+	"github.com/inspr-at/aeon/internal/plugins/fence"
+	"github.com/inspr-at/aeon/internal/tenant"
+	"github.com/jackc/pgx/v5"
+)
+
+type fixture struct {
+	t            *testing.T
+	pool         *dbtest.DB
+	mux          *http.ServeMux
+	reg          *plugins.Registry
+	tenantID     string
+	admin        tenant.Principal
+	customer     tenant.Principal
+	org, contact string
+}
+
+func newFixture(t *testing.T) *fixture {
+	t.Helper()
+	database := dbtest.Open(t)
+	f := &fixture{t: t, pool: database, mux: http.NewServeMux(), tenantID: "aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa"}
+	reg := plugins.NewRegistry()
+	for _, id := range []string{"business_costs", "business_crm"} {
+		p := plugins.Plugin{Manifest: plugins.Manifest{ID: id, Version: "1", Owner: "aeon", Permissions: []string{fence.PermNodesContribute}}}
+		sum, err := plugins.Digest(p)
+		if err != nil {
+			t.Fatal(err)
+		}
+		p.Manifest.DigestSHA256 = sum
+		if err := reg.Register(p); err != nil {
+			t.Fatal(err)
+		}
+	}
+	qp, err := quotes.ManifestPlugin()
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := reg.Register(qp); err != nil {
+		t.Fatal(err)
+	}
+	reg.Seal()
+	f.reg = reg
+	ctx := t.Context()
+	err = db.InTenant(ctx, database.App, f.tenantID, func(tx pgx.Tx) error {
+		if _, err := tx.Exec(ctx, `INSERT INTO tenants(id,slug,name) VALUES($1::uuid,'public-test','Public test')`, f.tenantID); err != nil {
+			return err
+		}
+		f.admin = tenant.Principal{TenantID: f.tenantID, Kind: tenant.Person, Roles: []string{"admin"}}
+		f.customer = tenant.Principal{TenantID: f.tenantID, Kind: tenant.Person, Roles: []string{"customer"}}
+		for _, p := range []*tenant.Principal{&f.admin, &f.customer} {
+			if err := tx.QueryRow(ctx, `INSERT INTO principals(tenant_id,kind,name,roles) VALUES($1::uuid,'person','Synthetic user',$2) RETURNING id::text`, f.tenantID, p.Roles).Scan(&p.ID); err != nil {
+				return err
+			}
+		}
+		var orgKind, contactKind string
+		for _, k := range []struct {
+			slug, prefix string
+			target       *string
+		}{{"organisation", "ORG", &orgKind}, {"contact", "CON", &contactKind}, {"quote", "QUO", new(string)}} {
+			if err := tx.QueryRow(ctx, `INSERT INTO node_kinds(tenant_id,slug,label,short_prefix,icon) VALUES($1::uuid,$2,$2,$3,$2) RETURNING id::text`, f.tenantID, k.slug, k.prefix).Scan(k.target); err != nil {
+				return err
+			}
+		}
+		if err := tx.QueryRow(ctx, `INSERT INTO nodes(tenant_id,key,kind_id,title) VALUES($1::uuid,'ORG-1',$2::uuid,'Customer') RETURNING id::text`, f.tenantID, orgKind).Scan(&f.org); err != nil {
+			return err
+		}
+		if err := tx.QueryRow(ctx, `INSERT INTO nodes(tenant_id,key,kind_id,title) VALUES($1::uuid,'CON-1',$2::uuid,'Contact') RETURNING id::text`, f.tenantID, contactKind).Scan(&f.contact); err != nil {
+			return err
+		}
+		if _, err := tx.Exec(ctx, `INSERT INTO node_relations(tenant_id,source_node_id,target_node_id,type) VALUES($1::uuid,$2::uuid,$3::uuid,'contact_for')`, f.tenantID, f.contact, f.org); err != nil {
+			return err
+		}
+		if _, err := tx.Exec(ctx, `INSERT INTO crm_contact_principals(tenant_id,contact_node_id,principal_id,bound_by_principal_id) VALUES($1::uuid,$2::uuid,$3::uuid,$4::uuid)`, f.tenantID, f.contact, f.customer.ID, f.admin.ID); err != nil {
+			return err
+		}
+		for _, id := range []string{"business_costs", "business_crm", quotes.PluginID} {
+			p, _ := reg.Lookup(id)
+			if _, err := tx.Exec(ctx, `INSERT INTO plugin_installations(tenant_id,plugin_id,version,manifest_digest_sha256,owner,enabled,permissions,updated_by_principal_id) VALUES($1::uuid,$2,$3,$4,$5,true,$6,$7::uuid)`, f.tenantID, id, p.Manifest.Version, p.Manifest.DigestSHA256, p.Manifest.Owner, p.Manifest.Permissions, f.admin.ID); err != nil {
+				return err
+			}
+		}
+		return nil
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	quoteModule, err := quotes.New(database.App, reg)
+	if err != nil {
+		t.Fatal(err)
+	}
+	quoteModule.Mount(f.mux)
+	publicModule, err := New(database.App, reg, nil, "https://example.invalid")
+	if err != nil {
+		t.Fatal(err)
+	}
+	publicModule.Mount(f.mux)
+	events.New(database.App, events.WithUndoHandlers(UndoHandlers())).Mount(f.mux)
+	status, body := f.call(&f.admin, "PATCH", "/api/quotes/settings", `{"expected_revision":0,"numbering_time_zone":"Europe/Vienna","default_currency":"EUR","sender":{"company":"Example Sender","street":"Example Street 1","postal_code":"0000","city":"Example City","country":"AT","email":"sender@example.test"},"defaults":{"intro":"","blocks":[],"accept_text":"","vat_note":""},"layout":{},"smtp_confirmation_enabled":false}`)
+	if status != 200 {
+		t.Fatalf("settings %d %s", status, body)
+	}
+	return f
+}
+func (f *fixture) call(p *tenant.Principal, method, path, body string) (int, string) {
+	f.t.Helper()
+	req := httptest.NewRequest(method, path, strings.NewReader(body))
+	if body != "" {
+		req.Header.Set("Content-Type", "application/json")
+	}
+	if p != nil {
+		req = req.WithContext(tenant.WithPrincipal(req.Context(), *p))
+	}
+	rec := httptest.NewRecorder()
+	f.mux.ServeHTTP(rec, req)
+	return rec.Code, rec.Body.String()
+}
+func object(t *testing.T, body string) map[string]any {
+	t.Helper()
+	var m map[string]any
+	if err := json.Unmarshal([]byte(body), &m); err != nil {
+		t.Fatal(err)
+	}
+	return m
+}
+func (f *fixture) issued() (string, string, string) {
+	f.t.Helper()
+	status, body := f.call(&f.admin, "POST", "/api/quotes", fmt.Sprintf(`{"title":"Synthetic offer","customer_org_node_id":%q}`, f.org))
+	if status != 201 {
+		f.t.Fatalf("create %d %s", status, body)
+	}
+	id := object(f.t, body)["quote_node_id"].(string)
+	status, body = f.call(&f.admin, "GET", "/api/quotes/"+id+"/draft", "")
+	if status != 200 {
+		f.t.Fatalf("draft %d %s", status, body)
+	}
+	doc := object(f.t, body)["document"].(map[string]any)
+	recipient := doc["recipient"].(map[string]any)
+	recipient["address"] = "Sample Lane 2"
+	recipient["email"] = "customer@example.invalid"
+	recipient["contact_node_id"] = f.contact
+	doc["positions"] = []any{map[string]any{"id": "11111111-1111-4111-8111-111111111111", "pricing_source": "manual", "short_text": "Service", "long_text": "Synthetic", "quantity": "1.00", "unit_label": "item", "unit_price_cents": 100, "total_cents": 0, "currency": "EUR"}}
+	patch, _ := json.Marshal(map[string]any{"client_session_id": "22222222-2222-4222-8222-222222222222", "mutation_id": "33333333-3333-4333-8333-333333333333", "writer_version": 1, "document": doc})
+	req := httptest.NewRequest("PATCH", "/api/quotes/"+id+"/draft", strings.NewReader(string(patch)))
+	req.Header.Set("Content-Type", "application/json")
+	req.Header.Set("If-Match", `"qd-1"`)
+	req = req.WithContext(tenant.WithPrincipal(req.Context(), f.admin))
+	rec := httptest.NewRecorder()
+	f.mux.ServeHTTP(rec, req)
+	if rec.Code != 200 {
+		f.t.Fatalf("patch %d %s", rec.Code, rec.Body.String())
+	}
+	saved := object(f.t, rec.Body.String())
+	status, body = f.call(&f.admin, "GET", "/api/quotes/"+id, "")
+	if status != 200 {
+		f.t.Fatalf("quote %d %s", status, body)
+	}
+	revision := object(f.t, body)["revision"].(float64)
+	status, body = f.call(&f.admin, "POST", "/api/quotes/"+id+"/finalize", fmt.Sprintf(`{"expected_quote_revision":%.0f,"expected_draft_revision":2,"expected_document_sha256":%q}`, revision, saved["document_sha256"]))
+	if status != 200 {
+		f.t.Fatalf("finalize %d %s", status, body)
+	}
+	status, body = f.call(&f.admin, "GET", "/api/quotes/"+id+"/versions/1", "")
+	if status != 200 {
+		f.t.Fatalf("version %d %s", status, body)
+	}
+	digest := object(f.t, body)["content_sha256"].(string)
+	status, body = f.call(&f.admin, "POST", "/api/quotes/"+id+"/versions/1/public-link", `{}`)
+	if status != 201 {
+		f.t.Fatalf("link %d %s", status, body)
+	}
+	return id, digest, object(f.t, body)["path"].(string)
+}
+func acceptanceBody(digest, mutation string) string {
+	return fmt.Sprintf(`{"version":1,"expected_content_sha256":%q,"client_mutation_id":%q,"name":"Customer Example","company":"Example Co","note":"Approved","confirm":true}`, digest, mutation)
+}
+func TestPublicCapabilityReplayPrivacyAndDecisionRace(t *testing.T) {
+	f := newFixture(t)
+	id, digest, path := f.issued()
+	selectorAndToken := strings.TrimPrefix(path, "/offers/")
+	api := "/api/public/quotes/" + selectorAndToken
+	status, body := f.call(nil, "GET", api, "")
+	if status != 200 || strings.Contains(body, id) || strings.Contains(body, f.admin.ID) || !strings.Contains(body, `"acceptable":true`) {
+		t.Fatalf("scoped read %d %s", status, body)
+	}
+	mutation := "44444444-4444-4444-8444-444444444444"
+	status, body = f.call(nil, "POST", api+"/accept", acceptanceBody(digest, mutation))
+	if status != 201 {
+		t.Fatalf("public accept %d %s", status, body)
+	}
+	status, _ = f.call(nil, "POST", api+"/accept", acceptanceBody(digest, mutation))
+	if status != 200 {
+		t.Fatalf("exact replay %d", status)
+	}
+	status, _ = f.call(nil, "POST", api+"/accept", strings.Replace(acceptanceBody(digest, mutation), "Approved", "Changed", 1))
+	if status != 409 {
+		t.Fatalf("divergent replay %d", status)
+	}
+	status, _ = f.call(&f.customer, "POST", "/api/quotes/"+id+"/versions/1/accept", fmt.Sprintf(`{"expected_content_sha256":%q}`, digest))
+	if status != 409 {
+		t.Fatalf("authenticated channel won after public acceptance: %d", status)
+	}
+	var decisions, jobs, receipts int
+	var recipientFrozen bool
+	err := db.InTenant(t.Context(), f.pool.App, f.tenantID, func(tx pgx.Tx) error {
+		return tx.QueryRow(t.Context(), `SELECT (SELECT count(*) FROM quote_decisions WHERE quote_node_id=$1::uuid),(SELECT count(*) FROM quote_confirmation_jobs WHERE quote_node_id=$1::uuid),(SELECT count(*) FROM quote_public_acceptances WHERE quote_node_id=$1::uuid),(SELECT j.recipient_snapshot=s.recipient FROM quote_confirmation_jobs j JOIN quote_version_snapshots s ON s.tenant_id=j.tenant_id AND s.quote_node_id=j.quote_node_id AND s.version=j.version WHERE j.quote_node_id=$1::uuid)`, id).Scan(&decisions, &jobs, &receipts, &recipientFrozen)
+	})
+	if err != nil || decisions != 1 || jobs != 1 || receipts != 1 || !recipientFrozen {
+		t.Fatalf("decision projection %d/%d/%d, recipient frozen %t: %v", decisions, jobs, receipts, recipientFrozen, err)
+	}
+	if _, err := os.Stat("../../../../web/dist/quote-print.html"); err == nil {
+		store := attachments.Store{FilesDir: t.TempDir()}
+		confirmationModule, err := confirmation.New(f.pool.App, f.reg, os.DirFS("../../../../web/dist"), store)
+		if err != nil {
+			t.Fatal(err)
+		}
+		plugin, err := confirmation.ManifestPlugin(confirmationModule)
+		if err != nil || plugin.Manifest.DigestSHA256 == "" || plugin.Jobs == nil {
+			t.Fatalf("confirmation manifest: %v", err)
+		}
+		confirmationModule.Mount(f.mux)
+		processed, err := confirmationModule.ProcessNext(t.Context(), f.tenantID)
+		if err != nil || !processed {
+			t.Fatalf("receipt processing %v: %v", processed, err)
+		}
+		var receiptHash, jobState string
+		err = db.InTenant(t.Context(), f.pool.App, f.tenantID, func(tx pgx.Tx) error {
+			return tx.QueryRow(t.Context(), `SELECT r.file_sha256,j.state FROM quote_confirmation_receipts r JOIN quote_confirmation_jobs j ON j.tenant_id=r.tenant_id AND j.quote_node_id=r.quote_node_id AND j.version=r.version WHERE r.quote_node_id=$1::uuid AND r.version=1`, id).Scan(&receiptHash, &jobState)
+		})
+		if err != nil || jobState != "ready" || len(receiptHash) != 64 {
+			t.Fatalf("receipt binding %q %q: %v", receiptHash, jobState, err)
+		}
+		file, err := store.Open(f.tenantID, receiptHash, "original")
+		if err != nil {
+			t.Fatal(err)
+		}
+		_ = file.Close()
+		processed, err = confirmationModule.ProcessNext(t.Context(), f.tenantID)
+		if err != nil || processed {
+			t.Fatalf("receipt rendered twice %v: %v", processed, err)
+		}
+		// Model an ambiguous future transport result with a durable event. The
+		// disabled adapter cannot emit this state in the private instance.
+		err = db.InTenant(t.Context(), f.pool.App, f.tenantID, func(tx pgx.Tx) error {
+			_, err := events.Append(t.Context(), tx, f.admin, events.Change{NodeID: &id, Type: "quote.confirmation_uncertain", After: map[string]any{"version": 1, "state": "uncertain"}})
+			if err != nil {
+				return err
+			}
+			_, err = tx.Exec(t.Context(), `UPDATE quote_confirmation_jobs SET state='uncertain' WHERE quote_node_id=$1::uuid AND version=1`, id)
+			return err
+		})
+		if err != nil {
+			t.Fatal(err)
+		}
+		retryPath := "/api/quotes/" + id + "/versions/1/confirmation/retry"
+		status, _ = f.call(&f.admin, "POST", retryPath, `{"acknowledge_uncertain":false}`)
+		if status != 409 {
+			t.Fatalf("uncertain retry without acknowledgement %d", status)
+		}
+		status, body = f.call(&f.admin, "POST", retryPath, `{"acknowledge_uncertain":true}`)
+		if status != 200 || !strings.Contains(body, `"state":"ready"`) || !strings.Contains(body, receiptHash) {
+			t.Fatalf("acknowledged uncertainty %d %s", status, body)
+		}
+	}
+	status, _ = f.call(&f.admin, "POST", "/api/quotes/"+id+"/versions/1/public-link/revoke", "")
+	if status != 200 {
+		t.Fatalf("revoke %d", status)
+	}
+	status, _ = f.call(nil, "GET", api, "")
+	if status != 404 {
+		t.Fatalf("revoked link readable %d", status)
+	}
+	// A second offer tests simultaneous channels against the same quote row.
+	id2, digest2, path2 := f.issued()
+	api2 := "/api/public/quotes/" + strings.TrimPrefix(path2, "/offers/")
+	statuses := make([]int, 2)
+	var wg sync.WaitGroup
+	wg.Add(2)
+	go func() {
+		defer wg.Done()
+		statuses[0], _ = f.call(nil, "POST", api2+"/accept", acceptanceBody(digest2, "55555555-5555-4555-8555-555555555555"))
+	}()
+	go func() {
+		defer wg.Done()
+		statuses[1], _ = f.call(&f.customer, "POST", "/api/quotes/"+id2+"/versions/1/accept", fmt.Sprintf(`{"expected_content_sha256":%q}`, digest2))
+	}()
+	wg.Wait()
+	if !((statuses[0] == 201 && statuses[1] == 409) || (statuses[1] == 201 && statuses[0] == 409)) {
+		t.Fatalf("two-channel decision race: %v", statuses)
+	}
+	if _, err := os.Stat("../../../../web/dist/quote-print.html"); err == nil {
+		store := attachments.Store{FilesDir: t.TempDir()}
+		unavailable, err := confirmation.New(f.pool.App, f.reg, nil, store)
+		if err != nil {
+			t.Fatal(err)
+		}
+		processed, err := unavailable.ProcessNext(t.Context(), f.tenantID)
+		if err != nil || !processed {
+			t.Fatalf("failed render transition %v: %v", processed, err)
+		}
+		var state string
+		err = db.InTenant(t.Context(), f.pool.App, f.tenantID, func(tx pgx.Tx) error {
+			return tx.QueryRow(t.Context(), `SELECT state FROM quote_confirmation_jobs WHERE quote_node_id=$1::uuid AND version=1`, id2).Scan(&state)
+		})
+		if err != nil || state != "failed" {
+			t.Fatalf("failed job state %q: %v", state, err)
+		}
+		status, _ := f.call(&f.admin, "POST", "/api/quotes/"+id2+"/versions/1/confirmation/retry", `{"acknowledge_uncertain":false}`)
+		if status != 200 {
+			t.Fatalf("failed job retry %d", status)
+		}
+		available, err := confirmation.New(f.pool.App, f.reg, os.DirFS("../../../../web/dist"), store)
+		if err != nil {
+			t.Fatal(err)
+		}
+		processed, err = available.ProcessNext(t.Context(), f.tenantID)
+		if err != nil || !processed {
+			t.Fatalf("retry render %v: %v", processed, err)
+		}
+	}
+}
+
+func TestAcceptRejectsCrossSiteAndInvalidToken(t *testing.T) {
+	f := newFixture(t)
+	_, digest, path := f.issued()
+	api := "/api/public/quotes/" + strings.TrimPrefix(path, "/offers/")
+	req := httptest.NewRequest("POST", api+"/accept", strings.NewReader(acceptanceBody(digest, "44444444-4444-4444-8444-444444444444")))
+	req.Header.Set("Content-Type", "application/json")
+	req.Header.Set("Origin", "https://elsewhere.invalid")
+	rec := httptest.NewRecorder()
+	f.mux.ServeHTTP(rec, req)
+	if rec.Code != 403 {
+		t.Fatalf("cross-site request %d", rec.Code)
+	}
+	status, _ := f.call(nil, "GET", api+"wrong", "")
+	if status != 404 {
+		t.Fatalf("invalid token %d", status)
+	}
+}
+
+func TestExpiredReadableAndLinkCreationUndo(t *testing.T) {
+	f := newFixture(t)
+	id, digest, path := f.issued()
+	selector := strings.Split(strings.TrimPrefix(path, "/offers/"), "/")[0]
+	var originalEvent int64
+	err := db.InTenant(t.Context(), f.pool.App, f.tenantID, func(tx pgx.Tx) error {
+		return tx.QueryRow(t.Context(), `SELECT issued_event_id FROM quote_public_links WHERE quote_node_id=$1::uuid`, id).Scan(&originalEvent)
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	status, _ := f.call(&f.admin, "POST", fmt.Sprintf("/api/events/%d/undo", originalEvent), "")
+	if status != 201 {
+		t.Fatalf("link creation undo %d", status)
+	}
+	status, _ = f.call(nil, "GET", "/api/public/quotes/"+strings.TrimPrefix(path, "/offers/"), "")
+	if status != 404 {
+		t.Fatalf("undone link readable %d", status)
+	}
+	// Insert a historical, already expired capability to prove that expiry is
+	// a decision fence while the document remains readable.
+	token, err := randomURL(32)
+	if err != nil {
+		t.Fatal(err)
+	}
+	err = db.InTenant(t.Context(), f.pool.App, f.tenantID, func(tx pgx.Tx) error {
+		event, err := events.Append(t.Context(), tx, f.admin, events.Change{NodeID: &id, Type: "quote.public_link_created", After: map[string]any{"version": 1, "target_content_sha256": digest}})
+		if err != nil {
+			return err
+		}
+		_, err = tx.Exec(t.Context(), `INSERT INTO quote_public_links(tenant_id,quote_node_id,version,token_sha256,target_content_sha256,issued_at,expires_at,issued_by_principal_id,issued_event_id) VALUES($1::uuid,$2::uuid,1,$3,$4,clock_timestamp()-interval '3 days',clock_timestamp()-interval '1 day',$5::uuid,$6)`, f.tenantID, id, hash(token), digest, f.admin.ID, event.ID)
+		return err
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	api := "/api/public/quotes/" + selector + "/" + token
+	status, body := f.call(nil, "GET", api, "")
+	if status != 200 || !strings.Contains(body, `"acceptable":false`) {
+		t.Fatalf("expired read %d %s", status, body)
+	}
+	status, _ = f.call(nil, "POST", api+"/accept", acceptanceBody(digest, "66666666-6666-4666-8666-666666666666"))
+	if status != 409 {
+		t.Fatalf("expired acceptance %d", status)
+	}
+}

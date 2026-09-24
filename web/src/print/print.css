@@ -1,0 +1,8 @@
+/* SPDX-License-Identifier: AGPL-3.0-only */
+/* Bundled metrics make server and browser pagination agree across hosts. */
+:root { --font: 'JetBrains Mono', monospace; --serif: 'JetBrains Mono', monospace; color-scheme: light; }
+body { margin: 0; background: white; }
+.quote-document { --quote-paper: white; --quote-ink: #203c3d; --ink: #203c3d; --ink-2: #496064; --line-2: #bcc9c9; }
+.quote-print-qr { position: absolute; left: 2mm; bottom: 2mm; width: 16mm; height: 16mm; }
+.quote-print-qr svg { display: block; width: 100%; height: 100%; }
+@media print { .quote-page:last-child { break-after: auto; } }
