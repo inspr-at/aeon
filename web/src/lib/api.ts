@@ -55,22 +55,7 @@ export interface WorkNode {
   position: string; created_at: string; updated_at: string; deleted_at?: string | null
 }
 export interface Page<T> { items: T[]; next_cursor: string | null }
-export interface TreeEntry { node: WorkNode; depth: number }
 export interface SearchHit { node: WorkNode; score: number }
-export type SortField = 'position' | 'updated_at' | 'created_at' | 'key' | 'title'
-export interface NodeFilters {
-  kind_id?: string; state?: string; parent_id?: string; include_descendants?: boolean
-}
-export interface NodeQuery extends NodeFilters {
-  sort?: SortField; direction?: 'asc' | 'desc'; cursor?: string; limit?: number
-}
-export interface ViewWrite {
-  name: string; filters: NodeFilters; sort: { field: SortField; direction: 'asc' | 'desc' }
-  columns: string[]; shared?: boolean
-}
-export interface SavedView extends ViewWrite {
-  id: string; owner_principal_id: string; shared: boolean; created_at: string; updated_at: string
-}
 export interface NodeCreate {
   kind_id: string; title: string; body?: string; fields?: Record<string, unknown>
   state?: string; parent_id?: string | null; before_id?: string | null; key_prefix?: string
@@ -106,8 +91,6 @@ function query(values: object): string {
 }
 const idPath = (id: string) => encodeURIComponent(id)
 export const getKinds = () => json<{ items: Kind[] }>('/kinds')
-export const getNodes = (params: NodeQuery = {}) => json<Page<WorkNode>>(`/nodes${query(params)}`)
-export const getTree = (params: { root_id?: string; cursor?: string; limit?: number } = {}) => json<Page<TreeEntry>>(`/nodes/tree${query(params)}`)
 export const getNode = (id: string) => json<WorkNode>(`/nodes/${idPath(id)}`)
 export const createNode = (body: NodeCreate) => json<WorkNode>('/nodes', 'POST', body)
 // ifUnmodifiedSince is the node's updated_at as read; a newer server copy answers 412.
@@ -170,23 +153,4 @@ export type RelationType = 'blocks' | 'relates' | 'implements' | 'cites' | 'dupl
 export interface Relation { id: string; source_node_id: string; target_node_id: string; type: RelationType; created_at: string }
 export const getRelations = (nodeId: string) => json<{ items: Relation[]; next_cursor: string | null }>(`/relations${query({ node_id: nodeId, limit: 100 })}`)
 
-export const getViews = () => json<{ items: SavedView[] }>('/views')
-export const createView = (body: ViewWrite) => json<SavedView>('/views', 'POST', body)
-export const updateView = (id: string, body: Partial<ViewWrite>) => json<SavedView>(`/views/${idPath(id)}`, 'PATCH', body)
-export const deleteView = (id: string) => json<void>(`/views/${idPath(id)}`, 'DELETE')
 
-// EventSource owns Last-Event-ID and retries; close it when the workspace unmounts.
-// Named events do not reach onmessage. Keep this list aligned with R1 writers.
-export function subscribeWorkspace(changed: () => void, connection: (live: boolean) => void): () => void {
-  const stream = new EventSource('/api/events/stream')
-  stream.onopen = () => { connection(true); changed() }
-  stream.onerror = () => connection(false)
-  stream.onmessage = changed
-  for (const resource of ['node', 'kind', 'relation', 'view']) {
-    for (const action of ['created', 'updated', 'deleted', 'moved', 'restored']) {
-      stream.addEventListener(`${resource}.${action}`, changed)
-    }
-  }
-  stream.addEventListener('event.undone', changed)
-  return () => stream.close()
-}

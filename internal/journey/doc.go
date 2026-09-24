@@ -7,9 +7,10 @@
 // reconciles shared contract changes.
 //
 // Journey face (accepted INSPR Flow prototype, read-only source
-// /Users/markus/Code/inspr-flow-next-20260922): /projects/:projectId redirects
-// to /projects/:projectId/journey/:stage; the default child stage is returned
-// by GET /projects/{projectId}/journey. Each project is one R1 project node.
+// /Users/markus/Code/inspr-flow-next-20260922) is the Journey view of the
+// project page, /p/:projectKey?view=journey&stage=<stage>; earlier
+// /projects/:projectId links redirect there. The stage shown by default is the
+// one GET /projects/{projectId}/journey returns. Each project is one R1 project node.
 // The eight stages are Inspire -> Shape -> Requirements -> Plan -> Build ->
 // Deploy -> Access -> Live. Stage and exactly one next action are projections,
 // not mutable node fields. Derive them from an accepted brief, the human Shape
@@ -60,15 +61,17 @@
 // The agreement handler locks the project, uses its revision and idempotency
 // key, and commits nodes, links and one R1 event per mutation atomically.
 //
-// Vue split: JourneyView owns route loading and stage navigation; JourneyBar
-// owns the eight-step rail and one CTA; InspirePanel, ShapePanel,
-// RequirementsPanel, PlanPanel, BuildPanel, DeployPanel, AccessPanel and
-// LivePanel own stage content; GateCard renders R2 approval state; ReleaseWalker
-// owns the full-screen A3 interaction; TicketDetails owns the selected ticket,
-// evidence and linked screens; AithemaPanel embeds AIT-34's conversation UI.
-// Put typed requests in web/src/lib/journey.ts and derived view state in
-// web/src/stores/journey.ts. Route registration belongs to the coordinator in
-// web/src/router.ts. Use Vue script setup, design tokens and centered SVG icons.
+// Vue split: components/journey/JourneyView owns loading and the one next
+// action; JourneyRail owns the eight-step rail (navigation only; the stage's
+// decision card carries the one primary button);
+// InspireStage, ShapeStage, RequirementsStage, PlanStage, BuildStage,
+// DeployStage, AccessStage and LiveStage own stage content; GateCard and
+// GateApprovals render R2 gates in the agents' "Needs you" pattern;
+// ReleaseWalker and WalkerBar own the full-screen A3 walker (screens are the
+// ticket's image attachments). Typed requests live in web/src/lib/journey.ts,
+// the projection in web/src/stores/journey.ts and stage data in
+// web/src/lib/useJourneyData.ts. Use Vue script setup, design tokens and
+// centered SVG icons.
 // Port directly from app.js: STAGES/labels, stage bar geometry, next-action
 // copy, grouped ticket display, keyboard map, screen filmstrip, search/jump,
 // compare and zoom controls, and drag-to-scroll behavior (pointer threshold
@@ -170,9 +173,9 @@
 //   - stage handoffs: internal/stagehandoff/*.go; /stage-handoffs/*; 0302.
 //   - plugin registry: internal/plugins/*.go; /plugins/*; 0303. Pharos and
 //     Janus implementations live under internal/plugins/pharos and /janus.
-//   - Vue face: web/src/views/JourneyView.vue,
-//     web/src/components/journey/*.vue, web/src/lib/journey.ts and
-//     web/src/stores/journey.ts. The coordinator wires web/src/router.ts.
+//   - Vue face: web/src/components/journey/*.vue (in the project page),
+//     web/src/lib/journey.ts, web/src/lib/useJourneyData.ts, web/src/lib/usePlan.ts
+//     and web/src/stores/journey.ts.
 //
 // The contract worker owns api/openapi.yaml, migrations 0300-0303 and this
 // doc.go. All builders consume db.InTenant, tenant.PrincipalFrom, the R1 event

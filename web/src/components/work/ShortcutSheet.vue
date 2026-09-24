@@ -29,6 +29,13 @@ const sections: { title: string; rows: { keys: Key[][]; label: string; joiner?: 
     { keys: [[{ icon: 'enter', label: 'Enter' }]], label: 'Log the entry' },
     { keys: [['Esc']], label: 'Close the review' },
   ] },
+  { title: 'Journey', rows: [
+    { keys: [['['], [']']], label: 'Previous and next stage' },
+    { keys: [['w']], label: 'Walk through the release' },
+    { keys: [[{ icon: 'arrow-left', label: 'Left arrow' }], [{ icon: 'arrow', label: 'Right arrow' }]], label: 'In the walker: previous and next ticket; with Shift, feature' },
+    { keys: [['Space']], label: 'In the walker: include in the release or defer' },
+    { keys: [['c'], ['z'], ['i']], joiner: '·', label: 'In the walker: compare, 100 %, details' },
+  ] },
   { title: 'Ticket list', rows: [
     { keys: [['j'], [{ icon: 'arrow-down', label: 'Down arrow' }]], label: 'Next ticket' },
     { keys: [['k'], [{ icon: 'arrow-up', label: 'Up arrow' }]], label: 'Previous ticket' },

@@ -38,7 +38,7 @@ const email = computed(() => session.identity ? accountEmail(session.identity) :
 const mac = /Mac|iPhone|iPad/.test(navigator.platform || navigator.userAgent)
 
 // The legacy workspace view keeps its own search; everywhere else search is global.
-const globalSearch = computed(() => !!session.identity && !route.meta.legacySearch)
+const globalSearch = computed(() => !!session.identity)
 const projectKey = computed(() => typeof route.params.projectKey === 'string' ? route.params.projectKey : '')
 const project = computed(() => projectKey.value ? projects.byRouteKey(projectKey.value) : undefined)
 const onProjects = computed(() => route.path === '/')

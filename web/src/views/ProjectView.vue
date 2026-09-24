@@ -26,6 +26,9 @@ import StatusIcon from '../components/work/StatusIcon.vue'
 import StatusMenu from '../components/work/StatusMenu.vue'
 import TicketTable from '../components/work/TicketTable.vue'
 import TicketWorkspace from '../components/work/TicketWorkspace.vue'
+import JourneyChip from '../components/journey/JourneyChip.vue'
+import JourneyView from '../components/journey/JourneyView.vue'
+import type { Stage } from '../lib/journey'
 import type { QuickDraft } from '../components/work/QuickCreateRow.vue'
 
 const route = useRoute()
@@ -50,11 +53,36 @@ function saveWidths(widths: Partial<Record<ColumnId, number>>) { listPref.value?
 const filters = computed(() => filtersFromQuery(route.query))
 const list = useTicketList(projectId, filters)
 const now = ref(Date.now())
-// List or Outline. The full page keeps whichever the ticket was opened from.
+// List, Outline or Journey. The full page keeps whichever the ticket was opened from.
+type ViewMode = 'list' | 'outline' | 'journey'
+const modeOf = (view: unknown): ViewMode => view === 'outline' ? 'outline' : view === 'journey' ? 'journey' : 'list'
 const fullViewQuery = computed(() => !!ticketKey.value && route.query.view === 'full')
-const lastListMode = ref<'list' | 'outline'>(route.query.view === 'outline' ? 'outline' : 'list')
-watch(() => route.query.view, view => { if (view !== 'full') lastListMode.value = view === 'outline' ? 'outline' : 'list' })
-const viewMode = computed<'list' | 'outline'>(() => fullViewQuery.value ? lastListMode.value : route.query.view === 'outline' ? 'outline' : 'list')
+const lastListMode = ref<ViewMode>(modeOf(route.query.view))
+watch(() => route.query.view, view => { if (view !== 'full') lastListMode.value = modeOf(view) })
+const viewMode = computed<ViewMode>(() => fullViewQuery.value ? lastListMode.value : modeOf(route.query.view))
+const journeyActive = computed(() => viewMode.value === 'journey')
+// The journey's own place: the stage looked at, a chosen release and the walker's ticket.
+const JOURNEY_KEYS = ['stage', 'release', 'walk'] as const
+const queryText = (value: unknown) => typeof value === 'string' && value ? value : null
+const journeyStage = computed(() => queryText(route.query.stage))
+const journeyRelease = computed(() => queryText(route.query.release))
+const journeyWalk = computed(() => queryText(route.query.walk))
+function journeyQuery(patch: Partial<Record<typeof JOURNEY_KEYS[number], string | null>> = {}) {
+  const query: Record<string, string> = { view: 'journey' }
+  for (const key of JOURNEY_KEYS) {
+    const value = key in patch ? patch[key] : queryText(route.query[key])
+    if (value) query[key] = value
+  }
+  return query
+}
+function journeyStageTo(stage: Stage) { void router.push({ path: `/p/${encodeURIComponent(routeKey.value)}`, query: journeyQuery({ stage, walk: null }) }) }
+function journeyReleaseTo(key: string | null) { void router.replace({ path: route.path, query: journeyQuery({ release: key }) }) }
+function journeyWalkTo(key: string | null, mode: 'open' | 'move' | 'close') {
+  if (mode === 'open') { void router.push({ path: route.path, query: journeyQuery({ walk: key }) }); return }
+  if (mode === 'move') { void router.replace({ path: route.path, query: journeyQuery({ walk: key }) }); return }
+  if (typeof window.history.state?.back === 'string' && window.history.state.back.includes('view=journey') && !window.history.state.back.includes('walk=')) router.back()
+  else void router.replace({ path: route.path, query: journeyQuery({ walk: null }) })
+}
 const outlineActive = computed(() => viewMode.value === 'outline')
 const outline = useOutline(projectId, filters, outlineActive, list)
 
@@ -119,14 +147,16 @@ function options(dimension: Dimension) {
 
 // ---------- URL state ----------
 function update(patch: Partial<ListFilters>) {
-  const view = route.query.view === 'outline' || route.query.view === 'full' ? { view: route.query.view } : {}
+  const view = route.query.view === 'outline' || route.query.view === 'full' || route.query.view === 'journey' ? { view: route.query.view } : {}
   void router.replace({ path: route.path, query: { ...filtersToQuery({ ...filters.value, ...patch }), ...view } })
 }
-function setView(mode: 'list' | 'outline') {
+function setView(mode: ViewMode) {
   if (mode === viewMode.value) return
   creating.value = false
-  const { view: _view, ...query } = route.query
-  void router.replace({ path: route.path, query: mode === 'outline' ? { ...query, view: 'outline' } : query })
+  const { view: _view, stage: _stage, release: _release, walk: _walk, ...query } = route.query
+  if (mode === 'journey') { void router.push({ path: `/p/${encodeURIComponent(routeKey.value)}`, query: { view: 'journey' } }); return }
+  const path = viewMode.value === 'journey' ? `/p/${encodeURIComponent(routeKey.value)}` : route.path
+  void router.replace({ path, query: mode === 'outline' ? { ...query, view: 'outline' } : query })
 }
 function toggleValue(dimension: Dimension, value: string) {
   const current = filters.value[dimension]
@@ -148,7 +178,7 @@ function toggleGroup(key: string) {
 const queryKey = computed(() => projectId.value ? JSON.stringify(apiParams(projectId.value, filters.value)) : '')
 // The Outline without filters loads its own levels; the list query then only supplies
 // counts. With filters or Hide closed, the Outline needs the list's whole match set.
-const listLoadMode = computed(() => !outlineActive.value ? 'list' : outline.matchMode.value ? 'all' : 'counts')
+const listLoadMode = computed(() => journeyActive.value ? 'counts' : !outlineActive.value ? 'list' : outline.matchMode.value ? 'all' : 'counts')
 watch([queryKey, listLoadMode], async ([value, mode], old) => {
   if (!value) return
   // Switching views on the same query reuses the rows already loaded.
@@ -240,6 +270,7 @@ function openKey(key: string) {
 function openRow(row: ListItem) { cursorId.value = row.id; openKey(row.key) }
 function listQuery() {
   const { view, ...query } = route.query
+  if (view === 'journey' || (view === 'full' && lastListMode.value === 'journey')) return journeyQuery()
   return view === 'outline' || (view === 'full' && lastListMode.value === 'outline') ? { ...query, view: 'outline' } : query
 }
 function closePanel() {
@@ -453,6 +484,9 @@ function keydown(event: KeyboardEvent) {
     if (event.key === 'ArrowDown' && target === toolbar.value?.input) { event.preventDefault(); target.blur(); void move(cursorId.value ? 0 : 1) }
     return
   }
+  // The journey has its own keys; with a ticket open, the panel's keys still work.
+  if (journeyActive.value && !ticketKey.value) return
+  if (journeyActive.value && ['j', 'k', 'ArrowDown', 'ArrowUp', 'Enter', 'o', '/', 'n'].includes(event.key)) return
   const row = sequence.value.find(item => item.id === cursorId.value)
   if (outlineActive.value && !fullView.value && outlineKey(event, row)) return
   switch (event.key) {
@@ -558,6 +592,7 @@ watch([project, panelItem], ([current, item]) => {
             <span v-else-if="project.archived" class="chip state-chip">Archived</span>
           </div>
           <p class="description" :data-tip="project.description.length > 120 ? project.description : undefined">{{ project.description || 'No description yet.' }}</p>
+          <JourneyChip :project-id="project.id" :active="journeyActive" @go="journeyActive ? journeyStageTo(journeyStage as Stage ?? 'inspire') : setView('journey')" />
         </div>
         <div v-if="counts" class="head-stats" :aria-label="`${counts.open} open, ${counts.progress} in progress, ${counts.done} done of ${counts.total}`">
           <div class="stat-line">
@@ -585,8 +620,13 @@ watch([project, panelItem], ([current, item]) => {
         />
       </div>
 
+      <JourneyView
+        v-if="journeyActive" :project="{ id: project.id, routeKey: project.routeKey, title: project.title }" :stage="journeyStage" :release-key="journeyRelease" :walk-key="journeyWalk"
+        :can-write="writable" :person="session.identity?.principal.kind !== 'agent'" :me="me?.id ?? null"
+        @stage="journeyStageTo" @release="journeyReleaseTo" @walk="journeyWalkTo" @open="openKey"
+      />
       <TicketTable
-        ref="table" :expected-rows="expectedRows" :groups="groups" :group="filters.group" :rows-by-id="rowsById" :cursor-id="cursorId" :open-id="panelItem?.id ?? null"
+        v-else ref="table" :expected-rows="expectedRows" :groups="groups" :group="filters.group" :rows-by-id="rowsById" :cursor-id="cursorId" :open-id="panelItem?.id ?? null"
         :query="filters.q" :sort="filters.sort" :density="density"
         :loading="outlineActive ? outline.loading.value : list.loading.value" :loading-more="outlineActive ? outline.loadingMoreRoot.value : list.loadingMore.value"
         :error="outlineActive ? outline.error.value || list.error.value : list.error.value" :more-error="list.moreError.value"
@@ -602,7 +642,7 @@ watch([project, panelItem], ([current, item]) => {
         @retry="outlineActive ? outline.reload() : list.load()" @more="outlineActive ? outline.loadMoreRoot() : list.loadMore()" @grid-focus="focusFirst" @clear-filters="clearFilters" @show-closed="update({ showClosed: true })"
       />
 
-      <p class="hint">
+      <p v-if="!journeyActive" class="hint">
         <kbd class="keycap">j</kbd><kbd class="keycap">k</kbd> move · <kbd class="keycap"><AppIcon name="enter" /></kbd> open · <kbd class="keycap">/</kbd> search ·
         <button type="button" class="hint-link" @click="run({ name: 'shortcuts' })"><kbd class="keycap">?</kbd> all shortcuts</button>
       </p>
@@ -618,7 +658,7 @@ watch([project, panelItem], ([current, item]) => {
       />
       <StatusMenu v-if="statusMenu" :anchor="statusMenu.anchor" :current="statusMenu.row.state" :known-states="knownStates" :ticket-key="statusMenu.row.key" @choose="chooseStatus" @close="closeStatus" />
       <FilterSheet
-        ref="filterSheet" :filters="filters" :options="options" :total="total" :view="viewMode" @expand-all="outline.expandAll()" @collapse-all="outline.collapseAll()"
+        ref="filterSheet" :filters="filters" :options="options" :total="total" :view="viewMode === 'journey' ? 'list' : viewMode" @expand-all="outline.expandAll()" @collapse-all="outline.collapseAll()"
         @toggle="toggleValue" @clear-all="clearFilters" @show-closed="value => update({ showClosed: value })" @group="setGroup"
         @opened="list.resolveNames(options('assignee').map(o => o.value))"
       />

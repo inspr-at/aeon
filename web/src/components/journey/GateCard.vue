@@ -1,36 +1,65 @@
 <!-- SPDX-License-Identifier: AGPL-3.0-only -->
 <script setup lang="ts">
-import { computed, ref, onMounted, onBeforeUnmount } from 'vue'
-import type { Approval } from '../../lib/agents'
-const props = defineProps<{ title: string; approval?: Approval; requested?: boolean; busy: boolean; canDecide: boolean; independent?: boolean }>()
-defineEmits<{ decide: [id: string, decision: 'approved' | 'denied', reason: string] }>()
-const reason = ref('')
-const now = ref(Date.now())
-let timer: ReturnType<typeof setInterval> | undefined
-onMounted(() => { timer = setInterval(() => { now.value = Date.now() }, 1000) })
-onBeforeUnmount(() => { if (timer) clearInterval(timer) })
-const expired = computed(() => !!props.approval && (!Number.isFinite(Date.parse(props.approval.expires_at)) || Date.parse(props.approval.expires_at) <= now.value))
+import AppIcon from '../AppIcon.vue'
+
+// The decision card beside a stage: an eyebrow, the decision's name and the one
+// primary button, with a gold seal. Records (decided, done) and blocked gates use
+// the same card without the button's glow.
+defineProps<{
+  eyebrow: string; title: string; tone?: 'gate' | 'record' | 'blocked'
+  action?: { label: string; disabled?: boolean; busy?: boolean; tip?: string } | null
+}>()
+const emit = defineEmits<{ act: [] }>()
 </script>
+
 <template>
-  <section class="j-card gate" aria-label="Human gate">
-    <div class="eyebrow">Human decision</div><h2>{{ title }}</h2>
-    <template v-if="approval">
-      <p>{{ approval.rationale }}</p>
-      <dl class="j-kv"><dt>Scope</dt><dd>{{ approval.scope }}</dd><dt>Resource</dt><dd>{{ approval.resource_kind }} · {{ approval.resource_id || 'Tenant' }}</dd><dt>Status</dt><dd>{{ expired ? 'Expired' : approval.decision || 'Awaiting decision' }}</dd><dt>Expires</dt><dd>{{ new Date(approval.expires_at).toLocaleString() }}</dd><template v-if="approval.decided_by_principal_id"><dt>Decided by</dt><dd>{{ approval.decided_by_principal_id }}</dd></template></dl>
-      <p v-if="independent" class="j-note">Enterprise requires a named reviewer independent of the builder and current compliance checks. The server verifies the deciding person.</p>
-      <form v-if="!approval.decision && !expired && canDecide" @submit.prevent="$emit('decide', approval.id, 'approved', reason)">
-        <label class="j-label">Decision reason<textarea v-model="reason" maxlength="2048" rows="2" required /></label>
-        <div class="j-actions"><button class="j-button" :disabled="busy || !reason.trim()">Approve gate</button><button type="button" class="j-button" :disabled="busy || !reason.trim()" @click="$emit('decide', approval.id, 'denied', reason)">Deny gate</button></div>
-      </form>
-      <p v-else-if="!canDecide" class="j-note">A person must decide this gate.</p>
-    </template>
-    <p v-else>{{ requested ? 'The referenced approval is unavailable. Refresh or inspect Approvals.' : 'No human gate has been proposed for this stage yet.' }}</p>
-    <RouterLink class="j-link" to="/agents">View approvals</RouterLink>
+  <section class="gate-card" :class="tone ?? 'gate'" :aria-label="`${eyebrow}: ${title}`">
+    <span v-if="(tone ?? 'gate') === 'gate'" class="seal" aria-hidden="true" />
+    <header class="gh">
+      <div class="gh-text">
+        <p class="eyebrow gate-eyebrow"><AppIcon v-if="tone === 'blocked'" name="alert" :size="11" />{{ eyebrow }}</p>
+        <h2>{{ title }}</h2>
+      </div>
+      <button
+        v-if="action" type="button" class="btn primary gate-btn" :disabled="action.disabled || action.busy" :aria-disabled="action.disabled || undefined"
+        :data-tip="action.tip" @click="emit('act')"
+      >{{ action.busy ? 'Working…' : action.label }}<AppIcon name="arrow" :size="14" /></button>
+    </header>
+    <div class="gate-body"><slot /></div>
   </section>
 </template>
+
 <style scoped>
-.gate { position:relative; background:radial-gradient(ellipse at 100% 0,var(--aqua-2),transparent 65%),var(--glass); }
-.gate::after { content:''; position:absolute; inset:6px; border:1px solid color-mix(in srgb,var(--gold) 35%,transparent); border-radius:11px; pointer-events:none; }
-.gate h2 { font-size:25px; font-weight:300; margin:6px 0 12px; padding-right:32px; }.gate::before { content:''; position:absolute; top:24px; right:24px; width:24px; height:24px; border:1.5px solid var(--gold); border-radius:50%; background:radial-gradient(circle,var(--aqua) 0 3px,var(--surface) 4px, var(--gold-wash)); }
-.j-link { display:inline-block; margin-top:12px; font-size:12px; }
+.gate-card {
+  position: relative; display: grid; gap: 12px; padding: 16px 18px 16px; border-radius: var(--radius); isolation: isolate;
+  background: radial-gradient(120% 90% at 100% 0%, color-mix(in oklab, var(--aqua-2) 70%, transparent), transparent 55%), var(--glass);
+  box-shadow: var(--shadow), 0 0 70px -24px rgba(164, 229, 223, .9);
+  backdrop-filter: blur(18px); -webkit-backdrop-filter: blur(18px);
+}
+/* A gold hairline just inside the edge. */
+.gate-card::after { content: ''; position: absolute; inset: 6px; z-index: -1; border-radius: calc(var(--radius) - 5px); box-shadow: inset 0 0 0 1px rgba(214, 155, 49, .35); pointer-events: none; }
+.gate-card.record { background: var(--glass); box-shadow: var(--shadow); }
+.gate-card.record::after { box-shadow: inset 0 0 0 1px var(--line); }
+.gate-card.blocked { background: radial-gradient(120% 90% at 100% 0%, var(--danger-bg), transparent 60%), var(--glass); box-shadow: var(--shadow); }
+.gate-card.blocked::after { box-shadow: inset 0 0 0 1px var(--danger-line); }
+.seal {
+  position: absolute; top: 14px; right: 14px; width: 26px; height: 26px; border-radius: 50%;
+  border: 1.5px solid var(--gold); background: radial-gradient(circle, var(--teal) 0 3px, var(--surface) 4px, color-mix(in oklab, var(--gold-2) 40%, var(--surface)));
+  box-shadow: 0 0 12px -2px rgba(214, 155, 49, .6);
+}
+.gh { display: flex; align-items: flex-start; gap: 12px; padding-right: 38px; }
+.record .gh, .blocked .gh { padding-right: 0; }
+.gh-text { flex: 1; min-width: 0; }
+.gate-eyebrow { display: inline-flex; align-items: center; gap: 6px; color: var(--teal-ink); }
+.blocked .gate-eyebrow { color: var(--danger); }
+.record .gate-eyebrow { color: var(--ink-3); }
+.gh h2 { margin-top: 4px; font-size: 22px; font-weight: 300; letter-spacing: -.01em; overflow-wrap: anywhere; }
+.gate-btn { flex-shrink: 0; gap: 8px; }
+.gate-btn[aria-disabled="true"] { cursor: not-allowed; }
+.gate-body { display: grid; gap: 10px; font-size: 13.5px; color: var(--ink-2); }
+.gate-body:empty { display: none; }
+@media (max-width: 720px) {
+  .gh { flex-wrap: wrap; }
+  .gate-btn { width: 100%; justify-content: center; order: 2; }
+}
 </style>

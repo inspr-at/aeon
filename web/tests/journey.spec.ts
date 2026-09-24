@@ -1,235 +1,324 @@
 // SPDX-License-Identifier: AGPL-3.0-only
-// Coordinator runs: npx playwright test -c playwright.ui.config.ts journey.spec.ts
-// Production router remains coordinator-owned. This harness mounts the real view
-// with the existing shell/session and mocks only contract HTTP routes.
+// U10: the project journey inside the project page. The rail with the one next
+// action, gates as approvals, the plan with tri-state features, the release walker
+// (A3), intake, the blocked deploy gate and the header's compact stage.
 import { test, expect, type Page } from '@playwright/test'
-import type { Journey, ReleaseWalker, Stage, Intake } from '../src/lib/journey'
-const project='10000000-0000-4000-8000-000000000001', release='20000000-0000-4000-8000-000000000001', gate='30000000-0000-4000-8000-000000000001'
-const feature='40000000-0000-4000-8000-000000000001', second='40000000-0000-4000-8000-000000000002'
-const id=(n:number)=>`50000000-0000-4000-8000-${String(n).padStart(12,'0')}`
-const stamp='2026-09-23T10:00:00Z'
-const stageKeys: Stage[]=['inspire','shape','requirements','plan','build','deploy','access','live']
-function node(nodeId:string,title:string,key:string,body='Recorded description') { return {id:nodeId,key,title,body,kind_id:'kind',fields:{},state:'open',parent_id:project,position:'a',created_at:stamp,updated_at:stamp} }
-async function setup(page:Page, options:{stage?:Stage;kind?:string;many?:boolean}={}) {
-  const current=options.stage||'plan'
-  const journey:Journey={project_node_id:project,profile:'professional',revision:5,stage:current,stages:stageKeys.map((key,i)=>({key,state:i<stageKeys.indexOf(current)?'done':key===current?'current':'later'})),next_action:{key:current==='build'?'wait_for_build':current==='requirements'?'approve_requirements':'start_build',label:current==='build'?'Building release':current==='requirements'?'Agree requirements':'Start build',stage:current,available:current!=='build',approval_request_id:gate},requirements_revision:2,current_release_id:release}
-  const walker:ReleaseWalker={project_node_id:project,release_node_id:release,revision:7,state:current==='build'?'building':'planning',features:[{feature_node_id:feature,epic_key:'EP-1',title:'Order flow',selection:'some'},{feature_node_id:second,epic_key:'EP-2',title:'Customer access',selection:'none'},{feature_node_id:'empty',epic_key:'EP-3',title:'Future feature',selection:'empty'}],tickets:Array.from({length:options.many?30:4},(_,i)=>({ticket_node_id:id(i+1),key:`T-${i+1}`,title:`Ticket ${i+1}`,feature_node_id:i<2?feature:second,included:i===0,position:i,estimated_hours:2,screen_node_ids:i===0?['screen-1','screen-2']:[]}))}
-  const intake:Intake={sources:[],turns:[],drafts:[]}
-  const approval={id:gate,agent_principal_id:'agent',scope:'journey.build',resource_kind:'node',resource_id:release,rationale:'Build the agreed release plan.',expires_at:'2099-01-01T00:00:00Z',proposed_at:stamp,decision:'approved' as string|null,decided_by_principal_id:'person'}
-  const state={journey,walker,intake,approval,failWrite:false,failRead:false,slowProject:false}
-  const calls:{path:string;method:string;body:any}[]=[]
-  await page.addInitScript(()=> { class MockEventSource { constructor(){} addEventListener(){} close(){} }; Object.assign(window,{EventSource:MockEventSource}) })
-  await page.route('**/api/**',async route=>{
-    const path=new URL(route.request().url()).pathname,method=route.request().method(),body=route.request().postDataJSON()
-    calls.push({path,method,body})
-    if(path==='/api/me') return route.fulfill({json:{principal:{id:'person',kind:options.kind||'person',name:'Markus Barta'},tenant:{id:'tenant',name:'INSPR'}}})
-    if(path==='/api/version') return route.fulfill({json:{version:'260923161128.0.0',scheme:'inspr-calendar-v2'}})
-    if(state.failWrite && method!=='GET') return route.fulfill({status:409,json:{error:'Stale revision'}})
-    if(state.failRead && path.includes('/journey')) return route.fulfill({status:503,json:{error:'Journey unavailable'}})
-    if(path===`/api/projects/${project}/journey`) return route.fulfill({json:state.journey})
-    if(path.endsWith('/journey/profile')) { state.journey.profile=body.profile;state.journey.revision++;return route.fulfill({json:state.journey}) }
-    if(path.endsWith('/journey/actions')) { state.journey.revision++;state.journey.stage='build';state.journey.stages=stageKeys.map((key,i)=>({key,state:i<4?'done':i===4?'current':'later'}));state.journey.next_action={key:'wait_for_build',label:'Building release',stage:'build',available:false};state.walker.state='building';return route.fulfill({json:state.journey}) }
-    if(path.endsWith('/requirements/agree')) return route.fulfill({json:[]})
-    if(path.endsWith('/requirements')) return route.fulfill({json:method==='POST'?{...body,node_id:'req',project_node_id:project,status:'draft',revision:3}:[{node_id:'req',project_node_id:project,kind:'functional',revision:2,status:'agreed',title:'Take orders',feature_node_id:feature,generated_ticket_ids:[id(1),id(2)]}]})
-    if(path.endsWith('/walker')) return route.fulfill({json:state.walker})
-    if(path.endsWith('/plan')) { state.walker.tickets=body.ordered_ticket_ids.map((ticketId:string,index:number)=>({...state.walker.tickets.find(t=>t.ticket_node_id===ticketId),position:index,included:body.included_ticket_ids.includes(ticketId)}));state.walker.revision++;return route.fulfill({json:state.walker}) }
-    if(path.endsWith('/intake')) return route.fulfill({json:state.intake})
-    if(path.endsWith('/accept')) return route.fulfill({json:state.intake.drafts[0]})
-    if(path==='/api/approvals') return route.fulfill({json:[state.approval]})
-    if(path.endsWith('/decision')) { state.approval.decision=body.decision;return route.fulfill({json:state.approval}) }
-    if(path.startsWith('/api/nodes/')) {
-      const nodeId=decodeURIComponent(path.split('/').at(-1)!)
-      if(nodeId==='tree') return route.fulfill({json:{items:[],next_cursor:null}})
-      if(nodeId===project) return route.fulfill({json:node(project,'Bakery orders','PROJ-1')})
-      if(nodeId===release) return route.fulfill({json:node(release,'Release 1','REL-1')})
-      const t=state.walker.tickets.find(t=>t.ticket_node_id===nodeId)
-      return route.fulfill({json:node(nodeId,t?.title||'Linked screen',t?.key||nodeId,nodeId==='screen-1'?'# Order form\nChoose your bread.':nodeId==='screen-2'?'# Revised form\nChoose a pickup time.':'Recorded ticket evidence')})
-    }
-    if(path==='/api/kinds'||path==='/api/views') return route.fulfill({json:{items:[]}})
-    if(path.startsWith('/api/stage-handoffs/')) return route.fulfill({json:{id:'handoff',project_node_id:project,release_node_id:release,stage:'deploy',operation:'deploy',plugin_id:'pharos',attempt:2,authority_epoch:2,state:'blocked',expires_at:'2099-01-01T00:00:00Z',result:{outcome:'failed',blocker_code:'policy_refused',completed_at:stamp}}})
-    return route.fulfill({status:404,json:{error:'Uncontracted route'}})
-  })
-  return {state,calls}
+import { fixtures, mockWork, watchErrors } from './work-fixtures'
+import { journeyWorld, mockJourney, type JourneyStart, type WorldOptions } from './journey-fixtures'
+
+async function open(page: Page, start: JourneyStart = 'plan', path = '/p/PHAROS?view=journey', options: WorldOptions & { failPlan?: boolean; kind?: 'person' | 'agent'; noTicketRoute?: boolean } = {}) {
+  await page.setViewportSize({ width: 1440, height: 900 })
+  await mockWork(page, fixtures())
+  const world = journeyWorld(start, options)
+  const calls = await mockJourney(page, world, options)
+  await page.goto(path)
+  await expect(page.getByRole('navigation', { name: 'Project journey' })).toBeVisible()
+  return { world, calls }
 }
-async function mount(page:Page,stage?:Stage) {
-  await page.goto('/')
-  await page.evaluate(async ({project,stage})=>{
-    // Dynamic import strings deliberately refer to Vite's served source modules.
-    const routerModule='/src/router.ts',viewModule='/src/views/JourneyView.vue'
-    const {router}=await import(routerModule),{default:component}=await import(viewModule)
-    router.addRoute({path:'/projects/:projectId',component})
-    router.addRoute({path:'/projects/:projectId/journey/:stage',component})
-    await router.push(`/projects/${project}${stage?`/journey/${stage}`:''}`)
-  },{project,stage})
-  await expect(page.getByRole('navigation',{name:'Project journey'})).toBeVisible()
-}
-async function walker(page:Page) { await page.getByRole('button',{name:'Full screen',exact:true}).click();return page.getByRole('dialog',{name:'Release walker',exact:true}) }
+const rail = (page: Page) => page.getByRole('navigation', { name: 'Project journey' })
+const writes = (calls: { method: string; path: string }[], suffix: string) => calls.filter(c => c.method !== 'GET' && c.path.endsWith(suffix))
 
-test.use({viewport:{width:1280,height:720}})
-test('server default stage, eight steps, fixed workspace, no hover shift',async({page})=>{
-  await setup(page);await mount(page)
-  await expect(page).toHaveURL(new RegExp(`/projects/${project}/journey/plan$`))
-  await expect(page.getByRole('navigation',{name:'Project journey'}).locator('li')).toHaveCount(8)
-  await expect(page.getByText('No tickets · no accepted breakdown yet.')).toBeVisible()
-  const button=page.getByRole('button',{name:'Full screen',exact:true}),before=await button.boundingBox();await button.hover();expect(await button.boundingBox()).toEqual(before)
-  expect(await page.evaluate(()=>({body:document.documentElement.scrollHeight<=innerHeight,main:document.querySelector('main')!.scrollHeight<=document.querySelector('main')!.clientHeight}))).toEqual({body:true,main:true})
-})
-test('A3 feature checkbox restores its remembered partial set with revision-fenced PUTs',async({page})=>{
-  const {calls}=await setup(page);await mount(page);const dialog=await walker(page)
-  const group=dialog.getByRole('checkbox',{name:/Select Order flow/})
-  await expect(group).toHaveAttribute('aria-checked','mixed')
-  for(const value of ['true','false','mixed']) {await group.click();await expect(group).toHaveAttribute('aria-checked',value);await expect(group).toBeEnabled()}
-  const writes=calls.filter(c=>c.method==='PUT'&&c.path.endsWith('/plan'))
-  expect(writes.map(c=>c.body.expected_revision)).toEqual([7,8,9])
-  expect(writes.map(c=>c.body.included_ticket_ids)).toEqual([[id(1),id(2)],[],[id(1)]])
-  expect(writes.every(c=>c.body.ordered_ticket_ids.length===4)).toBeTruthy()
-})
-test('A3 wraps tickets and features; search, screens, compare, zoom, details and focus',async({page})=>{
-  await setup(page);await mount(page);const dialog=await walker(page)
-  await dialog.focus();await page.keyboard.press('ArrowLeft');await expect(dialog.getByRole('heading',{name:'Ticket 4',exact:true})).toBeVisible()
-  await page.keyboard.press('Shift+ArrowRight');await expect(dialog.getByRole('heading',{name:'Ticket 1',exact:true})).toBeVisible()
-  await expect(dialog.getByRole('heading',{name:'Order form',exact:true})).toBeVisible()
-  await page.keyboard.press('ArrowDown');await expect(dialog.getByRole('heading',{name:'Revised form',exact:true})).toBeVisible()
-  await page.keyboard.press('c');await expect(dialog.getByLabel('Compare linked screen')).toBeVisible()
-  await page.keyboard.press('z');await expect(dialog.getByRole('button',{name:'Zoom to 100 percent'})).toHaveAttribute('aria-pressed','true')
-  await page.keyboard.press('i');await expect(dialog.getByLabel('Ticket details', {exact:true})).toHaveCount(1)
-  await page.keyboard.press('/');await dialog.getByLabel('Search tickets').fill('Ticket 3');await page.keyboard.press('Enter')
-  await page.keyboard.press('i');await expect(dialog.getByRole('heading',{name:'Ticket 3',exact:true})).toBeVisible()
-  await dialog.focus();await page.keyboard.press('?');await expect(dialog.getByRole('heading',{name:'Shortcuts'})).toBeVisible()
-  await page.keyboard.press('Escape');await expect(dialog).toBeVisible();await page.keyboard.press('Escape');await expect(dialog).not.toBeVisible()
-  await expect(page.getByRole('button',{name:'Full screen',exact:true})).toBeFocused()
-})
-test('dragging the A3 header never activates a ticket',async({page})=>{
-  await setup(page,{many:true});await mount(page);const dialog=await walker(page)
-  const chip=dialog.locator('.ticket-chip button').first(),box=await chip.boundingBox();expect(box).not.toBeNull()
-  await page.mouse.move(box!.x+box!.width/2,box!.y+box!.height/2);await page.mouse.down();await page.mouse.move(box!.x-220,box!.y+box!.height/2,{steps:12});await page.mouse.up()
-  await expect(dialog.getByRole('heading',{name:'Ticket 1',exact:true})).toBeVisible()
-  expect(await dialog.locator('.walker-rail').evaluate(el=>el.scrollLeft)).toBeGreaterThan(0)
-})
-test('conflicting plans preserve server selection and block writes until refresh',async({page})=>{
-  const {state,calls}=await setup(page);await mount(page);const dialog=await walker(page);state.failWrite=true
-  await dialog.getByRole('checkbox',{name:'Include T-2',exact:true}).click()
-  await expect(dialog.getByRole('alert')).toContainText('This project changed')
-  await expect(dialog.getByRole('checkbox',{name:'Include T-2',exact:true})).not.toBeChecked()
-  await expect(dialog.getByRole('checkbox',{name:'Include T-1',exact:true})).toBeDisabled()
-  expect(calls.filter(c=>c.method==='PUT').length).toBe(1)
-  state.failWrite=false;await dialog.getByRole('button',{name:'Refresh',exact:true}).click();await expect(dialog.getByRole('checkbox',{name:'Include T-1',exact:true})).toBeEnabled()
-})
-test('one server next action, bounded build approval, then passive build with no plan editing',async({page})=>{
-  const {calls}=await setup(page);await mount(page)
-  await page.getByRole('button',{name:'Start build',exact:true}).click();await page.getByRole('button',{name:'Confirm action',exact:true}).click()
-  await expect(page).toHaveURL(/journey\/build$/)
-  await expect(page.getByRole('navigation',{name:'Project journey'})).toContainText('Building release')
-  expect(calls.find(c=>c.path.endsWith('/journey/actions'))?.body).toMatchObject({action:'start_build',expected_revision:5,approval_request_id:gate,release_id:release})
-  expect(calls.filter(c=>c.path.endsWith('/decision'))).toHaveLength(0)
-  const dialog=await walker(page);await expect(dialog.getByRole('checkbox',{name:'Include T-1',exact:true})).toBeDisabled()
-  await dialog.focus();await page.keyboard.press('Space');expect(calls.filter(c=>c.path.endsWith('/plan'))).toHaveLength(0)
-})
-test('profile writes use stable slugs and keep gate history',async({page})=>{
-  const {calls}=await setup(page);await mount(page)
-  const profile=page.getByLabel('Profile',{exact:true})
-  await expect(profile).toHaveAccessibleName('Profile')
-  await expect(profile).toHaveValue('professional')
-  await profile.selectOption('enterprise')
-  await expect(page.getByRole('status')).toContainText('Profile saved')
-  await expect(profile).toHaveValue('enterprise')
-  expect(calls.find(c=>c.path.endsWith('/journey/profile'))?.body).toEqual({profile:'enterprise',expected_revision:5})
-  await expect(page.getByLabel('Human gate')).toContainText('approved')
-})
-test('agent and unavailable action cannot mutate the journey',async({page})=>{
-  const {state,calls}=await setup(page,{kind:'agent'});state.journey.next_action.available=false;state.journey.next_action.reason='Requirements agreement expired.'
-  await mount(page)
-  await expect(page.getByRole('button',{name:'Start build',exact:true})).toBeDisabled()
-  await expect(page.getByLabel('Profile',{exact:true})).toBeDisabled()
-  const dialog=await walker(page);await expect(dialog.getByRole('checkbox',{name:'Include T-1',exact:true})).toBeDisabled()
-  expect(calls.filter(c=>c.method!=='GET')).toHaveLength(0)
-})
-test('human gate decisions are explicit R2 writes, distinct from journey actions',async({page})=>{
-  const {state,calls}=await setup(page);state.approval.decision=null;state.journey.next_action.available=false;state.journey.next_action.reason='Build gate pending.'
-  await mount(page);await page.getByLabel('Decision reason').fill('Reviewed scope and budget');await page.getByRole('button',{name:'Approve gate',exact:true}).click()
-  await expect(page.getByLabel('Human gate')).toContainText('approved')
-  expect(calls.find(c=>c.path.endsWith('/decision'))?.body).toEqual({decision:'approved',reason:'Reviewed scope and budget'})
-  expect(calls.filter(c=>c.path.endsWith('/journey/actions'))).toHaveLength(0)
-})
-test('requirements agreement uses its dedicated endpoint and project revision',async({page})=>{
-  const {calls}=await setup(page,{stage:'requirements'});await mount(page)
-  await page.getByRole('button',{name:'Agree requirements',exact:true}).click();await page.getByRole('button',{name:'Confirm action'}).click()
-  await expect(page.getByRole('status')).toContainText('Requirements agreed')
-  expect(calls.find(c=>c.path.endsWith('/requirements/agree'))?.body).toMatchObject({expected_revision:5,approval_request_id:gate})
-  expect(calls.filter(c=>c.path.endsWith('/journey/actions'))).toHaveLength(0)
-})
-test('deployment blocker and skipped access reflect server evidence',async({page})=>{
-  const {state}=await setup(page,{stage:'deploy'});state.journey.next_action={key:'retry_deploy',label:'Retry deployment',stage:'deploy',available:false,reason:'Fresh backup evidence required.'};state.journey.stages.find(s=>s.key==='deploy')!.handoff_id='handoff';state.journey.stages.find(s=>s.key==='access')!.state='skipped'
-  await mount(page);await expect(page.getByText('policy refused',{exact:true})).toBeVisible();await expect(page.getByRole('button',{name:'Retry deployment'})).toBeDisabled()
-  await page.getByRole('link',{name:'Access · skipped',exact:true}).click();await expect(page.getByRole('heading',{name:'Not needed in this release'})).toBeVisible()
-})
-test('intake shows saved citations and submits base-event-fenced acceptance',async({page})=>{
-  const {state,calls}=await setup(page,{stage:'inspire'});state.journey.next_action={key:'continue_intake',label:'Continue conversation',stage:'inspire',available:true}
-  state.intake.sources=[{id:'source',project_node_id:project,kind:'conversation',label:'Bakery conversation',content_sha256:'a'.repeat(64),created_at:stamp}]
-  state.intake.turns=[{id:'turn',source_id:'source',ordinal:0,speaker:'person',body:'Make bread orders easy.',created_at:stamp}]
-  state.intake.drafts=[{id:'draft',kind:'brief',title:'Order brief',body:'A short order form.',base_event_id:42,status:'proposed',proposed_at:stamp,citations:[{source_id:'source',turn_id:'turn',locator:'turn 1'}]}]
-  await mount(page);await page.getByRole('button',{name:'Transcript',exact:true}).click();await expect(page.getByText('Make bread orders easy.')).toBeVisible()
-  await expect(page.getByText('Bakery conversation · turn 1')).toBeVisible();await page.getByRole('button',{name:'Accept draft',exact:true}).click()
-  await expect(page.getByRole('status')).toContainText('Cited draft accepted');expect(calls.find(c=>c.path.endsWith('/accept'))?.body).toEqual({expected_base_event_id:42})
+test('Journey is a third view of the project, with the stage and next action in the header', async ({ page }) => {
+  const errors = watchErrors(page)
+  await page.setViewportSize({ width: 1440, height: 900 })
+  await mockWork(page, fixtures())
+  await mockJourney(page, journeyWorld('plan'))
+  await page.goto('/p/PHAROS')
+  const chip = page.getByRole('button', { name: /^Journey: Plan, stage 4 of 8\. Next: Start build/ })
+  await expect(chip).toBeVisible()
+  await page.getByRole('radio', { name: 'Journey view' }).click()
+  await expect(page).toHaveURL(/view=journey/)
+  await expect(rail(page).locator('li')).toHaveCount(8)
+  await expect(rail(page).getByRole('button', { name: '4. Plan, now' })).toHaveAttribute('aria-current', 'step')
+  await expect(rail(page).getByRole('button', { name: '1. Inspire, done' })).toBeVisible()
+  // The rail only navigates; the one primary button is on the decision card (the gate is requested, so it approves and starts).
+  await expect(rail(page).locator('.btn.primary, .stage-cta')).toHaveCount(0)
+  await expect(page.locator('.btn.primary:visible')).toHaveText(['Approve and start build'])
+  await expect(page.getByRole('heading', { name: 'Plan release 2' })).toBeVisible()
+  // [ and ] move between stages.
+  await page.locator('body').click({ position: { x: 5, y: 400 } })
+  await page.keyboard.press(']')
+  await expect(page).toHaveURL(/stage=build/)
+  await page.keyboard.press('[')
+  await expect(page).toHaveURL(/stage=plan/)
+  // Back to the list.
+  await page.getByRole('radio', { name: 'List view' }).click()
+  await expect(page.locator('tr.ticket-row').first()).toBeVisible()
+  expect(errors).toEqual([])
 })
 
-test('expired human gates are readable but cannot be approved',async({page})=>{
-  const {state,calls}=await setup(page);state.approval.decision=null;state.approval.expires_at='2000-01-01T00:00:00Z';state.journey.next_action.available=false
-  await mount(page);await expect(page.getByLabel('Human gate')).toContainText('Expired')
-  await expect(page.getByRole('button',{name:'Approve gate',exact:true})).toHaveCount(0)
-  expect(calls.filter(c=>c.method!=='GET')).toHaveLength(0)
-})
-test('failed journey read has an explicit retry and never invents a stage',async({page})=>{
-  const {state}=await setup(page);state.failRead=true
-  await page.goto('/')
-  await page.evaluate(async project=>{
-    const routerModule='/src/router.ts',viewModule='/src/views/JourneyView.vue'
-    const {router}=await import(routerModule),{default:component}=await import(viewModule)
-    router.addRoute({path:'/projects/:projectId/journey/:stage',component})
-    await router.push(`/projects/${project}/journey/plan`)
-  },project)
-  await expect(page.getByRole('heading',{name:'Journey unavailable'})).toBeVisible()
-  await expect(page.getByRole('navigation',{name:'Project journey'})).toHaveCount(0)
-  state.failRead=false;await page.getByRole('button',{name:'Refresh',exact:true}).click()
-  await expect(page.getByRole('navigation',{name:'Project journey'})).toBeVisible()
-})
-test('empty walker keeps empty features without synthetic tickets or screenshots',async({page})=>{
-  const {state,calls}=await setup(page);state.walker.tickets=[]
-  await mount(page);const dialog=await walker(page)
-  await expect(dialog.getByRole('heading',{name:'No tickets yet'})).toBeVisible()
-  await expect(dialog.locator('.no-tickets')).toHaveCount(3)
-  await expect(dialog.getByRole('button',{name:'Next ticket',exact:true})).toBeDisabled()
-  await dialog.focus();await page.keyboard.press('ArrowRight');await page.keyboard.press('Space')
-  expect(calls.filter(c=>c.method!=='GET')).toHaveLength(0)
+test('the plan: ticked tickets form the release; features cycle all, none and the last partial pick', async ({ page }) => {
+  const { calls } = await open(page)
+  const feature = page.getByRole('checkbox', { name: /^Guarded multi-cloud provisioning: 2 of 3 in the release/ })
+  await expect(feature).toHaveAttribute('aria-checked', 'mixed')
+  await feature.click()
+  await expect(page.getByRole('checkbox', { name: /^Guarded multi-cloud provisioning: 3 of 3/ })).toHaveAttribute('aria-checked', 'true')
+  await page.getByRole('checkbox', { name: /^Guarded multi-cloud provisioning: 3 of 3/ }).click()
+  await expect(page.getByRole('checkbox', { name: /^Guarded multi-cloud provisioning: 0 of 3/ })).toHaveAttribute('aria-checked', 'false')
+  // The third click restores the earlier partial pick (PHAROS-11 and PHAROS-13).
+  await page.getByRole('checkbox', { name: /^Guarded multi-cloud provisioning: 0 of 3.*restore the earlier 2/ }).click()
+  await expect(page.getByRole('checkbox', { name: /^Guarded multi-cloud provisioning: 2 of 3/ })).toHaveAttribute('aria-checked', 'mixed')
+  await expect.poll(() => writes(calls, '/plan').length).toBe(3)
+  const plans = writes(calls, '/plan').map(c => c.body as { expected_revision: number; ordered_ticket_ids: string[]; included_ticket_ids: string[] })
+  expect(plans.map(p => p.expected_revision)).toEqual([7, 8, 9])
+  expect(plans[0].included_ticket_ids).toEqual(['n-1', 'n-2', 'n-3'])
+  expect(plans[1].included_ticket_ids).toEqual([])
+  expect(plans[2].included_ticket_ids).toEqual(['n-1', 'n-3'])
+  expect(plans[0].ordered_ticket_ids).toEqual(['n-1', 'n-2', 'n-3', 'n-4'])
+  // One ticket's box.
+  await page.getByRole('checkbox', { name: 'PHAROS-14 in the release' }).check()
+  await expect.poll(() => writes(calls, '/plan').length).toBe(4)
+  expect((writes(calls, '/plan')[3].body as { included_ticket_ids: string[] }).included_ticket_ids).toEqual(['n-1', 'n-3', 'n-4'])
+  // The epic key is a link that opens a new window.
+  await expect(page.locator('.release-tickets .ekey').first()).toHaveAttribute('target', '_blank')
 })
 
-test('leaving the journey preserves R1 node details and R2 human decisions',async({page})=>{
-  const {state,calls}=await setup(page)
-  state.approval.decision=null
-  const projectNode=node(project,'Bakery orders','PROJ-1','# Order context\n\nA **shared** plan.')
-  await page.route('**/api/nodes/tree',route=>route.fulfill({json:{items:[{node:projectNode,depth:0}],next_cursor:null}}))
-  await page.route(`**/api/nodes/${project}`,route=>route.fulfill({json:projectNode}))
-  await mount(page)
-  await page.getByRole('link',{name:'PAIMOS AEON home',exact:true}).click()
-  await expect(page.getByRole('navigation',{name:'Project journey'})).toHaveCount(0)
-  await expect(page.getByRole('heading',{name:'Projects',level:1})).toBeVisible()
-  await page.evaluate(async()=>{const routerModule='/src/router.ts';const {router}=await import(routerModule);await router.push('/workspace')})
-  await page.getByRole('button',{name:'Open PROJ-1: Bakery orders',exact:true}).click()
-  const details=page.getByRole('complementary',{name:'Node details'})
-  await expect(details.getByRole('heading',{name:'Order context',exact:true})).toBeVisible()
-  await expect(details.locator('.markdown-body strong')).toHaveText('shared')
-  await page.evaluate(async()=>{
-    const routerModule='/src/router.ts'
-    const {router}=await import(routerModule)
-    await router.push('/approvals')
-  })
-  // The old approvals page now lives in Agents.
-  await expect(page).toHaveURL('/agents')
-  const request=page.getByRole('listitem',{name:/^Build journey, asked by/})
-  await request.getByRole('button',{name:'Approve',exact:true}).click()
-  await request.getByLabel('Reason (optional)',{exact:true}).fill('Reviewed after leaving the journey')
-  await request.getByRole('button',{name:'Approve permission',exact:true}).click()
-  await expect(page.locator('.toast').filter({hasText:'Approved:'})).toBeVisible()
-  expect(calls.find(c=>c.path.endsWith('/decision'))?.body).toEqual({decision:'approved',reason:'Reviewed after leaving the journey'})
-  expect(calls.filter(c=>c.path.endsWith('/journey/actions'))).toHaveLength(0)
+test('the one next action approves the gate and starts the build; the stage follows', async ({ page }) => {
+  const { calls } = await open(page)
+  await expect(page.getByRole('region', { name: 'Decision: Release 2' }).getByRole('listitem', { name: /Build gate on Release 2, asked by/ })).toBeVisible()
+  await page.getByRole('region', { name: 'Decision: Release 2' }).getByRole('button', { name: 'Approve and start build' }).click()
+  const dialog = page.getByRole('dialog', { name: 'Start build?' })
+  await expect(dialog).toContainText('This approves the build gate')
+  await dialog.getByRole('button', { name: 'Approve and start build' }).click()
+  await expect(page).toHaveURL(/stage=build/)
+  await expect(page.getByRole('heading', { name: 'Build release 2' })).toBeVisible()
+  await expect(rail(page).getByRole('button', { name: '5. Build, now' })).toHaveAttribute('aria-current', 'step')
+  const decision = writes(calls, '/decision')
+  expect(decision).toHaveLength(1)
+  expect(decision[0].body).toEqual({ decision: 'approved', reason: '' })
+  const action = writes(calls, '/journey/actions')
+  expect(action).toHaveLength(1)
+  expect(action[0].body).toMatchObject({ action: 'start_build', expected_revision: 12, approval_request_id: 'ap-build', release_id: 'r-2' })
+  expect(typeof (action[0].body as { idempotency_key: string }).idempotency_key).toBe('string')
+})
+
+test('without a requested gate the next action waits and says why', async ({ page }) => {
+  const { calls } = await open(page, 'plan', '/p/PHAROS?view=journey', { noGate: true })
+  const button = page.getByRole('region', { name: 'Decision: Release 2' }).getByRole('button', { name: /Start build/ })
+  await expect(button).toBeDisabled()
+  await expect(button).toHaveAttribute('data-tip', 'Build start needs an approved gate.')
+  await expect(page.getByText('An agent asks for the build gate on Release 2')).toBeVisible()
+  expect(writes(calls, '/journey/actions')).toHaveLength(0)
+})
+
+test('the walker (A3): release eyebrow, features and tickets, arrows, Space, the sheet and Esc', async ({ page }) => {
+  const { calls } = await open(page)
+  await page.getByRole('button', { name: 'Full screen' }).click()
+  const walker = page.getByRole('dialog', { name: 'Release walker' })
+  await expect(walker).toBeVisible()
+  await expect(page).toHaveURL(/walk=PHAROS-11/)
+  const bar = walker.locator('.walker-bar')
+  await expect(bar.locator('.rt2 .eyebrow')).toHaveText('Release 2')
+  await expect(bar.locator('.count')).toHaveText('2 of 4')
+  // Feature line: its name, and the epic key as the only link (new window).
+  await expect(bar.locator('.fg').first().locator('.fn')).toContainText('Guarded multi-cloud provisioning')
+  const line = bar.locator('.fg').first().locator('.fl')
+  await expect(line.getByRole('link')).toHaveCount(1)
+  await expect(line.getByRole('link')).toHaveText('PHAROS-10')
+  await expect(line.getByRole('link')).toHaveAttribute('target', '_blank')
+  // The current chip shows its title; its checkbox shows because it is current.
+  await expect(bar.locator('.ck.on .tt')).toContainText('Connect Hetzner')
+  // Screens: the ticket's image attachments.
+  await expect(walker.locator('img.shot')).toBeVisible()
+  await expect(walker.getByRole('group', { name: 'Screens' }).getByRole('button')).toHaveCount(5)
+  await page.keyboard.press('ArrowRight')
+  await expect(page).toHaveURL(/walk=PHAROS-12/)
+  await expect(bar.locator('.ck.on .tt')).toContainText('Oracle')
+  // Space includes PHAROS-12.
+  await page.keyboard.press(' ')
+  await expect.poll(() => writes(calls, '/plan').length).toBe(1)
+  expect((writes(calls, '/plan')[0].body as { included_ticket_ids: string[] }).included_ticket_ids).toEqual(['n-1', 'n-2', 'n-3'])
+  await expect(bar.locator('.count')).toHaveText('3 of 4')
+  // Shift+→ goes to the next feature (the loose tickets), → wraps around.
+  await page.keyboard.press('Shift+ArrowRight')
+  await expect(page).toHaveURL(/walk=PHAROS-14/)
+  await page.keyboard.press('ArrowRight')
+  await expect(page).toHaveURL(/walk=PHAROS-11/)
+  // ? opens the sheet, Esc closes it, then the walker.
+  await page.keyboard.press('?')
+  await expect(walker.getByRole('dialog', { name: 'Walker shortcuts' })).toBeVisible()
+  await page.keyboard.press('Escape')
+  await expect(walker.getByRole('dialog', { name: 'Walker shortcuts' })).toHaveCount(0)
+  await page.keyboard.press('Escape')
+  await expect(walker).toHaveCount(0)
+  await expect(page).not.toHaveURL(/walk=/)
+})
+
+test('the walker checkbox shows only over its slot, never over the chip', async ({ page }) => {
+  await open(page, 'plan', '/p/PHAROS?view=journey&walk=PHAROS-11')
+  const walker = page.getByRole('dialog', { name: 'Release walker' })
+  const chip = walker.locator('.ck').filter({ hasText: 'PHAROS-13' })
+  await chip.locator('.go').hover()
+  await expect(chip.locator('.cb')).toBeHidden()
+  await chip.locator('.slot').hover()
+  await expect(chip.locator('.cb')).toBeVisible()
+})
+
+test('an earlier release reads without boxes and its walker cannot change it', async ({ page }) => {
+  const { calls } = await open(page, 'plan', '/p/PHAROS?view=journey&stage=plan&release=PHAROS-30')
+  await expect(page.getByRole('heading', { name: 'Plan release 1' })).toBeVisible()
+  await expect(page.locator('.release-tickets input[type=checkbox]')).toHaveCount(0)
+  await expect(page.locator('.release-tickets .fcb')).toHaveCount(0)
+  await page.keyboard.press('w')
+  const walker = page.getByRole('dialog', { name: 'Release walker' })
+  await expect(walker.locator('.cb')).toHaveCount(0)
+  await page.keyboard.press(' ')
+  expect(writes(calls, '/plan')).toHaveLength(0)
+})
+
+test('Inspire shows the sources, the transcript and cited drafts; accepting the brief moves the next action', async ({ page }) => {
+  const { calls } = await open(page, 'inspire')
+  await expect(page.getByRole('heading', { name: 'Conversation and sources' })).toBeVisible()
+  await expect(page.getByText('Voice conversation with Markus', { exact: true })).toBeVisible()
+  await page.getByRole('button', { name: '00:31', exact: false }).first().click()
+  await expect(page.locator('#turn-t-1')).toBeVisible()
+  await expect(page.locator('#turn-t-1')).toHaveClass(/j-flash/)
+  await page.getByRole('button', { name: 'Accept draft' }).click()
+  await expect.poll(() => writes(calls, '/accept').length).toBe(1)
+  expect(writes(calls, '/accept')[0].body).toEqual({ expected_base_event_id: 42 })
+  await expect(page.getByRole('region', { name: 'Decision: Confirm the brief' }).getByRole('button', { name: 'Confirm brief' })).toBeEnabled()
+})
+
+test('Shape decides with the gate: park needs a reason', async ({ page }) => {
+  const { calls } = await open(page, 'shape')
+  await expect(page.getByRole('listitem', { name: /Shape gate on the project, asked by/ })).toBeVisible()
+  await page.getByRole('button', { name: /^Park/ }).click()
+  await page.getByLabel('Why park it?').fill('Waiting for the provider contract.')
+  await page.getByRole('button', { name: 'Record' }).click()
+  await expect.poll(() => writes(calls, '/journey/actions').length).toBe(1)
+  expect(writes(calls, '/decision')[0].body).toEqual({ decision: 'approved', reason: '' })
+  expect(writes(calls, '/journey/actions')[0].body).toMatchObject({ action: 'park', approval_request_id: 'ap-shape', reason: 'Waiting for the provider contract.' })
+  expect((writes(calls, '/journey/actions')[0].body as Record<string, unknown>).release_id).toBeUndefined()
+})
+
+test('requirements agree with the gate scoped to the revision', async ({ page }) => {
+  const { calls } = await open(page, 'requirements')
+  await expect(page.getByText('A new host is provisioned only after its price is approved.')).toBeVisible()
+  await page.getByRole('region', { name: 'Decision: Approve requirements' }).getByRole('button', { name: /Approve requirements/ }).click()
+  await page.getByRole('dialog', { name: 'Agree the requirements?' }).getByRole('button', { name: /Approve and approve requirements|Approve requirements/ }).click()
+  await expect.poll(() => writes(calls, '/requirements/agree').length).toBe(1)
+  expect(writes(calls, '/requirements/agree')[0].body).toMatchObject({ approval_request_id: 'ap-req', expected_revision: 12 })
+})
+
+test('Deploy shows launch admission as a blocked gate and the refused handoff', async ({ page }) => {
+  await open(page, 'deploy')
+  await expect(page.getByRole('region', { name: 'Blocked: Launch admission is closed' })).toContainText('Pharos launch checks are unavailable')
+  await expect(page.getByText('The host policy refused it')).toBeVisible()
+  await expect(page.getByText('Launch admission · closed')).toBeVisible()
+  await expect(page.getByRole('region', { name: 'Decision: The host did not apply it' })).toBeVisible()
+})
+
+test('a stale plan write restores the list and says so', async ({ page }) => {
+  await open(page, 'plan', '/p/PHAROS?view=journey', { failPlan: true })
+  await page.getByRole('checkbox', { name: 'PHAROS-14 in the release' }).check()
+  await expect(page.locator('.toast').filter({ hasText: 'The plan changed elsewhere' })).toBeVisible()
+  await expect(page.getByRole('checkbox', { name: 'PHAROS-14 in the release' })).not.toBeChecked()
+})
+
+test('an agent principal reads the journey but cannot move it', async ({ page }) => {
+  const { calls } = await open(page, 'plan', '/p/PHAROS?view=journey', { kind: 'agent' })
+  await expect(page.locator('.release-tickets input[type=checkbox]')).toHaveCount(0)
+  await expect(page.getByRole('region', { name: 'Decision: Release 2' }).getByRole('button', { name: /start build/i })).toBeDisabled()
+  expect(calls.filter(c => c.method !== 'GET')).toHaveLength(0)
+})
+
+test('on a phone the rail scrolls and says what is next', async ({ page }) => {
+  await page.setViewportSize({ width: 390, height: 844 })
+  await mockWork(page, fixtures())
+  await mockJourney(page, journeyWorld('plan'))
+  await page.goto('/p/PHAROS?view=journey')
+  await expect(rail(page).locator('.next-line')).toContainText('Approve and start build')
+  await expect(rail(page).getByRole('button', { name: '4. Plan, now' })).toBeInViewport()
+  const width = await page.evaluate(() => document.documentElement.scrollWidth)
+  expect(width).toBeLessThanOrEqual(390)
+})
+
+test('Plan adds a ticket to the release, under a feature', async ({ page }) => {
+  const { calls } = await open(page)
+  await page.getByLabel('New ticket for this release').fill('Show the provider price before approval')
+  await page.getByLabel('Feature of the new ticket').selectOption({ label: 'Guarded multi-cloud provisioning' })
+  await page.getByRole('button', { name: 'Add', exact: true }).click()
+  await expect(page.locator('.toast').filter({ hasText: 'PHAROS-44 joins release 2.' })).toBeVisible()
+  await expect(page.locator('.release-tickets').getByText('Show the provider price before approval')).toBeVisible()
+  const add = writes(calls, '/tickets')
+  expect(add).toHaveLength(1)
+  expect(add[0].body).toMatchObject({ title: 'Show the provider price before approval', feature_node_id: 'n-epic', included: true, expected_revision: 7 })
+})
+
+test('adding a ticket on a server without the route says so', async ({ page }) => {
+  await open(page, 'plan', '/p/PHAROS?view=journey', { noTicketRoute: true })
+  await page.getByLabel('New ticket for this release').fill('Anything')
+  await page.getByRole('button', { name: 'Add', exact: true }).click()
+  await expect(page.locator('.toast').filter({ hasText: 'This server cannot add tickets to a plan yet.' })).toBeVisible()
+})
+
+test('a mature project leads with its build: progress, what is left, releases; Inspire and Shape are history', async ({ page }) => {
+  await open(page, 'build', '/p/PHAROS?view=journey', { derived: true })
+  await expect(page.getByRole('heading', { name: 'Build release 2' })).toBeVisible()
+  await expect(page.getByRole('list', { name: 'Tickets by status' })).toContainText('1 in QA')
+  await expect(page.getByRole('region', { name: 'What stands before the candidate' })).toContainText('still open')
+  await expect(page.getByRole('list', { name: 'Releases, newest first' }).getByRole('listitem')).toHaveCount(2)
+  // The plan cannot change during the build.
+  await page.goto('/p/PHAROS?view=journey&stage=plan')
+  await expect(page.locator('.release-tickets .tk').first()).toBeVisible()
+  await expect(page.locator('.release-tickets input[type=checkbox]')).toHaveCount(0)
+  await page.goto('/p/PHAROS?view=journey&stage=inspire')
+  const history = page.locator('section.history')
+  await expect(history).toContainText('the project came to Aeon with its history')
+  await expect(page.getByText('Sources · stored with the project')).toHaveCount(0)
+  await history.getByRole('button', { name: 'Show the sources' }).click()
+  await expect(page.getByText('Sources · stored with the project')).toBeVisible()
+})
+
+test('the header chip hides until the project has really started its journey', async ({ page }) => {
+  await page.setViewportSize({ width: 1440, height: 900 })
+  await mockWork(page, fixtures())
+  await mockJourney(page, journeyWorld('inspire', { noIntake: true }))
+  await page.goto('/p/PHAROS')
+  await expect(page.locator('tr.ticket-row').first()).toBeVisible()
+  await page.waitForTimeout(300)
+  await expect(page.locator('.journey-chip')).toHaveCount(0)
+})
+
+test('the header chip shows once there are sources, or when the stage is derived', async ({ page }) => {
+  await page.setViewportSize({ width: 1440, height: 900 })
+  await mockWork(page, fixtures())
+  await mockJourney(page, journeyWorld('inspire'))
+  await page.goto('/p/PHAROS')
+  await expect(page.getByRole('button', { name: /^Journey: Inspire, stage 1 of 8\. Next: Continue intake/ })).toBeVisible()
+})
+
+test('Deploy follows launch readiness: ready shows a check, blocked shows its reason', async ({ page }) => {
+  await open(page, 'deploy', '/p/PHAROS?view=journey', { readiness: { can_admit: false, reason: 'Backup evidence is older than the policy allows.' } })
+  await expect(page.getByRole('region', { name: 'Blocked: Launch admission is closed' })).toContainText('Backup evidence is older than the policy allows.')
+  await expect(page.getByText('Launch admission · closed')).toBeVisible()
+  await page.unroute('**/api/**')
+  await open(page, 'deploy', '/p/PHAROS?view=journey', { readiness: { can_admit: true, reason: '' } })
+  await expect(page.getByRole('region', { name: 'Launch admission is ready' })).toBeVisible()
+  await expect(page.getByText('Launch admission · ready')).toBeVisible()
+  await expect(page.getByRole('region', { name: /Blocked: Launch admission/ })).toHaveCount(0)
+})
+
+test('Build: marking the candidate approves the build gate and sends mark_candidate', async ({ page }) => {
+  const { calls } = await open(page, 'mark')
+  const card = page.getByRole('region', { name: 'Decision: Mark release 2 as the candidate' })
+  await expect(card.getByRole('listitem', { name: /Build gate on Release 2, asked by/ })).toBeVisible()
+  await expect(page.locator('.btn.primary:visible')).toHaveText(['Approve and mark candidate'])
+  await card.getByRole('button', { name: 'Approve and mark candidate' }).click()
+  await page.getByRole('dialog', { name: 'Mark candidate?' }).getByRole('button', { name: 'Approve and mark candidate' }).click()
+  await expect(page.locator('.toast').filter({ hasText: 'Release 2 is the candidate.' })).toBeVisible()
+  expect(writes(calls, '/journey/actions')[0].body).toMatchObject({ action: 'mark_candidate', approval_request_id: 'ap-mark', release_id: 'r-2' })
+  await expect(page.getByRole('region', { name: 'Decision: Approve the release candidate' })).toBeVisible()
+})
+
+test('Plan: a project without a release opens release 1 with one click', async ({ page }) => {
+  const { calls } = await open(page, 'open')
+  const card = page.getByRole('region', { name: 'Decision: Open release 1' })
+  await card.getByRole('button', { name: 'Open release 1' }).click()
+  await page.getByRole('dialog', { name: 'Open release 1?' }).getByRole('button', { name: 'Open release 1' }).click()
+  await expect(page.locator('.toast').filter({ hasText: 'Release 1 is open.' })).toBeVisible()
+  const action = writes(calls, '/journey/actions')[0].body as Record<string, unknown>
+  expect(action).toMatchObject({ action: 'open_first_release', approval_request_id: null })
+  expect(action.release_id).toBeUndefined()
+  await expect(page.getByRole('checkbox', { name: 'PHAROS-14 in the release' })).toBeVisible()
 })
