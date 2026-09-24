@@ -15,8 +15,8 @@ import StatusIcon from '../work/StatusIcon.vue'
 
 // What the customer is part of: its projects, quotes and the hours booked on
 // those projects, each a way into its own page. Documents list what is on file.
-const props = defineProps<{ related: Related | null; error?: string }>()
-const emit = defineEmits<{ retry: [] }>()
+const props = defineProps<{ related: Related | null; error?: string; canQuote?: boolean }>()
+const emit = defineEmits<{ retry: []; newQuote: [] }>()
 const projects = useProjects()
 const business = useBusiness()
 void projects.load()
@@ -61,7 +61,10 @@ const docMeta = (d: Related['documents'][number]) => [d.category && sentenceCase
       </div>
 
       <div class="group" role="group" aria-labelledby="rel-quotes">
-        <h3 id="rel-quotes" class="group-title">Quotes <span class="card-count">{{ related.quotes.length }}</span></h3>
+        <div class="group-head">
+          <h3 id="rel-quotes" class="group-title">Quotes <span class="card-count">{{ related.quotes.length }}</span></h3>
+          <button v-if="canQuote" type="button" class="add-quote" @click="emit('newQuote')"><AppIcon name="plus" :size="12" />New quote</button>
+        </div>
         <ul v-if="quotes.length" class="rows">
           <li v-for="q in quotes" :key="q.id">
             <RouterLink class="rel-row" :to="`/business/quotes/${encodeURIComponent(q.id)}`" :class="{ archived: q.archived }">
@@ -114,6 +117,10 @@ const docMeta = (d: Related['documents'][number]) => [d.category && sentenceCase
 .groups { display: grid; gap: 16px; }
 .group-title { display: flex; align-items: baseline; gap: 8px; margin-bottom: 6px; font: 500 10.5px/1.4 var(--mono); letter-spacing: .14em; text-transform: uppercase; color: var(--ink-3); font-variant-ligatures: none; }
 .group-title .card-count { letter-spacing: .02em; text-transform: none; }
+.group-head { display: flex; align-items: baseline; justify-content: space-between; gap: 8px; }
+.add-quote { display: inline-flex; align-items: center; gap: 5px; height: 24px; margin-bottom: 6px; padding: 0 8px; border: 0; border-radius: 999px; background: transparent; color: var(--teal-ink); font-size: 12px; font-weight: 600; }
+.add-quote:hover { background: var(--row-selected); }
+.add-quote:focus-visible { box-shadow: var(--focus-ring); }
 .rows { display: grid; gap: 2px; margin: 0; padding: 0; list-style: none; }
 .rel-row { display: flex; align-items: center; gap: 10px; min-height: 38px; padding: 6px 10px; margin: 0 -10px; border-radius: 10px; color: var(--ink); text-decoration: none; }
 @media (hover: hover) { .rel-row:hover { background: var(--row-hover); } .rel-row:hover .go { color: var(--teal-ink); } }

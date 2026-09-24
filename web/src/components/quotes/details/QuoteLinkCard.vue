@@ -1,0 +1,137 @@
+<!-- SPDX-License-Identifier: AGPL-3.0-only -->
+<script setup lang="ts">
+import './details.css'
+import { computed, ref, watch } from 'vue'
+import { confirmAction } from '../../../lib/confirm'
+import { createLink, getLink, lifecycleError, linkUrl, revokeLink, type PublicLink } from '../../../lib/quotes/lifecycle'
+import { toast } from '../../../lib/toast'
+import AppIcon from '../../AppIcon.vue'
+import BizIcon from '../../business/BizIcon.vue'
+
+// The customer link for one issued version: create it with an end date, copy it
+// while it is shown (once: only its fingerprint is kept), revoke it any time.
+// The link opens this frozen version and nothing else, and it can accept it
+// until it ends, the quote is revised or someone revokes it.
+const props = defineProps<{ quoteId: string; version: number; admin: boolean; acceptable: boolean; accepted: boolean }>()
+const emit = defineEmits<{ changed: [] }>()
+const link = ref<PublicLink | null>(null)
+const loaded = ref(false)
+const error = ref('')
+const busy = ref(false)
+const fresh = ref('')
+const days = ref(30)
+const copied = ref(false)
+const DAYS = [7, 14, 30, 60, 90]
+const now = ref(Date.now())
+const state = computed<'none' | 'active' | 'expired' | 'revoked'>(() => {
+  const l = link.value
+  if (!l) return 'none'
+  if (l.revoked_at) return 'revoked'
+  return Date.parse(l.expires_at) <= now.value ? 'expired' : 'active'
+})
+const when = (iso: string | undefined) => iso ? new Intl.DateTimeFormat('en-GB', { day: 'numeric', month: 'short', year: 'numeric', hour: '2-digit', minute: '2-digit' }).format(new Date(iso)) : ''
+const endsOn = computed(() => new Intl.DateTimeFormat('en-GB', { day: 'numeric', month: 'short', year: 'numeric' }).format(new Date(Date.now() + days.value * 86_400_000)))
+
+async function load() {
+  error.value = ''
+  if (!props.admin) { loaded.value = true; return }
+  try { link.value = await getLink(props.quoteId, props.version); now.value = Date.now() }
+  catch (e) { error.value = lifecycleError(e, 'The link could not be read.') }
+  finally { loaded.value = true }
+}
+watch(() => [props.quoteId, props.version], () => { fresh.value = ''; link.value = null; loaded.value = false; void load() }, { immediate: true })
+
+async function create() {
+  if (busy.value) return
+  busy.value = true; error.value = ''
+  try {
+    const made = await createLink(props.quoteId, props.version, new Date(Date.now() + days.value * 86_400_000).toISOString())
+    fresh.value = linkUrl(made)
+    link.value = { ...made, token: undefined, path: undefined }
+    now.value = Date.now()
+    emit('changed')
+  } catch (e) { error.value = lifecycleError(e, 'The link was not created. Nothing changed.') }
+  finally { busy.value = false }
+}
+async function revoke() {
+  const ok = await confirmAction({
+    title: 'Revoke the customer link?', confirmLabel: 'Revoke link', danger: true,
+    body: 'Whoever has it can no longer open or accept the quote. The quote itself stays issued, and you can create a new link afterwards.',
+  })
+  if (!ok) return
+  busy.value = true; error.value = ''
+  try { link.value = await revokeLink(props.quoteId, props.version); fresh.value = ''; now.value = Date.now(); toast('The link is revoked.'); emit('changed') }
+  catch (e) { error.value = lifecycleError(e, 'The link was not revoked.') }
+  finally { busy.value = false }
+}
+async function copy() {
+  try { await navigator.clipboard.writeText(fresh.value); copied.value = true; setTimeout(() => { copied.value = false }, 1800) }
+  catch { toast('Copying did not work here. Select the link and copy it.', { tone: 'error' }) }
+}
+function selectAll(event: FocusEvent) { (event.target as HTMLInputElement).select() }
+</script>
+
+<template>
+  <section class="d-card" aria-labelledby="link-title">
+    <header class="d-head">
+      <span class="d-icon" aria-hidden="true"><AppIcon name="link" :size="15" /></span>
+      <h3 id="link-title">Customer link</h3>
+      <span v-if="state === 'active'" class="pill ok">Active</span>
+      <span v-else-if="state === 'revoked'" class="pill">Revoked</span>
+      <span v-else-if="state === 'expired'" class="pill">Ended</span>
+    </header>
+
+    <p v-if="!admin" class="d-text">An admin shares quotes with customers through a link.</p>
+    <div v-else-if="!loaded" class="sk" aria-hidden="true"><span class="skeleton" /><span class="skeleton short" /></div>
+    <template v-else>
+      <div v-if="fresh" class="fresh">
+        <label class="d-label" for="quote-link-url">Copy it now: it is shown only this once</label>
+        <div class="url-row">
+          <input id="quote-link-url" class="field url" :value="fresh" readonly @focus="selectAll" />
+          <button type="button" class="btn sm primary" @click="copy"><AppIcon :name="copied ? 'check' : 'copy'" :size="13" />{{ copied ? 'Copied' : 'Copy' }}</button>
+        </div>
+        <a class="open" :href="fresh" target="_blank" rel="noopener noreferrer">Open as the customer sees it<AppIcon name="external" :size="12" /></a>
+      </div>
+
+      <p v-if="state === 'active'" class="d-text">Opens this version until <strong>{{ when(link!.expires_at) }}</strong>{{ acceptable ? ', and can accept it.' : '. Acceptance is closed.' }}</p>
+      <p v-else-if="state === 'revoked'" class="d-text">Revoked on {{ when(link!.revoked_at) }}. It no longer opens the quote.</p>
+      <p v-else-if="state === 'expired'" class="d-text">Ended on {{ when(link!.expires_at) }}. It no longer opens the quote.</p>
+      <p v-else-if="accepted" class="d-text">This version was accepted without a link.</p>
+      <p v-else class="d-text">Share this version with a link. Whoever has it can read the quote and accept it, without an account.</p>
+
+      <div v-if="state !== 'active' && acceptable" class="create-row">
+        <label class="d-label" for="quote-link-days">Link ends after</label>
+        <div class="create-controls">
+          <select id="quote-link-days" v-model.number="days" class="field days">
+            <option v-for="d in DAYS" :key="d" :value="d">{{ d }} days</option>
+          </select>
+          <button type="button" class="btn sm primary" :disabled="busy" @click="create"><AppIcon name="link" :size="13" />{{ busy ? 'Creating…' : state === 'none' ? 'Create link' : 'Create a new link' }}</button>
+        </div>
+        <p class="hint">Ends on {{ endsOn }}.</p>
+      </div>
+      <div v-if="state === 'active'" class="actions">
+        <button type="button" class="btn sm ghost danger-text" :disabled="busy" @click="revoke">Revoke link</button>
+      </div>
+      <p v-if="state === 'active' && !fresh && acceptable" class="hint">Lost the link? For privacy it was shown only once. Revoke it and create a new one.</p>
+      <p v-if="error" class="d-error" role="alert"><AppIcon name="alert" :size="13" />{{ error }}</p>
+
+      <p class="privacy"><BizIcon name="lock" :size="13" /><span>The page shows only this frozen version: no other quotes, customers or people. It is never cached or indexed, and it stores the link only as a fingerprint.</span></p>
+    </template>
+  </section>
+</template>
+
+<style scoped>
+.fresh { display: grid; gap: 6px; padding: 10px; border-radius: 10px; background: var(--row-selected); box-shadow: inset 0 0 0 1px var(--chip-teal-line); }
+.url-row { display: flex; gap: 6px; }
+.url { flex: 1; min-width: 0; height: 32px; padding: 0 9px; font: 500 12px/1 var(--mono); font-variant-ligatures: none; }
+.open { display: inline-flex; align-items: center; gap: 5px; width: fit-content; font-size: 12.5px; font-weight: 600; color: var(--teal-ink); text-decoration: none; }
+.open:hover { text-decoration: underline; }
+.open:focus-visible { box-shadow: var(--focus-ring); border-radius: 4px; }
+.create-row { display: grid; gap: 6px; }
+.create-controls { display: flex; flex-wrap: wrap; gap: 6px; }
+.days { width: auto; height: 32px; padding: 0 28px 0 10px; font-size: 13px; }
+.actions { display: flex; gap: 6px; }
+.danger-text { color: var(--danger); }
+.privacy { display: flex; align-items: flex-start; gap: 7px; padding-top: 10px; border-top: 1px solid var(--line); font-size: 12px; line-height: 1.45; color: var(--ink-3); }
+.privacy svg { flex-shrink: 0; margin-top: 2px; }
+</style>

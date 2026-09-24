@@ -1,0 +1,25 @@
+/* SPDX-License-Identifier: AGPL-3.0-only */
+/* The quote details pane: quiet cards on the side panel, one per concern
+   (status, customer link, receipt, versions, attachments, facts). */
+.d-card { display: grid; gap: 10px; padding: 14px; border-radius: 12px; background: var(--surface-raised); box-shadow: inset 0 0 0 1px var(--line); }
+.d-head { display: flex; align-items: center; gap: 8px; min-width: 0; }
+.d-head h3 { flex: 1; min-width: 0; font-size: 13.5px; font-weight: 650; color: var(--ink); }
+.d-icon { display: grid; place-items: center; flex-shrink: 0; width: 26px; height: 26px; border-radius: 8px; background: var(--surface-2); color: var(--ink-2); }
+.d-text { font-size: 13px; line-height: 1.5; color: var(--ink-2); overflow-wrap: anywhere; }
+.d-text strong { color: var(--ink); font-weight: 600; }
+.d-label { font-size: 12px; font-weight: 600; color: var(--ink); }
+.d-error { display: flex; align-items: flex-start; gap: 6px; font-size: 12.5px; line-height: 1.45; color: var(--danger); }
+.d-error svg { flex-shrink: 0; margin-top: 2px; }
+.d-card .hint { font-size: 12px; line-height: 1.45; color: var(--ink-3); }
+.d-card .pill { flex-shrink: 0; height: 20px; padding: 0 8px; border-radius: 999px; background: var(--surface-2); box-shadow: inset 0 0 0 1px var(--line-2); color: var(--ink-2); font: 600 10px/20px var(--mono); letter-spacing: .06em; text-transform: uppercase; font-variant-ligatures: none; }
+.d-card .pill.ok { background: var(--chip-teal-bg); box-shadow: inset 0 0 0 1px var(--chip-teal-line); color: var(--teal-ink); }
+.d-card .sk { display: grid; gap: 8px; }
+.d-card .sk .skeleton { height: 10px; }
+.d-card .sk .short { width: 60%; }
+.d-digest { display: inline-flex; align-items: center; gap: 6px; min-width: 0; max-width: 100%; height: 24px; padding: 0 4px 0 8px; border-radius: 7px; background: var(--code-bg); color: var(--ink); font: 500 11.5px/1 var(--mono); font-variant-ligatures: none; }
+.d-digest .d-copy { display: grid; place-items: center; width: 20px; height: 20px; border: 0; border-radius: 5px; background: transparent; color: var(--ink-3); }
+.d-digest .d-copy:hover { color: var(--ink); background: var(--row-hover); }
+.d-digest .d-copy:focus-visible { box-shadow: var(--focus-ring); }
+.d-facts { display: grid; grid-template-columns: auto minmax(0, 1fr); gap: 6px 12px; margin: 0; font-size: 12.5px; }
+.d-facts dt { color: var(--ink-3); }
+.d-facts dd { margin: 0; min-width: 0; color: var(--ink); overflow-wrap: anywhere; }

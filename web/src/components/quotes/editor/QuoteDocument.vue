@@ -1,4 +1,19 @@
 <!-- SPDX-License-Identifier: AGPL-3.0-only -->
+<script lang="ts">
+import type { QuoteEditor as Editor } from '../../../lib/quotes/editor'
+// A lent editor is wrapped again by each view that mounts it; every view wraps
+// the editor's own select, never the previous view's wrapper.
+const ownSelect = new WeakMap<Editor, Editor['select']>()
+// The document a lent editor last agreed with (as JSON), so a view that borrows it
+// later replaces its document only for a real change, never for the editor's own
+// normalisation, and so keeps its undo history.
+const synced = new WeakMap<Editor, string>()
+function unwrappedSelect(editor: Editor): Editor['select'] {
+  let base = ownSelect.get(editor)
+  if (!base) { base = editor.select.bind(editor); ownSelect.set(editor, base) }
+  return base
+}
+</script>
 <script setup lang="ts">
 import { computed, nextTick, onBeforeUnmount, onMounted, ref, shallowRef, toRaw, watch } from 'vue'
 import QuoteAcceptance from './QuoteAcceptance.vue'
@@ -14,22 +29,31 @@ import { sectionLabel } from '../../../lib/quotes/inspector'
 import { sectionActions } from '../../../lib/quotes/sectionActions'
 import { fitWholeBlocks, type PaginationResult, type PagePlan } from '../../../lib/quotes/layout'
 import type { QuoteDocumentData, DocumentSettings, ListMode, MarkName, NumberingOptions, OffsetPatch, QuoteMarker, QuoteSection, SectionSettingsPatch, TextSelection } from '../../../lib/quotes/types'
-const props = withDefaults(defineProps<{ document: QuoteDocumentData; offerNo?: string; editable?: boolean; accepted?: { name: string; company?: string; at: string; digest: string } | null }>(), { editable: false, offerNo: '' })
+const props = withDefaults(defineProps<{ document: QuoteDocumentData; offerNo?: string; editable?: boolean; accepted?: { name: string; company?: string; at: string; digest: string } | null; editor?: QuoteEditor | null }>(), { editable: false, offerNo: '', editor: null })
 const emit = defineEmits<{ 'update:document': [document: QuoteDocumentData]; change: [document: QuoteDocumentData]; 'render-state': [state: PaginationResult]; overflow: [message: string | null] }>()
-const editor = new QuoteEditor(props.document)
+// P7: a workspace may lend its editor (and so its undo history) to this view, so
+// moving the quote between the docked panel and the full page keeps both.
+const editor = props.editor ?? new QuoteEditor(props.document)
+if (props.editor) {
+  // The view that lent it before must not hear this one's changes.
+  editor.onChange = undefined
+  const incoming = JSON.stringify(props.document), known = synced.get(editor)
+  if (known === undefined) synced.set(editor, incoming)
+  else if (known !== incoming && incoming !== JSON.stringify(editor.document)) { editor.replaceDocument(props.document); synced.set(editor, incoming) }
+}
 const state = shallowRef(editor.document)
 // P4: the inspector and title bar follow every change and selection through this counter.
 const version = ref(0)
 const touch = () => { version.value++ }
 let lastEmitted: QuoteDocumentData | null = null
-editor.onChange = document => { state.value = document; lastEmitted = document; touch(); emit('update:document', document); emit('change', document); schedule() }
-const baseSelect = editor.select.bind(editor)
+editor.onChange = document => { state.value = document; lastEmitted = document; if (props.editor) synced.set(editor, JSON.stringify(document)); touch(); emit('update:document', document); emit('change', document); schedule() }
+const baseSelect = unwrappedSelect(editor)
 editor.select = (selection, preserveTyping) => { baseSelect(selection, preserveTyping); touch() }
 // The session hands every edit back as a copy; only a different document (a reload,
 // a restored draft, a merge) replaces the editor's, or each edit would echo forever.
 watch(() => props.document, document => {
   if (toRaw(document) === lastEmitted || JSON.stringify(document) === JSON.stringify(editor.document)) return
-  editor.replaceDocument(document); lastEmitted = editor.document; schedule()
+  editor.replaceDocument(document); lastEmitted = editor.document; if (props.editor) synced.set(editor, JSON.stringify(document)); schedule()
 })
 const pages = ref<PagePlan[]>([{ kind: 'cover', sectionIds: [], positionIds: [], acceptance: false }, { kind: 'positions', sectionIds: [], positionIds: [], acceptance: true }])
 const renderState = ref<PaginationResult>({ ready: false, overflow: null, pages: pages.value })

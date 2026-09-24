@@ -393,15 +393,18 @@ test('narrower screens float the panel over the page; phones get a sheet; nothin
   await expect(inspector(page)).toHaveCount(0)
 })
 
-test('a read-only quote shows the inspector without letting it change anything', async ({ page }) => {
+test('an issued quote is read only: Details instead of Format, nothing on the paper changes', async ({ page }) => {
   await page.setViewportSize({ width: 1440, height: 900 })
   await mockWork(page, fixtures())
   await mockQuoteEditor(page, quoteDocument(), { state: 'issued' })
   await page.goto(`/business/quotes/${QUOTE_ID}`)
   await expect(page.locator('.save')).toContainText('Read only')
   await expect(page.getByRole('button', { name: /Section \d actions/ })).toHaveCount(0)
-  await inspector(page).getByRole('tab', { name: 'Section' }).click()
-  await expect(inspector(page).getByRole('button', { name: 'Add a section at the end' })).toHaveCount(0)
+  // Formatting an issued version means nothing: the panel shows its Details (U18).
+  await expect(page.getByRole('button', { name: 'Format panel' })).toHaveCount(0)
+  await expect(inspector(page)).toHaveCount(0)
+  await expect(page.getByRole('complementary', { name: 'Details' })).toBeVisible()
+  await expect(page.getByRole('textbox', { name: 'Angebotstitel' })).toHaveCount(0)
 })
 
 for (const colorScheme of ['light', 'dark'] as const) {

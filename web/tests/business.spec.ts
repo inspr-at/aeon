@@ -29,7 +29,8 @@ test('the header offers Business once a business plugin is enabled', async ({ pa
   await expect(page.getByRole('navigation', { name: 'Business' }).getByRole('link')).toHaveText(['Overview', 'Customers', 'Quotes', 'Hours', 'Rates'])
   await page.goto('/business/quotes/QUO-3')
   await expect(page).toHaveURL(/\/business\/quotes$/)
-  await expect(page.getByRole('heading', { name: 'No quotes yet' })).toBeVisible()
+  // Quotes is not enabled in this workspace: its page says so and how to open it.
+  await expect(page.getByRole('heading', { name: 'Quotes is not enabled for this workspace' })).toBeVisible()
   await page.goto('/business/organisations')
   await expect(page).toHaveURL(/\/business\/customers$/)
   expect(errors).toEqual([])

@@ -17,6 +17,8 @@ function recompute(){cancelAnimationFrame(frame);const current=++generation;fram
 async function draw(current:number){
   const root=props.root;if(!root){marks.value=[];return}
   const next:Mark[]=[]
+  // Marks stay inside the desk the paper scrolls in; one scrolled out of view is not drawn over the title bar.
+  const clip=root.closest('.quote-desk')?.getBoundingClientRect()
   for(const s of props.presence?.sessions??[]){if(s.principal_id===props.principalId || !s.anchor || s.mode==='idle')continue
     const fidelity=await anchorFidelity(s.anchor,props.document,props.revision);if(current!==generation)return;if(fidelity==='missing')continue
     const section=root.querySelector(`[data-section-id="${CSS.escape(s.anchor.section_id)}"]`);if(!section)continue
@@ -25,6 +27,7 @@ async function draw(current:number){
       if(text){const point=textPoint(text,s.anchor.focus??0);if(point){const range=document.createRange();range.setStart(point.node,point.offset);range.collapse(true)
         const caret=range.getClientRects()[0];if(caret){rect=caret;width=2;height=Math.max(14,caret.height);kind='precise'}}}
     }
+    if(clip && (rect.bottom<clip.top+4 || rect.top>clip.bottom-4 || rect.right<clip.left || rect.left>clip.right))continue
     next.push({id:s.session_id,name:s.name,fidelity:kind,color:collaboratorColor(s.principal_id),left:rect.left,top:rect.top,width,height})
   }
   if(current===generation)marks.value=next
@@ -37,11 +40,16 @@ watch(()=>props.root,observe);watch(()=>[props.presence,props.document,props.rev
 <template>
   <div class="quote-presence-overlays" aria-hidden="true">
     <div v-for="mark in marks" :key="mark.id" class="mark" :class="mark.fidelity" :style="{left:`${mark.left}px`,top:`${mark.top}px`,width:`${mark.width}px`,height:`${mark.height}px`,'--mark-color':mark.color}">
-      <span class="label">{{ mark.name }}{{ mark.fidelity==='section' ? ' editing this section' : '' }}</span>
+      <span class="label">{{ mark.name }}{{ mark.fidelity==='section' ? ' · in this section' : '' }}</span>
     </div>
   </div>
 </template>
 <style scoped>
-.quote-presence-overlays{position:fixed;inset:0;z-index:15;pointer-events:none}.mark{position:fixed;box-sizing:border-box;border-radius:4px;outline:1px solid var(--mark-color);outline-offset:2px}.mark.section{background:transparent}.mark.precise{width:2px;background:var(--mark-color);outline:0;border-radius:0}.label{position:absolute;left:0;top:-24px;max-width:180px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;padding:3px 6px;border-radius:5px;background:var(--mark-color);color:var(--surface);font-size:11px;font-weight:700}
+.quote-presence-overlays{position:fixed;inset:0;z-index:15;pointer-events:none}
+.mark{position:fixed;box-sizing:border-box;border-radius:5px;outline:1.5px solid var(--mark-color);outline-offset:3px}
+.mark.section{background:transparent}
+.mark.precise{width:2px;background:var(--mark-color);outline:0;border-radius:1px}
+.label{position:absolute;left:-3px;top:-25px;max-width:220px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;padding:3px 7px;border-radius:6px 6px 6px 2px;background:var(--mark-color);color:var(--presence-ink);font:650 11px/1.3 var(--font);box-shadow:0 1px 2px rgba(0,0,0,.12)}
+.mark.precise .label{left:0;border-radius:6px 6px 6px 0}
 @media print{.quote-presence-overlays{display:none}}
 </style>

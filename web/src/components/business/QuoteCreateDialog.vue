@@ -1,148 +1,216 @@
 <!-- SPDX-License-Identifier: AGPL-3.0-only -->
-<!-- Parked (AEON-70, 2026-09-24): quotes and organisations will be ported from Markus's current classic Paimos quote builder; this file is not routed or linked. -->
 <script setup lang="ts">
-import { computed, nextTick, ref } from 'vue'
-import { createQuote, createRelation, type Quote } from '../../lib/business'
+import '../../styles/crm.css'
+import { computed, nextTick, ref, watch } from 'vue'
+import { getRelated, type RelatedProject } from '../../lib/crm'
+import { createQuote, getSettings, lifecycleError, type QuoteProjection } from '../../lib/quotes/lifecycle'
+import { highlight } from '../../lib/work'
 import { useBusiness } from '../../stores/business'
-import { useProjects } from '../../stores/projects'
-import AppIcon from './BizIcon.vue'
-import PickerMenu, { type PickOption } from './PickerMenu.vue'
+import { useCustomers } from '../../stores/customers'
+import AppIcon from '../AppIcon.vue'
+import BizIcon from './BizIcon.vue'
 
-// A quote belongs to one customer organisation and one project. When the two are
-// not linked yet, creating the quote first links the organisation as the
-// project's customer (a normal graph link anyone can see and remove).
-const emit = defineEmits<{ created: [quote: Quote] }>()
+// A new quote: who it is for and what it is called. The document starts from the
+// workspace's sender and texts (Settings › Business), the customer's address and
+// today's date; its number and the customer's number are assigned on creation.
+// Opened from a customer's page, the customer is already chosen.
+const emit = defineEmits<{ created: [quote: QuoteProjection, customer: string] }>()
 const business = useBusiness()
-const projects = useProjects()
+const customers = useCustomers()
 const dialog = ref<HTMLDialogElement>()
 const titleInput = ref<HTMLInputElement>()
+const customerInput = ref<HTMLInputElement>()
+const customerId = ref('')
+const fixedCustomer = ref(false)
+const fixedName = ref('')
+const search = ref('')
+const listOpen = ref(false)
+const active = ref(0)
 const title = ref('')
-const orgId = ref('')
 const projectId = ref('')
+const projects = ref<RelatedProject[] | null>(null)
 const busy = ref(false)
 const error = ref('')
-const picker = ref<{ kind: 'org' | 'project'; anchor: HTMLElement } | null>(null)
+const touched = ref(false)
+const settings = ref<'loading' | 'ready' | 'missing' | 'error'>('loading')
 let opener: HTMLElement | null = null
+const mod = /Mac|iPhone|iPad/.test(navigator.platform || navigator.userAgent) ? '⌘' : 'Ctrl'
 
-const org = computed(() => business.organisation(orgId.value))
-const project = computed(() => projects.byId(projectId.value))
-const linkedProjects = computed(() => business.links.get(orgId.value)?.projects ?? [])
-const linked = computed(() => !!projectId.value && linkedProjects.value.includes(projectId.value))
-const orgOptions = computed<PickOption[]>(() => business.organisations.map(o => ({ value: o.id, label: o.title, note: typeof o.fields.website === 'string' ? o.fields.website : undefined, icon: 'building' })))
-const projectOptions = computed<PickOption[]>(() => projects.projects.filter(p => !p.archived || linkedProjects.value.includes(p.id))
-  .sort((a, b) => Number(linkedProjects.value.includes(b.id)) - Number(linkedProjects.value.includes(a.id)) || a.title.localeCompare(b.title))
-  .map(p => ({ value: p.id, label: p.title, badge: p.routeKey, hint: linkedProjects.value.includes(p.id) ? 'customer' : undefined })))
-const ready = computed(() => !!title.value.trim() && !!orgId.value && !!projectId.value)
+const all = computed(() => customers.items ?? [])
+const chosen = computed(() => all.value.find(c => c.id === customerId.value) ?? null)
+const matches = computed(() => {
+  const q = search.value.trim().toLowerCase()
+  const list = q ? all.value.filter(c => [c.name, c.legal_name, c.customer_no ?? ''].some(v => v.toLowerCase().includes(q))) : all.value
+  return [...list].sort((a, b) => a.name.localeCompare(b.name)).slice(0, 50)
+})
+const problems = computed(() => ({
+  customer: !customerId.value ? 'Choose who the quote is for.' : '',
+  title: !title.value.trim() ? 'A title is needed.' : title.value.trim().length > 512 ? 'At most 512 characters.' : '',
+}))
+const dirty = computed(() => !!title.value.trim() || (!fixedCustomer.value && !!customerId.value))
 
-async function open(preset: { orgId?: string; projectId?: string } = {}) {
+async function open(options: { customerId?: string; customerName?: string } = {}) {
   opener = document.activeElement as HTMLElement
-  title.value = ''; orgId.value = preset.orgId ?? ''; projectId.value = preset.projectId ?? ''; error.value = ''; busy.value = false
-  void business.loadCRM(); void projects.load()
-  if (orgId.value) void business.loadLinks([orgId.value])
+  customerId.value = options.customerId ?? ''; fixedCustomer.value = !!options.customerId; fixedName.value = options.customerName ?? ''
+  search.value = ''; title.value = ''; projectId.value = ''; projects.value = null
+  error.value = ''; busy.value = false; touched.value = false; listOpen.value = false; active.value = 0
+  settings.value = 'loading'
   dialog.value?.showModal()
-  await nextTick(); titleInput.value?.focus()
+  void customers.load()
+  void getSettings().then(s => { settings.value = s.revision > 0 ? 'ready' : 'missing' }).catch(() => { settings.value = 'error' })
+  await nextTick()
+  ;(customerId.value ? titleInput.value : customerInput.value)?.focus()
 }
-function close() { picker.value = null; dialog.value?.close(); opener?.focus({ preventScroll: true }) }
-function openPicker(kind: 'org' | 'project', event: MouseEvent) { picker.value = picker.value?.kind === kind ? null : { kind, anchor: event.currentTarget as HTMLElement } }
-function closePicker(restore: boolean) { const anchor = picker.value?.anchor; picker.value = null; if (restore) anchor?.focus() }
-async function chooseOrg(option: PickOption) {
-  orgId.value = option.value; closePicker(true)
-  await business.loadLinks([option.value])
-  const only = business.links.get(option.value)?.projects ?? []
-  if (!projectId.value && only.length === 1) projectId.value = only[0]
+function close() { dialog.value?.close(); listOpen.value = false; opener?.focus({ preventScroll: true }) }
+// The customer's projects, for an optional link; a quote needs none.
+watch(customerId, async id => {
+  projects.value = null; projectId.value = ''
+  if (!id) return
+  try { const related = await getRelated(id); if (customerId.value === id) projects.value = related.projects }
+  catch { if (customerId.value === id) projects.value = [] }
+})
+function pick(id: string) {
+  customerId.value = id; listOpen.value = false; search.value = ''
+  void nextTick(() => titleInput.value?.focus())
 }
-async function createOrg(name: string) {
-  try {
-    const node = await business.createCRMNode('organisation', name)
-    business.upsertNode('organisations', node)
-    business.setLinks(node.id, { contacts: [], projects: [], quotes: [] })
-    orgId.value = node.id
-  } catch (e) { error.value = e instanceof Error ? e.message : 'The organisation was not created.' }
-  closePicker(true)
+function comboKeys(event: KeyboardEvent) {
+  if (event.key === 'ArrowDown' || event.key === 'ArrowUp') {
+    event.preventDefault(); listOpen.value = true
+    const count = matches.value.length
+    if (count) active.value = (active.value + (event.key === 'ArrowDown' ? 1 : -1) + count) % count
+  } else if (event.key === 'Enter' && listOpen.value) {
+    event.preventDefault()
+    const hit = matches.value[active.value]
+    if (hit) pick(hit.id)
+  } else if (event.key === 'Escape' && listOpen.value) { event.preventDefault(); event.stopPropagation(); listOpen.value = false }
 }
-function chooseProject(option: PickOption) { projectId.value = option.value; closePicker(true) }
+watch(search, value => { active.value = 0; if (value) listOpen.value = true })
 async function submit() {
-  if (!ready.value || busy.value) return
+  touched.value = true
+  if (settings.value !== 'ready') return
+  if (problems.value.customer) { if (!fixedCustomer.value) customerInput.value?.focus(); return }
+  if (problems.value.title) { titleInput.value?.focus(); return }
+  if (busy.value) return
   busy.value = true; error.value = ''
   try {
-    if (!linked.value) {
-      await createRelation(orgId.value, projectId.value, 'customer_of')
-      const links = business.links.get(orgId.value) ?? { contacts: [], projects: [], quotes: [] }
-      business.setLinks(orgId.value, { ...links, projects: [...links.projects, projectId.value] })
-    }
-    const quote = await createQuote({ title: title.value.trim(), project_node_id: projectId.value, customer_org_node_id: orgId.value })
-    business.upsertQuote(quote)
-    const links = business.links.get(orgId.value)
-    if (links) business.setLinks(orgId.value, { ...links, quotes: [...links.quotes, quote.quote_node_id] })
-    close()
-    emit('created', quote)
-  } catch (e) { error.value = e instanceof Error ? e.message : 'The quote was not created.' }
+    const quote = await createQuote({ title: title.value.trim(), customer_org_node_id: customerId.value, ...(projectId.value ? { project_node_id: projectId.value } : {}) })
+    dialog.value?.close()
+    emit('created', quote, customerId.value)
+  } catch (e) { error.value = lifecycleError(e, 'The quote was not created. Nothing changed.') }
   finally { busy.value = false }
 }
-function backdrop(event: MouseEvent) { if (event.target === dialog.value) close() }
+function backdrop(event: MouseEvent) { if (event.target === dialog.value && !dirty.value) close() }
+function keys(event: KeyboardEvent) {
+  if ((event.metaKey || event.ctrlKey) && event.key === 'Enter') { event.preventDefault(); void submit() }
+}
 defineExpose({ open })
 </script>
 
 <template>
-  <dialog id="new-quote-dialog" ref="dialog" class="create" aria-labelledby="new-quote-title" @cancel.prevent="picker ? closePicker(true) : close()" @click="backdrop">
-    <form class="create-card" @submit.prevent="submit">
-      <header>
-        <h2 id="new-quote-title">New quote</h2>
-        <button type="button" class="icon-btn sm" aria-label="Close" @click="close"><AppIcon name="close" :size="14" /></button>
+  <dialog ref="dialog" class="create" aria-labelledby="new-quote-title" @cancel.prevent="close" @click="backdrop">
+    <form class="create-card" novalidate @submit.prevent="submit" @keydown="keys">
+      <header class="create-head">
+        <div>
+          <h2 id="new-quote-title">New quote</h2>
+          <p class="lead">It starts from your sender and texts, the customer’s address and today’s date. You write the rest on the page.</p>
+        </div>
+        <button type="button" class="icon-btn sm flat" aria-label="Close" data-tip="Close · Esc" @click="close"><AppIcon name="close" :size="15" /></button>
       </header>
-      <label class="row">
-        <span class="label">Title</span>
-        <input ref="titleInput" v-model="title" class="field" placeholder="What the offer is about" maxlength="512" autocomplete="off" />
-      </label>
-      <div class="row">
-        <span class="label" aria-hidden="true">Customer</span>
-        <button type="button" class="pick" :class="{ unset: !org }" :aria-label="`Customer: ${org?.title ?? 'choose an organisation'}`" aria-haspopup="dialog" :aria-expanded="picker?.kind === 'org'" @click="openPicker('org', $event)">
-          <AppIcon name="building" :size="14" /><span>{{ org?.title ?? 'Choose an organisation' }}</span><AppIcon name="chevron" :size="12" class="chev" />
-        </button>
+
+      <div v-if="settings === 'missing'" class="gate" role="alert">
+        <span class="gate-icon"><BizIcon name="seal" :size="16" /></span>
+        <div>
+          <p class="gate-title">Set up the sender first</p>
+          <p v-if="business.admin">A quote carries your company’s name, address and bank details. Add them once in Settings › Business; every new quote starts from them.</p>
+          <p v-else>A quote carries the company’s name, address and bank details. A workspace admin adds them in Settings › Business.</p>
+          <RouterLink v-if="business.admin" class="btn sm" to="/settings/business" @click="close">Open Settings › Business</RouterLink>
+        </div>
       </div>
-      <div class="row">
-        <span class="label" aria-hidden="true">Project</span>
-        <button type="button" class="pick" :class="{ unset: !project }" :aria-label="`Project: ${project?.title ?? 'choose a project'}`" aria-haspopup="dialog" :aria-expanded="picker?.kind === 'project'" @click="openPicker('project', $event)">
-          <span v-if="project" class="key-badge">{{ project.routeKey }}</span><AppIcon v-else name="folder" :size="14" /><span>{{ project?.title ?? 'Choose a project' }}</span><AppIcon name="chevron" :size="12" class="chev" />
-        </button>
+      <p v-else-if="settings === 'error'" class="f-error" role="alert"><AppIcon name="alert" :size="14" />The quote settings could not be read, so nothing can be created right now.</p>
+
+      <div class="f-grid" :class="{ muted: settings === 'missing' }">
+        <div class="f-row wide">
+          <span id="new-quote-customer-label" class="f-label">Customer</span>
+          <div v-if="fixedCustomer" class="fixed-customer"><BizIcon name="building" :size="14" /><span>{{ chosen?.name ?? fixedName }}</span><span v-if="chosen?.customer_no" class="number mono">{{ chosen.customer_no }}</span></div>
+          <div v-else class="combo">
+            <div v-if="chosen && !listOpen" class="chosen">
+              <BizIcon name="building" :size="14" /><span class="chosen-name">{{ chosen.name }}</span><span v-if="chosen.customer_no" class="number mono">{{ chosen.customer_no }}</span>
+              <button type="button" class="btn sm ghost" @click="customerId = ''; nextTick(() => customerInput?.focus())">Change</button>
+            </div>
+            <template v-else>
+              <input
+                id="new-quote-customer" ref="customerInput" v-model="search" class="field" role="combobox" autocomplete="off" placeholder="Find a customer by name or number"
+                aria-labelledby="new-quote-customer-label" aria-autocomplete="list" :aria-expanded="listOpen" aria-controls="new-quote-customers"
+                :aria-activedescendant="listOpen && matches[active] ? `new-quote-c-${matches[active]!.id}` : undefined" :aria-invalid="touched && !!problems.customer"
+                :disabled="settings === 'missing'" @click="listOpen = true" @keydown="comboKeys" @blur="listOpen = false"
+              />
+              <ul v-if="listOpen" id="new-quote-customers" class="options" role="listbox" aria-label="Customers">
+                <li
+                  v-for="(c, i) in matches" :id="`new-quote-c-${c.id}`" :key="c.id" role="option" class="option" :class="{ active: i === active }" :aria-selected="i === active"
+                  @mousedown.prevent="pick(c.id)" @mousemove="active = i"
+                >
+                  <span class="option-name"><template v-for="(part, j) in highlight(c.name, search)" :key="j"><mark v-if="part.match">{{ part.text }}</mark><template v-else>{{ part.text }}</template></template></span>
+                  <span v-if="c.customer_no" class="number mono">{{ c.customer_no }}</span>
+                </li>
+                <li v-if="customers.items && !matches.length" class="none" role="presentation">No customer matches. Add one on the Customers page.</li>
+                <li v-else-if="!customers.items" class="none" role="presentation">{{ customers.error || 'Loading customers…' }}</li>
+              </ul>
+            </template>
+          </div>
+          <p v-if="touched && problems.customer" class="f-note bad" role="alert"><AppIcon name="alert" :size="12" />{{ problems.customer }}</p>
+        </div>
+        <div class="f-row wide">
+          <label class="f-label" for="new-quote-name">Title</label>
+          <input id="new-quote-name" ref="titleInput" v-model="title" class="field" maxlength="512" autocomplete="off" placeholder="Website relaunch" :disabled="settings === 'missing'" :aria-invalid="touched && !!problems.title" />
+          <p v-if="touched && problems.title" class="f-note bad" role="alert"><AppIcon name="alert" :size="12" />{{ problems.title }}</p>
+        </div>
+        <div v-if="customerId && projects && projects.length" class="f-row wide">
+          <label class="f-label" for="new-quote-project">Project <span class="opt">optional</span></label>
+          <select id="new-quote-project" v-model="projectId" class="field" :disabled="settings === 'missing'">
+            <option value="">No project</option>
+            <option v-for="p in projects" :key="p.id" :value="p.id">{{ p.title }}</option>
+          </select>
+        </div>
       </div>
-      <p v-if="org && project && !linked" class="note"><AppIcon name="link" :size="13" />Creating it also links {{ org.title }} as the customer of {{ project.title }}.</p>
-      <p v-if="error" class="error-line" role="alert"><AppIcon name="alert" :size="13" />{{ error }}</p>
-      <footer>
-        <span class="hint">The first version comes next: lines, rates and terms.</span>
+      <p v-if="error" class="f-error" role="alert"><AppIcon name="alert" :size="14" />{{ error }}</p>
+      <footer class="create-foot">
+        <p class="f-hint"><kbd class="keycap">{{ mod }}</kbd><kbd class="keycap"><AppIcon name="enter" /></kbd> creates · <kbd class="keycap">esc</kbd> closes</p>
         <button type="button" class="btn" @click="close">Cancel</button>
-        <button type="submit" class="btn primary" :disabled="!ready || busy">{{ busy ? 'Creating…' : 'Create quote' }}</button>
+        <button type="submit" class="btn primary" :disabled="busy || settings !== 'ready'"><AppIcon name="plus" :size="14" />{{ busy ? 'Creating…' : 'Create quote' }}</button>
       </footer>
     </form>
-    <PickerMenu v-if="picker?.kind === 'org'" :anchor="picker.anchor" title="Customer" :options="orgOptions" :current="orgId" placeholder="Find or add an organisation…" to="#new-quote-dialog" :create-label="term => `Add organisation “${term}”`" @choose="chooseOrg" @create="createOrg" @close="closePicker" />
-    <PickerMenu v-if="picker?.kind === 'project'" :anchor="picker.anchor" title="Project" :options="projectOptions" :current="projectId" placeholder="Find a project…" to="#new-quote-dialog" @choose="chooseProject" @close="closePicker" />
   </dialog>
 </template>
 
 <style scoped>
-.create { width: min(520px, calc(100vw - 24px)); padding: 0; border: 0; background: transparent; color: var(--ink); overflow: visible; }
+.create { width: min(560px, calc(100vw - 24px)); max-height: calc(100dvh - 24px); padding: 0; border: 0; background: transparent; color: var(--ink); overflow: visible; }
 .create::backdrop { background: var(--scrim); backdrop-filter: blur(2px); }
-.create-card { display: grid; gap: 14px; padding: 20px 22px 18px; border-radius: var(--radius); border: 1px solid var(--glass-edge); background: linear-gradient(165deg, var(--surface-raised), var(--surface-raised-2)); box-shadow: var(--shadow-pop), var(--shadow); }
-header { display: flex; align-items: center; justify-content: space-between; }
+.create-card { display: grid; gap: 16px; max-height: calc(100dvh - 24px); overflow: auto; padding: 20px 22px 18px; border-radius: var(--radius); border: 1px solid var(--glass-edge); background: linear-gradient(165deg, var(--surface-raised), var(--surface-raised-2)); box-shadow: var(--shadow-pop), var(--shadow); }
+.create-head { display: flex; align-items: flex-start; justify-content: space-between; gap: 12px; }
 h2 { font-size: 18px; }
-.row { display: grid; grid-template-columns: 92px minmax(0, 1fr); align-items: center; gap: 12px; }
-.label { font: 500 10.5px/1 var(--mono); letter-spacing: .12em; text-transform: uppercase; color: var(--ink-3); font-variant-ligatures: none; }
-.pick { display: flex; align-items: center; gap: 8px; min-width: 0; height: 34px; padding: 0 10px 0 11px; border: 1px solid var(--glass-edge); border-radius: var(--radius-s); background: var(--field-bg); box-shadow: var(--field-inset), 0 0 0 1px var(--line); color: var(--ink); font-size: 13.5px; text-align: left; }
-.pick span:not(.key-badge) { flex: 1; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
-.pick svg { color: var(--ink-3); flex-shrink: 0; }
-.pick.unset { color: var(--ink-3); }
-.pick:hover { box-shadow: var(--field-inset), 0 0 0 1px var(--glass-rim); }
-.pick:focus-visible { box-shadow: var(--focus-ring); }
-.pick .key-badge { height: 20px; padding: 0 6px; font-size: 10.5px; }
-.note { display: flex; align-items: center; gap: 8px; padding: 8px 12px; border-radius: 10px; background: var(--aqua-wash); color: var(--teal-ink); font-size: 12.5px; }
-.error-line { display: flex; align-items: center; gap: 8px; padding: 8px 12px; border-radius: 10px; background: var(--danger-bg); color: var(--danger); font-size: 13px; }
-footer { display: flex; align-items: center; justify-content: flex-end; gap: 8px; margin-top: 4px; }
-.hint { flex: 1; font-size: 12px; color: var(--ink-3); }
+.lead { margin-top: 4px; max-width: 46ch; font-size: 13px; color: var(--ink-2); }
+.gate { display: flex; gap: 12px; padding: 12px 14px; border-radius: 12px; background: var(--surface-2); box-shadow: inset 0 0 0 1px var(--line-2); font-size: 13px; color: var(--ink-2); }
+.gate > div { display: grid; gap: 6px; justify-items: start; }
+.gate-title { font-weight: 650; color: var(--ink); }
+.gate-icon { display: grid; place-items: center; flex-shrink: 0; width: 32px; height: 32px; border-radius: 50%; background: var(--chip-teal-bg); box-shadow: inset 0 0 0 1px var(--chip-teal-line); color: var(--teal-ink); }
+.muted { opacity: .55; }
+.fixed-customer, .chosen { display: flex; align-items: center; gap: 8px; min-height: 38px; padding: 0 6px 0 12px; border-radius: 10px; background: var(--surface-2); box-shadow: inset 0 0 0 1px var(--line); font-size: 13.5px; font-weight: 600; }
+.fixed-customer svg, .chosen svg { flex-shrink: 0; color: var(--ink-3); }
+.chosen-name { flex: 1; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.fixed-customer { padding-right: 12px; }
+/* In the flow of the form: the dialog grows with it, so no choice is ever cut off. */
+.options { max-height: 220px; overflow: auto; margin: 4px 0 0; padding: 4px; list-style: none; border-radius: 12px; border: 1px solid var(--line-2); background: var(--surface-raised); box-shadow: var(--shadow); }
+.option { display: flex; align-items: center; gap: 10px; min-height: 34px; padding: 0 10px; border-radius: 8px; font-size: 13.5px; cursor: pointer; }
+.option.active { background: var(--row-selected); }
+.option-name { flex: 1; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.none { padding: 8px 10px; font-size: 13px; color: var(--ink-3); }
+.number { flex-shrink: 0; padding: 1px 6px; border-radius: 6px; background: var(--chip-bg); box-shadow: inset 0 0 0 1px var(--chip-line); font: 500 11.5px/16px var(--mono); color: var(--ink-2); font-variant-ligatures: none; }
+.create-foot { display: flex; align-items: center; justify-content: flex-end; gap: 8px; }
+.create-foot .f-hint { flex: 1; }
 @media (max-width: 600px) {
-  .row { grid-template-columns: minmax(0, 1fr); gap: 6px; }
-  .pick, .row .field { height: 44px; font-size: 16px; }
-  footer { flex-wrap: wrap; }
-  .hint { flex-basis: 100%; }
-  footer .btn { flex: 1; height: 44px; }
+  .create-card { padding: 16px; }
+  .create-foot { flex-wrap: wrap; }
+  .create-foot .f-hint { display: none; }
+  .create-foot .btn { flex: 1; height: 44px; }
 }
 </style>

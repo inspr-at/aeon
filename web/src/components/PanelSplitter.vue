@@ -15,7 +15,7 @@ watchEffect(() => {
   if (typeof width === 'number' && width >= MIN) root.style.setProperty('--panel-user-w', `${Math.round(width)}px`)
   else root.style.removeProperty('--panel-user-w')
 })
-function current() { return parseFloat(getComputedStyle(root).getPropertyValue('--panel-w')) || document.querySelector<HTMLElement>('.ticket-ws.panel, .session-panel')?.getBoundingClientRect().width || 560 }
+function current() { return parseFloat(getComputedStyle(root).getPropertyValue('--panel-w')) || document.querySelector<HTMLElement>('.ticket-ws.panel, .session-panel, .quote-dock')?.getBoundingClientRect().width || 560 }
 function clamp(width: number) { return Math.round(Math.max(MIN, Math.min(window.innerWidth * 0.72, width))) }
 function set(width: number, delay = 400) { pref.save({ ...(pref.value.value ?? {}), panel: clamp(width) }, delay) }
 let lastPress = -Infinity

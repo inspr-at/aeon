@@ -66,6 +66,8 @@
   --avatar-bg: radial-gradient(circle at 30% 25%, #fff, var(--aqua-2));
   /* Initials avatars: lightness of the palette colour behind and of the letters (hue per person). */
   --avatar-l-bg: .9; --avatar-l-ink: .38; --avatar-rim: rgba(32, 60, 61, .08);
+  /* Collaborator presence: carets, outlines and name labels in each person's avatar hue. */
+  --presence-l: .46; --presence-c: .13; --presence-ink: #fff;
 
   /* Status (derived from the palette) */
   --st-new: #d69b31;
@@ -150,6 +152,7 @@
   --track: rgba(237, 244, 240, 0.09);
   --avatar-bg: radial-gradient(circle at 30% 25%, rgba(164, 229, 223, 0.35), rgba(164, 229, 223, 0.1));
   --avatar-l-bg: .38; --avatar-l-ink: .93; --avatar-rim: rgba(255, 255, 255, .08);
+  --presence-l: .78; --presence-c: .12; --presence-ink: #0d1d1d;
   --st-new: #e2b45a; --st-backlog: #7f9a99; --st-progress: #a4e5df; --st-qa-fill: rgba(164, 229, 223, 0.4); --st-qa-ring: #a4e5df; --st-ok: #7fd1a8; --st-closed: #6f8a89;
   --wash-1: rgba(164, 229, 223, 0.12); --wash-2: transparent; --wash-3: rgba(214, 155, 49, 0.08); --wash-4: transparent;
   --grain-opacity: 0;
@@ -190,6 +193,7 @@
     --track: rgba(237, 244, 240, 0.09);
     --avatar-bg: radial-gradient(circle at 30% 25%, rgba(164, 229, 223, 0.35), rgba(164, 229, 223, 0.1));
     --avatar-l-bg: .38; --avatar-l-ink: .93; --avatar-rim: rgba(255, 255, 255, .08);
+  --presence-l: .78; --presence-c: .12; --presence-ink: #0d1d1d;
     --st-new: #e2b45a; --st-backlog: #7f9a99; --st-progress: #a4e5df; --st-qa-fill: rgba(164, 229, 223, 0.4); --st-qa-ring: #a4e5df; --st-ok: #7fd1a8; --st-closed: #6f8a89;
     --wash-1: rgba(164, 229, 223, 0.12); --wash-2: transparent; --wash-3: rgba(214, 155, 49, 0.08); --wash-4: transparent;
     --grain-opacity: 0;
