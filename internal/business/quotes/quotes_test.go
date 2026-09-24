@@ -515,7 +515,7 @@ func TestQuoteFlowAndGates(t *testing.T) {
 	recipient["email"] = "customer@example.test"
 	doc["sections"] = []any{map[string]any{"id": "aaaaaaaa-1111-4111-8111-111111111111", "heading": "Scope", "body": "A😀B", "nodes": []any{map[string]any{"id": "bbbbbbbb-2222-4222-8222-222222222222", "kind": "paragraph", "text": "A😀B", "marks": []any{map[string]any{"start": 1, "end": 3, "bold": true, "italic": true}}}}}}
 	doc["positions"] = []any{map[string]any{"id": "11111111-1111-4111-8111-111111111111", "pricing_source": "manual", "short_text": "Work", "long_text": "Description", "quantity": "1.5", "unit_label": "item", "unit_price_cents": 9999, "total_cents": 0, "currency": "EUR"}}
-	patchBody, _ := json.Marshal(map[string]any{"client_session_id": "22222222-2222-4222-8222-222222222222", "mutation_id": "33333333-3333-4333-8333-333333333333", "writer_version": 1, "document": doc})
+	patchBody, _ := json.Marshal(map[string]any{"client_session_id": "22222222-2222-4222-8222-222222222222", "mutation_id": "33333333-3333-4333-8333-333333333333", "writer_version": 2, "document": doc})
 	patch := func(body []byte, tag string) (int, map[string]any) {
 		req := httptest.NewRequest("PATCH", "/api/quotes/"+newID+"/draft", strings.NewReader(string(body)))
 		if tag != "" {
