@@ -175,7 +175,7 @@ onBeforeUnmount(() => {
   stop?.(); clearInterval(poll); clearInterval(clock); clearTimeout(debounce)
   window.removeEventListener('keydown', keydown)
 })
-watch(sessionId, id => { if (id) cursor.value = `s:${id}` })
+watch(sessionId, id => { if (id) cursor.value = `s:${id}` }, { immediate: true })
 </script>
 
 <template>
@@ -194,7 +194,7 @@ watch(sessionId, id => { if (id) cursor.value = `s:${id}` })
     <div class="layout">
       <div class="main-col">
         <ApprovalQueue
-          v-if="agents.approvalsState !== 'unavailable'" ref="queue" :pending="agents.pending" :held="agents.held" :history="history" :now="agents.now"
+          ref="queue" :pending="agents.pending" :held="agents.held" :history="history" :now="agents.now"
           :cursor="cursor" :can-decide="writable" :asker="agents.askerName" :resource="resource" :decide="decide" :revoke="agents.revoke"
           @focus-row="id => cursor = id" @open-agent="openAgent"
         />

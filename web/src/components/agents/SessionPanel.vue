@@ -36,7 +36,7 @@ const messages = computed(() => s.value ? agents.thread(s.value).slice(-40) : []
 const address = computed(() => s.value ? agents.addressOf(s.value.agent_principal_id) : '')
 const composeBlock = computed(() => {
   if (!s.value) return ''
-  if (agents.messagingState === 'unavailable') return 'This server does not carry project messages yet.'
+  if (agents.messagingState === 'error') return 'Messages could not be loaded right now. Close and reopen the session to try again.'
   if (agents.messagingState === 'forbidden') return 'Messages are open to workspace admins.'
   if (!address.value) return `${props.view!.name} has no message address yet. It gets one when it registers a message target.`
   if (s.value.phase === 'stopped') return 'This session has stopped. Messages reach the agent’s next session.'
@@ -73,18 +73,29 @@ defineExpose({ focus: () => root.value?.focus({ preventScroll: true }) })
 
 <template>
   <aside ref="root" class="session-panel" aria-label="Session details" tabindex="-1">
-    <header class="panel-bar">
-      <template v-if="view">
-        <LiveDot :tone="view.status.tone" />
-        <span class="bar-state">{{ view.status.label }}</span>
-      </template>
-      <span class="spacer" />
-      <template v-if="view && view.status.group !== 'stopped'">
-        <button type="button" class="icon-btn sm flat" :aria-label="`Interrupt ${view.name}`" :aria-disabled="!!controlBlock(view, 'interrupt')" :data-tip="controlBlock(view, 'interrupt') || 'Interrupt the current turn'" @click="control('interrupt')"><AppIcon name="pause" :size="14" /></button>
-        <button type="button" class="icon-btn sm flat stop" :aria-label="`Stop ${view.name}`" :aria-disabled="!!controlBlock(view, 'stop')" :data-tip="controlBlock(view, 'stop') || 'Stop this session'" @click="control('stop')"><AppIcon name="stop" :size="13" /></button>
-        <span class="bar-sep" aria-hidden="true" />
-      </template>
-      <button type="button" class="icon-btn sm flat" aria-label="Close session details" aria-keyshortcuts="Escape" data-tip="Close · Esc" @click="emit('close')"><AppIcon name="close" :size="15" /></button>
+    <!-- The identity stays in view while runs and messages scroll below it. -->
+    <header class="panel-head">
+      <div class="head-top">
+        <template v-if="view">
+          <LiveDot :tone="view.status.tone" />
+          <span class="harness">{{ view.harness }}</span>
+          <h2 class="name">{{ view.name }}</h2>
+          <span class="state-text" :class="view.status.group">{{ view.status.label }}</span>
+        </template>
+        <span class="spacer" />
+        <template v-if="view && view.status.group !== 'stopped'">
+          <button type="button" class="icon-btn sm flat" :aria-label="`Interrupt ${view.name}`" :aria-disabled="!!controlBlock(view, 'interrupt')" :data-tip="controlBlock(view, 'interrupt') || 'Interrupt: stop the current turn, keep the session'" @click="control('interrupt')"><AppIcon name="interrupt" :size="16" /></button>
+          <button type="button" class="icon-btn sm flat stop" :aria-label="`Stop ${view.name}`" :aria-disabled="!!controlBlock(view, 'stop')" :data-tip="controlBlock(view, 'stop') || 'Stop: end this session'" @click="control('stop')"><AppIcon name="halt" :size="16" /></button>
+          <span class="bar-sep" aria-hidden="true" />
+        </template>
+        <button type="button" class="icon-btn sm flat" aria-label="Close session details" aria-keyshortcuts="Escape" data-tip="Close · Esc" @click="emit('close')"><AppIcon name="close" :size="15" /></button>
+      </div>
+      <p v-if="view" class="head-sub">
+        <RouterLink v-if="view.ticket" class="ticket-chip" :to="view.ticket.href" :aria-label="`Ticket ${view.ticket.key}: ${view.ticket.title}`">{{ view.ticket.key }}</RouterLink>
+        <span v-if="view.ticket" class="head-ticket">{{ view.ticket.title }}</span>
+        <span v-else class="muted">Not bound to a ticket</span>
+        <span class="head-account" :class="{ muted: !view.account }"><AppIcon name="gauge" :size="12" />{{ view.account || 'Account not reported' }}</span>
+      </p>
     </header>
 
     <div v-if="!view && loading" class="scroll" role="status" aria-label="Loading session">
@@ -100,14 +111,6 @@ defineExpose({ focus: () => root.value?.focus({ preventScroll: true }) })
     </div>
 
     <div v-else ref="thread" class="scroll">
-      <div class="who">
-        <h2 class="name"><span class="harness">{{ view.harness }}</span>{{ view.name }}</h2>
-        <p class="sub">
-          {{ view.session.role === 'coordinator' ? 'Lead session' : 'Worker' }} on <span class="mono">{{ view.session.host }}</span>
-          · {{ view.session.management_mode === 'managed' ? 'owned by Aeon' : 'runs on its own' }}
-        </p>
-      </div>
-
       <div v-if="pending.length" class="callout" role="note">
         <AppIcon name="shield" :size="15" />
         <div class="callout-text">
@@ -118,15 +121,11 @@ defineExpose({ focus: () => root.value?.focus({ preventScroll: true }) })
       </div>
 
       <dl class="facts">
-        <div class="fact wide"><dt>Ticket</dt><dd>
-          <RouterLink v-if="view.ticket" class="ticket-link" :to="view.ticket.href"><span class="ticket-chip">{{ view.ticket.key }}</span><span class="ticket-title">{{ view.ticket.title }}</span></RouterLink>
-          <span v-else class="muted">Not bound to a ticket</span>
-        </dd></div>
         <div class="fact"><dt>Project</dt><dd>
           <RouterLink v-if="view.projectKey" class="project-link" :to="`/p/${encodeURIComponent(view.projectKey)}`"><span class="key-badge">{{ view.projectKey }}</span>{{ view.projectTitle }}</RouterLink>
           <span v-else class="muted">—</span>
         </dd></div>
-        <div class="fact"><dt>Account</dt><dd :class="{ muted: !view.account }">{{ view.account || 'Not reported' }}</dd></div>
+        <div class="fact"><dt>Runs on</dt><dd><span class="mono">{{ view.session.host }}</span><span class="muted">{{ view.session.role === 'coordinator' ? 'lead session' : 'worker' }} · {{ view.session.management_mode === 'managed' ? 'owned by Aeon' : 'runs on its own' }}</span></dd></div>
         <div class="fact"><dt>Model</dt><dd class="mono" :class="{ muted: !view.model }">{{ view.model || 'Not reported' }}<span v-if="run && run.model_evidence === 'vendor_reported'" class="evidence" data-tip="Reported by the vendor, not only requested"><AppIcon name="check" :size="11" /></span></dd></div>
         <div class="fact"><dt>Heartbeat</dt><dd>
           <time v-if="view.session.heartbeat_at" :datetime="view.session.heartbeat_at" :data-tip="absoluteTime(view.session.heartbeat_at)">{{ relativeTime(view.session.heartbeat_at, { now, long: true }) }}</time>
@@ -163,7 +162,7 @@ defineExpose({ focus: () => root.value?.focus({ preventScroll: true }) })
 
       <section class="block" aria-labelledby="messages-title">
         <h3 id="messages-title" class="eyebrow">Messages</h3>
-        <p v-if="!messages.length" class="empty-line">{{ agents.messagingState === 'unavailable' ? 'Messages are not available on this server yet.' : `No messages with ${view.name} yet.` }}</p>
+        <p v-if="!messages.length" class="empty-line">{{ agents.messagingState === 'error' ? 'Messages could not be loaded right now.' : `No messages with ${view.name} yet.` }}</p>
         <ol v-else class="thread" aria-label="Messages">
           <li v-for="m in messages" :key="m.id" class="msg" :class="{ theirs: fromAgent(m), mine: m.sender_principal_id === me }">
             <p class="msg-meta">
@@ -214,33 +213,35 @@ defineExpose({ focus: () => root.value?.focus({ preventScroll: true }) })
   .session-panel { animation: panel-in .22s cubic-bezier(.2, .7, .2, 1); }
   @keyframes panel-in { from { opacity: 0; transform: translateX(24px); } to { opacity: 1; transform: none; } }
 }
-.panel-bar { display: flex; align-items: center; gap: 8px; height: 48px; flex-shrink: 0; padding: 0 10px 0 18px; border-bottom: 1px solid var(--line); }
-.bar-state { font-size: 12.5px; font-weight: 600; color: var(--ink-2); }
+.panel-head { flex-shrink: 0; padding: 8px 10px 10px 18px; border-bottom: 1px solid var(--line); }
+.head-top { display: flex; align-items: center; gap: 8px; min-height: 36px; }
+.name { min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; font-size: 18px; font-weight: 650; letter-spacing: -.01em; }
+.state-text { flex-shrink: 0; font-size: 12.5px; font-weight: 600; color: var(--ink-2); }
+.state-text.needs { color: var(--gold-ink); }
+.head-sub { display: flex; align-items: center; gap: 8px; min-width: 0; margin-top: 4px; padding-right: 8px; font-size: 12.5px; color: var(--ink-2); }
+.head-ticket { min-width: 0; flex: 1; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; color: var(--ink); font-weight: 600; }
+.head-account { flex-shrink: 0; display: inline-flex; align-items: center; gap: 5px; margin-left: auto; padding-left: 10px; box-shadow: inset 1px 0 0 var(--line-2); }
+.head-account svg { color: var(--ink-3); }
 .spacer { flex: 1; }
 .bar-sep { width: 1px; height: 18px; margin: 0 4px; background: var(--line-2); }
-.panel-bar [aria-disabled="true"] { opacity: .35; cursor: not-allowed; }
+.panel-head [aria-disabled="true"] { opacity: .35; cursor: not-allowed; }
 .stop:not([aria-disabled="true"]):hover { color: var(--danger); }
 .scroll { flex: 1; min-height: 0; overflow: auto; overscroll-behavior: contain; padding: 18px 24px 24px; }
-.who { display: grid; gap: 4px; }
-.name { display: flex; align-items: center; gap: 10px; font-size: 22px; font-weight: 650; letter-spacing: -.01em; }
-.harness { display: inline-flex; align-items: center; height: 22px; padding: 0 8px; border-radius: 7px; background: var(--chip-bg); box-shadow: inset 0 0 0 1px var(--chip-line); font: 500 11px/1 var(--mono); color: var(--ink-2); font-variant-ligatures: none; }
-.sub { font-size: 13px; color: var(--ink-2); }
-.sub .mono { font-size: 12px; }
-.callout { display: flex; align-items: center; gap: 12px; margin-top: 16px; padding: 12px 12px 12px 14px; border-radius: 12px; background: var(--gold-wash); box-shadow: inset 0 0 0 1px rgba(214, 155, 49, .35); color: var(--gold-ink); }
+.harness { flex-shrink: 0; display: inline-flex; align-items: center; height: 22px; padding: 0 8px; border-radius: 7px; background: var(--chip-bg); box-shadow: inset 0 0 0 1px var(--chip-line); font: 500 11px/1 var(--mono); color: var(--ink-2); font-variant-ligatures: none; }
+.callout { display: flex; align-items: center; gap: 12px; margin-bottom: 18px; padding: 12px 12px 12px 14px; border-radius: 12px; background: var(--gold-wash); box-shadow: inset 0 0 0 1px rgba(214, 155, 49, .35); color: var(--gold-ink); }
 .callout-text { display: grid; flex: 1; min-width: 0; font-size: 12.5px; color: var(--ink-2); }
 .callout-text strong { color: var(--ink); font-size: 13px; }
-.facts { display: grid; grid-template-columns: minmax(0, 1fr) minmax(0, 1fr); align-items: start; gap: 12px 20px; margin: 20px 0 0; padding: 16px 0 0; border-top: 1px solid var(--line); }
+.facts { display: grid; grid-template-columns: minmax(0, 1fr) minmax(0, 1fr); align-items: start; gap: 12px 20px; margin: 0; }
 .fact { display: grid; grid-template-columns: minmax(0, 1fr); gap: 3px; min-width: 0; }
 .fact.wide { grid-column: 1 / -1; }
 .fact dt { font: 500 10px/1.5 var(--mono); letter-spacing: .14em; text-transform: uppercase; color: var(--ink-3); font-variant-ligatures: none; }
 .fact dd { margin: 0; font-size: 13px; color: var(--ink); overflow-wrap: anywhere; display: flex; align-items: center; gap: 6px; flex-wrap: wrap; }
-.fact dd.mono { font-size: 12px; }
+.fact dd.mono, .fact dd .mono { font-size: 12px; font-family: var(--mono); font-variant-ligatures: none; }
 .muted { color: var(--ink-3); }
 .evidence { display: inline-grid; place-items: center; width: 16px; height: 16px; border-radius: 50%; background: var(--chip-teal-bg); color: var(--teal-ink); }
-.ticket-link, .project-link { display: inline-flex; align-items: center; gap: 8px; min-width: 0; max-width: 100%; color: var(--ink); text-decoration: none; }
-.ticket-link:hover .ticket-title, .project-link:hover { color: var(--teal-ink); }
+.project-link { display: inline-flex; align-items: center; gap: 8px; min-width: 0; max-width: 100%; color: var(--ink); text-decoration: none; }
+.project-link:hover { color: var(--teal-ink); }
 .ticket-chip { flex-shrink: 0; display: inline-flex; align-items: center; height: 22px; padding: 0 8px; border-radius: 6px; background: var(--chip-teal-bg); box-shadow: inset 0 0 0 1px var(--chip-teal-line); color: var(--teal-ink); font: 600 11.5px/1 var(--mono); font-variant-ligatures: none; }
-.ticket-title { min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; font-weight: 600; }
 .block { margin-top: 26px; }
 .block h3 { margin-bottom: 10px; }
 .telemetry { display: grid; grid-template-columns: repeat(4, minmax(0, 1fr)); gap: 8px; }
@@ -289,8 +290,11 @@ defineExpose({ focus: () => root.value?.focus({ preventScroll: true }) })
 .sk .w40 { width: 40%; height: 18px; } .sk .w70 { width: 70%; } .sk .w90 { width: 90%; } .sk .w60 { width: 60%; }
 @media (max-width: 720px) {
   .session-panel { z-index: 40; inset: 0; width: auto; height: 100dvh; border-radius: 0; border: 0; background: var(--canvas); }
-  .panel-bar { padding-left: 16px; }
-  .panel-bar .icon-btn { width: 40px; height: 40px; }
+  .panel-head { padding: 6px 8px 10px 16px; }
+  .head-top .icon-btn { width: 40px; height: 40px; }
+  .state-text { display: none; }
+  .head-sub { flex-wrap: wrap; row-gap: 4px; }
+  .head-account { margin-left: 0; padding-left: 0; box-shadow: none; width: 100%; }
   .scroll { padding: 16px 18px 24px; }
   .telemetry { grid-template-columns: 1fr 1fr; }
   .run-row { grid-template-columns: 88px minmax(0, 1fr) 60px; }

@@ -29,7 +29,6 @@ const stateLabel: Record<AgentAccount['state'], string> = { available: 'Availabl
       <h2 id="accounts-title"><AppIcon name="gauge" :size="15" />Accounts and pacing</h2>
     </header>
     <p v-if="state === 'forbidden'" class="note">Accounts and their allowances are visible to workspace admins.</p>
-    <p v-else-if="state === 'unavailable'" class="note">This server does not report agent accounts.</p>
     <p v-else-if="state === 'error'" class="note" role="alert">Accounts could not be loaded right now.</p>
     <div v-else-if="state === 'idle'" class="sk"><span class="skeleton" /><span class="skeleton short" /><span class="skeleton" /></div>
     <p v-else-if="!accounts.length" class="note">No accounts are enrolled. The local agent daemon enrolls one per harness sign-in.</p>

@@ -77,7 +77,8 @@ defineExpose({ begin, cancel, isOpen: () => !!open.value })
     <ul v-else class="items" aria-label="Requests waiting for you">
       <li
         v-for="approval in pending" :key="approval.id" class="item" :class="[riskOf(approval), { active: cursor === `a:${approval.id}`, open: open?.id === approval.id }]"
-        :data-row="`a:${approval.id}`" tabindex="-1" :aria-label="`${scopeLabel(approval.scope)}, asked by ${asker(approval.agent_principal_id).name}`" @click="emit('focusRow', `a:${approval.id}`)"
+        :data-row="`a:${approval.id}`" tabindex="-1" :aria-label="`${scopeLabel(approval.scope)}, asked by ${asker(approval.agent_principal_id).name}`"
+        @click="emit('focusRow', `a:${approval.id}`)" @focusin="emit('focusRow', `a:${approval.id}`)"
       >
         <span class="mark"><AppIcon name="shield" :size="15" /></span>
         <div class="body">
@@ -116,7 +117,7 @@ defineExpose({ begin, cancel, isOpen: () => !!open.value })
         </div>
         <div v-if="open?.id !== approval.id && canDecide" class="row-actions">
           <button type="button" class="btn sm" aria-keyshortcuts="d" @click.stop="begin(approval.id, 'deny')"><AppIcon name="close" :size="13" />Deny</button>
-          <button type="button" class="btn sm primary" aria-keyshortcuts="a" @click.stop="begin(approval.id, 'approve')"><AppIcon name="check" :size="13" />Approve</button>
+          <button type="button" class="btn sm" :class="cursor === `a:${approval.id}` ? 'primary' : 'approve-soft'" aria-keyshortcuts="a" @click.stop="begin(approval.id, 'approve')"><AppIcon name="check" :size="13" />Approve</button>
         </div>
       </li>
       <li
@@ -204,6 +205,9 @@ defineExpose({ begin, cancel, isOpen: () => !!open.value })
 .decision textarea { width: 100%; min-height: 58px; resize: vertical; padding: 8px 10px; font: inherit; font-size: 13.5px; line-height: 1.4; }
 .decision-actions { display: flex; align-items: center; justify-content: flex-end; gap: 8px; }
 .decision-actions .hint { margin-right: auto; display: inline-flex; align-items: center; gap: 4px; font-size: 11.5px; color: var(--ink-3); }
+/* One primary at a time: only the selected request's Approve is filled. */
+.btn.approve-soft { border-color: transparent; background: var(--chip-teal-bg); color: var(--teal-ink); box-shadow: inset 0 0 0 1px var(--chip-teal-line); }
+.btn.approve-soft:hover { background: var(--row-selected); box-shadow: inset 0 0 0 1px var(--teal); }
 .btn.deny { color: #fff; background: var(--danger); border-color: transparent; }
 .btn.deny:hover { filter: brightness(1.06); background: var(--danger); }
 .error { display: flex; align-items: center; gap: 6px; font-size: 12.5px; color: var(--danger); }

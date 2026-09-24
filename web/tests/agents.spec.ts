@@ -70,8 +70,13 @@ test('approvals: j and k move, a opens a reason, Enter records the decision', as
   await expect(first).toContainText('Interrupt or stop agent sessions')
   await expect(first).toContainText('High risk')
   await expect(first).toContainText(/Expires in \d+m/)
+  // Only the selected request's Approve is the filled primary; the emphasis moves with j and k.
+  await expect(first.getByRole('button', { name: 'Approve' })).toHaveClass(/primary/)
+  await expect(queue(page).locator('.item').nth(1).getByRole('button', { name: 'Approve' })).toHaveClass(/approve-soft/)
   await page.keyboard.press('j')
   await expect(queue(page).locator('.item').nth(1)).toHaveClass(/active/)
+  await expect(queue(page).locator('.item').nth(1).getByRole('button', { name: 'Approve' })).toHaveClass(/primary/)
+  await expect(first.getByRole('button', { name: 'Approve' })).not.toHaveClass(/primary/)
   await page.keyboard.press('a')
   const reason = queue(page).getByLabel('Reason (optional)')
   await expect(reason).toBeFocused()
@@ -115,7 +120,8 @@ test('the session panel shows the ticket, runs, telemetry and the thread, and se
   await openAgents(page, `/agents/${camy}`)
   const details = panel(page)
   await expect(details.getByRole('heading', { name: /camy/ })).toBeVisible()
-  await expect(details).toContainText('Lead session on imac0')
+  await expect(details.locator('.head-sub')).toContainText('Claude Max')
+  await expect(details).toContainText('lead session · owned by Aeon')
   await expect(details.getByRole('link', { name: /PHAROS-11/ })).toHaveAttribute('href', '/p/PHAROS/PHAROS-11')
   await expect(details).toContainText('Claude Max')
   await expect(details.locator('.metric')).toHaveText([/Running/, /184k/, /22k/, /\$3\.84/])
@@ -216,10 +222,13 @@ test('an empty workspace explains how an agent connects', async ({ page }) => {
   await expect(page.locator('.summary')).toHaveText('No agent connected yet')
 })
 
-test('a server without the session surface says so and keeps approvals working', async ({ page }) => {
+test('a failing sessions read is a real error with a retry, and approvals keep working', async ({ page }) => {
   await setup(page, { sessionsMissing: true, messagesMissing: true })
   await page.goto('/agents')
-  await expect(page.getByRole('heading', { name: 'This server does not report agent sessions yet' })).toBeVisible()
+  const failure = page.getByRole('region', { name: 'Sessions' }).getByRole('alert')
+  await expect(failure).toContainText('Sessions could not be loaded')
+  await expect(failure).toContainText('(404)')
+  await expect(failure.getByRole('button', { name: 'Try again' })).toBeVisible()
   await expect(queue(page).locator('.item')).toHaveCount(3)
 })
 
@@ -255,6 +264,13 @@ for (const colorScheme of ['light', 'dark'] as const) {
       expect(box.x + box.width).toBeLessThanOrEqual(390)
     }
     await expect(page.getByRole('link', { name: 'Agents, 4 need you' })).toBeVisible()
+    // Row controls live in an overflow menu on phones.
+    const { calls } = { calls: [] as string[] }
+    page.on('request', request => { if (request.method() === 'POST') calls.push(new URL(request.url()).pathname) })
+    await row(page, nova).evaluate(el => el.scrollIntoView({ block: 'center' }))
+    await page.getByRole('button', { name: 'Actions for nova' }).click()
+    await page.getByRole('menuitem', { name: /^Interrupt/ }).click()
+    await expect.poll(() => calls.some(path => path.endsWith(`/harness-sessions/${nova}/controls/interrupt`))).toBe(true)
     await row(page, camy).locator('.c-agent a').click()
     expect(await panel(page).boundingBox()).toEqual({ x: 0, y: 0, width: 390, height: 844 })
     expect(errors).toEqual([])

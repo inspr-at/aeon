@@ -11,8 +11,8 @@ import { agentName, groupSessions, harnessLabel, heldRequests, needsYou, pending
 import { toast } from '../lib/toast'
 import { useProjects } from './projects'
 
-// unavailable: the server does not offer this surface (404); forbidden: not for this person.
-export type Availability = 'idle' | 'ready' | 'unavailable' | 'forbidden' | 'error'
+// forbidden: not for this person; error: the read failed (any other status, including 404).
+export type Availability = 'idle' | 'ready' | 'forbidden' | 'error'
 export interface NodeRef { id: string; key: string; title: string }
 export interface SessionView {
   session: HarnessSession; status: SessionStatus; name: string; harness: string; account: string; model: string
@@ -27,9 +27,8 @@ async function perProject<T>(ids: string[], read: (id: string) => Promise<T>): P
   const results = new Map<string, T>()
   if (!ids.length) return { state: 'ready', results, error: '' }
   try { results.set(ids[0], await read(ids[0])) } catch (e) {
-    if (e instanceof APIError && e.status === 404) return { state: 'unavailable', results, error: '' }
     if (e instanceof APIError && e.status === 403) return { state: 'forbidden', results, error: '' }
-    return { state: 'error', results, error: message(e) }
+    return { state: 'error', results, error: e instanceof APIError ? `The server answered “${e.message}” (${e.status}).` : message(e) }
   }
   let next = 1
   const worker = async () => { while (next < ids.length) { const id = ids[next++]; try { results.set(id, await read(id)) } catch { /* shown as missing */ } } }
@@ -84,19 +83,18 @@ export const useAgents = defineStore('agents', () => {
   async function refreshApprovals() {
     try { approvals.value = await listApprovals(); approvalsState.value = 'ready'; approvalsError.value = '' }
     catch (e) {
-      approvalsState.value = e instanceof APIError && e.status === 404 ? 'unavailable' : e instanceof APIError && e.status === 403 ? 'forbidden' : 'error'
+      approvalsState.value = e instanceof APIError && e.status === 403 ? 'forbidden' : 'error'
       approvalsError.value = message(e)
     }
   }
   async function refreshAccounts() {
     try { accounts.value = await listAccounts(); accountsState.value = 'ready' }
-    catch (e) { accountsState.value = e instanceof APIError && e.status === 404 ? 'unavailable' : e instanceof APIError && e.status === 403 ? 'forbidden' : 'error' }
+    catch (e) { accountsState.value = e instanceof APIError && e.status === 403 ? 'forbidden' : 'error' }
   }
   async function refreshModels() { if (!models.value.length) try { models.value = await listModels() } catch { /* model names fall back to the run's */ } }
   // Messages are paged per project from the oldest, so a full scan runs at most
   // every 30 seconds; a sent message refreshes its own thread at once.
   async function refreshMessages() {
-    if (messagingState.value === 'unavailable' && Date.now() - messagesAt < 300_000) return
     if (Date.now() - messagesAt < 30_000) return
     messagesAt = Date.now()
     const result = await perProject(activeProjectIds(), async id => {
@@ -159,19 +157,18 @@ export const useAgents = defineStore('agents', () => {
   }
   // One project's sessions, for the ticket panel; cached for 20 seconds.
   async function ensureProject(projectId: string) {
-    if (sessionsState.value === 'unavailable' || Date.now() - (projectLoadedAt.get(projectId) ?? 0) < 20_000) return
+    if (Date.now() - (projectLoadedAt.get(projectId) ?? 0) < 20_000) return
     projectLoadedAt.set(projectId, Date.now())
     try {
       const list = await listSessions(projectId)
       sessions.value = [...sessions.value.filter(s => s.project_id !== projectId), ...list]
       if (sessionsState.value === 'idle') sessionsState.value = 'ready'
       await details(list)
-    } catch (e) { if (e instanceof APIError && e.status === 404) sessionsState.value = 'unavailable' }
+    } catch { /* the ticket panel simply shows no sessions */ }
   }
   async function refreshThread(projectId: string) {
-    if (messagingState.value === 'unavailable') return
     try { const list = await allMessages(projectId); messages.value = { ...messages.value, [projectId]: list }; if (messagingState.value === 'idle') messagingState.value = 'ready' }
-    catch (e) { if (e instanceof APIError && e.status === 404) messagingState.value = 'unavailable' }
+    catch (e) { if (messagingState.value !== 'ready') messagingState.value = e instanceof APIError && e.status === 403 ? 'forbidden' : 'error' }
   }
   async function runsFor(runIds: string[]) {
     await all(runIds.filter(id => !runs.value[id] || !terminal(runs.value[id])), async id => { const run = await getRun(id); runs.value = { ...runs.value, [id]: run } })
