@@ -39,8 +39,9 @@ test('the header links to Agents with a count of what needs you', async ({ page 
   await expect(link).toBeVisible()
   await link.click()
   await expect(page).toHaveURL('/agents')
-  await expect(page.getByRole('link', { name: 'Agents, 4 need you' })).toHaveAttribute('aria-current', 'page')
-  await expect(page.getByRole('navigation', { name: 'Breadcrumb' })).toHaveText('Agents')
+  // Agents is a place: highlighted in the header, so no breadcrumb repeats it.
+  await expect(page.getByRole('navigation', { name: 'Places' }).getByRole('link', { name: 'Agents, 4 need you' })).toHaveAttribute('aria-current', 'page')
+  await expect(page.getByRole('navigation', { name: 'Breadcrumb' })).toHaveCount(0)
 })
 
 test('sessions are grouped by what they need, with ticket, account, model and heartbeat', async ({ page }) => {

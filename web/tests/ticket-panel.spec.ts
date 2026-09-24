@@ -368,7 +368,7 @@ test('a selected row hides its parent chip rather than clipping it under the row
 })
 
 for (const colorScheme of ['light', 'dark'] as const) {
-  test(`on a phone the ticket is a full-screen sheet with a chip row and a bottom composer in ${colorScheme}`, async ({ page }) => {
+  test(`on a phone the ticket is a full-screen sheet with wrapping chips and a bottom composer in ${colorScheme}`, async ({ page }) => {
     const errors = watchErrors(page)
     await page.setViewportSize({ width: 390, height: 844 })
     await page.emulateMedia({ colorScheme })
@@ -379,7 +379,9 @@ for (const colorScheme of ['light', 'dark'] as const) {
     expect(await ws.boundingBox()).toEqual({ x: 0, y: 0, width: 390, height: 844 })
     await expect(ws.getByRole('button', { name: 'Close ticket details' })).toBeInViewport()
     const chips = ws.locator('.props.row')
-    expect(await chips.evaluate(el => getComputedStyle(el).flexWrap)).toBe('nowrap')
+    // The chips wrap onto more lines; none is cut at the edge.
+    expect(await chips.evaluate(el => getComputedStyle(el).flexWrap)).toBe('wrap')
+    expect(await chips.evaluate(el => el.scrollWidth <= el.clientWidth + 1)).toBe(true)
     const composer = (await ws.getByLabel('Add a comment').boundingBox())!
     expect(composer.y + composer.height).toBeGreaterThan(790)
     expect(await page.evaluate(() => document.documentElement.scrollWidth <= innerWidth)).toBe(true)

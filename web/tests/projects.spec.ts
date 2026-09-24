@@ -94,7 +94,9 @@ test('j, k and Enter open a project from the keyboard', async ({ page }) => {
   await page.keyboard.press('Enter')
   await expect(page).toHaveURL('/p/PHAROS')
   await expect(page.getByRole('heading', { name: 'Pharos', level: 1 })).toBeVisible()
-  await expect(page.getByRole('navigation', { name: 'Breadcrumb' })).toContainText('Projects/PHAROSPharos')
+  // The breadcrumb continues from the Projects place.
+  await expect(page.getByRole('navigation', { name: 'Places' }).getByRole('link', { name: 'Projects' })).toHaveAttribute('aria-current', 'true')
+  await expect(page.getByRole('navigation', { name: 'Breadcrumb' })).toHaveText('/PHAROSPharos')
 })
 
 test('loading shows skeleton rows; a failure explains itself and retries', async ({ page }) => {

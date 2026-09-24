@@ -1,0 +1,180 @@
+// SPDX-License-Identifier: AGPL-3.0-only
+// Settings: Personal for everyone (theme, greeting, keys), and Workspace,
+// Business and Projects for admins, read from what the server already has.
+import { test, expect, type Page } from '@playwright/test'
+import AxeBuilder from '@axe-core/playwright'
+import { fixtures, mockWork, watchErrors } from './work-fixtures'
+import { businessData, mockBusiness } from './business-fixtures'
+import { agentData, mockAgents } from './agents-fixtures'
+import { mockSettings, settingsData, type SettingsMockOptions } from './settings-fixtures'
+
+const sections = (page: Page) => page.getByRole('navigation', { name: 'Settings sections' })
+async function setup(page: Page, options: SettingsMockOptions & { role?: 'admin' | 'member' } = {}) {
+  await mockWork(page, fixtures())
+  await mockBusiness(page, businessData({ role: options.role ?? 'admin' }), { role: options.role ?? 'admin' })
+  const data = settingsData(options)
+  await mockSettings(page, data, options)
+  return data
+}
+
+test('the account menu opens Settings on Personal: theme, greeting and keys', async ({ page }) => {
+  const errors = watchErrors(page)
+  const data = await setup(page)
+  await page.goto('/')
+  await page.getByRole('button', { name: /^Account for / }).click()
+  await page.getByRole('button', { name: 'Settings' }).click()
+  await expect(page).toHaveURL('/settings/personal')
+  await expect(page).toHaveTitle(/^Settings · /)
+  await expect(sections(page).getByRole('link')).toHaveText([/^Personal/, /^Workspace/, /^Business/, /^Projects/])
+  await expect(sections(page).getByRole('link', { name: /^Personal/ })).toHaveAttribute('aria-current', 'page')
+
+  await page.getByRole('radio', { name: 'Dark' }).click()
+  await expect(page.locator('html')).toHaveAttribute('data-theme', 'dark')
+
+  const greeting = page.getByRole('checkbox', { name: 'Greeting On' })
+  await expect(greeting).toBeChecked()
+  await greeting.uncheck()
+  await expect(page.getByRole('checkbox', { name: 'Greeting Off' })).not.toBeChecked()
+  expect(data.patches).toEqual([{ greeting_enabled: false }])
+  await expect(page.locator('.toast')).toHaveText(/The greeting is off\./)
+
+  // Profile editing is a clean slot for now, not a form.
+  await expect(page.locator('#profile')).toContainText('Editing your name, photo, time zone and language arrives here next.')
+  await expect(page.locator('#profile input')).toHaveCount(0)
+  await page.getByRole('button', { name: 'All shortcuts' }).click()
+  await expect(page.getByRole('dialog', { name: 'Keyboard shortcuts' })).toBeVisible()
+  expect(errors).toEqual([])
+})
+
+test('a greeting that cannot be saved goes back to how it was', async ({ page }) => {
+  await setup(page, { failPatch: true })
+  await page.goto('/settings/personal')
+  // A click, not uncheck(): the switch flips back as soon as the save fails.
+  await page.getByRole('checkbox', { name: 'Greeting On' }).click()
+  await expect(page.locator('.toast.error')).toContainText('could not be saved')
+  await expect(page.getByRole('checkbox', { name: 'Greeting On' })).toBeChecked()
+})
+
+test('members see only Personal; an admin section explains itself', async ({ page }) => {
+  await setup(page, { role: 'member' })
+  await page.goto('/settings')
+  await expect(page).toHaveURL('/settings/personal')
+  await expect(sections(page)).toHaveCount(0)
+  await expect(page.getByRole('heading', { name: 'Greeting' })).toBeVisible()
+  await page.goto('/settings/workspace')
+  await expect(page.getByRole('heading', { name: 'Workspace settings are for workspace admins' })).toBeVisible()
+  await expect(page.getByRole('table')).toHaveCount(0)
+  await page.keyboard.press('Control+k')
+  await page.keyboard.type('workspace settings')
+  await expect(page.getByRole('option', { name: /Workspace settings/ })).toHaveCount(0)
+})
+
+test('Workspace lists members and agent keys, read-only', async ({ page }) => {
+  await setup(page)
+  await page.goto('/settings/workspace')
+  const members = page.locator('#members')
+  await expect(members.locator('.people').first().getByRole('listitem')).toHaveText([/Markus Barta\s*Admin/, /Mira Holm\s*Member/])
+  await expect(members).toContainText('Cleo Customer')
+  await expect(members).toContainText('Nova')
+  await expect(members).not.toContainText('System')
+  const rows = page.locator('#agent-keys tbody tr')
+  await expect(rows).toHaveCount(3)
+  await expect(rows.nth(0)).toContainText('aeon-coordinator')
+  await expect(rows.nth(0)).toContainText('aeon_c0or_…')
+  await expect(rows.nth(1)).toContainText('journey:write')
+  await expect(rows.nth(2).locator('.state')).toHaveText('Revoked')
+  // Read-only: nothing to create or revoke yet.
+  await expect(page.locator('#agent-keys').getByRole('button')).toHaveCount(0)
+})
+
+test('without the directory the members note says why in plain words', async ({ page }) => {
+  await mockWork(page, fixtures())
+  await mockBusiness(page, businessData(), { noDirectory: true })
+  await mockSettings(page, settingsData())
+  await page.goto('/settings/workspace')
+  await expect(page.locator('#members')).toContainText('Members show here only while a Business part is on, and none is on in this workspace.')
+})
+
+test('card controls share one alignment: centred on the title and its line', async ({ page }) => {
+  await setup(page)
+  await page.goto('/settings/personal')
+  await expect(page.getByRole('checkbox', { name: 'Greeting On' })).toBeVisible()
+  for (const id of ['appearance', 'greeting', 'keys']) {
+    const offset = await page.locator(`#${id}`).evaluate(card => {
+      const titles = card.querySelector('.card-titles')!.getBoundingClientRect(), aside = card.querySelector('.card-aside')!.getBoundingClientRect()
+      return Math.abs((titles.top + titles.height / 2) - (aside.top + aside.height / 2))
+    })
+    expect(offset, id).toBeLessThanOrEqual(1)
+  }
+  // No empty body under a card that has none.
+  await expect(page.locator('#greeting .card-body')).toHaveCount(0)
+})
+
+test('Business shows the parts and the stored quote settings; a deep link rings its card', async ({ page }) => {
+  await setup(page)
+  await page.goto('/settings/business#quotes')
+  const quotes = page.locator('#quotes')
+  await expect(quotes).toHaveClass(/arrived/)
+  await expect(quotes).toContainText('EUR')
+  await expect(quotes).toContainText('INSPR Studio · Graz · AT')
+  await expect(quotes).not.toContainText('AT00')
+  await expect(page.getByRole('heading', { name: 'Business parts' })).toBeVisible()
+  await expect(page.getByRole('checkbox', { name: 'Hours enabled' })).toBeChecked()
+})
+
+test('without Quotes the quote settings say so', async ({ page }) => {
+  await setup(page, { noQuotes: true })
+  await page.goto('/settings/business')
+  await expect(page.locator('#quotes')).toContainText('Quote settings show here once Quotes is enabled for this workspace.')
+})
+
+test('Projects lists the ticket types with their prefixes', async ({ page }) => {
+  await setup(page)
+  await page.goto('/settings/projects')
+  await expect(page.locator('#ticket-types li')).toHaveCount(3)
+  await expect(page.locator('#ticket-types')).toContainText('Epic')
+  await expect(page.locator('#ticket-types .prefix')).toHaveText(['EPI', 'TIC', 'TAS'])
+})
+
+test('Agents links admins to the agent keys', async ({ page }) => {
+  await mockWork(page, fixtures())
+  await mockAgents(page, agentData({ me: '11111111-1111-4111-8111-111111111111', projects: { pharos: 'p-pharos', aeon: 'p-aeon', pai: 'p-frozen' }, tickets: { fleet: 'n-1', restore: 'n-2', web: 'n-a1', release: 'n-5', approvals: 'n-6' }, nodes: {}, empty: true }))
+  await mockBusiness(page, businessData())
+  await mockSettings(page, settingsData())
+  await page.goto('/agents')
+  await page.getByRole('link', { name: 'Agent keys' }).click()
+  await expect(page).toHaveURL('/settings/workspace#agent-keys')
+  await expect(page.locator('#agent-keys')).toHaveClass(/arrived/)
+})
+
+test('at 390 the sections sit in a grid and nothing is cut', async ({ page }) => {
+  await page.setViewportSize({ width: 390, height: 844 })
+  await setup(page)
+  for (const section of ['personal', 'workspace', 'business', 'projects']) {
+    await page.goto(`/settings/${section}`)
+    await expect(page.locator('.settings-card').first()).toBeVisible()
+    await page.waitForTimeout(150)
+    const cut = await page.evaluate(() => [...document.querySelectorAll<HTMLElement>('.settings-page *')].filter(el => {
+      const r = el.getBoundingClientRect()
+      if (r.width <= 1 || r.height <= 1 || getComputedStyle(el).display === 'none') return false
+      const c = getComputedStyle(el)
+      return r.left < -0.5 || r.right > innerWidth + 0.5 || ((c.overflowX !== 'visible' || c.textOverflow === 'ellipsis') && el.scrollWidth > el.clientWidth + 1)
+    }).map(el => el.className || el.tagName))
+    expect(cut, section).toEqual([])
+  }
+})
+
+for (const colorScheme of ['light', 'dark'] as const) {
+  for (const section of ['personal', 'workspace', 'business', 'projects']) {
+    test(`axe: settings ${section} in ${colorScheme}`, async ({ page }) => {
+      await page.emulateMedia({ colorScheme, reducedMotion: 'reduce' })
+      await setup(page)
+      await page.goto(`/settings/${section}`)
+      await expect(page.locator('.settings-card').first()).toBeVisible()
+      await page.waitForTimeout(300)
+      const results = await new AxeBuilder({ page }).withTags(['wcag2a', 'wcag2aa', 'wcag21a', 'wcag21aa']).exclude('.calendar-version').analyze()
+      const summary = results.violations.map(v => `${v.id} (${v.impact}): ${v.help}\n${v.nodes.slice(0, 4).map(n => `    ${n.target.join(' ')} — ${n.failureSummary?.split('\n').slice(1, 2).join(' ').trim()}`).join('\n')}`)
+      expect(summary, summary.join('\n')).toEqual([])
+    })
+  }
+}

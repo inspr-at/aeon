@@ -10,6 +10,8 @@ import { toast } from '../lib/toast'
 import { useAgents, type HeldRequest, type SessionView } from '../stores/agents'
 import { useProjects } from '../stores/projects'
 import { useSession } from '../stores/session'
+import { isTenantAdmin } from '../components/business/catalog'
+import { settingsLink } from '../lib/settings'
 import AppIcon from '../components/AppIcon.vue'
 import AccountsCard from '../components/agents/AccountsCard.vue'
 import ApprovalQueue from '../components/agents/ApprovalQueue.vue'
@@ -208,9 +210,12 @@ watch(sessionId, id => { if (id) cursor.value = `s:${id}` }, { immediate: true }
         <h1 id="agents-title">Agents</h1>
         <p class="summary"><span v-if="summary">{{ summary }}</span><span v-else class="skeleton summary-skeleton" /></p>
       </div>
-      <p class="live" :class="{ on: live }" :data-tip="live ? 'Updates arrive as they happen' : 'Refreshing every 20 seconds'">
-        <span class="live-mark" aria-hidden="true" />{{ live ? 'Live' : 'Polling' }}
-      </p>
+      <div class="head-side">
+        <RouterLink v-if="isTenantAdmin(session.identity)" class="context-link" :to="settingsLink('workspace', 'agent-keys')">Agent keys<AppIcon name="arrow" :size="13" /></RouterLink>
+        <p class="live" :class="{ on: live }" :data-tip="live ? 'Updates arrive as they happen' : 'Refreshing every 20 seconds'">
+          <span class="live-mark" aria-hidden="true" />{{ live ? 'Live' : 'Polling' }}
+        </p>
+      </div>
     </header>
 
     <div class="layout">
@@ -246,6 +251,16 @@ watch(sessionId, id => { if (id) cursor.value = `s:${id}` }, { immediate: true }
 .agents-page { width: 100%; margin: 0; padding: 22px var(--gutter) 24px; }
 .page-head { display: flex; align-items: flex-end; justify-content: space-between; gap: 24px; margin-bottom: 20px; }
 .page-head h1 { margin-top: 6px; }
+.head-side { display: flex; align-items: center; gap: 12px; }
+/* In-context link to the matching settings. */
+.context-link { display: inline-flex; align-items: center; gap: 6px; height: 32px; padding: 0 10px; border-radius: 999px; color: var(--teal-ink); font-size: 13px; font-weight: 600; white-space: nowrap; }
+@media (max-width: 600px) {
+  .page-head { flex-direction: column; align-items: stretch; gap: 8px; }
+  .head-side { justify-content: space-between; margin: 0 -10px 0 0; }
+  .context-link { height: 44px; margin-left: -10px; }
+}
+@media (hover: hover) { .context-link:hover { background: var(--row-hover); } }
+.context-link:focus-visible { box-shadow: var(--focus-ring); }
 .summary { margin-top: 6px; min-height: 20px; font-size: 13.5px; color: var(--ink-2); }
 .summary-skeleton { display: inline-block; width: 220px; }
 .live { display: inline-flex; align-items: center; gap: 8px; height: 28px; padding: 0 12px; border-radius: 999px; background: var(--chip-bg); box-shadow: inset 0 0 0 1px var(--chip-line); font-size: 12px; color: var(--ink-2); }

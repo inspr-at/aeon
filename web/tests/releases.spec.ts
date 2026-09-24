@@ -262,6 +262,8 @@ test('the palette and the account menu open the history too', async ({ page }) =
   await page.keyboard.type('release history')
   await page.getByRole('option', { name: /Release history/ }).click()
   await expect(sheet(page)).toBeVisible()
+  // Keys wait until the sheet has taken focus.
+  await expect(page.getByRole('listbox', { name: 'Releases, newest first' })).toBeFocused()
   await page.keyboard.press('Escape')
   await expect(sheet(page)).toHaveCount(0)
   await page.getByRole('button', { name: /^Account for / }).click()

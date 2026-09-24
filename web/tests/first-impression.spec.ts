@@ -179,6 +179,8 @@ test.describe('account menu', () => {
     await page.keyboard.press('ArrowRight')
     await expect(menu.getByRole('radio', { name: 'System' })).toHaveAttribute('aria-checked', 'true')
     await page.keyboard.press('ArrowDown')
+    await expect(menu.getByRole('button', { name: 'Settings' })).toBeFocused()
+    await page.keyboard.press('ArrowDown')
     await expect(menu.getByRole('button', { name: 'Release history' })).toBeFocused()
     await page.keyboard.press('ArrowDown')
     await expect(menu.getByRole('button', { name: /Keyboard shortcuts/ })).toBeFocused()

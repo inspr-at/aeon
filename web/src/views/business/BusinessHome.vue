@@ -13,6 +13,7 @@ import { useProjects } from '../../stores/projects'
 import { useSession } from '../../stores/session'
 import AppIcon from '../../components/business/BizIcon.vue'
 import BusinessPage from '../../components/business/BusinessPage.vue'
+import { settingsLink } from '../../lib/settings'
 import SetupCard from '../../components/business/SetupCard.vue'
 
 // A calm desk for the business side: your week of hours and where it went, the
@@ -110,6 +111,7 @@ const offered = computed(() => business.open.costs || business.open.hours)
     </template>
     <template v-if="business.admin && offered" #actions>
       <button type="button" class="btn sm" :aria-pressed="managing" @click="managing = !managing"><AppIcon name="sliders" :size="14" />Manage parts</button>
+      <RouterLink class="btn sm ghost" :to="settingsLink('business')">Business settings<AppIcon name="arrow" :size="13" /></RouterLink>
     </template>
 
     <div v-if="!offered" class="intro">
@@ -250,6 +252,7 @@ a.ticket-chip:hover { text-decoration: underline; }
 .ticket-chip:focus-visible { box-shadow: var(--focus-ring); }
 .ticket-chip.plain { background: var(--chip-bg); box-shadow: inset 0 0 0 1px var(--chip-line); color: var(--ink-2); }
 .t-title { min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+@media (max-width: 600px) { .t-title { white-space: normal; overflow: visible; overflow-wrap: anywhere; } }
 .t-bar { height: 5px; border-radius: 999px; background: var(--track); overflow: hidden; }
 .t-bar i { display: block; height: 100%; border-radius: 999px; background: linear-gradient(90deg, #0e6f6c, #a4e5df); }
 .t-time { text-align: right; font-size: 12.5px; }

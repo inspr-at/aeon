@@ -9,6 +9,9 @@ const sections: { title: string; rows: { keys: Key[][]; label: string; joiner?: 
   { title: 'Anywhere', rows: [
     { keys: [[mac ? '⌘' : 'Ctrl', 'K']], label: 'Search tickets, projects and actions' },
     { keys: [['/']], label: 'Search, on pages without a list' },
+    { keys: [['g'], ['p']], joiner: 'then', label: 'Go to Projects' },
+    { keys: [['g'], ['a']], joiner: 'then', label: 'Go to Agents' },
+    { keys: [['g'], ['b']], joiner: 'then', label: 'Go to Business' },
     { keys: [['?']], label: 'This sheet' },
   ] },
   { title: 'Search', rows: [

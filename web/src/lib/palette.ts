@@ -7,7 +7,8 @@ import type { Recent } from './recents.ts'
 
 export interface TicketResult { type: 'ticket'; id: string; key: string; title: string; state: string; kind: string; projectKey: string | null }
 export interface ProjectResult { type: 'project'; id: string; key: string; title: string; description: string; archived: boolean }
-export interface ActionResult { type: 'action'; id: string; label: string; hint?: string; icon: string; keys?: string[] }
+// searchOnly: offered when a search matches it, not in the empty palette's short list.
+export interface ActionResult { type: 'action'; id: string; label: string; hint?: string; icon: string; keys?: string[]; searchOnly?: boolean }
 export type Result = TicketResult | ProjectResult | ActionResult
 export interface Group { id: 'recent' | 'tickets' | 'projects' | 'actions'; label: string; items: Result[] }
 export interface PaletteProject { id: string; routeKey: string; title: string; description: string; archived: boolean }
@@ -61,7 +62,7 @@ export function projectResults(q: string, projects: PaletteProject[], limit = 5)
 
 export function actionResults(q: string, actions: ActionResult[]): ActionResult[] {
   const needle = q.trim()
-  return needle ? actions.filter(action => matchesAll(`${action.label} ${action.hint ?? ''}`, needle)) : actions
+  return needle ? actions.filter(action => matchesAll(`${action.label} ${action.hint ?? ''}`, needle)) : actions.filter(action => !action.searchOnly)
 }
 
 export function recentResults(recents: Recent[], scopeKey: string | null): Result[] {

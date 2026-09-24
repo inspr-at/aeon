@@ -175,4 +175,10 @@ function saveCaption(item: Attachment) { if (editing.value !== item.id) return; 
 .caption-input { background: var(--field-bg); box-shadow: var(--focus-ring); color: var(--ink); }
 .gallery .item.drop-before::before, .gallery .item.drop-after::after { bottom: 26px; }
 @media (hover: none) { .remove { opacity: 1; } }
+/* Phones: the strip becomes the two-up grid; no tile is cut at the edge. */
+@media (max-width: 600px) {
+  .list { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 12px 10px; overflow: visible; }
+  .tile, .sk-thumb { width: 100%; height: auto; aspect-ratio: 3 / 2; }
+  .strip-caption, .file-name { max-width: 100%; white-space: normal; overflow-wrap: anywhere; }
+}
 </style>

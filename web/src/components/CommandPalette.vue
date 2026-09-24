@@ -3,6 +3,7 @@
 import { computed, nextTick, onBeforeUnmount, ref, watch } from 'vue'
 import { useRoute, useRouter } from 'vue-router'
 import { listNodes, searchNodes, type ListItem, type WorkNode } from '../lib/api'
+import { visibleSections } from '../lib/settings'
 import { run } from '../lib/commands'
 import { actionResults, assemble, keyPrefixOf, keyQuery, projectResults, recentResults, ticketResults, type ActionResult, type Group, type Result, type TicketResult } from '../lib/palette'
 import { recents } from '../lib/recents'
@@ -59,14 +60,17 @@ const actions = computed<ActionResult[]>(() => {
     const outline = route.query.view === 'outline'
     out.push({ type: 'action', id: outline ? 'go-list' : 'go-outline', label: outline ? 'Go to List' : 'Go to Outline', hint: here.title, icon: outline ? 'list' : 'outline' })
   }
-  if (route.path !== '/') out.push({ type: 'action', id: 'go-projects', label: 'Go to Projects', icon: 'folder' })
-  if (!route.path.startsWith('/agents')) out.push({ type: 'action', id: 'go-agents', label: 'Go to Agents', hint: 'Sessions, approvals and pacing', icon: 'agent' })
+  if (route.path !== '/') out.push({ type: 'action', id: 'go-projects', label: 'Go to Projects', icon: 'folder', keys: ['g', 'p'] })
+  if (!route.path.startsWith('/agents')) out.push({ type: 'action', id: 'go-agents', label: 'Go to Agents', hint: 'Sessions, approvals and pacing', icon: 'agent', keys: ['g', 'a'] })
   // Business: log time (on the open ticket, when one is open) and the overview.
   if (business.open.hours && business.staff) {
     const ticket = typeof route.params.ticketKey === 'string' ? route.params.ticketKey.toUpperCase() : ''
     out.push({ type: 'action', id: 'log-time', label: ticket ? `Log time on ${ticket}` : 'Log time', hint: 'Hours this week', icon: 'clock', keys: route.path.startsWith('/business/hours') ? ['l'] : undefined })
   }
-  if (business.anyOpen && route.path !== '/business') out.push({ type: 'action', id: 'go-business', label: 'Go to Business', hint: 'Hours and rates', icon: 'briefcase' })
+  if (business.anyOpen && route.path !== '/business') out.push({ type: 'action', id: 'go-business', label: 'Go to Business', hint: 'Customers, quotes, hours and rates', icon: 'briefcase', keys: ['g', 'b'] })
+  if (!route.path.startsWith('/settings')) out.push({ type: 'action', id: 'settings', label: 'Settings', hint: 'Theme, greeting and keys', icon: 'gear' })
+  // Each settings section is found by name ("workspace settings", "agent keys").
+  for (const section of visibleSections(business.admin)) out.push({ type: 'action', id: `settings-${section.id}`, label: `${section.label} settings`, hint: section.summary, icon: 'gear', searchOnly: true })
   out.push({ type: 'action', id: 'theme', label: dark.value ? 'Switch to light theme' : 'Switch to dark theme', icon: dark.value ? 'sun' : 'moon' })
   out.push({ type: 'action', id: 'releases', label: 'Release history', hint: 'What changed, release by release', icon: 'history' })
   out.push({ type: 'action', id: 'shortcuts', label: 'Keyboard shortcuts', icon: 'keyboard', keys: ['?'] })
@@ -166,6 +170,8 @@ function act(id: string) {
   else if (id === 'theme') toggleTheme()
   else if (id === 'shortcuts') run({ name: 'shortcuts' })
   else if (id === 'releases') run({ name: 'releases' })
+  else if (id === 'settings') void router.push('/settings')
+  else if (id.startsWith('settings-')) void router.push(`/settings/${id.slice('settings-'.length)}`)
 }
 async function choose(result: Result | undefined, newTab = false) {
   if (!result) return
