@@ -223,12 +223,59 @@ test('the customer page: number, primary contact, contacts, related work and an 
   await expect(related.getByRole('link', { name: /Framework agreement/ })).toBeVisible()
   await expect(page.getByRole('region', { name: 'Addresses' })).toContainText('Same as billing')
   await expect(page.locator('.integration')).toContainText('Not connected')
-  await expect(page.locator('.integration')).toContainText('An operator connects one on the server')
+  await expect(page.locator('.integration')).toContainText('No CRM provider is connected')
   // Customers with projects or quotes cannot be deleted.
   await page.getByRole('button', { name: 'More actions' }).click()
   await expect(page.getByRole('menuitem', { name: 'Delete customer…' })).toBeDisabled()
   await page.keyboard.press('Escape')
   expect(errors).toEqual([])
+})
+
+test('customer and project files can be uploaded, edited and removed; project cooperation is saved', async ({ page }) => {
+  const { data } = await setup(page)
+  const related = data.related[HOFER]
+  const documents = related.documents as Record<string, unknown>[]
+  const projects = related.projects as Record<string, unknown>[]
+  let metadataBody: Record<string, unknown> | null = null
+  let cooperationBody: Record<string, unknown> | null = null
+  await page.route('**/api/crm/documents/att-1/metadata', async route => {
+    metadataBody = route.request().postDataJSON()
+    Object.assign(documents[0], metadataBody, { revision: 2 })
+    await route.fulfill({ json: documents[0] })
+  })
+  await page.route('**/api/crm/projects/p-pharos/cooperation', async route => {
+    cooperationBody = route.request().postDataJSON()
+    projects[0].cooperation = cooperationBody
+    projects[0].cooperation_revision = 2
+    await route.fulfill({ json: { ...cooperationBody, revision: 2 } })
+  })
+  await page.route(`**/api/nodes/${HOFER}/attachments`, async route => {
+    documents.push({ attachment_id: 'att-new', node_id: HOFER, name: 'new.pdf', title: '', category: '', status: 'draft', valid_from: null, valid_until: null, revision: 0 })
+    await route.fulfill({ status: 201, json: [{ id: 'att-new', node_id: HOFER, name: 'new.pdf' }] })
+  })
+  await page.route('**/api/attachments/att-new', async route => { documents.splice(documents.findIndex(d => d.attachment_id === 'att-new'), 1); await route.fulfill({ status: 204, body: '' }) })
+  await page.goto(`/business/customers/${HOFER}`)
+  const section = page.getByRole('region', { name: 'Projects, quotes and hours' })
+  await section.getByRole('button', { name: 'Edit details' }).first().click()
+  await section.getByLabel('Label').fill('Updated agreement')
+  await section.getByLabel('Category').fill('contract')
+  await section.getByLabel('Valid until').fill('2028-12-31')
+  await section.getByRole('button', { name: 'Save details' }).click()
+  await expect(section.getByRole('link', { name: /Updated agreement/ })).toBeVisible()
+  expect(metadataBody).toMatchObject({ title: 'Updated agreement', status: 'active', valid_until: '2028-12-31', expected_revision: 1 })
+  await section.getByRole('button', { name: 'Edit cooperation' }).click()
+  await section.getByLabel('Engagement').fill('Retainer')
+  await section.getByLabel('Environment responsibility').fill('Customer')
+  await section.getByLabel('SLA').fill('Next business day')
+  await section.getByRole('button', { name: 'Save cooperation' }).click()
+  await expect(section).toContainText('SLA: Next business day')
+  expect(cooperationBody).toMatchObject({ engagement: 'Retainer', environment_responsibility: 'Customer', sla: 'Next business day', expected_revision: 1 })
+  await section.getByLabel('Upload file').setInputFiles({ name: 'new.pdf', mimeType: 'application/pdf', buffer: Buffer.from('PDF fixture') })
+  await expect(section.getByRole('link', { name: /new.pdf/ })).toBeVisible()
+  await section.getByRole('button', { name: 'Edit details' }).last().click()
+  await section.getByRole('button', { name: 'Delete file' }).click()
+  await page.getByRole('dialog').getByRole('button', { name: 'Delete file' }).click()
+  await expect(section.getByRole('link', { name: /new.pdf/ })).toHaveCount(0)
 })
 
 test('edit mode: e opens one form, ⌘↵ saves the whole record, Undo restores it', async ({ page }) => {
@@ -388,7 +435,7 @@ test('Settings › Business: the quote sender is a form with a preview; saving k
   await expect(page.getByText('Quote settings saved. New quotes use them.')).toBeVisible()
   const patch = calls.find(c => c.method === 'PATCH' && c.path === '/api/quotes/settings')!
   expect(patch.body).toEqual({
-    expected_revision: 2, numbering_time_zone: 'Europe/Vienna', default_currency: 'EUR', smtp_confirmation_enabled: true,
+    expected_revision: 2, numbering_time_zone: 'Europe/Vienna', default_currency: 'EUR', smtp_confirmation_enabled: false,
     defaults: { intro: 'Thank you for your enquiry.' }, layout: { page_style: 'classic' },
     sender: { logo_file_id: 'file-logo', company: 'INSPR Studio GmbH', street: 'Annenstraße 1', postal_code: '8020', city: 'Graz', country: 'Austria', email: 'hello@inspr.example', uid: 'ATU77777777', iban: 'AT00 0000 0000 0000 0000', bic: 'rzstat2g' },
   })
@@ -404,6 +451,56 @@ test('the Quotes page links admins to the quote settings card', async ({ page })
   await expect(page).toHaveURL('/settings/business#quotes')
   await expect(page.locator('#quotes')).toHaveClass(/arrived/)
   await expect(page.locator('#quotes').getByLabel('Company', { exact: true })).toBeVisible()
+})
+
+test('a compiled CRM provider can be configured, searched and imported without credentials in the page', async ({ page }) => {
+  const { data } = await setup(page, { providers: [{ id: 'http', enabled: false, configured: false, revision: 0 }] })
+  let config: Record<string, unknown> | null = null
+  await page.route('**/api/crm/providers/http/config', route => {
+    config = route.request().postDataJSON() as Record<string, unknown>
+    return route.fulfill({ json: { id: 'http', enabled: true, configured: true, revision: 1 } })
+  })
+  await page.route('**/api/crm/providers/search?*', route => route.fulfill({ json: [{ provider: 'http', external_id: 'remote-1', name: 'Remote Sample', fields: {} }] }))
+  await page.route('**/api/crm/providers/http/import', route => {
+    expect(route.request().postDataJSON()).toEqual({ external_id: 'remote-1' })
+    const imported = { ...data.customers[0]!, id: 'org-new-provider', key: 'ORG-80', name: 'Remote Sample', external_provider: 'http', external_id: 'remote-1' }
+    data.customers.push(imported)
+    return route.fulfill({ status: 201, json: imported })
+  })
+  await page.goto('/business/customers')
+  await ready(page)
+  await page.getByText('Provider settings').click()
+  await page.getByLabel('Secret reference for http').fill('secret://test/crm')
+  await page.getByRole('button', { name: 'Enable', exact: true }).click()
+  expect(config).toEqual({ enabled: true, secret_ref: 'secret://test/crm', expected_revision: 0 })
+  await page.getByLabel('Search connected CRM').fill('Remote')
+  await page.getByRole('button', { name: 'Search', exact: true }).click()
+  await expect(page.getByRole('list', { name: 'External customers' })).toContainText('Remote Sample')
+  await page.getByRole('button', { name: 'Import', exact: true }).click()
+  await expect(page).toHaveURL('/business/customers/org-new-provider')
+  await expect(page.getByRole('heading', { name: 'Remote Sample', level: 1 })).toBeVisible()
+})
+
+test('a linked customer shows a provider link and durable sync status', async ({ page }) => {
+  const { data } = await setup(page, { providers: [{ id: 'http', enabled: true, configured: true, revision: 1 }] })
+  const customer = data.customers.find(c => c.id === HOFER)!
+  customer.external_provider = 'http'; customer.external_id = 'remote-1'; customer.external_url = 'https://example.invalid/customer/remote-1'
+  let state: 'never' | 'ok' | 'error' = 'never'
+  let fail = false
+  await page.route(`**/api/crm/organisations/${HOFER}/sync-status`, route => route.fulfill({ json: { provider_id: 'http', state, attempted_at: state === 'never' ? null : '2026-09-24T12:00:00Z', synced_at: state === 'never' ? null : '2026-09-24T12:00:00Z', error: state === 'error' ? 'provider_unavailable' : '' } }))
+  await page.route(`**/api/crm/organisations/${HOFER}/sync`, route => {
+    if (fail) { state = 'error'; return route.fulfill({ status: 409, json: { message: 'Provider unavailable' } }) }
+    state = 'ok'; return route.fulfill({ json: customer })
+  })
+  await page.goto(`/business/customers/${HOFER}`)
+  await expect(page.getByRole('link', { name: /example.invalid/ })).toBeVisible()
+  await expect(page.getByText('Not synced yet')).toBeVisible()
+  await page.getByRole('button', { name: 'Sync now' }).click()
+  await expect(page.getByText(/^Synced /)).toBeVisible()
+  fail = true
+  await page.getByRole('button', { name: 'Sync now' }).click()
+  await expect(page.getByText(/Last sync failed/)).toBeVisible()
+  await expect(page.getByRole('alert').filter({ hasText: 'changed elsewhere' })).toBeVisible()
 })
 
 test('Manage parts: a workspace that never had Customers enables Quotes, which brings Customers and its kinds', async ({ page }) => {

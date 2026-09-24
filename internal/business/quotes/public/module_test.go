@@ -52,6 +52,7 @@ type fixture struct {
 	pool         *dbtest.DB
 	mux          *http.ServeMux
 	reg          *plugins.Registry
+	store        attachments.Store
 	tenantID     string
 	admin        tenant.Principal
 	customer     tenant.Principal
@@ -61,7 +62,7 @@ type fixture struct {
 func newFixture(t *testing.T) *fixture {
 	t.Helper()
 	database := dbtest.Open(t)
-	f := &fixture{t: t, pool: database, mux: http.NewServeMux(), tenantID: "aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa"}
+	f := &fixture{t: t, pool: database, mux: http.NewServeMux(), tenantID: "aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa", store: attachments.Store{FilesDir: t.TempDir()}}
 	reg := plugins.NewRegistry()
 	for _, id := range []string{"business_costs", "business_crm"} {
 		p := plugins.Plugin{Manifest: plugins.Manifest{ID: id, Version: "1", Owner: "aeon", Permissions: []string{fence.PermNodesContribute}}}
@@ -132,7 +133,7 @@ func newFixture(t *testing.T) *fixture {
 		t.Fatal(err)
 	}
 	quoteModule.Mount(f.mux)
-	publicModule, err := New(database.App, reg, nil, "https://example.invalid")
+	publicModule, err := NewWithStore(database.App, reg, nil, f.store, "https://example.invalid")
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -207,11 +208,29 @@ func (f *fixture) issued() (string, string, string) {
 		f.t.Fatalf("version %d %s", status, body)
 	}
 	digest := object(f.t, body)["content_sha256"].(string)
-	status, body = f.call(&f.admin, "POST", "/api/quotes/"+id+"/versions/1/public-link", `{}`)
+	status, body = f.call(&f.admin, "POST", "/api/quotes/"+id+"/versions/1/public-link", "")
 	if status != 201 {
 		f.t.Fatalf("link %d %s", status, body)
 	}
 	return id, digest, object(f.t, body)["path"].(string)
+}
+
+func TestPublicLinkReadDoesNotRotateCapability(t *testing.T) {
+	f := newFixture(t)
+	id, _, path := f.issued()
+	url := "/api/quotes/" + id + "/versions/1/public-link"
+	status, body := f.call(&f.admin, "GET", url, "")
+	if status != 200 || strings.Contains(body, `"token"`) || strings.Contains(body, path) {
+		t.Fatalf("link metadata leaked or unavailable: %d %s", status, body)
+	}
+	status, _ = f.call(&f.admin, "POST", url, "")
+	if status != 409 {
+		t.Fatalf("existing capability rotated: %d", status)
+	}
+	status, _ = f.call(nil, "GET", "/api/public/quotes/"+strings.TrimPrefix(path, "/offers/"), "")
+	if status != 200 {
+		t.Fatalf("original capability stopped working: %d", status)
+	}
 }
 func acceptanceBody(digest, mutation string) string {
 	return fmt.Sprintf(`{"version":1,"expected_content_sha256":%q,"client_mutation_id":%q,"name":"Customer Example","company":"Example Co","note":"Approved","confirm":true}`, digest, mutation)
@@ -289,8 +308,7 @@ func TestPublicCapabilityReplayPrivacyAndDecisionRace(t *testing.T) {
 		t.Fatalf("decision projection %d/%d/%d, recipient frozen %t: %v", decisions, jobs, receipts, recipientFrozen, err)
 	}
 	if _, err := os.Stat("../../../../web/dist/quote-print.html"); err == nil {
-		store := attachments.Store{FilesDir: t.TempDir()}
-		confirmationModule, err := confirmation.New(f.pool.App, f.reg, os.DirFS("../../../../web/dist"), store)
+		confirmationModule, err := confirmation.New(f.pool.App, f.reg, os.DirFS("../../../../web/dist"), f.store)
 		if err != nil {
 			t.Fatal(err)
 		}
@@ -310,11 +328,19 @@ func TestPublicCapabilityReplayPrivacyAndDecisionRace(t *testing.T) {
 		if err != nil || jobState != "ready" || len(receiptHash) != 64 {
 			t.Fatalf("receipt binding %q %q: %v", receiptHash, jobState, err)
 		}
-		file, err := store.Open(f.tenantID, receiptHash, "original")
+		file, err := f.store.Open(f.tenantID, receiptHash, "original")
 		if err != nil {
 			t.Fatal(err)
 		}
 		_ = file.Close()
+		status, body = f.call(nil, "GET", api+"/pdf", "")
+		if status != 200 || !strings.HasPrefix(body, "%PDF-") {
+			t.Fatalf("public accepted receipt download %d", status)
+		}
+		status, body = f.call(&f.admin, "GET", "/api/quotes/"+id+"/versions/1/confirmation/receipt", "")
+		if status != 200 || !strings.HasPrefix(body, "%PDF-") {
+			t.Fatalf("admin accepted receipt download %d", status)
+		}
 		processed, err = confirmationModule.ProcessNext(t.Context(), f.tenantID)
 		if err != nil || processed {
 			t.Fatalf("receipt rendered twice %v: %v", processed, err)
@@ -369,8 +395,7 @@ func TestPublicCapabilityReplayPrivacyAndDecisionRace(t *testing.T) {
 		t.Fatalf("two-channel decision race: %v", statuses)
 	}
 	if _, err := os.Stat("../../../../web/dist/quote-print.html"); err == nil {
-		store := attachments.Store{FilesDir: t.TempDir()}
-		unavailable, err := confirmation.New(f.pool.App, f.reg, nil, store)
+		unavailable, err := confirmation.New(f.pool.App, f.reg, nil, f.store)
 		if err != nil {
 			t.Fatal(err)
 		}
@@ -385,11 +410,39 @@ func TestPublicCapabilityReplayPrivacyAndDecisionRace(t *testing.T) {
 		if err != nil || state != "failed" {
 			t.Fatalf("failed job state %q: %v", state, err)
 		}
+		err = db.InTenant(t.Context(), f.pool.App, f.tenantID, func(tx pgx.Tx) error {
+			_, err := events.Append(t.Context(), tx, f.admin, events.Change{NodeID: &id2, Type: "quote.confirmation_retry_limit_fixture", After: map[string]any{"attempts": 5}})
+			if err != nil {
+				return err
+			}
+			_, err = tx.Exec(t.Context(), `UPDATE quote_confirmation_jobs SET attempts=5,next_attempt_at=clock_timestamp()-interval '1 minute' WHERE quote_node_id=$1::uuid AND version=1`, id2)
+			return err
+		})
+		if err != nil {
+			t.Fatal(err)
+		}
+		processed, err = unavailable.ProcessNext(t.Context(), f.tenantID)
+		if err != nil || processed {
+			t.Fatalf("exhausted job retried automatically %v: %v", processed, err)
+		}
 		status, _ := f.call(&f.admin, "POST", "/api/quotes/"+id2+"/versions/1/confirmation/retry", `{"acknowledge_uncertain":false}`)
 		if status != 200 {
 			t.Fatalf("failed job retry %d", status)
 		}
-		available, err := confirmation.New(f.pool.App, f.reg, os.DirFS("../../../../web/dist"), store)
+		err = db.InTenant(t.Context(), f.pool.App, f.tenantID, func(tx pgx.Tx) error {
+			var attempts int
+			if err := tx.QueryRow(t.Context(), `SELECT attempts FROM quote_confirmation_jobs WHERE quote_node_id=$1::uuid AND version=1`, id2).Scan(&attempts); err != nil {
+				return err
+			}
+			if attempts != 0 {
+				return fmt.Errorf("manual retry did not reset attempt window: %d", attempts)
+			}
+			return nil
+		})
+		if err != nil {
+			t.Fatal(err)
+		}
+		available, err := confirmation.New(f.pool.App, f.reg, os.DirFS("../../../../web/dist"), f.store)
 		if err != nil {
 			t.Fatal(err)
 		}

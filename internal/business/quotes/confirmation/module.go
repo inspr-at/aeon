@@ -344,7 +344,7 @@ func (m *Module) retry(w http.ResponseWriter, r *http.Request) {
 		if err != nil {
 			return err
 		}
-		j, err = scanJob(tx.QueryRow(r.Context(), `UPDATE quote_confirmation_jobs SET state=$3,next_attempt_at=clock_timestamp(),lease_until=NULL,last_safe_error='',updated_at=clock_timestamp() WHERE quote_node_id=$1::uuid AND version=$2 RETURNING `+jobColumns, id, version, nextState))
+		j, err = scanJob(tx.QueryRow(r.Context(), `UPDATE quote_confirmation_jobs SET state=$3,attempts=CASE WHEN $3='pending' THEN 0 ELSE attempts END,next_attempt_at=clock_timestamp(),lease_until=NULL,last_safe_error='',updated_at=clock_timestamp() WHERE quote_node_id=$1::uuid AND version=$2 RETURNING `+jobColumns, id, version, nextState))
 		return err
 	})
 	if err != nil {
@@ -389,7 +389,7 @@ func (m *Module) ProcessNext(ctx context.Context, tenantID string) (bool, error)
 		if err := m.gate(ctx, tx, tenantID, fence.PermStepsApply); err != nil {
 			return err
 		}
-		j, err = scanJob(tx.QueryRow(ctx, `SELECT `+jobColumns+` FROM quote_confirmation_jobs WHERE (state IN ('pending','failed') AND next_attempt_at<=clock_timestamp()) OR (state='rendering' AND lease_until<clock_timestamp()) ORDER BY next_attempt_at,quote_node_id LIMIT 1 FOR UPDATE SKIP LOCKED`))
+		j, err = scanJob(tx.QueryRow(ctx, `SELECT `+jobColumns+` FROM quote_confirmation_jobs WHERE (state='pending' AND next_attempt_at<=clock_timestamp()) OR (state='failed' AND attempts<5 AND next_attempt_at<=clock_timestamp()) OR (state='rendering' AND lease_until<clock_timestamp()) ORDER BY next_attempt_at,quote_node_id LIMIT 1 FOR UPDATE SKIP LOCKED`))
 		if errors.Is(err, pgx.ErrNoRows) {
 			return nil
 		}
@@ -479,7 +479,7 @@ func (m *Module) markFailed(ctx context.Context, tenantID string, j Job, reason 
 		if err != nil {
 			return err
 		}
-		_, err = tx.Exec(ctx, `UPDATE quote_confirmation_jobs SET state='failed',last_safe_error=$3,lease_until=NULL,next_attempt_at=clock_timestamp()+make_interval(mins=>LEAST(60,power(2,LEAST($4,6))::integer)),updated_at=clock_timestamp() WHERE quote_node_id=$1::uuid AND version=$2`, id, j.Version, reason, j.Attempts)
+		_, err = tx.Exec(ctx, `UPDATE quote_confirmation_jobs SET state='failed',last_safe_error=$3,lease_until=NULL,next_attempt_at=clock_timestamp()+make_interval(secs=>20*$4*$4),updated_at=clock_timestamp() WHERE quote_node_id=$1::uuid AND version=$2`, id, j.Version, reason, j.Attempts)
 		return err
 	})
 }

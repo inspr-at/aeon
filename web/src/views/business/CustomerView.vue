@@ -297,7 +297,7 @@ watch(id, value => { if (!value || !route.path.startsWith('/business/customers/'
       <div class="layout">
         <div class="main-col">
           <ContactList ref="contactList" :customer="customer" :contacts="contacts" :admin="admin" :error="contactsError" @changed="contactsChanged" />
-          <RelatedSection :related="related" :error="relatedError" @retry="loadRelated" />
+          <RelatedSection :related="related" :customer-id="id" :admin="admin" :error="relatedError" @retry="loadRelated" @changed="loadRelated" />
           <NotesSection :customer="customer" :admin="admin" @updated="updated" @reload="loadCustomer" />
         </div>
         <aside class="side-col" aria-label="Details">
@@ -338,7 +338,7 @@ watch(id, value => { if (!value || !route.path.startsWith('/business/customers/'
               </div>
             </div>
           </section>
-          <IntegrationCard :admin="admin" :customer="customer" />
+          <IntegrationCard :admin="admin" :customer="customer" @synced="updated" />
         </aside>
       </div>
     </template>

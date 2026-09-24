@@ -79,6 +79,7 @@ func (m *module) Mount(mux *http.ServeMux) {
 	mux.HandleFunc("GET /api/crm/providers/search", m.searchProviders)
 	mux.HandleFunc("POST /api/crm/providers/{providerId}/import", m.importProvider)
 	mux.HandleFunc("POST /api/crm/organisations/{organisationId}/sync", m.syncProvider)
+	mux.HandleFunc("GET /api/crm/organisations/{organisationId}/sync-status", m.providerSyncStatus)
 }
 
 func (m *module) bind(w http.ResponseWriter, r *http.Request) {

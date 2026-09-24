@@ -100,13 +100,13 @@ export function crmData(options: CRMMockOptions = {}) {
       projects: [{ id: 'p-pharos', key: 'PRJ-17', title: 'Pharos', state: 'active', cooperation: {}, cooperation_revision: 1 }],
       quotes: [{ id: QUOTE_12, offer_no: 'Q-2026-0012', state: 'accepted', archived: false }, { id: '9b2f3c41-7d1e-4a8b-9c0d-2e3f4a5b6c19', offer_no: null, state: 'draft', archived: false }],
       hours: [{ project_node_id: 'p-pharos', currency: 'EUR', duration_seconds: 27000, amount: '712.5000' }],
-      documents: [{ attachment_id: 'att-1', node_id: HOFER, name: 'framework-agreement.pdf', title: 'Framework agreement', category: 'contract', status: 'signed', valid_from: '2026-01-01', valid_until: '2027-12-31' }],
+      documents: [{ attachment_id: 'att-1', node_id: HOFER, name: 'framework-agreement.pdf', title: 'Framework agreement', category: 'contract', status: 'active', valid_from: '2026-01-01', valid_until: '2027-12-31', revision: 1 }],
     },
   }
   const quoteSettings = {
     revision: options.quoteRevision ?? 2, numbering_time_zone: options.quoteRevision === 0 ? '' : 'Europe/Vienna', default_currency: options.quoteRevision === 0 ? '' : 'EUR',
     sender: options.quoteRevision === 0 ? {} as Record<string, string> : { company: 'INSPR Studio', street: 'Annenstraße 1', postal_code: '8020', city: 'Graz', country: 'Austria', email: 'hello@inspr.example', uid: 'ATU77777777', iban: 'AT00 0000 0000 0000 0000', logo_file_id: 'file-logo' } as Record<string, string>,
-    defaults: { intro: 'Thank you for your enquiry.' }, layout: { page_style: 'classic' }, smtp_confirmation_enabled: true, smtp_configured: true,
+    defaults: { intro: 'Thank you for your enquiry.' }, layout: { page_style: 'classic' }, smtp_confirmation_enabled: false, smtp_configured: false,
   }
   return { plugins, kinds, customers, contacts, related, quoteSettings, events: [] as Event[], drafts: [] as { id: string; org: string; base: number; text: string; applied: boolean }[], counter: { next: 1, event: 900 } }
 }

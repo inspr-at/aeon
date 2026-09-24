@@ -563,6 +563,19 @@ func (m *module) syncProvider(w http.ResponseWriter, r *http.Request) {
 	}
 	remote, e := m.providers[before.ExternalProvider].Fetch(r.Context(), ref, before.ExternalID)
 	if e != nil {
+		_ = m.run(r, p, fence.PermIntegrationsCall, func(tx pgx.Tx) error {
+			current, err := customer(r.Context(), tx, org, true)
+			if err != nil || current.ExternalProvider != before.ExternalProvider || current.ExternalID != before.ExternalID {
+				return errConflict
+			}
+			if err := appendCRM(r.Context(), tx, p, org, "crm.customer_sync_failed", nil, map[string]any{"provider_id": before.ExternalProvider, "reason": "provider_unavailable"}); err != nil {
+				return err
+			}
+			_, err = tx.Exec(r.Context(), `INSERT INTO crm_provider_sync_status(tenant_id,organisation_node_id,provider_id,state,last_error)
+				VALUES($1::uuid,$2::uuid,$3,'error','provider_unavailable')
+				ON CONFLICT(tenant_id,organisation_node_id) DO UPDATE SET provider_id=excluded.provider_id,state='error',attempted_at=clock_timestamp(),last_error='provider_unavailable'`, p.TenantID, org, before.ExternalProvider)
+			return err
+		})
 		writeErr(w, errConflict)
 		return
 	}
@@ -602,10 +615,52 @@ func (m *module) syncProvider(w http.ResponseWriter, r *http.Request) {
 		if e != nil {
 			return e
 		}
-		return appendCRM(r.Context(), tx, p, org, "crm.customer_synced", current, out)
+		if e = appendCRM(r.Context(), tx, p, org, "crm.customer_synced", current, out); e != nil {
+			return e
+		}
+		_, e = tx.Exec(r.Context(), `INSERT INTO crm_provider_sync_status(tenant_id,organisation_node_id,provider_id,state,synced_at)
+			VALUES($1::uuid,$2::uuid,$3,'ok',clock_timestamp())
+			ON CONFLICT(tenant_id,organisation_node_id) DO UPDATE SET provider_id=excluded.provider_id,state='ok',attempted_at=clock_timestamp(),synced_at=clock_timestamp(),last_error=''`, p.TenantID, org, before.ExternalProvider)
+		return e
 	})
 	if e != nil {
 		writeErr(w, e)
+		return
+	}
+	httpapi.WriteJSON(w, 200, out)
+}
+
+func (m *module) providerSyncStatus(w http.ResponseWriter, r *http.Request) {
+	p, ok := actor(w, r, true)
+	if !ok {
+		return
+	}
+	org, err := pathUUID(r, "organisationId")
+	if err != nil {
+		writeErr(w, err)
+		return
+	}
+	out := struct {
+		State       string     `json:"state"`
+		ProviderID  string     `json:"provider_id"`
+		AttemptedAt *time.Time `json:"attempted_at"`
+		SyncedAt    *time.Time `json:"synced_at"`
+		Error       string     `json:"error"`
+	}{State: "never"}
+	err = m.run(r, p, fence.PermViewsProvide, func(tx pgx.Tx) error {
+		c, err := customer(r.Context(), tx, org, false)
+		if err != nil {
+			return err
+		}
+		out.ProviderID = c.ExternalProvider
+		err = tx.QueryRow(r.Context(), `SELECT state,attempted_at,synced_at,last_error FROM crm_provider_sync_status WHERE organisation_node_id=$1::uuid AND provider_id=$2`, org, c.ExternalProvider).Scan(&out.State, &out.AttemptedAt, &out.SyncedAt, &out.Error)
+		if errors.Is(err, pgx.ErrNoRows) {
+			return nil
+		}
+		return err
+	})
+	if err != nil {
+		writeErr(w, err)
 		return
 	}
 	httpapi.WriteJSON(w, 200, out)

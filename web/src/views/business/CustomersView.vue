@@ -15,6 +15,7 @@ import BusinessPage from '../../components/business/BusinessPage.vue'
 import ChoiceFacet from '../../components/business/ChoiceFacet.vue'
 import CustomerCreateDialog from '../../components/crm/CustomerCreateDialog.vue'
 import CustomerTable from '../../components/crm/CustomerTable.vue'
+import IntegrationCard from '../../components/crm/IntegrationCard.vue'
 
 // Business › Customers: every customer in one list you can search, sort and
 // filter, with the keyboard of the ticket list (j/k, Enter, / and n). Admins add
@@ -143,6 +144,8 @@ watch(() => business.open.crm, on => { if (on) void store.load(true) })
       <span class="spacer" />
       <p v-if="store.items && narrowed" class="count" role="status">{{ rows.length }} of {{ all.length }}</p>
     </div>
+
+    <IntegrationCard v-if="business.admin" :admin="true" bare @imported="created" />
 
     <div v-if="store.error && !store.items" class="state glass-card" role="alert">
       <span class="state-icon danger"><AppIcon name="alert" :size="18" /></span>

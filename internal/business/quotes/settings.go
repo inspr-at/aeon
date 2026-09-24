@@ -141,6 +141,10 @@ func (m *Module) settingsPatch(w http.ResponseWriter, r *http.Request) {
 		respond(w, 0, nil, e)
 		return
 	}
+	if in.SMTPConfirmationEnabled {
+		respond(w, 0, nil, bad("email delivery is disabled"))
+		return
+	}
 	if _, e = time.LoadLocation(in.NumberingTimeZone); e != nil || len(in.NumberingTimeZone) > 100 || in.NumberingTimeZone == "Local" || !timeZoneRe.MatchString(in.NumberingTimeZone) {
 		respond(w, 0, nil, bad("invalid numbering time zone"))
 		return
@@ -158,9 +162,6 @@ func (m *Module) settingsPatch(w http.ResponseWriter, r *http.Request) {
 		}
 		if current.Revision != in.ExpectedRevision {
 			return conflict("settings revision is stale")
-		}
-		if in.SMTPConfirmationEnabled && !current.SMTPConfigured {
-			return bad("SMTP confirmation requires a configured transport")
 		}
 		if current.Revision == 0 {
 			_, err = tx.Exec(r.Context(), `INSERT INTO quote_settings(tenant_id,revision,numbering_time_zone,default_currency,sender,defaults,layout,updated_by_principal_id) VALUES($1::uuid,1,$2,$3,$4::jsonb,$5::jsonb,$6::jsonb,$7::uuid)`, p.TenantID, in.NumberingTimeZone, in.DefaultCurrency, string(in.Sender), string(in.Defaults), string(in.Layout), p.ID)

@@ -54,7 +54,7 @@ export const getQuoteSettings = () => read<QuoteSettings>('/quotes/settings')
 export async function saveQuoteSettings(current: QuoteSettings, change: { sender: Record<string, string>; default_currency: string; numbering_time_zone: string }): Promise<QuoteSettings> {
   const body = {
     expected_revision: current.revision, numbering_time_zone: change.numbering_time_zone, default_currency: change.default_currency,
-    sender: change.sender, defaults: current.defaults ?? {}, layout: current.layout ?? {}, smtp_confirmation_enabled: current.smtp_confirmation_enabled,
+    sender: change.sender, defaults: current.defaults ?? {}, layout: current.layout ?? {}, smtp_confirmation_enabled: false,
   }
   const response = await api('/quotes/settings', { method: 'PATCH', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(body) })
   if (!response.ok) {

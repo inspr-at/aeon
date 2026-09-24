@@ -47,7 +47,7 @@ type Module struct {
 	pool          *pgxpool.Pool
 	registry      *plugins.Registry
 	assets        fs.FS
-	store         attachments.Store
+	store         *attachments.Store
 	publicBaseURL string
 	mu            sync.Mutex
 	attempts      map[string][]time.Time
@@ -55,10 +55,22 @@ type Module struct {
 
 var _ httpapi.Module = (*Module)(nil)
 
-// New exposes management and public capability routes; assets is the built
-// web filesystem for offered PDF rendering. publicBaseURL is trusted operator
-// configuration for the QR code; an empty value omits that code.
+// New preserves the existing module constructor until the coordinator wires
+// the receipt store. PDF downloads return unavailable without that store.
 func New(pool *pgxpool.Pool, registry *plugins.Registry, assets fs.FS, publicBaseURL string) (httpapi.Module, error) {
+	return newModule(pool, registry, assets, nil, publicBaseURL)
+}
+
+// NewWithStore exposes management and public capability routes. The receipt
+// store must be the same tenant-namespaced store used by the confirmation
+// worker, so an accepted public PDF resolves to its immutable receipt. The
+// coordinator mounts this httpapi.Module. assets is the built web filesystem
+// for offered PDF rendering; publicBaseURL is trusted QR configuration.
+func NewWithStore(pool *pgxpool.Pool, registry *plugins.Registry, assets fs.FS, store attachments.Store, publicBaseURL string) (httpapi.Module, error) {
+	return newModule(pool, registry, assets, &store, publicBaseURL)
+}
+
+func newModule(pool *pgxpool.Pool, registry *plugins.Registry, assets fs.FS, store *attachments.Store, publicBaseURL string) (httpapi.Module, error) {
 	if pool == nil || registry == nil {
 		return nil, errors.New("quote public module requires pool and registry")
 	}
@@ -71,7 +83,7 @@ func New(pool *pgxpool.Pool, registry *plugins.Registry, assets fs.FS, publicBas
 			return nil, errors.New("invalid public base URL")
 		}
 	}
-	return &Module{pool: pool, registry: registry, assets: assets, publicBaseURL: strings.TrimRight(publicBaseURL, "/"), attempts: make(map[string][]time.Time)}, nil
+	return &Module{pool: pool, registry: registry, assets: assets, store: store, publicBaseURL: strings.TrimRight(publicBaseURL, "/"), attempts: make(map[string][]time.Time)}, nil
 }
 
 func (m *Module) Mount(mux *http.ServeMux) {
@@ -185,9 +197,11 @@ func (m *Module) createLink(w http.ResponseWriter, r *http.Request) {
 	var input struct {
 		ExpiresAt time.Time `json:"expires_at"`
 	}
-	if err := decode(r, &input); err != nil {
-		fail(w, 400, "invalid link request")
-		return
+	if r.ContentLength != 0 {
+		if err := decode(r, &input); err != nil {
+			fail(w, 400, "invalid link request")
+			return
+		}
 	}
 	if input.ExpiresAt.IsZero() {
 		input.ExpiresAt = time.Now().Add(30 * 24 * time.Hour)
@@ -413,6 +427,10 @@ func (m *Module) pdf(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	if out.receiptHash != nil {
+		if m.store == nil {
+			fail(w, 503, "quote PDF unavailable")
+			return
+		}
 		file, err := m.store.Open(out.tenantID, *out.receiptHash, "original")
 		if err != nil {
 			fail(w, 503, "quote PDF unavailable")

@@ -16,12 +16,15 @@ export interface CustomerFields {
 export interface Customer extends CustomerFields { id: string; key: string; name: string; revision: number; customer_no: string | null; primary_contact_node_id: string | null }
 export interface ContactFields { email: string; phone: string; role: string; note: string; external_provider: string; external_id: string; external_url: string }
 export interface Contact extends ContactFields { id: string; key: string; organisation_node_id: string; name: string; revision: number; primary: boolean }
-export interface RelatedProject { id: string; key: string; title: string; state: string }
+export interface Cooperation { engagement: string; ownership: string; environment_responsibility: string; sla: string; report_contract: string; revision: number }
+export interface RelatedProject { id: string; key: string; title: string; state: string; cooperation: Cooperation; cooperation_revision: number }
 export interface RelatedQuote { id: string; offer_no: string | null; state: string; archived: boolean }
 export interface RelatedHours { project_node_id: string; currency: string; duration_seconds: number; amount: string }
-export interface RelatedDocument { attachment_id: string; node_id: string; name: string; title: string; category: string; status: string; valid_from: string | null; valid_until: string | null }
+export interface RelatedDocument { attachment_id: string; node_id: string; name: string; title: string; category: string; status: string; valid_from: string | null; valid_until: string | null; revision: number }
 export interface Related { projects: RelatedProject[]; quotes: RelatedQuote[]; hours: RelatedHours[]; documents: RelatedDocument[] }
 export interface Provider { id: string; enabled: boolean; configured: boolean; revision: number }
+export interface RemoteCustomer { provider: string; external_id: string; name: string; fields: CustomerFields }
+export interface ProviderSyncStatus { state: 'never' | 'ok' | 'error'; provider_id: string; attempted_at: string | null; synced_at: string | null; error: string }
 export interface NoteDraft { id: string; organisation_node_id: string; draft_text: string; applied: boolean }
 // A proposal as this session keeps it: the draft, and the customer it was made against.
 export interface NoteProposal extends NoteDraft { base_revision: number; base_text: string }
@@ -81,9 +84,16 @@ export const updateContact = (id: string, write: ContactWrite, expectedRevision:
 export const deleteContact = (id: string) => send<void>(`/contacts/${seg(id)}`, 'DELETE')
 export const makePrimary = (orgId: string, contactId: string, expectedRevision: number) => send<Customer>(`/organisations/${seg(orgId)}/primary-contact`, 'POST', { contact_node_id: contactId, expected_revision: expectedRevision })
 export const getRelated = (id: string) => send<Related>(`/organisations/${seg(id)}/related`)
+export const setDocumentMetadata = (doc: RelatedDocument, data: Pick<RelatedDocument, 'title' | 'category' | 'status' | 'valid_from' | 'valid_until'>) => send<RelatedDocument>(`/documents/${seg(doc.attachment_id)}/metadata`, 'PUT', { ...data, expected_revision: doc.revision })
+export const setCooperation = (project: RelatedProject, data: Omit<Cooperation, 'revision'>) => send<Cooperation>(`/projects/${seg(project.id)}/cooperation`, 'PUT', { ...data, expected_revision: project.cooperation_revision })
 export const draftNote = (id: string, text: string, expectedRevision: number) => send<NoteDraft>(`/organisations/${seg(id)}/note-rewrite`, 'POST', { draft_text: text, expected_revision: expectedRevision })
 export const applyNote = (id: string, draftId: string) => send<Customer>(`/organisations/${seg(id)}/note-rewrite/${seg(draftId)}/apply`, 'POST')
 export const listProviders = () => send<Provider[]>('/providers')
+export const configureProvider = (provider: Provider, enabled: boolean, secretRef: string) => send<Provider>(`/providers/${seg(provider.id)}/config`, 'PUT', { enabled, secret_ref: secretRef, expected_revision: provider.revision })
+export const searchProviders = (q: string) => send<RemoteCustomer[]>(`/providers/search?q=${seg(q)}`)
+export const importProvider = (providerId: string, externalId: string) => send<Customer>(`/providers/${seg(providerId)}/import`, 'POST', { external_id: externalId })
+export const syncProvider = (id: string) => send<Customer>(`/organisations/${seg(id)}/sync`, 'POST')
+export const getProviderSyncStatus = (id: string) => send<ProviderSyncStatus>(`/organisations/${seg(id)}/sync-status`)
 
 // Primary contacts for the list: one read of the contact nodes (names, email,
 // role), not one request per customer. Missing on failure; the list still works.
