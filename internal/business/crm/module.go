@@ -54,6 +54,7 @@ func New(pool *pgxpool.Pool, reg *plugins.Registry) httpapi.Module {
 
 func (m *module) Mount(mux *http.ServeMux) {
 	mux.HandleFunc("POST /api/crm/contacts/{contactId}/principals", m.bind)
+	mux.HandleFunc("GET /api/crm/contacts/{contactId}/principals", m.bindings)
 }
 
 func (m *module) bind(w http.ResponseWriter, r *http.Request) {

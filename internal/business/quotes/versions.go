@@ -58,6 +58,9 @@ type version struct {
 	ContentSHA256          string    `json:"content_sha256"`
 	CreatedByPrincipalID   string    `json:"created_by_principal_id"`
 	CreatedAt              time.Time `json:"created_at"`
+	// Read endpoints add the version's decisions; digests and events omit them.
+	Issue      *issueRecord      `json:"issue,omitempty"`
+	Acceptance *acceptanceRecord `json:"acceptance,omitempty"`
 }
 
 func appendEvent(ctx context.Context, tx pgx.Tx, p tenant.Principal, id, kind string, before, after any) error {
@@ -117,6 +120,9 @@ func (m *Module) versions(w http.ResponseWriter, r *http.Request) {
 			if err != nil {
 				return err
 			}
+			if err := attachDecisions(r.Context(), tx, &v); err != nil {
+				return err
+			}
 			out = append(out, v)
 		}
 		return nil
@@ -140,7 +146,13 @@ func (m *Module) version(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	var out version
-	e = m.tx(r.Context(), p, fence.PermViewsProvide, false, func(tx pgx.Tx) error { var err error; out, err = readVersion(r.Context(), tx, id, n); return err })
+	e = m.tx(r.Context(), p, fence.PermViewsProvide, false, func(tx pgx.Tx) error {
+		var err error
+		if out, err = readVersion(r.Context(), tx, id, n); err != nil {
+			return err
+		}
+		return attachDecisions(r.Context(), tx, &out)
+	})
 	respond(w, 200, out, e)
 }
 func readVersion(ctx context.Context, tx pgx.Tx, id string, n int) (version, error) {
