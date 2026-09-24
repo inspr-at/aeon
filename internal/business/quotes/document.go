@@ -42,10 +42,15 @@ type textNode struct {
 	Marks        []textMark `json:"marks,omitempty"`
 }
 type documentSection struct {
-	ID      string     `json:"id"`
-	Heading string     `json:"heading"`
-	Body    string     `json:"body"`
-	Nodes   []textNode `json:"nodes"`
+	ID              string     `json:"id"`
+	Heading         string     `json:"heading"`
+	Body            string     `json:"body"`
+	Nodes           []textNode `json:"nodes"`
+	NumberingStyle  string     `json:"numbering_style,omitempty"`
+	PageBreakBefore *bool      `json:"page_break_before,omitempty"`
+	KeepTogether    *bool      `json:"keep_together,omitempty"`
+	SpacingBeforeMM string     `json:"spacing_before_mm,omitempty"`
+	SpacingAfterMM  string     `json:"spacing_after_mm,omitempty"`
 }
 type documentPosition struct {
 	ID             string `json:"id"`
@@ -209,6 +214,15 @@ func validateDocument(d *quoteDocument, final bool) error {
 	for _, s := range d.Sections {
 		if !uuidRe.MatchString(s.ID) || ids[s.ID] || len(s.Heading) > 500 || len(s.Body) > 100000 || len(s.Nodes) > 100 {
 			return bad("invalid section")
+		}
+		if s.NumberingStyle != "" && s.NumberingStyle != "decimal" && s.NumberingStyle != "upper-roman" && s.NumberingStyle != "lower-roman" && s.NumberingStyle != "upper-alpha" && s.NumberingStyle != "lower-alpha" && s.NumberingStyle != "none" {
+			return bad("invalid section numbering style")
+		}
+		if _, err := parseMM(s.SpacingBeforeMM, 0, 400); err != nil {
+			return err
+		}
+		if _, err := parseMM(s.SpacingAfterMM, 0, 400); err != nil {
+			return err
 		}
 		ids[s.ID] = true
 		for _, n := range s.Nodes {

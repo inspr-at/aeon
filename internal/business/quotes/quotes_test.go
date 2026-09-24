@@ -53,6 +53,50 @@ func TestExactMoneyAndManifest(t *testing.T) {
 	}
 }
 
+func TestQuoteSectionFormattingContract(t *testing.T) {
+	pageBreak := true
+	keepTogether := false
+	base := quoteDocument{
+		SchemaVersion: 1, MinimumWriterVersion: 1, Title: "Example", OfferDate: "2026-09-24", ValidUntil: "2026-10-24", Currency: "EUR",
+		Sender: json.RawMessage(`{}`), Recipient: json.RawMessage(`{}`), Legal: json.RawMessage(`{}`), Layout: json.RawMessage(`{}`),
+		Sections: []documentSection{{ID: "11111111-1111-4111-8111-111111111111", Heading: "Scope", Body: "Text", Nodes: []textNode{},
+			NumberingStyle: "upper-roman", PageBreakBefore: &pageBreak, KeepTogether: &keepTogether, SpacingBeforeMM: "3.5", SpacingAfterMM: "2.0"}},
+		Positions: []documentPosition{},
+	}
+	raw, err := json.Marshal(base)
+	if err != nil {
+		t.Fatal(err)
+	}
+	decoded, err := decodeDocument(raw)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := validateDocument(&decoded, false); err != nil {
+		t.Fatal(err)
+	}
+	section := decoded.Sections[0]
+	if section.NumberingStyle != "upper-roman" || section.PageBreakBefore == nil || !*section.PageBreakBefore || section.KeepTogether == nil || *section.KeepTogether || section.SpacingBeforeMM != "3.5" || section.SpacingAfterMM != "2.0" {
+		t.Fatalf("section formatting lost on document round trip: %+v", section)
+	}
+	for _, change := range []struct {
+		name string
+		edit func(*documentSection)
+	}{
+		{"numbering", func(s *documentSection) { s.NumberingStyle = "octal" }},
+		{"spacing precision", func(s *documentSection) { s.SpacingBeforeMM = "1.25" }},
+		{"spacing range", func(s *documentSection) { s.SpacingAfterMM = "40.1" }},
+	} {
+		t.Run(change.name, func(t *testing.T) {
+			candidate := decoded
+			candidate.Sections = append([]documentSection(nil), decoded.Sections...)
+			change.edit(&candidate.Sections[0])
+			if err := validateDocument(&candidate, false); err == nil {
+				t.Fatal("invalid section formatting accepted")
+			}
+		})
+	}
+}
+
 func TestQuoteFlowAndGates(t *testing.T) {
 	database := dbtest.Open(t)
 	ctx := context.Background()
