@@ -2,6 +2,7 @@
 <script setup lang="ts">
 import { computed, ref, watch } from 'vue'
 import QuoteDocument from '../components/quotes/editor/QuoteDocument.vue'
+import { brand } from '../lib/brand'
 import type { QuoteDocumentData } from '../lib/quotes/types'
 
 // The coordinator passes route params from /offers/:publicTenant/:token and
@@ -57,7 +58,7 @@ async function accept() {
 </script>
 <template>
   <main class="public-quote">
-    <header class="public-quote-header"><span class="public-quote-brand">Aeon</span><span>Customer quote</span></header>
+    <header class="public-quote-header"><span class="public-quote-brand">{{ brand.wordmark }}</span><span>Customer quote</span></header>
     <div v-if="loading" role="status" class="public-quote-message">Loading quote…</div>
     <div v-else-if="!quote" role="alert" class="public-quote-message">{{ error || 'This quote link is unavailable.' }}</div>
     <template v-else>
