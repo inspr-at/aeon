@@ -110,13 +110,21 @@ test('the list type is one segmented control; numbering options show only for nu
   await expect(preview).toHaveText(/This item reads\s*2\.1/)
   await inspector(page).getByRole('radiogroup', { name: 'Numbers count' }).getByRole('radio', { name: 'Own count' }).click()
   await expect(preview).toHaveText(/This item reads\s*1$/)
+  // How the list counts is one choice, and the current one shows.
+  const counting = inspector(page).getByRole('radiogroup', { name: 'Counting' })
+  await expect(counting.getByRole('radio', { checked: true })).toHaveText('Automatic')
+  await expect(inspector(page).getByLabel('Start numbering at')).toHaveCount(0)
+  await counting.getByRole('radio', { name: 'Start at' }).click()
+  await expect(counting.getByRole('radio', { checked: true })).toHaveText('Start at')
   const start = inspector(page).getByLabel('Start numbering at')
+  await expect(start).toHaveValue('1')
   await start.fill('4'); await start.press('Enter')
   await expect(preview).toHaveText(/This item reads\s*4$/)
   await expect(page.locator(`.quote-page [data-node-id="${NODES[3]}"] .quote-marker`)).toHaveText('4')
-  await inspector(page).getByRole('button', { name: 'Restart' }).click()
-  await expect(inspector(page).getByRole('button', { name: 'Restart' })).toHaveAttribute('aria-pressed', 'true')
+  await counting.getByRole('radio', { name: 'Automatic' }).click()
   await expect(preview).toHaveText(/This item reads\s*1$/)
+  await counting.getByRole('radio', { name: 'Continue' }).click()
+  await expect(counting.getByRole('radio', { checked: true })).toHaveText('Continue')
   // Bullets: numbering steps aside, the bullet glyphs come in.
   await list.getByRole('radio', { name: 'Bullets' }).click()
   await expect(inspector(page).getByRole('heading', { name: 'Numbering' })).toHaveCount(0)
@@ -250,10 +258,28 @@ test('the Document tab holds this quote’s settings and links to the templates'
   await open(page)
   await expect(inspector(page).getByLabel('Currency')).toBeDisabled()
   await expect(inspector(page)).toContainText('Fixed once positions are priced.')
-  await inspector(page).getByLabel('Valid until').fill('2026-09-01')
+  // Dates read as the document prints them, in the panel and on the paper; no native date inputs.
+  await expect(page.locator('input[type="date"]')).toHaveCount(0)
+  const valid = inspector(page).getByRole('button', { name: /^Valid until:/ })
+  await expect(valid).toHaveText('24.10.2026')
+  await expect(page.getByRole('button', { name: 'Gültig bis: Saturday, 24 October 2026' })).toHaveText('24.10.2026')
+  await valid.click()
+  const picker = page.getByRole('dialog', { name: 'Valid until' })
+  await expect(picker.getByRole('button', { name: 'Saturday, 24 October 2026' })).toBeFocused()
+  await picker.getByLabel('Date').fill('01.09.2026'); await picker.getByLabel('Date').press('Enter')
   await expect(inspector(page).getByRole('alert')).toHaveText('Valid until is before the quote date.')
-  await inspector(page).getByLabel('Valid until').fill('2026-11-24')
-  await expect(inspector(page)).toContainText('Open for 61 days.')
+  await expect(page.getByRole('button', { name: /^Gültig bis:/ })).toHaveText('01.09.2026')
+  // The month grid by keyboard: a week on, a month on, Enter picks.
+  await valid.click()
+  await page.keyboard.press('ArrowDown'); await page.keyboard.press('PageDown')
+  await page.keyboard.press('Enter')
+  await expect(valid).toHaveText('08.10.2026')
+  await expect(inspector(page)).toContainText('Open for 14 days.')
+  // On the paper the picker opens from the date itself.
+  await page.getByRole('button', { name: /^Angebotsdatum:/ }).click()
+  await expect(page.getByRole('dialog', { name: 'Angebotsdatum' })).toBeVisible()
+  await page.keyboard.press('Escape')
+  await expect(page.getByRole('button', { name: /^Angebotsdatum:/ })).toBeFocused()
   await inspector(page).getByRole('link', { name: 'Edit templates' }).click()
   await expect(page).toHaveURL('/settings/business#quotes')
 })
@@ -313,6 +339,31 @@ test('the title bar: compact zoom, the header chevron beside PDF, save state and
   expect(node.marks).toEqual([{ start: 4, end: 9, bold: true }])
   await expect(save).toBeDisabled()
   await expect(page.locator('.save')).toContainText('Saved')
+})
+
+// Nothing in the panel reaches past its inner gutter, whichever tab and layout.
+async function insideGutter(page: Page) {
+  const out = await page.locator('.quote-inspector-slot .panel').evaluate(panel => {
+    const box = panel.getBoundingClientRect(), pad = parseFloat(getComputedStyle(panel).paddingRight)
+    return [...panel.querySelectorAll<HTMLElement>('*')].filter(el => {
+      const r = el.getBoundingClientRect()
+      return r.width > 0 && r.height > 0 && !el.closest('svg') && r.right > box.right - pad + 0.5
+    }).map(el => `${el.tagName}.${el.className}`)
+  })
+  expect(out).toEqual([])
+}
+test('every tab stays inside the panel gutter, docked, floating and as a sheet', async ({ page }) => {
+  for (const [width, height] of [[1440, 900], [1024, 800], [390, 844]] as const) {
+    await page.setViewportSize({ width, height })
+    if (width === 1440) await open(page); else await page.reload()
+    await expect(page.locator('.quote-document')).toHaveAttribute('data-quote-ready', 'true')
+    await selectText(page, NODES[4]!, 2)
+    if (width < 1100) await page.getByRole('button', { name: 'Format panel' }).click()
+    for (const tab of ['Text', 'Section', 'Document']) {
+      await inspector(page).getByRole('tab', { name: tab }).click()
+      await insideGutter(page)
+    }
+  }
 })
 
 test('narrower screens float the panel over the page; phones get a sheet; nothing is cut at 390', async ({ page }) => {

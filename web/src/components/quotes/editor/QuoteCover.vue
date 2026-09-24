@@ -1,6 +1,7 @@
 <!-- SPDX-License-Identifier: AGPL-3.0-only -->
 <script setup lang="ts">
 import QuoteText from './QuoteText.vue'
+import DatePicker from '../DatePicker.vue'
 import type { QuoteEditor } from '../../../lib/quotes/editor'
 import type { QuoteDocumentData } from '../../../lib/quotes/types'
 const props = defineProps<{ document: QuoteDocumentData; editor: QuoteEditor; offerNo?: string; editable?: boolean }>()
@@ -22,9 +23,9 @@ const date = (value: string) => value ? new Intl.DateTimeFormat('de-AT', { day: 
       </div>
       <dl class="quote-meta">
         <dt>Angebotsnummer</dt><dd>{{ offerNo }}</dd>
-        <dt>Angebotsdatum</dt><dd><input v-if="editable" type="date" aria-label="Angebotsdatum" :value="document.offer_date" @change="editor.editField('offer_date', ($event.target as HTMLInputElement).value)" /><template v-else>{{ date(document.offer_date) }}</template></dd>
+        <dt>Angebotsdatum</dt><dd><DatePicker v-if="editable" variant="paper" label="Angebotsdatum" :model-value="document.offer_date" @update:model-value="editor.editField('offer_date', $event)" /><template v-else>{{ date(document.offer_date) }}</template></dd>
         <dt>Kundennummer</dt><dd>{{ document.recipient.customer_no }}</dd>
-        <dt>Gültig bis</dt><dd><input v-if="editable" type="date" aria-label="Gültig bis" :value="document.valid_until" @change="editor.editField('valid_until', ($event.target as HTMLInputElement).value)" /><template v-else>{{ date(document.valid_until) }}</template></dd>
+        <dt>Gültig bis</dt><dd><DatePicker v-if="editable" variant="paper" label="Gültig bis" :model-value="document.valid_until" @update:model-value="editor.editField('valid_until', $event)" /><template v-else>{{ date(document.valid_until) }}</template></dd>
         <dt>Ansprechpartner</dt><dd><QuoteText :model-value="document.sender.contact_person ?? ''" label="Ansprechpartner" :editable="editable" @update:model-value="set('sender', 'contact_person', $event)" /></dd>
         <dt>Projektreferenz</dt><dd><QuoteText :model-value="document.project_ref" label="Projektreferenz" :editable="editable" @update:model-value="editor.editField('project_ref', $event)" /></dd>
       </dl>
@@ -43,7 +44,6 @@ const date = (value: string) => value ? new Intl.DateTimeFormat('de-AT', { day: 
 .quote-recipient { font-size: 12pt; font-weight: 700; }
 .quote-meta { display: grid; grid-template-columns: 32mm 1fr; gap: 3mm 5mm; margin: 0; font-size: 9pt; }
 .quote-meta dt { color: var(--ink-2); }.quote-meta dd { margin: 0; overflow-wrap: anywhere; }
-.quote-meta input { width: 100%; font: inherit; }
 .quote-sender { display: flex; flex-wrap: wrap; gap: 1mm 5mm; border-top: 1px solid var(--line-2); padding-top: 4mm; font-size: 8pt; }
 .quote-intro { font-size: 10pt; line-height: 1.5; margin-top: 8mm; }
 </style>

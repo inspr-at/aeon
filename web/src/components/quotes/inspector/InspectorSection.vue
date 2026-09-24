@@ -125,7 +125,7 @@ function add(after: string) { const created = props.actions.addBelow(after); if 
 
 <style scoped>
 .tab-body { display: grid; grid-template-columns: minmax(0, 1fr); }
-.group { min-width: 0; }
+.group { min-width: 0; grid-template-columns: minmax(0, 1fr); }
 .group { display: grid; gap: 10px; padding: 16px 0; border-top: 1px solid var(--line); }
 .group:first-child { border-top: 0; padding-top: 4px; }
 .group-head { display: flex; align-items: center; justify-content: space-between; min-height: 22px; }
@@ -141,8 +141,8 @@ function add(after: string) { const created = props.actions.addBelow(after); if 
 .reset:hover { background: var(--row-hover); }
 .reset:focus-visible { box-shadow: var(--focus-ring); }
 .empty { padding: 4px 0 16px; font-size: 13px; line-height: 1.5; color: var(--ink-2); }
-.outline { display: grid; gap: 2px; margin: 0; padding: 0; list-style: none; }
-.outline-row { position: relative; display: flex; align-items: center; gap: 2px; min-height: 36px; border-radius: 9px; }
+.outline { display: grid; grid-template-columns: minmax(0, 1fr); gap: 2px; margin: 0; padding: 0; list-style: none; }
+.outline-row { position: relative; display: flex; align-items: center; gap: 2px; min-width: 0; min-height: 36px; border-radius: 9px; }
 @media (hover: hover) { .outline-row:hover { background: var(--row-hover); } }
 .outline-row.current { background: var(--row-selected); }
 .outline-row.lifted { opacity: .45; }

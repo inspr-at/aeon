@@ -26,6 +26,15 @@ const BULLETS: Segment<Bullet>[] = [
   { value: 'disc', label: 'Dot', glyph: '•' }, { value: 'circle', label: 'Circle', glyph: '◦' },
   { value: 'square', label: 'Square', glyph: '▪' }, { value: 'dash', label: 'Dash', glyph: '–' },
 ]
+const SEQUENCE: Segment<'follow' | 'continue' | 'start'>[] = [
+  { value: 'follow', label: 'Automatic', tip: 'Counts on within the list; text in between starts it again at 1' },
+  { value: 'continue', label: 'Continue', icon: 'list-continue', tip: 'Carries on from the list before the text in between' },
+  { value: 'start', label: 'Start at', icon: 'list-restart', tip: 'Starts at a number you set; 1 restarts the count' },
+]
+function chooseSequence(value: 'follow' | 'continue' | 'start') {
+  if (value === s.value.sequence) return
+  numbering(value === 'start' ? { mode: 'start', start: s.value.number ?? 1 } : { mode: value })
+}
 const REFERENCES: Segment<'section' | 'own'>[] = [
   { value: 'section', label: 'With section', tip: 'Numbers carry the section number, like 2.1' },
   { value: 'own', label: 'Own count', tip: 'Numbers count on their own, like 1' },
@@ -97,13 +106,10 @@ const isItem = computed(() => s.value.list === 'bullet' || s.value.list === 'num
     <section v-if="s.list === 'numbered'" class="group" aria-labelledby="text-numbering">
       <h3 id="text-numbering" class="group-title">Numbering</h3>
       <SegmentedControl :options="REFERENCES" :model-value="s.bound === 'mixed' || s.bound === null ? 'mixed' : s.bound ? 'section' : 'own'" label="Numbers count" :disabled="disabled" @choose="value => numbering({ mode: value === 'section' ? 'section' : 'independent' })" />
-      <div class="sequence">
-        <button type="button" class="chip-toggle" :aria-pressed="pressed(s.continued ?? false)" :disabled="disabled" data-tip="Carry on from the list before the last paragraph" @mousedown.prevent @click="numbering({ mode: s.continued === true ? 'follow' : 'continue' })"><QuoteIcon name="list-continue" :size="15" />Continue</button>
-        <button type="button" class="chip-toggle" :aria-pressed="pressed(s.restarted ?? false)" :disabled="disabled" data-tip="Start again at 1" @mousedown.prevent @click="numbering({ mode: s.restarted === true ? 'follow' : 'restart' })"><QuoteIcon name="list-restart" :size="15" />Restart</button>
-        <label class="start-field"><span>Start at</span>
-          <input :value="startShown" class="num-field" inputmode="numeric" autocomplete="off" :disabled="disabled" aria-label="Start numbering at" @input="startDraft = ($event.target as HTMLInputElement).value" @keydown="startKeys" @change="commitStart" @blur="commitStart" />
-        </label>
-      </div>
+      <SegmentedControl :options="SEQUENCE" :model-value="s.sequence" label="Counting" :disabled="disabled" @choose="chooseSequence" />
+      <label v-if="s.sequence === 'start'" class="start-row"><span>Start this list at</span>
+        <input :value="startShown" class="num-field" inputmode="numeric" autocomplete="off" :disabled="disabled" aria-label="Start numbering at" @input="startDraft = ($event.target as HTMLInputElement).value" @keydown="startKeys" @change="commitStart" @blur="commitStart" />
+      </label>
       <p class="preview" aria-live="polite"><span class="preview-label">This item reads</span><span class="preview-value">{{ s.preview ?? '—' }}</span></p>
     </section>
 
@@ -123,7 +129,7 @@ const isItem = computed(() => s.value.list === 'bullet' || s.value.list === 'num
 
 <style scoped>
 .tab-body { display: grid; grid-template-columns: minmax(0, 1fr); }
-.group { min-width: 0; }
+.group { min-width: 0; grid-template-columns: minmax(0, 1fr); }
 .group { display: grid; gap: 10px; padding: 16px 0; border-top: 1px solid var(--line); }
 .group:first-child { border-top: 0; padding-top: 4px; }
 .group-head { display: flex; align-items: center; justify-content: space-between; min-height: 22px; }
@@ -144,13 +150,7 @@ const isItem = computed(() => s.value.list === 'bullet' || s.value.list === 'num
 .level-of { color: var(--ink-3); }
 .level-tools { display: inline-flex; gap: 4px; }
 .level-tools .tool { border-radius: 8px; box-shadow: inset 0 0 0 1px var(--line-2); }
-.sequence { display: flex; flex-wrap: wrap; align-items: center; gap: 6px; }
-.chip-toggle { display: inline-flex; align-items: center; gap: 6px; height: 30px; padding: 0 10px 0 8px; border: 0; border-radius: 8px; background: transparent; box-shadow: inset 0 0 0 1px var(--line-2); color: var(--ink-2); font-size: 12.5px; font-weight: 600; }
-@media (hover: hover) { .chip-toggle:hover:not(:disabled) { color: var(--ink); background: var(--row-hover); } }
-.chip-toggle[aria-pressed="true"] { background: var(--seg-on); color: var(--teal-ink); box-shadow: inset 0 0 0 1px var(--chip-teal-line); }
-.chip-toggle:focus-visible { box-shadow: var(--focus-ring); }
-.chip-toggle:disabled { color: var(--ink-3); cursor: not-allowed; }
-.start-field { display: inline-flex; align-items: center; gap: 6px; margin-left: auto; font-size: 12.5px; color: var(--ink-2); }
+.start-row { display: flex; align-items: center; justify-content: space-between; gap: 12px; min-height: 34px; font-size: 13px; color: var(--ink-2); }
 .num-field { width: 56px; height: 30px; padding: 0 8px; border: 1px solid var(--glass-edge); border-radius: 8px; background: var(--field-bg); box-shadow: var(--field-inset), 0 0 0 1px var(--line); color: var(--ink); font: 500 13px/1 var(--mono); text-align: right; }
 .num-field:focus { outline: none; box-shadow: var(--focus-ring); }
 .preview { display: flex; align-items: center; justify-content: space-between; gap: 10px; padding: 8px 10px; border-radius: 9px; background: var(--surface-2); }

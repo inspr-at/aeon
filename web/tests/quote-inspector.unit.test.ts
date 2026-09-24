@@ -5,6 +5,7 @@ import { join } from 'node:path'
 import { QuoteEditor } from '../src/lib/quotes/editor.ts'
 import { formatMm, mmText, parseMm, scopeFor, scrubMm, sectionLabel, stepMm, textState } from '../src/lib/quotes/inspector.ts'
 import { parseZoom, readZoom, stepZoom, zoomPercent, ZOOM_STEPS } from '../src/lib/quotes/zoom.ts'
+import { addMonths, formatDocDate, monthGrid, parseDocDate } from '../src/lib/quotes/dates.ts'
 import type { QuoteDocumentData, TextSelection } from '../src/lib/quotes/types.ts'
 
 const S = '11111111-1111-4111-8111-111111111111'
@@ -46,8 +47,11 @@ describe('text state for the inspector', () => {
     editor.select({ sectionId: S, text: sel(3, 0) })
     editor.setListMode('numbered')
     expect(textState(editor.document, editor.selection.text)!.list).toBe('numbered')
+    expect(textState(editor.document, editor.selection.text)!.sequence).toBe('follow')
     editor.setNumbering({ mode: 'start', start: 4 })
-    expect(textState(editor.document, editor.selection.text)!.number).toBe(4)
+    expect(textState(editor.document, editor.selection.text)).toMatchObject({ number: 4, sequence: 'start', listStart: 4 })
+    editor.setNumbering({ mode: 'continue' })
+    expect(textState(editor.document, editor.selection.text)!.sequence).toBe('continue')
     editor.setOffsets({ textStart: mmText(stepMm(0, 1, true, { min: -20, max: 40 })) })
     expect(textState(editor.document, editor.selection.text)!.textStart).toBe(5)
     editor.undo()
@@ -88,12 +92,26 @@ describe('zoom', () => {
   })
 })
 
+describe('dates on the paper', () => {
+  it('read in the document language and parse what people type', () => {
+    expect(formatDocDate('2026-10-24')).toBe('24.10.2026')
+    expect([parseDocDate('24.10.2026'), parseDocDate('1.2.26'), parseDocDate('2026-02-29'), parseDocDate('2028-02-29'), parseDocDate('31.11.2026'), parseDocDate('soon')]).toEqual(['2026-10-24', '2026-02-01', null, '2028-02-29', null, null])
+  })
+  it('lays a month out from Monday and keeps month ends when stepping', () => {
+    const grid = monthGrid('2026-10-24')
+    expect(grid).toHaveLength(42)
+    expect(grid[0]).toEqual({ value: '2026-09-28', day: 28, inMonth: false })
+    expect(grid.find(d => d.value === '2026-10-01')).toEqual({ value: '2026-10-01', day: 1, inMonth: true })
+    expect([addMonths('2026-01-31', 1), addMonths('2026-03-31', -1), addMonths('2026-12-15', 1)]).toEqual(['2026-02-28', '2026-02-28', '2027-01-15'])
+  })
+})
+
 // CSP parity: default-src 'self'; img-src 'self' blob: data:. The inspector needs no
 // inline scripts, no eval and nothing from another origin.
 describe('CSP parity of the inspector', () => {
   it('uses no eval, inline handlers as strings, or other origins', () => {
     const root = new URL('../src/components/quotes/inspector/', import.meta.url).pathname
-    const files = [...readdirSync(root).map(f => join(root, f)), new URL('../src/components/quotes/QuoteTitleBar.vue', import.meta.url).pathname, new URL('../src/lib/quotes/inspector.ts', import.meta.url).pathname]
+    const files = [...readdirSync(root).map(f => join(root, f)), new URL('../src/components/quotes/QuoteTitleBar.vue', import.meta.url).pathname, new URL('../src/components/quotes/DatePicker.vue', import.meta.url).pathname, new URL('../src/lib/quotes/inspector.ts', import.meta.url).pathname]
     for (const file of files) {
       const text = readFileSync(file, 'utf8')
       expect(text, file).not.toMatch(/\beval\(|new Function\(|<script(?! setup| lang)|https?:\/\/(?!www\.w3\.org)|innerHTML|javascript:/)

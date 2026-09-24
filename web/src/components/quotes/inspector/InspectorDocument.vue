@@ -5,6 +5,7 @@ import { PAGE_MM } from '../../../lib/quotes/layout'
 import { settingsLink } from '../../../lib/settings'
 import type { QuoteEditor } from '../../../lib/quotes/editor'
 import type { DocumentSettings, QuoteDocumentData } from '../../../lib/quotes/types'
+import DatePicker from '../DatePicker.vue'
 import QuoteIcon from './QuoteIcon.vue'
 
 // The Document scope: this quote's own settings (dates, reference, currency) and
@@ -20,12 +21,6 @@ function days(from: string, to: string) {
   const n = Math.round((Date.parse(`${to}T00:00:00Z`) - Date.parse(`${from}T00:00:00Z`)) / 86_400_000)
   return Number.isFinite(n) && n >= 0 ? `${n} ${n === 1 ? 'day' : 'days'}` : ''
 }
-// A cleared date field keeps the date it had: quotes always carry both dates.
-function date(key: 'offer_date' | 'valid_until', event: Event) {
-  const input = event.target as HTMLInputElement
-  if (!input.value) { input.value = props.document[key]; return }
-  if (input.value !== props.document[key]) set({ [key]: input.value })
-}
 function currency(event: Event) {
   const input = event.target as HTMLInputElement
   const value = input.value.trim().toUpperCase()
@@ -39,8 +34,8 @@ function currency(event: Event) {
     <section class="group" aria-labelledby="doc-details">
       <h3 id="doc-details" class="group-title">This quote</h3>
       <div class="rows">
-        <label class="row"><span class="row-label">Quote date</span><input class="field-sm" type="date" :value="document.offer_date" :disabled="!editable" @change="date('offer_date', $event)" /></label>
-        <label class="row"><span class="row-label">Valid until</span><input class="field-sm" type="date" :value="document.valid_until" :disabled="!editable" :aria-invalid="!!dateProblem || undefined" @change="date('valid_until', $event)" /></label>
+        <div class="row"><span class="row-label">Quote date</span><DatePicker label="Quote date" :model-value="document.offer_date" :disabled="!editable" @update:model-value="value => set({ offer_date: value })" /></div>
+        <div class="row"><span class="row-label">Valid until</span><DatePicker label="Valid until" :model-value="document.valid_until" :disabled="!editable" :invalid="!!dateProblem" @update:model-value="value => set({ valid_until: value })" /></div>
         <p v-if="dateProblem" class="note bad" role="alert">{{ dateProblem }}</p>
         <p v-else-if="days(document.offer_date, document.valid_until)" class="note">Open for {{ days(document.offer_date, document.valid_until) }}.</p>
         <label class="row"><span class="row-label">Project reference</span><input class="field-sm" :value="document.project_ref" maxlength="200" :disabled="!editable" placeholder="Optional" @change="set({ project_ref: ($event.target as HTMLInputElement).value.trim() })" /></label>
@@ -71,7 +66,7 @@ function currency(event: Event) {
 
 <style scoped>
 .tab-body { display: grid; grid-template-columns: minmax(0, 1fr); }
-.group { min-width: 0; }
+.group { min-width: 0; grid-template-columns: minmax(0, 1fr); }
 .group { display: grid; gap: 10px; padding: 16px 0; border-top: 1px solid var(--line); }
 .group:first-child { border-top: 0; padding-top: 4px; }
 .group-title { font: 500 10.5px/1.4 var(--mono); letter-spacing: .14em; text-transform: uppercase; color: var(--ink-3); font-variant-ligatures: none; }

@@ -17,7 +17,8 @@ export interface TextState {
   bold: boolean | 'mixed'; italic: boolean | 'mixed'
   list: Mixed<ListKind>; bullet: Mixed<Exclude<QuoteMarker, 'decimal'>> | null
   depth: Mixed<number> | null; canIndent: boolean; canOutdent: boolean
-  bound: Mixed<boolean> | null; continued: Mixed<boolean> | null; restarted: Mixed<boolean> | null
+  bound: Mixed<boolean> | null; continued: Mixed<boolean> | null; listStart: number | null
+  sequence: 'follow' | 'continue' | 'start' | 'mixed' | null
   number: number | null; preview: string | null
   markerX: Mixed<number> | null; markerY: Mixed<number> | null; textStart: Mixed<number> | null
   kind: Mixed<'paragraph' | 'item'>
@@ -65,7 +66,9 @@ export function textState(doc: QuoteDocumentData, selection: TextSelection | und
     canOutdent: items.length > 0,
     bound: numbered.length ? same(numbered.map(n => !!n.section_bound)) : null,
     continued: numbered.length ? same(numbered.slice(0, 1).map(n => !!n.list_continue)) : null,
-    restarted: numbered.length ? same(numbered.slice(0, 1).map(n => n.list_start === 1)) : null,
+    listStart: numbered[0]?.list_start ?? null,
+    // How the first numbered item counts: on from the list, on across text, or from a set number.
+    sequence: !numbered.length ? null : numbered[0]!.list_continue ? 'continue' : numbered[0]!.list_start ? 'start' : 'follow',
     number: Number.isFinite(lastPart) ? lastPart : null,
     preview,
     markerX: items.length ? same(items.map(n => mm(n.marker_x_mm))) : null,
