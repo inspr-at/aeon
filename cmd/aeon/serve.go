@@ -20,6 +20,7 @@ import (
 	"github.com/inspr-at/aeon/internal/agentaccounts"
 	"github.com/inspr-at/aeon/internal/agentruns"
 	"github.com/inspr-at/aeon/internal/approvals"
+	"github.com/inspr-at/aeon/internal/attachments"
 	"github.com/inspr-at/aeon/internal/embedding"
 	"github.com/inspr-at/aeon/internal/events"
 	"github.com/inspr-at/aeon/internal/harness"
@@ -143,6 +144,7 @@ func serveListener(ctx context.Context, cfg config.Config, ln net.Listener) erro
 			search.New(pool, embedProvider),
 			views.New(pool),
 			activity.New(pool),
+			attachments.New(pool, attachments.Store{FilesDir: cfg.FilesDir}),
 			imports.New(pool),
 			// R2: agents
 			inbox.New(pool),
