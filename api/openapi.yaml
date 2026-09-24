@@ -1515,12 +1515,16 @@ paths:
       parameters:
         - {name: project_node_id, in: query, schema: {type: string, format: uuid}}
         - {name: customer_org_node_id, in: query, schema: {type: string, format: uuid}}
+        - {name: state, in: query, schema: {type: string, enum: [draft, issued, accepted, void]}}
+        - {name: archived, in: query, schema: {type: string, enum: ['true', 'false', all], default: 'false'}}
+        - {name: limit, in: query, schema: {type: integer, minimum: 1, maximum: 200, default: 100}}
+        - {name: cursor, in: query, schema: {type: string}}
       responses:
-        '200': {description: Quotes, content: {application/json: {schema: {type: array, items: {$ref: '#/components/schemas/BusinessQuote'}}}}}
+        '200': {description: Quotes in created order; X-Next-Cursor is present when another page exists, headers: {X-Next-Cursor: {schema: {type: string}}}, content: {application/json: {schema: {type: array, items: {$ref: '#/components/schemas/BusinessQuote'}}}}}
     post:
       operationId: createQuote
       summary: Create a quote node and projection
-      description: Requires an enabled business_quotes installation and matching organisation/project links. The node key comes from R1.
+      description: Requires enabled business plugins. A linked project is optional when tenant quote settings are configured; the customer organisation is required. New configured quotes allocate commercial and customer numbers atomically.
       security: *auth
       requestBody: {required: true, content: {application/json: {schema: {$ref: '#/components/schemas/QuoteCreate'}}}}
       responses:
@@ -1535,6 +1539,86 @@ paths:
       responses:
         '200': {description: Quote, content: {application/json: {schema: {$ref: '#/components/schemas/BusinessQuote'}}}}
         '404': {$ref: '#/components/responses/Error'}
+  /quotes/settings:
+    get:
+      operationId: getQuoteSettings
+      summary: Read tenant quote defaults and sender
+      security: [{session: []}]
+      responses:
+        '200': {description: Settings, content: {application/json: {schema: {$ref: '#/components/schemas/QuoteSettings'}}}}
+    patch:
+      operationId: updateQuoteSettings
+      summary: Compare and set future quote defaults
+      description: Admin person only. expected_revision is zero for first setup. SMTP confirmation remains disabled until a configured transport is available. Existing drafts and versions are not rewritten.
+      security: [{session: []}]
+      requestBody: {required: true, content: {application/json: {schema: {$ref: '#/components/schemas/QuoteSettingsWrite'}}}}
+      responses:
+        '200': {description: Updated settings, content: {application/json: {schema: {$ref: '#/components/schemas/QuoteSettings'}}}}
+        '409': {$ref: '#/components/responses/Error'}
+  /quotes/{quoteId}/draft:
+    get:
+      operationId: getQuoteDraft
+      summary: Read the mutable document draft
+      security: [{session: []}]
+      parameters: [{name: quoteId, in: path, required: true, schema: {type: string, format: uuid}}]
+      responses:
+        '200': {description: Draft with ETag "qd-N", content: {application/json: {schema: {$ref: '#/components/schemas/QuoteDraft'}}}}
+        '404': {$ref: '#/components/responses/Error'}
+    patch:
+      operationId: saveQuoteDraft
+      summary: Save one full document with compare and swap
+      description: Requires If-Match "qd-N", client_session_id, mutation_id and writer_version. The mutation receipt is durable and replays the acknowledgement for the same payload. A stale precondition returns 412; no document content enters the event stream.
+      security: [{session: []}]
+      parameters:
+        - {name: quoteId, in: path, required: true, schema: {type: string, format: uuid}}
+        - {name: If-Match, in: header, required: true, schema: {type: string, pattern: '^"qd-[1-9][0-9]*"$'}}
+      requestBody: {required: true, content: {application/json: {schema: {$ref: '#/components/schemas/QuoteDraftWrite'}}}}
+      responses:
+        '200': {description: Mutation acknowledgement and canonical document for a new save, content: {application/json: {schema: {$ref: '#/components/schemas/QuoteMutationReceipt'}}}}
+        '412': {$ref: '#/components/responses/Error'}
+        '428': {$ref: '#/components/responses/Error'}
+  /quotes/{quoteId}/finalize:
+    post:
+      operationId: finalizeQuoteDraft
+      summary: Freeze and issue the exact saved draft atomically
+      description: Admin person only. Does not send email or create a public link. Creates an immutable document-v1 snapshot with cent-half-up-v1 pricing and digest; existing R4 versions retain r4-v1.
+      security: [{session: []}]
+      parameters: [{name: quoteId, in: path, required: true, schema: {type: string, format: uuid}}]
+      requestBody: {required: true, content: {application/json: {schema: {$ref: '#/components/schemas/QuoteFinalizeWrite'}}}}
+      responses:
+        '200': {description: Issued quote, content: {application/json: {schema: {$ref: '#/components/schemas/BusinessQuote'}}}}
+        '409': {$ref: '#/components/responses/Error'}
+  /quotes/{quoteId}/draft/branch:
+    post:
+      operationId: branchQuoteDraft
+      summary: Branch an issued document version into a mutable draft
+      description: Admin person only. The previous issued or accepted version and its evidence remain immutable. A new finalization creates the next version on this quote; duplicate creates a separate numbered quote.
+      security: [{session: []}]
+      parameters: [{name: quoteId, in: path, required: true, schema: {type: string, format: uuid}}]
+      requestBody: {required: true, content: {application/json: {schema: {$ref: '#/components/schemas/QuoteBranchWrite'}}}}
+      responses:
+        '200': {description: Branched draft with ETag, content: {application/json: {schema: {$ref: '#/components/schemas/QuoteDraft'}}}}
+        '409': {$ref: '#/components/responses/Error'}
+  /quotes/{quoteId}/duplicate:
+    post:
+      operationId: duplicateQuote
+      summary: Duplicate into a new numbered draft for the same customer
+      security: [{session: []}]
+      parameters: [{name: quoteId, in: path, required: true, schema: {type: string, format: uuid}}]
+      requestBody: {required: true, content: {application/json: {schema: {type: object, additionalProperties: false, required: [expected_revision], properties: {expected_revision: {type: integer, minimum: 1}}}}}}
+      responses:
+        '201': {description: New quote, content: {application/json: {schema: {$ref: '#/components/schemas/BusinessQuote'}}}}
+        '409': {$ref: '#/components/responses/Error'}
+  /quotes/{quoteId}/visibility:
+    patch:
+      operationId: setQuoteVisibility
+      summary: Archive or restore without deleting history
+      security: [{session: []}]
+      parameters: [{name: quoteId, in: path, required: true, schema: {type: string, format: uuid}}]
+      requestBody: {required: true, content: {application/json: {schema: {type: object, additionalProperties: false, required: [expected_revision, archived], properties: {expected_revision: {type: integer, minimum: 1}, archived: {type: boolean}}}}}}
+      responses:
+        '200': {description: Quote, content: {application/json: {schema: {$ref: '#/components/schemas/BusinessQuote'}}}}
+        '409': {$ref: '#/components/responses/Error'}
   /quotes/{quoteId}/versions:
     get:
       operationId: listQuoteVersions
@@ -2095,21 +2179,170 @@ components:
     QuoteCreate:
       type: object
       additionalProperties: false
-      required: [title, project_node_id, customer_org_node_id]
+      required: [title, customer_org_node_id]
       properties:
         title: {type: string, minLength: 1}
-        project_node_id: {type: string, format: uuid}
+        project_node_id: {type: string, format: uuid, description: Optional linked project}
         customer_org_node_id: {type: string, format: uuid}
     BusinessQuote:
       type: object
-      required: [quote_node_id, project_node_id, customer_org_node_id, current_version, state, revision]
+      required: [quote_node_id, customer_org_node_id, current_version, state, revision, archived, project_ref, classic_status]
       properties:
         quote_node_id: {type: string, format: uuid}
-        project_node_id: {type: string, format: uuid}
+        project_node_id: {type: string, description: UUID or empty when customer-only}
         customer_org_node_id: {type: string, format: uuid}
         current_version: {type: integer, minimum: 0}
         state: {type: string, enum: [draft, issued, accepted, void]}
         revision: {type: integer, minimum: 1}
+        offer_no: {type: string, description: Immutable commercial number for configured quotes}
+        archived: {type: boolean}
+        project_ref: {type: string}
+        classic_status: {type: string, enum: [draft, sent, expired, accepted, void], description: Presentation mapping; expired is derived from the frozen validity day}
+    QuoteSettings:
+      type: object
+      required: [revision, numbering_time_zone, default_currency, sender, defaults, layout, smtp_confirmation_enabled, smtp_configured]
+      properties:
+        revision: {type: integer, minimum: 0}
+        numbering_time_zone: {type: string, description: Explicit IANA time zone such as Europe/Vienna}
+        default_currency: {type: string, pattern: '^$|^[A-Z]{3}$', description: Empty only before first setup}
+        sender: {type: object, description: Tenant-owned company, address, contact, registration and bank fields}
+        defaults: {type: object, description: Tenant-owned intro, blocks, acceptance and VAT prose}
+        layout: {type: object, description: Neutral rendering preferences and file references}
+        smtp_confirmation_enabled: {type: boolean}
+        smtp_configured: {type: boolean}
+    QuoteSettingsWrite:
+      type: object
+      additionalProperties: false
+      required: [expected_revision, numbering_time_zone, default_currency, sender, defaults, layout, smtp_confirmation_enabled]
+      properties:
+        expected_revision: {type: integer, minimum: 0}
+        numbering_time_zone: {type: string}
+        default_currency: {type: string, pattern: '^[A-Z]{3}$'}
+        sender: {type: object}
+        defaults: {type: object}
+        layout: {type: object}
+        smtp_confirmation_enabled: {type: boolean, description: May become true only after a tenant SMTP transport is configured}
+    QuoteDocument:
+      type: object
+      additionalProperties: false
+      required: [schema_version, minimum_writer_version, title, subtitle, project_ref, offer_date, valid_until, currency, sender, recipient, legal, layout, sections, positions, net_total_cents]
+      properties:
+        schema_version: {type: integer, const: 1}
+        minimum_writer_version: {type: integer, const: 1}
+        title: {type: string, maxLength: 512}
+        subtitle: {type: string, maxLength: 512}
+        project_ref: {type: string, maxLength: 512}
+        offer_date: {type: string, format: date}
+        valid_until: {type: string, format: date}
+        currency: {type: string, pattern: '^[A-Z]{3}$'}
+        sender: {type: object}
+        recipient: {type: object}
+        legal: {type: object}
+        layout: {type: object}
+        sections: {type: array, maxItems: 20, items: {$ref: '#/components/schemas/QuoteDocumentSection'}}
+        positions: {type: array, maxItems: 100, items: {$ref: '#/components/schemas/QuoteDocumentPosition'}}
+        net_total_cents: {type: integer, minimum: 0, description: Server-computed; input is ignored}
+    QuoteDocumentSection:
+      type: object
+      required: [id, heading, body, nodes]
+      properties:
+        id: {type: string, format: uuid}
+        heading: {type: string}
+        body: {type: string}
+        nodes: {type: array, maxItems: 100, items: {$ref: '#/components/schemas/QuoteTextNode'}}
+    QuoteTextNode:
+      type: object
+      required: [id, kind, text]
+      properties:
+        id: {type: string, format: uuid}
+        kind: {type: string, enum: [paragraph, item]}
+        text: {type: string}
+        depth: {type: integer, minimum: 0, maximum: 5}
+        marker: {type: string, enum: [disc, circle, square, dash, decimal]}
+        numbering: {type: string, enum: [outline]}
+        list_start: {type: integer, minimum: 0, maximum: 9999}
+        list_continue: {type: boolean}
+        section_bound: {type: boolean}
+        glyph: {type: string}
+        marker_x_mm: {type: string, description: Exact signed decimal millimetres}
+        marker_y_mm: {type: string, description: Exact signed decimal millimetres}
+        text_start_mm: {type: string, description: Exact signed decimal millimetres}
+        marks: {type: array, items: {$ref: '#/components/schemas/QuoteInlineMark'}}
+    QuoteInlineMark:
+      type: object
+      required: [start, end]
+      properties:
+        start: {type: integer, minimum: 0, description: Inclusive UTF-16 offset}
+        end: {type: integer, minimum: 1, description: Exclusive UTF-16 offset}
+        bold: {type: boolean}
+        italic: {type: boolean}
+    QuoteDocumentPosition:
+      type: object
+      required: [id, pricing_source, short_text, long_text, quantity, unit_label, unit_price_cents, total_cents, currency]
+      properties:
+        id: {type: string, format: uuid}
+        pricing_source: {type: string, enum: [manual, cost_unit]}
+        short_text: {type: string}
+        long_text: {type: string}
+        quantity: {type: string, pattern: '^[0-9]+(\.[0-9]{1,2})?$', description: Exact quantity}
+        unit_label: {type: string, maxLength: 80}
+        unit_price_cents: {type: integer, minimum: 0}
+        total_cents: {type: integer, minimum: 0, description: Server-computed}
+        cost_unit_node_id: {type: string, format: uuid}
+        rate_unit: {type: string, enum: [hour, day, item]}
+        currency: {type: string, pattern: '^[A-Z]{3}$'}
+    QuoteDraft:
+      type: object
+      required: [document, document_sha256, draft_revision, quote_revision, schema_version, minimum_writer_version, base_version, updated_at, updated_by_principal_id]
+      properties:
+        document: {$ref: '#/components/schemas/QuoteDocument'}
+        document_sha256: {type: string, pattern: '^[0-9a-f]{64}$'}
+        draft_revision: {type: integer, minimum: 1}
+        quote_revision: {type: integer, minimum: 1, description: Aggregate lifecycle revision}
+        schema_version: {type: integer, minimum: 1}
+        minimum_writer_version: {type: integer, minimum: 1}
+        base_version: {type: integer, minimum: 0}
+        updated_at: {type: string, format: date-time}
+        updated_by_principal_id: {type: string, format: uuid}
+    QuoteDraftWrite:
+      type: object
+      additionalProperties: false
+      required: [client_session_id, mutation_id, writer_version, document]
+      properties:
+        client_session_id: {type: string, format: uuid}
+        mutation_id: {type: string, format: uuid}
+        writer_version: {type: integer, const: 1}
+        document: {$ref: '#/components/schemas/QuoteDocument'}
+    QuoteMutationReceipt:
+      type: object
+      required: [mutation_id, acknowledged_revision, acknowledged_quote_revision, current_revision, current_quote_revision, replayed]
+      properties:
+        mutation_id: {type: string, format: uuid}
+        acknowledged_revision: {type: integer, minimum: 1}
+        acknowledged_quote_revision: {type: integer, minimum: 1}
+        current_revision: {type: integer, minimum: 1}
+        current_quote_revision: {type: integer, minimum: 1}
+        replayed: {type: boolean}
+        document: {$ref: '#/components/schemas/QuoteDocument'}
+        document_sha256: {type: string, pattern: '^[0-9a-f]{64}$'}
+        updated_at: {type: string, format: date-time}
+        updated_by_principal_id: {type: string, format: uuid}
+    QuoteFinalizeWrite:
+      type: object
+      additionalProperties: false
+      required: [expected_quote_revision, expected_draft_revision, expected_document_sha256]
+      properties:
+        expected_quote_revision: {type: integer, minimum: 1}
+        expected_draft_revision: {type: integer, minimum: 1}
+        expected_document_sha256: {type: string, pattern: '^[0-9a-f]{64}$'}
+    QuoteBranchWrite:
+      type: object
+      additionalProperties: false
+      required: [expected_quote_revision, expected_version, expected_content_sha256]
+      properties:
+        expected_quote_revision: {type: integer, minimum: 1}
+        expected_version: {type: integer, minimum: 1}
+        expected_content_sha256: {type: string, pattern: '^[0-9a-f]{64}$'}
     QuoteLineWrite:
       type: object
       additionalProperties: false
@@ -2137,11 +2370,11 @@ components:
         lines: {type: array, minItems: 1, items: {$ref: '#/components/schemas/QuoteLineWrite'}}
     QuoteVersion:
       type: object
-      required: [quote_node_id, version, recipient_contact_node_id, currency, title, terms_markdown, lines, subtotal, tax_total, total, content_sha256, created_by_principal_id, created_at]
+      required: [quote_node_id, version, currency, title, terms_markdown, lines, subtotal, tax_total, total, content_sha256, created_by_principal_id, created_at, digest_mode, pricing_mode]
       properties:
         quote_node_id: {type: string, format: uuid}
         version: {type: integer, minimum: 1}
-        recipient_contact_node_id: {type: string, format: uuid}
+        recipient_contact_node_id: {type: string, description: Bound contact UUID for R4 or optional document snapshot}
         currency: {type: string, pattern: '^[A-Z]{3}$'}
         title: {type: string}
         terms_markdown: {type: string}
@@ -2152,6 +2385,11 @@ components:
         content_sha256: {type: string, pattern: '^[0-9a-f]{64}$'}
         created_by_principal_id: {type: string, format: uuid}
         created_at: {type: string, format: date-time}
+        digest_mode: {type: string, enum: [r4-v1, document-v1]}
+        pricing_mode: {type: string, enum: [rate-4, cent-half-up-v1]}
+        document: {$ref: '#/components/schemas/QuoteDocument'}
+        offer_no: {type: string}
+        validity_time_zone: {type: string, description: IANA zone frozen for local validity checks}
     QuoteAcceptanceWrite:
       type: object
       additionalProperties: false

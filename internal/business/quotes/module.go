@@ -4,6 +4,7 @@ package quotes
 
 import (
 	"context"
+	"encoding/base64"
 	"encoding/json"
 	"errors"
 	"fmt"
@@ -12,6 +13,7 @@ import (
 	"regexp"
 	"strconv"
 	"strings"
+	"time"
 
 	"github.com/inspr-at/aeon/internal/db"
 	"github.com/inspr-at/aeon/internal/httpapi"
@@ -49,6 +51,14 @@ func (m *Module) Mount(mux *http.ServeMux) {
 	mux.HandleFunc("GET /api/quotes", m.list)
 	mux.HandleFunc("POST /api/quotes", m.create)
 	mux.HandleFunc("GET /api/quotes/{quoteId}", m.get)
+	mux.HandleFunc("GET /api/quotes/settings", m.settingsGet)
+	mux.HandleFunc("PATCH /api/quotes/settings", m.settingsPatch)
+	mux.HandleFunc("GET /api/quotes/{quoteId}/draft", m.draftGet)
+	mux.HandleFunc("PATCH /api/quotes/{quoteId}/draft", m.draftPatch)
+	mux.HandleFunc("POST /api/quotes/{quoteId}/draft/branch", m.branchDraft)
+	mux.HandleFunc("POST /api/quotes/{quoteId}/finalize", m.finalize)
+	mux.HandleFunc("POST /api/quotes/{quoteId}/duplicate", m.duplicate)
+	mux.HandleFunc("PATCH /api/quotes/{quoteId}/visibility", m.visibility)
 	mux.HandleFunc("GET /api/quotes/{quoteId}/versions", m.versions)
 	mux.HandleFunc("POST /api/quotes/{quoteId}/versions", m.freeze)
 	mux.HandleFunc("GET /api/quotes/{quoteId}/versions/{version}", m.version)
@@ -189,6 +199,10 @@ type quote struct {
 	CurrentVersion    int    `json:"current_version"`
 	State             string `json:"state"`
 	Revision          int64  `json:"revision"`
+	OfferNo           string `json:"offer_no,omitempty"`
+	Archived          bool   `json:"archived"`
+	ProjectRef        string `json:"project_ref"`
+	ClassicStatus     string `json:"classic_status"`
 }
 type createWrite struct {
 	Title             string `json:"title"`
@@ -197,16 +211,36 @@ type createWrite struct {
 }
 
 func readQuote(ctx context.Context, tx pgx.Tx, id string, lock bool) (quote, error) {
-	q := `SELECT quote_node_id::text,project_node_id::text,customer_org_node_id::text,current_version,state,revision FROM business_quotes WHERE quote_node_id=$1::uuid`
+	q := `SELECT quote_node_id::text,coalesce(project_node_id::text,''),customer_org_node_id::text,current_version,state,revision,coalesce(offer_no,''),archived_at IS NOT NULL,project_ref FROM business_quotes WHERE quote_node_id=$1::uuid`
 	if lock {
 		q += ` FOR UPDATE`
 	}
 	var out quote
-	err := tx.QueryRow(ctx, q, id).Scan(&out.QuoteNodeID, &out.ProjectNodeID, &out.CustomerOrgNodeID, &out.CurrentVersion, &out.State, &out.Revision)
+	err := tx.QueryRow(ctx, q, id).Scan(&out.QuoteNodeID, &out.ProjectNodeID, &out.CustomerOrgNodeID, &out.CurrentVersion, &out.State, &out.Revision, &out.OfferNo, &out.Archived, &out.ProjectRef)
 	if errors.Is(err, pgx.ErrNoRows) {
 		return out, missing()
 	}
+	if err == nil {
+		out.ClassicStatus, err = classicStatus(ctx, tx, out)
+	}
 	return out, err
+}
+func canReadQuote(ctx context.Context, tx pgx.Tx, p tenant.Principal, q quote, versionNo int) error {
+	if staff(p) {
+		return nil
+	}
+	if !person(p) || q.State != "issued" && q.State != "accepted" || q.CurrentVersion != versionNo || versionNo < 1 {
+		return denied()
+	}
+	var allowed bool
+	err := tx.QueryRow(ctx, `SELECT EXISTS(SELECT 1 FROM quote_versions v JOIN crm_contact_principals cp ON cp.tenant_id=v.tenant_id AND cp.contact_node_id=v.recipient_contact_node_id JOIN node_relations rel ON rel.tenant_id=cp.tenant_id AND rel.source_node_id=cp.contact_node_id AND rel.target_node_id=$3::uuid AND rel.type='contact_for' WHERE v.quote_node_id=$1::uuid AND v.version=$2 AND cp.principal_id=$4::uuid)`, q.QuoteNodeID, versionNo, q.CustomerOrgNodeID, p.ID).Scan(&allowed)
+	if err != nil {
+		return err
+	}
+	if !allowed {
+		return denied()
+	}
+	return nil
 }
 func (m *Module) list(w http.ResponseWriter, r *http.Request) {
 	p, e := caller(r)
@@ -214,28 +248,99 @@ func (m *Module) list(w http.ResponseWriter, r *http.Request) {
 		respond(w, 0, nil, e)
 		return
 	}
+	if !staff(p) {
+		respond(w, 0, nil, denied())
+		return
+	}
 	project := r.URL.Query().Get("project_node_id")
 	org := r.URL.Query().Get("customer_org_node_id")
+	state := r.URL.Query().Get("state")
+	archived := r.URL.Query().Get("archived")
+	if archived == "" {
+		archived = "false"
+	}
+	limit := 100
+	if raw := r.URL.Query().Get("limit"); raw != "" {
+		n, err := strconv.Atoi(raw)
+		if err != nil || n < 1 || n > 200 {
+			respond(w, 0, nil, bad("invalid limit"))
+			return
+		}
+		limit = n
+	}
+	var cursorTime, cursorID any
+	if raw := r.URL.Query().Get("cursor"); raw != "" {
+		b, err := base64.RawURLEncoding.DecodeString(raw)
+		if err != nil {
+			respond(w, 0, nil, bad("invalid cursor"))
+			return
+		}
+		parts := strings.Split(string(b), "|")
+		if len(parts) != 2 || !uuidRe.MatchString(parts[1]) {
+			respond(w, 0, nil, bad("invalid cursor"))
+			return
+		}
+		parsed, err := time.Parse(time.RFC3339Nano, parts[0])
+		if err != nil {
+			respond(w, 0, nil, bad("invalid cursor"))
+			return
+		}
+		cursorTime = parsed
+		cursorID = parts[1]
+	}
 	if (project != "" && !uuidRe.MatchString(project)) || (org != "" && !uuidRe.MatchString(org)) {
 		respond(w, 0, nil, bad("invalid filter"))
 		return
 	}
+	if state != "" && state != "draft" && state != "issued" && state != "accepted" && state != "void" || archived != "true" && archived != "false" && archived != "all" {
+		respond(w, 0, nil, bad("invalid quote filter"))
+		return
+	}
 	out := []quote{}
+	var next string
 	e = m.tx(r.Context(), p, fence.PermViewsProvide, false, func(tx pgx.Tx) error {
-		rows, err := tx.Query(r.Context(), `SELECT quote_node_id::text,project_node_id::text,customer_org_node_id::text,current_version,state,revision FROM business_quotes WHERE ($1::text='' OR project_node_id=NULLIF($1,'')::uuid) AND ($2::text='' OR customer_org_node_id=NULLIF($2,'')::uuid) ORDER BY created_at DESC,quote_node_id LIMIT 200`, project, org)
+		rows, err := tx.Query(r.Context(), `SELECT quote_node_id::text,coalesce(project_node_id::text,''),customer_org_node_id::text,current_version,state,revision,coalesce(offer_no,''),archived_at IS NOT NULL,project_ref,created_at FROM business_quotes WHERE ($1::text='' OR project_node_id=NULLIF($1,'')::uuid) AND ($2::text='' OR customer_org_node_id=NULLIF($2,'')::uuid) AND ($3::text='' OR state=$3) AND ($4::text='all' OR (archived_at IS NOT NULL)=($4::text='true')) AND ($5::timestamptz IS NULL OR created_at<$5::timestamptz OR (created_at=$5::timestamptz AND quote_node_id>$6::uuid)) ORDER BY created_at DESC,quote_node_id LIMIT $7`, project, org, state, archived, cursorTime, cursorID, limit+1)
 		if err != nil {
 			return err
 		}
-		defer rows.Close()
+		var lastTime time.Time
+		var lastID string
+		var hasMore bool
 		for rows.Next() {
 			var q quote
-			if err := rows.Scan(&q.QuoteNodeID, &q.ProjectNodeID, &q.CustomerOrgNodeID, &q.CurrentVersion, &q.State, &q.Revision); err != nil {
+			var created time.Time
+			if err := rows.Scan(&q.QuoteNodeID, &q.ProjectNodeID, &q.CustomerOrgNodeID, &q.CurrentVersion, &q.State, &q.Revision, &q.OfferNo, &q.Archived, &q.ProjectRef, &created); err != nil {
+				rows.Close()
 				return err
 			}
-			out = append(out, q)
+			if len(out) < limit {
+				out = append(out, q)
+				lastTime = created
+				lastID = q.QuoteNodeID
+			} else {
+				hasMore = true
+			}
 		}
-		return rows.Err()
+		if err := rows.Err(); err != nil {
+			rows.Close()
+			return err
+		}
+		rows.Close()
+		if hasMore {
+			next = base64.RawURLEncoding.EncodeToString([]byte(lastTime.Format(time.RFC3339Nano) + "|" + lastID))
+		}
+		for i := range out {
+			var err error
+			out[i].ClassicStatus, err = classicStatus(r.Context(), tx, out[i])
+			if err != nil {
+				return err
+			}
+		}
+		return nil
 	})
+	if e == nil && next != "" {
+		w.Header().Set("X-Next-Cursor", next)
+	}
 	respond(w, 200, out, e)
 }
 func (m *Module) get(w http.ResponseWriter, r *http.Request) {
@@ -250,7 +355,14 @@ func (m *Module) get(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	var out quote
-	e = m.tx(r.Context(), p, fence.PermViewsProvide, false, func(tx pgx.Tx) error { var err error; out, err = readQuote(r.Context(), tx, id, false); return err })
+	e = m.tx(r.Context(), p, fence.PermViewsProvide, false, func(tx pgx.Tx) error {
+		var err error
+		out, err = readQuote(r.Context(), tx, id, false)
+		if err != nil {
+			return err
+		}
+		return canReadQuote(r.Context(), tx, p, out, out.CurrentVersion)
+	})
 	respond(w, 200, out, e)
 }
 
@@ -270,19 +382,42 @@ func (m *Module) create(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	in.Title = strings.TrimSpace(in.Title)
-	if in.Title == "" || len(in.Title) > 512 || !uuidRe.MatchString(in.ProjectNodeID) || !uuidRe.MatchString(in.CustomerOrgNodeID) {
+	if in.Title == "" || len(in.Title) > 512 || (in.ProjectNodeID != "" && !uuidRe.MatchString(in.ProjectNodeID)) || !uuidRe.MatchString(in.CustomerOrgNodeID) {
 		respond(w, 0, nil, bad("invalid quote"))
 		return
 	}
 	var out quote
 	e = m.tx(r.Context(), p, fence.PermNodesContribute, true, func(tx pgx.Tx) error {
 		var exists bool
-		err := tx.QueryRow(r.Context(), `SELECT EXISTS(SELECT 1 FROM node_relations rel JOIN nodes org ON org.tenant_id=rel.tenant_id AND org.id=rel.source_node_id JOIN node_kinds ok ON ok.tenant_id=org.tenant_id AND ok.id=org.kind_id JOIN nodes prj ON prj.tenant_id=rel.tenant_id AND prj.id=rel.target_node_id JOIN node_kinds pk ON pk.tenant_id=prj.tenant_id AND pk.id=prj.kind_id WHERE rel.type='customer_of' AND rel.source_node_id=$1::uuid AND rel.target_node_id=$2::uuid AND org.deleted_at IS NULL AND prj.deleted_at IS NULL AND ok.slug='organisation' AND pk.slug='project')`, in.CustomerOrgNodeID, in.ProjectNodeID).Scan(&exists)
+		err := tx.QueryRow(r.Context(), `SELECT EXISTS(SELECT 1 FROM nodes org JOIN node_kinds ok ON ok.tenant_id=org.tenant_id AND ok.id=org.kind_id WHERE org.id=$1::uuid AND org.deleted_at IS NULL AND ok.slug='organisation' AND ($2::text='' OR EXISTS (SELECT 1 FROM node_relations rel JOIN nodes prj ON prj.tenant_id=rel.tenant_id AND prj.id=rel.target_node_id JOIN node_kinds pk ON pk.tenant_id=prj.tenant_id AND pk.id=prj.kind_id WHERE rel.type='customer_of' AND rel.source_node_id=org.id AND rel.target_node_id=NULLIF($2,'')::uuid AND prj.deleted_at IS NULL AND pk.slug='project')))`, in.CustomerOrgNodeID, in.ProjectNodeID).Scan(&exists)
 		if err != nil {
 			return err
 		}
 		if !exists {
-			return bad("project and customer organisation must be linked")
+			return bad("project must belong to a live customer organisation")
+		}
+		settings, err := readSettings(r.Context(), tx)
+		if err != nil {
+			return err
+		}
+		if settings.Revision == 0 && in.ProjectNodeID == "" {
+			return bad("quote settings must be configured for a customer-only draft")
+		}
+		var offerNo, customerNo string
+		var day time.Time
+		if settings.Revision > 0 {
+			day, err = quoteDay(settings, time.Now())
+			if err != nil {
+				return err
+			}
+			customerNo, err = ensureCustomerNumber(r.Context(), tx, p, in.CustomerOrgNodeID, day)
+			if err != nil {
+				return err
+			}
+			offerNo, err = allocateOfferNumber(r.Context(), tx, p, day)
+			if err != nil {
+				return err
+			}
 		}
 		err = tx.QueryRow(r.Context(), `INSERT INTO nodes(tenant_id,key,kind_id,title) SELECT $1::uuid,aeon_next_node_key($1::uuid,k.short_prefix),k.id,$2 FROM node_kinds k WHERE k.tenant_id=$1::uuid AND k.slug='quote' RETURNING id::text`, p.TenantID, in.Title).Scan(&out.QuoteNodeID)
 		if errors.Is(err, pgx.ErrNoRows) {
@@ -291,9 +426,23 @@ func (m *Module) create(w http.ResponseWriter, r *http.Request) {
 		if err != nil {
 			return err
 		}
-		_, err = tx.Exec(r.Context(), `INSERT INTO business_quotes(tenant_id,quote_node_id,project_node_id,customer_org_node_id) VALUES($1::uuid,$2::uuid,$3::uuid,$4::uuid)`, p.TenantID, out.QuoteNodeID, in.ProjectNodeID, in.CustomerOrgNodeID)
+		_, err = tx.Exec(r.Context(), `INSERT INTO business_quotes(tenant_id,quote_node_id,project_node_id,customer_org_node_id,offer_no) VALUES($1::uuid,$2::uuid,NULLIF($3,'')::uuid,$4::uuid,NULLIF($5,''))`, p.TenantID, out.QuoteNodeID, in.ProjectNodeID, in.CustomerOrgNodeID, offerNo)
 		if err != nil {
 			return err
+		}
+		if settings.Revision > 0 {
+			doc, err := makeDocument(r.Context(), tx, settings, in.CustomerOrgNodeID, in.Title, customerNo, day)
+			if err != nil {
+				return err
+			}
+			raw, err := json.Marshal(doc)
+			if err != nil {
+				return err
+			}
+			_, err = tx.Exec(r.Context(), `INSERT INTO quote_drafts(tenant_id,quote_node_id,document,schema_version,minimum_writer_version,updated_by_principal_id) VALUES($1::uuid,$2::uuid,$3::jsonb,1,1,$4::uuid)`, p.TenantID, out.QuoteNodeID, string(raw), p.ID)
+			if err != nil {
+				return err
+			}
 		}
 		_, err = tx.Exec(r.Context(), `INSERT INTO node_relations(tenant_id,source_node_id,target_node_id,type) VALUES($1::uuid,$2::uuid,$3::uuid,'customer_of')`, p.TenantID, in.CustomerOrgNodeID, out.QuoteNodeID)
 		if err != nil {

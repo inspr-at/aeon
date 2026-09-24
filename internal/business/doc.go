@@ -190,4 +190,95 @@
 // reconciles shared contract changes, wires cmd/aeon and web/src/router.ts,
 // and performs release-wide QA. Builders test tenant isolation, installation
 // closure, gate failures, event atomicity, retries and financial edge cases.
+//
+// QP1/AEON-82 quote port (migration 0600) adds generic commercial document
+// code, not a tenant's company identity, legal wording, logo or bank data.
+// The coordinator registers quotes.ManifestPlugin before Seal and mounts
+// quotes.New(pool, registry), which returns httpapi.Module. This package does
+// not wire cmd/aeon, internal/plugins/builtin.go or web/src/router.ts.
+// business_quotes is the lifecycle/number projection; quote_drafts is the
+// mutable full document; quote_versions and quote_version_snapshots are sealed
+// commercial evidence. R4 rows keep digest_mode=r4-v1 and pricing_mode=rate-4.
+// New document versions use digest_mode=document-v1 and pricing_mode=
+// cent-half-up-v1. No old version totals or digests are recomputed or rewritten.
+// A commercial offer number AYYMMDD-NN is allocated on creation and never
+// reused. KYYMM<unpadded counter> is allocated once on a customer's first
+// numbered quote. The calendar day comes from quote_settings.numbering_time_zone
+// (explicit IANA zone; Europe/Vienna for classic-compatible tenants), never
+// the server timezone. The draft currency comes from settings.default_currency.
+// Settings and SMTP confirmation default to absent/off;
+// only a tenant admin can configure future-offer content with revision CAS.
+// P2's CRM number-conversion adapter calls quotes.ReformatLegacyCustomerNumber
+// with its authenticated admin principal; the P1 service locks the customer
+// and related quotes, rejects any nondraft, updates draft customer numbers and
+// revisions, and appends events atomically. It never renumbers issued history.
+// No offer is emailed by finalization.
+//
+// P3 document JSON schema v1 (exact wire names; OpenAPI QuoteDocument):
+//   schema_version=1, minimum_writer_version=1; title, subtitle, project_ref,
+//   offer_date and valid_until (YYYY-MM-DD local calendar dates), currency
+//   (three uppercase letters); sender, recipient, legal and layout objects;
+//   sections and positions ordered arrays; net_total_cents server-computed.
+// sender is a tenant-settings snapshot with company, street, postal_code,
+// city, country, register_no, register_court, email, phone, website, uid,
+// bank_name, iban, bic, contact_person, plus optional file/hash references.
+// recipient is a frozen name, address, contact, country, customer_no, email
+// and optional contact_node_id. legal holds intro, accept_text and vat_note;
+// these are prose, not an inferred tax rate. layout holds neutral presentation
+// values including logo_width_mm/logo_offset_mm as exact decimal strings and
+// optional asset references. All business words and assets come from tenant
+// data; no migration, fixture or source constant supplies them.
+// Each section is {id,heading,body,nodes}; each prose node is
+// {id,kind,text,depth?,marker?,numbering?,list_start?,list_continue?,
+// section_bound?,glyph?,marker_x_mm?,marker_y_mm?,text_start_mm?,marks?}.
+// IDs are UUIDs unique within one document and remain stable on edits and
+// reorders. Splitting a node creates a new ID on one side; merging retains
+// one ID. Duplicating a quote remaps all section, prose and position IDs.
+// kind is paragraph|item; marker is disc|circle|square|dash|decimal;
+// numbering is absent or outline for multilevel generated numbers. depth is
+// 0..5. list_start is 0 or 1..9999; a positive start excludes continue.
+// list_continue resumes the prior compatible numbering, even across prose;
+// section_bound prefixes outline numbering with the owning section number.
+// The generated marker is never inserted into text. Optical offsets are
+// signed decimal millimetre strings, not binary floats. marks are ordered,
+// disjoint {start,end,bold?,italic?} UTF-16 half-open ranges. Offsets must be
+// valid surrogate boundaries; neither flag false/absent on both is invalid.
+// A plain body with empty nodes is retained for old content.
+// Each position is {id,pricing_source,short_text,long_text,quantity,
+// unit_label,unit_price_cents,total_cents,currency,cost_unit_node_id?,
+// rate_unit?}. quantity is an exact decimal string with at most two places;
+// unit_price_cents and total_cents are integers. Manual positions supply a
+// cent price and arbitrary bounded display unit. cost_unit positions identify
+// a live rate and hour|day|item rate_unit; their effective rate is frozen on
+// issue. The server recomputes every total with half-up cent rounding; client
+// totals never grant authority. A version holds the exact source mode, rate
+// snapshots, sender/recipient/legal/layout, number, date, validity_time_zone
+// and document digest. Later settings changes never change the expiry day.
+//
+// Draft PATCH requires If-Match "qd-<draft_revision>" and writer_version plus
+// UUID client_session_id/mutation_id. Missing/stale preconditions fail 428/412.
+// Receipts are durable with no silent expiry; exact replay acknowledges the
+// original result revision, while a reused ID with changed payload conflicts.
+// The aggregate business_quotes.revision fences lifecycle/visibility and is
+// distinct from draft_revision and immutable version. Draft reads and mutation
+// receipts expose both revision axes to P6. Events expose IDs,
+// revision and mutation metadata, never draft contents or capability secrets.
+// Finalize checks both revisions and the saved draft hash under the quote lock,
+// freezes it and issues in one transaction. Duplicate creates a new draft and
+// number; archive is independent of issue/acceptance and never deletes history.
+// POST /quotes/{id}/draft/branch explicitly reopens a sealed document as a
+// new mutable draft on the same quote, with base_version and new revisions;
+// the prior immutable version and decision evidence are never edited.
+// Classic draft/sent/accepted map to draft/issued/accepted; expired derives
+// from frozen valid_until in the configured local day and remains stored as
+// issued. Historical declined is import-only evidence; void stays distinct.
+// P5 owns public capability routes and confirmation jobs. Its acceptance
+// transaction must lock the same quote row and use one common decision guard
+// with authenticated acceptance; capability identity is never a bound person.
+// The public-link projection stores only a verifier hash, frozen target digest
+// and required quote.public_link_created / quote.public_link_revoked event IDs.
+// The public-acceptance projection requires quote.accepted_public evidence;
+// a unique quote_decisions row arbitrates both acceptance channels. P5 must
+// keep audit metadata out of general events and must use a tenant service
+// actor rather than inventing an authenticated customer principal.
 package business

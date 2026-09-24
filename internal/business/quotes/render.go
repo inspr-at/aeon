@@ -171,9 +171,23 @@ func (m *Module) export(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	var v version
-	e = m.tx(r.Context(), p, fence.PermViewsProvide, false, func(tx pgx.Tx) error { var err error; v, err = readVersion(r.Context(), tx, id, n); return err })
+	e = m.tx(r.Context(), p, fence.PermViewsProvide, false, func(tx pgx.Tx) error {
+		q, err := readQuote(r.Context(), tx, id, false)
+		if err != nil {
+			return err
+		}
+		if err = canReadQuote(r.Context(), tx, p, q, n); err != nil {
+			return err
+		}
+		v, err = readVersion(r.Context(), tx, id, n)
+		return err
+	})
 	if e != nil {
 		respond(w, 0, nil, e)
+		return
+	}
+	if v.DigestMode == "document-v1" {
+		respond(w, 0, nil, conflict("document export is provided by the document renderer"))
 		return
 	}
 	if format == "markdown" {

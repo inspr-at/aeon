@@ -45,23 +45,32 @@ type line struct {
 	NetAmount      decimal     `json:"net_amount"`
 }
 type version struct {
-	QuoteNodeID            string    `json:"quote_node_id"`
-	Version                int       `json:"version"`
-	RecipientContactNodeID string    `json:"recipient_contact_node_id"`
-	Currency               string    `json:"currency"`
-	Title                  string    `json:"title"`
-	TermsMarkdown          string    `json:"terms_markdown"`
-	Lines                  []line    `json:"lines"`
-	Subtotal               decimal   `json:"subtotal"`
-	TaxTotal               decimal   `json:"tax_total"`
-	Total                  decimal   `json:"total"`
-	ContentSHA256          string    `json:"content_sha256"`
-	CreatedByPrincipalID   string    `json:"created_by_principal_id"`
-	CreatedAt              time.Time `json:"created_at"`
+	QuoteNodeID            string          `json:"quote_node_id"`
+	Version                int             `json:"version"`
+	RecipientContactNodeID string          `json:"recipient_contact_node_id"`
+	Currency               string          `json:"currency"`
+	Title                  string          `json:"title"`
+	TermsMarkdown          string          `json:"terms_markdown"`
+	Lines                  []line          `json:"lines"`
+	Subtotal               decimal         `json:"subtotal"`
+	TaxTotal               decimal         `json:"tax_total"`
+	Total                  decimal         `json:"total"`
+	ContentSHA256          string          `json:"content_sha256"`
+	CreatedByPrincipalID   string          `json:"created_by_principal_id"`
+	CreatedAt              time.Time       `json:"created_at"`
+	DigestMode             string          `json:"digest_mode"`
+	PricingMode            string          `json:"pricing_mode"`
+	Document               json.RawMessage `json:"document,omitempty"`
+	OfferNo                string          `json:"offer_no,omitempty"`
+	ValidityTimeZone       string          `json:"validity_time_zone,omitempty"`
 }
 
 func appendEvent(ctx context.Context, tx pgx.Tx, p tenant.Principal, id, kind string, before, after any) error {
-	_, err := events.Append(ctx, tx, p, events.Change{NodeID: &id, Type: kind, Before: before, After: after})
+	var nodeID *string
+	if id != "" {
+		nodeID = &id
+	}
+	_, err := events.Append(ctx, tx, p, events.Change{NodeID: nodeID, Type: kind, Before: before, After: after})
 	return err
 }
 func validateVersion(in versionWrite) error {
@@ -82,6 +91,10 @@ func (m *Module) versions(w http.ResponseWriter, r *http.Request) {
 	p, e := caller(r)
 	if e != nil {
 		respond(w, 0, nil, e)
+		return
+	}
+	if !staff(p) {
+		respond(w, 0, nil, denied())
 		return
 	}
 	id, e := pathID(r)
@@ -140,13 +153,23 @@ func (m *Module) version(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	var out version
-	e = m.tx(r.Context(), p, fence.PermViewsProvide, false, func(tx pgx.Tx) error { var err error; out, err = readVersion(r.Context(), tx, id, n); return err })
+	e = m.tx(r.Context(), p, fence.PermViewsProvide, false, func(tx pgx.Tx) error {
+		q, err := readQuote(r.Context(), tx, id, false)
+		if err != nil {
+			return err
+		}
+		if err = canReadQuote(r.Context(), tx, p, q, n); err != nil {
+			return err
+		}
+		out, err = readVersion(r.Context(), tx, id, n)
+		return err
+	})
 	respond(w, 200, out, e)
 }
 func readVersion(ctx context.Context, tx pgx.Tx, id string, n int) (version, error) {
 	var v version
 	var subtotal, tax, total string
-	err := tx.QueryRow(ctx, `SELECT quote_node_id::text,version,recipient_contact_node_id::text,currency,title,terms_markdown,subtotal::text,tax_total::text,total::text,content_sha256,created_by_principal_id::text,created_at FROM quote_versions WHERE quote_node_id=$1::uuid AND version=$2`, id, n).Scan(&v.QuoteNodeID, &v.Version, &v.RecipientContactNodeID, &v.Currency, &v.Title, &v.TermsMarkdown, &subtotal, &tax, &total, &v.ContentSHA256, &v.CreatedByPrincipalID, &v.CreatedAt)
+	err := tx.QueryRow(ctx, `SELECT quote_node_id::text,version,coalesce(recipient_contact_node_id::text,''),currency,title,terms_markdown,subtotal::text,tax_total::text,total::text,content_sha256,created_by_principal_id::text,created_at,digest_mode,pricing_mode FROM quote_versions WHERE quote_node_id=$1::uuid AND version=$2`, id, n).Scan(&v.QuoteNodeID, &v.Version, &v.RecipientContactNodeID, &v.Currency, &v.Title, &v.TermsMarkdown, &subtotal, &tax, &total, &v.ContentSHA256, &v.CreatedByPrincipalID, &v.CreatedAt, &v.DigestMode, &v.PricingMode)
 	if errors.Is(err, pgx.ErrNoRows) {
 		return v, missing()
 	}
@@ -163,6 +186,13 @@ func readVersion(ctx context.Context, tx pgx.Tx, id string, n int) (version, err
 		}
 	}
 	v.Lines = []line{}
+	if v.DigestMode == "document-v1" {
+		err = tx.QueryRow(ctx, `SELECT document,offer_no,validity_time_zone FROM quote_version_snapshots WHERE quote_node_id=$1::uuid AND version=$2`, id, n).Scan(&v.Document, &v.OfferNo, &v.ValidityTimeZone)
+		if err != nil {
+			return v, err
+		}
+		return v, nil
+	}
 	rows, err := tx.Query(ctx, `SELECT position,description,cost_unit_node_id::text,unit,quantity::text,rate_amount::text,net_amount::text,tax_rate::text FROM quote_line_items WHERE quote_node_id=$1::uuid AND version=$2 ORDER BY position`, id, n)
 	if err != nil {
 		return v, err
@@ -321,7 +351,7 @@ func (m *Module) freeze(w http.ResponseWriter, r *http.Request) {
 		return appendEvent(r.Context(), tx, p, id, "quote.version_created", q, struct {
 			Quote   quote   `json:"quote"`
 			Version version `json:"version"`
-		}{quote{id, q.ProjectNodeID, q.CustomerOrgNodeID, out.Version, "draft", q.Revision + 1}, out})
+		}{quote{QuoteNodeID: id, ProjectNodeID: q.ProjectNodeID, CustomerOrgNodeID: q.CustomerOrgNodeID, CurrentVersion: out.Version, State: "draft", Revision: q.Revision + 1}, out})
 	})
 	respond(w, 201, out, e)
 }

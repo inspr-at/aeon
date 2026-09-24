@@ -1,7 +1,8 @@
 // SPDX-License-Identifier: AGPL-3.0-only
 
-// Package quotes implements the R4 frozen quote API. The coordinator registers
-// ManifestPlugin before sealing the registry and mounts New on the API server.
+// Package quotes implements R4 frozen versions and QP1 mutable documents. The
+// coordinator registers ManifestPlugin before sealing the registry and mounts
+// New on the API server. An existing tenant installation must pin this digest.
 package quotes
 
 import (
@@ -39,15 +40,17 @@ func (declaration) ApplyResult(context.Context, plugins.Call, plugins.StepResult
 func ManifestPlugin() (plugins.Plugin, error) {
 	d := declaration{}
 	p := plugins.Plugin{Manifest: plugins.Manifest{
-		ID: PluginID, Version: "1", Owner: "aeon",
+		ID: PluginID, Version: "2", Owner: "aeon",
 		Permissions: []string{fence.PermNodesContribute, fence.PermViewsProvide, fence.PermStepsApply},
 		NodeKinds:   []plugins.NodeKind{{Slug: "quote", FieldSchema: []byte(`{"type":"object","properties":{}}`)}},
 		Views:       []plugins.View{{ID: "quotes", Panels: []string{"quotes"}}},
 		WorkflowSteps: []plugins.WorkflowStep{
 			{Key: "quote_issue", Gates: []string{fence.GateObservedState, fence.GatePersonDecision}},
 			{Key: "quote_accept", Gates: []string{fence.GateObservedState, fence.GatePersonDecision}},
+			{Key: "quote_finalize", Gates: []string{fence.GateObservedState, fence.GatePersonDecision}},
+			{Key: "quote_branch", Gates: []string{fence.GateObservedState, fence.GatePersonDecision}},
 		},
-	}, StepPermissions: map[string]string{"quote_issue": fence.PermStepsApply, "quote_accept": fence.PermStepsApply}, Kinds: d, Views: d, Steps: d}
+	}, StepPermissions: map[string]string{"quote_issue": fence.PermStepsApply, "quote_accept": fence.PermStepsApply, "quote_finalize": fence.PermStepsApply, "quote_branch": fence.PermStepsApply}, Kinds: d, Views: d, Steps: d}
 	sum, err := plugins.Digest(p)
 	if err != nil {
 		return plugins.Plugin{}, err
