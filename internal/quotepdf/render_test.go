@@ -7,6 +7,9 @@ import (
 	"context"
 	"encoding/json"
 	"os"
+	"os/exec"
+	"regexp"
+	"strconv"
 	"strings"
 	"testing"
 	"time"
@@ -49,6 +52,75 @@ func TestBundledDocumentRefusesWholeBlockOverflow(t *testing.T) {
 	_, err := Render(ctx, assets, Payload{Document: json.RawMessage(tooLong), OfferNo: "A260924-1"})
 	if err == nil || !strings.Contains(err.Error(), "overflow") {
 		t.Fatalf("expected explicit overflow, got %v", err)
+	}
+}
+
+func TestSyntheticPDFGoldenTextAndGeometry(t *testing.T) {
+	if !Available() {
+		t.Skip("Chromium unavailable")
+	}
+	assets := os.DirFS("../../web/dist")
+	if _, err := os.Stat("../../web/dist/quote-print.html"); err != nil {
+		t.Skip("build web assets first")
+	}
+	document, err := os.ReadFile("../../web/tests/quotes/fixtures/synthetic-document.json")
+	if err != nil {
+		t.Fatal(err)
+	}
+	goldenBytes, err := os.ReadFile("../../web/tests/quotes/fixtures/pdf-golden.json")
+	if err != nil {
+		t.Fatal(err)
+	}
+	var golden struct {
+		Width     float64  `json:"page_width_points"`
+		Height    float64  `json:"page_height_points"`
+		Tolerance float64  `json:"geometry_tolerance_points"`
+		Required  []string `json:"required_text"`
+		Forbidden []string `json:"forbidden_text"`
+	}
+	if err := json.Unmarshal(goldenBytes, &golden); err != nil {
+		t.Fatal(err)
+	}
+	ctx, cancel := context.WithTimeout(t.Context(), 45*time.Second)
+	defer cancel()
+	pdf, err := Render(ctx, assets, Payload{Document: document, OfferNo: "A260924-01", PublicURL: "https://example.invalid/offers/synthetic/token"})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !bytes.HasPrefix(pdf, []byte("%PDF-")) || len(pdf) > 20<<20 {
+		t.Fatalf("invalid PDF size %d", len(pdf))
+	}
+	box := regexp.MustCompile(`/MediaBox\s*\[\s*0\s+0\s+([0-9.]+)\s+([0-9.]+)\s*\]`).FindSubmatch(pdf)
+	if len(box) != 3 {
+		t.Fatal("missing PDF MediaBox")
+	}
+	width, _ := strconv.ParseFloat(string(box[1]), 64)
+	height, _ := strconv.ParseFloat(string(box[2]), 64)
+	if width < golden.Width-golden.Tolerance || width > golden.Width+golden.Tolerance || height < golden.Height-golden.Tolerance || height > golden.Height+golden.Tolerance {
+		t.Fatalf("PDF geometry %.2f x %.2f, want %.2f x %.2f", width, height, golden.Width, golden.Height)
+	}
+	// Poppler checks the emitted PDF bytes when installed; source/DOM text is
+	// insufficient evidence because print CSS can omit text.
+	if _, err := exec.LookPath("pdftotext"); err != nil {
+		t.Log("pdftotext unavailable; PDF text check requires the release runner")
+		return
+	}
+	cmd := exec.CommandContext(ctx, "pdftotext", "-layout", "-", "-")
+	cmd.Stdin = bytes.NewReader(pdf)
+	textBytes, err := cmd.Output()
+	if err != nil {
+		t.Fatal(err)
+	}
+	content := string(textBytes)
+	for _, wanted := range golden.Required {
+		if !strings.Contains(content, wanted) {
+			t.Errorf("PDF text missing %q", wanted)
+		}
+	}
+	for _, denied := range golden.Forbidden {
+		if strings.Contains(content, denied) {
+			t.Errorf("PDF text contains %q", denied)
+		}
 	}
 }
 

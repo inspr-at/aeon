@@ -1,0 +1,8 @@
+{
+  "fixture": "synthetic-document.json",
+  "page_width_points": 595.28,
+  "page_height_points": 841.89,
+  "geometry_tolerance_points": 1,
+  "required_text": ["Synthetic service proposal", "Example Studio", "Sample Customer", "Scope", "Synthetic work only.", "Service"],
+  "forbidden_text": ["UNWANTED TEMPLATE MARK", "PRIVATE EXAMPLE DOMAIN"]
+}
