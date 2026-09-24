@@ -164,7 +164,7 @@ func serveListener(ctx context.Context, cfg config.Config, ln net.Listener) erro
 		_ = ln.Close()
 		return fmt.Errorf("quote collaboration: %w", err)
 	}
-	publicQuotesMod, err := publicquotes.New(pool, pluginRegistry, webFS, cfg.PublicURL)
+	publicQuotesMod, err := publicquotes.NewWithStore(pool, pluginRegistry, webFS, fileStore, cfg.PublicURL)
 	if err != nil {
 		_ = ln.Close()
 		return fmt.Errorf("public quotes: %w", err)
