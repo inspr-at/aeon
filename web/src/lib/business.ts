@@ -46,7 +46,11 @@ export interface TimeEntry {
   id: string; period_id: string; principal_id: string; node_id: string; cost_unit_node_id: string
   source: 'manual' | 'agent_run'; agent_run_id?: string | null; started_at: string; ended_at: string
   duration_seconds: number; rate_amount: string; currency: string; amount: string; note: string
+  // The revision a correction is made against (If-Unmodified-Since).
+  updated_at: string
 }
+// A correction sends only what changed. A start alone keeps the duration.
+export interface EntryPatch { node_id?: string; cost_unit_node_id?: string; started_at?: string; duration_seconds?: number; note?: string }
 export interface TimeTotals { node_id: string; duration_seconds: number; amounts: { currency: string; amount: string }[] }
 export interface Binding { principal_id: string; contact_node_id: string; bound_by_principal_id: string; bound_at: string; principal_name: string; principal_kind: 'person' | 'agent' }
 export interface Principal { id: string; kind: 'person' | 'agent'; name: string; roles: string[] }
@@ -64,10 +68,10 @@ export function encode(value: unknown): string {
   return JSON.stringify(value)
 }
 
-async function send<T>(path: string, method = 'GET', body?: unknown): Promise<{ data: T; response: Response }> {
+async function send<T>(path: string, method = 'GET', body?: unknown, headers: Record<string, string> = {}): Promise<{ data: T; response: Response }> {
   const response = await api(path, {
     method,
-    ...(body === undefined ? {} : { headers: { 'Content-Type': 'application/json' }, body: encode(body) }),
+    ...(body === undefined ? { headers } : { headers: { ...headers, 'Content-Type': 'application/json' }, body: encode(body) }),
   })
   const text = await response.text()
   let data: unknown = null
@@ -145,6 +149,32 @@ export const listEntries = async (filter: { period_id?: string; principal_id?: s
 }
 export const createEntry = async (body: { period_id: string; cost_unit_node_id: string; currency: string; principal_id: string; node_id: string; started_at: string; ended_at: string; note: string }) =>
   entry(await call<TimeEntry>('/time-entries', 'POST', { ...body, source: 'manual' }))
+// Corrections name the revision they were made against; a 412 carries the newer
+// entry (conflictEntry), a 409 means the period was approved or the time or rate
+// does not fit. Both write an event that POST /events/{id}/undo reverses.
+export const updateEntry = async (e: TimeEntry, patch: EntryPatch) =>
+  entry((await send<TimeEntry>(`/time-entries/${id(e.id)}`, 'PATCH', patch, { 'If-Unmodified-Since': e.updated_at })).data)
+export const deleteEntry = async (e: TimeEntry) => { await send<null>(`/time-entries/${id(e.id)}`, 'DELETE', undefined, { 'If-Unmodified-Since': e.updated_at }) }
+export function conflictEntry(error: unknown): TimeEntry | null {
+  const current = error instanceof APIError && error.status === 412 ? error.body.current : null
+  return current && typeof current === 'object' ? entry(current as TimeEntry) : null
+}
+// DELETE answers 204 without the event, so undo finds the newest deletion of
+// this entry on its ticket's event log (the same way attachments do).
+export async function findEntryEvent(nodeId: string, entryId: string, type: 'time_entry.deleted' | 'time_entry.updated'): Promise<number | null> {
+  let after = 0, found: number | null = null
+  for (let page = 0; page < 50; page++) {
+    const body = await call<{ items: { id: unknown; type: string; before: { id?: string } | null; undo_of: unknown }[]; next_after: unknown }>(`/events?node_id=${id(nodeId)}&limit=200${after ? `&after=${after}` : ''}`)
+    for (const event of body.items ?? []) if (event.type === type && event.before?.id === entryId && event.undo_of == null) found = int(event.id)
+    if (!body.next_after) break
+    after = int(body.next_after)
+  }
+  return found
+}
+export async function undoEntryEvent(eventId: number): Promise<TimeEntry | null> {
+  const event = await call<{ after: TimeEntry | null }>(`/events/${eventId}/undo`, 'POST')
+  return event?.after ? entry(event.after) : null
+}
 export const getTimeTotals = async (nodeId: string, approvedOnly = false) => {
   const raw = await call<TimeTotals>(`/nodes/${id(nodeId)}/time-totals${approvedOnly ? '?approved_only=true' : ''}`)
   return { ...raw, duration_seconds: int(raw.duration_seconds) }
