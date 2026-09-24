@@ -5,7 +5,8 @@ import { nextTick, onBeforeUnmount, onMounted, ref } from 'vue'
 // and sticky toolbars never clip it; it flips above the trigger near the
 // bottom edge, closes on Escape, outside clicks and page scroll, and hands
 // focus back to the trigger when it closes by keyboard.
-const props = withDefaults(defineProps<{ anchor: HTMLElement | null; align?: 'start' | 'end'; width?: number; label: string }>(), { align: 'start', width: 240 })
+// `to` renders it inside a modal dialog instead, where anything outside is inert.
+const props = withDefaults(defineProps<{ anchor: HTMLElement | null; align?: 'start' | 'end'; width?: number; label: string; to?: string }>(), { align: 'start', width: 240, to: 'body' })
 const emit = defineEmits<{ close: [restoreFocus: boolean] }>()
 const panel = ref<HTMLElement>()
 const x = ref(-9999)
@@ -64,7 +65,7 @@ defineExpose({ place })
 </script>
 
 <template>
-  <Teleport to="body">
+  <Teleport :to="to">
     <div ref="panel" class="floating pop" :class="{ above }" role="dialog" :aria-label="label" :style="{ transform: `translate(${x}px, ${y}px)`, width: `${Math.min(width, 9999)}px`, maxHeight: `${maxHeight}px` }" @keydown="keydown">
       <slot />
     </div>

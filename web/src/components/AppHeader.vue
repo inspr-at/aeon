@@ -6,6 +6,7 @@ import mark from '../assets/brand/aeon-mark.svg'
 import { useSession } from '../stores/session'
 import { useProjects } from '../stores/projects'
 import { useAgents } from '../stores/agents'
+import { useBusiness } from '../stores/business'
 import { dark, setTheme, themeChoice, toggleTheme, type ThemeChoice } from '../lib/theme'
 import { canWrite } from '../lib/activity'
 import { command, consume, run } from '../lib/commands'
@@ -19,6 +20,7 @@ import VersionDisplay from './VersionDisplay.vue'
 const session = useSession()
 const projects = useProjects()
 const agents = useAgents()
+const business = useBusiness()
 const route = useRoute()
 const router = useRouter()
 const open = ref(false)
@@ -44,6 +46,14 @@ const fullTicket = computed(() => typeof route.params.ticketKey === 'string' && 
 const pageTitle = computed(() => !onProjects.value && !projectKey.value && route.path !== '/signin' ? String(route.meta.title ?? '') : '')
 // Agents sits beside Projects, not under it.
 const agentsPage = computed(() => route.path === '/agents' || route.path.startsWith('/agents/'))
+// Business also sits beside Projects: Business / Quotes / QUO-3.
+const businessPage = computed(() => route.path === '/business' || route.path.startsWith('/business/'))
+const businessCrumbs = computed(() => {
+  if (!businessPage.value || route.path === '/business') return []
+  const area = route.path.startsWith('/business/quotes') ? { label: 'Quotes', to: '/business/quotes' } : { label: String(route.meta.title ?? ''), to: route.path }
+  const key = typeof route.params.quoteKey === 'string' && (route.query.view === 'full' || route.path.endsWith('/document')) ? route.params.quoteKey.toUpperCase() : ''
+  return key ? [{ label: area.label, to: area.to }, { label: key, to: '' }] : [{ label: area.label, to: '' }]
+})
 
 async function toggleMenu() {
   open.value = !open.value
@@ -103,7 +113,11 @@ function shortcut(event: KeyboardEvent) {
 }
 // The Agents badge: permission requests and held action requests, checked each minute.
 let needsPoll: ReturnType<typeof setInterval> | undefined
-watch(() => session.identity?.principal.id, id => { if (id) void agents.loadNeeds(true) }, { immediate: true })
+watch(() => session.identity?.principal.id, id => {
+  if (!id) { business.reset(); return }
+  void agents.loadNeeds(true)
+  void business.loadPlugins(true)
+}, { immediate: true })
 onMounted(() => {
   document.addEventListener('pointerdown', outside); window.addEventListener('keydown', shortcut)
   needsPoll = setInterval(() => { if (session.identity && !agentsPage.value) void agents.loadNeeds() }, 60_000)
@@ -117,8 +131,8 @@ onBeforeUnmount(() => { document.removeEventListener('pointerdown', outside); wi
       <span class="mark-backing"><img :src="mark" width="26" height="26" alt="" /></span>
       <span class="wordmark">PAIMOS<sup>AEON</sup></span>
     </RouterLink>
-    <nav v-if="session.identity && !fatal" class="crumbs" :class="{ deep: !!projectKey || !!pageTitle }" aria-label="Breadcrumb">
-      <RouterLink v-if="!agentsPage" class="crumb home-crumb" to="/" :aria-current="onProjects ? 'page' : undefined">Projects</RouterLink>
+    <nav v-if="session.identity && !fatal" class="crumbs" :class="{ deep: !!projectKey || !!pageTitle, biz: businessPage }" aria-label="Breadcrumb">
+      <RouterLink v-if="!agentsPage && !businessPage" class="crumb home-crumb" to="/" :aria-current="onProjects ? 'page' : undefined">Projects</RouterLink>
       <template v-if="projectKey">
         <span class="sep" aria-hidden="true">/</span>
         <RouterLink class="crumb project-crumb" :to="`/p/${encodeURIComponent(project?.routeKey ?? projectKey)}`" :aria-current="fullTicket ? undefined : 'page'">
@@ -130,12 +144,24 @@ onBeforeUnmount(() => { document.removeEventListener('pointerdown', outside); wi
           <span class="crumb current mono-crumb" aria-current="page">{{ fullTicket }}</span>
         </template>
       </template>
+      <template v-else-if="businessPage">
+        <RouterLink v-if="businessCrumbs.length" class="crumb" to="/business">Business</RouterLink>
+        <span v-else class="crumb current" aria-current="page">Business</span>
+        <template v-for="crumb in businessCrumbs" :key="crumb.label">
+          <span class="sep" aria-hidden="true">/</span>
+          <RouterLink v-if="crumb.to" class="crumb" :to="crumb.to">{{ crumb.label }}</RouterLink>
+          <span v-else class="crumb current" :class="{ 'mono-crumb': /^[A-Z]+-\d+$/.test(crumb.label) }" aria-current="page">{{ crumb.label }}</span>
+        </template>
+      </template>
       <template v-else-if="pageTitle">
         <span v-if="!agentsPage" class="sep" aria-hidden="true">/</span>
         <span class="crumb current" aria-current="page">{{ pageTitle }}</span>
       </template>
     </nav>
     <span class="spacer" />
+    <RouterLink v-if="session.identity && business.anyOpen" class="agents-link business-link" to="/business" :aria-current="businessPage ? 'page' : undefined" aria-label="Business">
+      <AppIcon name="briefcase" :size="16" /><span class="agents-text">Business</span>
+    </RouterLink>
     <RouterLink
       v-if="session.identity" class="agents-link" to="/agents" :aria-current="agentsPage ? 'page' : undefined"
       :aria-label="agents.needsCount ? `Agents, ${agents.needsCount} ${agents.needsCount === 1 ? 'needs' : 'need'} you` : 'Agents'"
@@ -194,6 +220,7 @@ onBeforeUnmount(() => { document.removeEventListener('pointerdown', outside); wi
 .wordmark { font: 600 13px/1 var(--mono); letter-spacing: .28em; white-space: nowrap; font-variant-ligatures: none; }
 .wordmark sup { position: relative; top: -.15em; margin-left: 2px; font: 600 8px/1 var(--mono); letter-spacing: .16em; color: var(--teal-ink); }
 .crumbs { display: flex; align-items: center; gap: 10px; flex: 0 1 auto; min-width: 0; overflow: hidden; padding-left: 16px; border-left: 1px solid var(--line-2); height: 24px; font-size: 13.5px; }
+.business-link { margin-right: -8px; }
 .crumb { display: inline-flex; align-items: center; gap: 8px; min-width: 0; height: 30px; padding: 0 8px; margin: 0 -8px; border-radius: 8px; color: var(--ink-2); font-weight: 600; white-space: nowrap; }
 .crumb:hover { color: var(--teal-ink); background: var(--row-hover); }
 .crumb:active { background: var(--row-selected); }
@@ -272,6 +299,9 @@ onBeforeUnmount(() => { document.removeEventListener('pointerdown', outside); wi
   /* On phones it is a round header button like search and the avatar. */
   .agents-link { width: 44px; height: 44px; padding: 0; justify-content: center; border: 1px solid var(--glass-edge); background: var(--btn-bg); box-shadow: var(--shadow-btn); }
   .agents-text { display: none; }
+  .business-link { margin-right: 0; }
+  /* Phones keep only the current business crumb. */
+  .crumbs.biz > :not(:last-child) { display: none; }
   .needs-badge { position: absolute; top: 3px; right: 1px; }
   /* The theme lives in the account menu on phones. */
   .theme-btn { display: none; }

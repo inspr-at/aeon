@@ -15,12 +15,18 @@ export const router = createRouter({
     { path: '/workspace', component: () => import('./views/HomeView.vue'), meta: { title: 'Workspace', legacySearch: true, fill: true } },
     { path: '/projects/:projectId', component: () => import('./views/JourneyView.vue'), meta: { title: 'Journey', fill: true } },
     { path: '/projects/:projectId/journey/:stage', component: () => import('./views/JourneyView.vue'), meta: { title: 'Journey', fill: true } },
-    { path: '/business', component: () => import('./views/business/BusinessHome.vue'), meta: { title: 'Business', fill: true } },
-    { path: '/business/crm', component: () => import('./views/business/CRMView.vue'), meta: { title: 'Organisations', fill: true } },
-    { path: '/business/quotes', component: () => import('./views/business/QuotesView.vue'), meta: { title: 'Quotes', fill: true } },
-    { path: '/business/costs', alias: '/business/cost-units', component: () => import('./views/business/CostUnitsView.vue'), meta: { title: 'Cost units', fill: true } },
-    { path: '/business/hours', component: () => import('./views/business/HoursView.vue'), meta: { title: 'Hours', fill: true } },
-    { path: '/crm', redirect: '/business/crm' },
+    // Business: an overview and four parts. Quotes and organisations keep one record for
+    // the list and its open item, so opening the panel never remounts the list.
+    { path: '/business', component: () => import('./views/business/BusinessHome.vue'), meta: { title: 'Business' } },
+    { path: '/business/quotes/:quoteKey/document', component: () => import('./views/business/QuoteDocumentView.vue'), meta: { title: 'Quote' } },
+    { path: '/business/quotes/:quoteKey?', component: () => import('./views/business/QuotesView.vue'), meta: { title: 'Quotes' } },
+    { path: '/business/hours', component: () => import('./views/business/HoursView.vue'), meta: { title: 'Hours' } },
+    { path: '/business/organisations/:orgKey?', component: () => import('./views/business/CRMView.vue'), meta: { title: 'Organisations' } },
+    { path: '/business/rates', component: () => import('./views/business/CostUnitsView.vue'), meta: { title: 'Rates' } },
+    { path: '/business/crm', redirect: '/business/organisations' },
+    { path: '/business/costs', redirect: '/business/rates' },
+    { path: '/business/cost-units', redirect: '/business/rates' },
+    { path: '/crm', redirect: '/business/organisations' },
     // One record for the overview and its open session, so opening the panel never remounts the page.
     { path: '/agents/:sessionId?', component: () => import('./views/AgentsView.vue'), meta: { title: 'Agents', fill: false } },
     // Earlier separate pages now live inside Agents.

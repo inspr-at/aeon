@@ -1,0 +1,262 @@
+// SPDX-License-Identifier: AGPL-3.0-only
+import { defineStore } from 'pinia'
+import { computed, ref } from 'vue'
+import { createNode, getKinds, getRelations, listNodes, type Kind, type ListItem, type Relation } from '../lib/api'
+import { listPrincipals, listQuotes, listRates, type CostRate, type Principal, type Quote, type Unit } from '../lib/business'
+import { availability, configurePlugin, installationWrite, isTenantAdmin, listPlugins, type BusinessPlugin } from '../components/business/catalog'
+import { businessSections } from '../components/business/areas'
+import { api } from '../lib/api'
+import { useProjects } from './projects'
+import { useSession } from './session'
+
+export type AreaId = 'costs' | 'crm' | 'quotes' | 'hours'
+export interface CostUnit { node: ListItem; rates: CostRate[] }
+export interface OrgLinks { contacts: string[]; projects: string[]; quotes: string[] }
+
+// Tenant kinds the business screens create when an admin sets Business up.
+// Kinds are tenant configuration: contacts get email, phone and role besides
+// the plugin's note; the screens show whatever fields the live kind declares.
+const KIND_SETUP: Record<string, { label: string; short_prefix: string; icon: string; field_schema: Record<string, unknown> }> = {
+  organisation: {
+    label: 'Organisation', short_prefix: 'ORG', icon: 'organisation',
+    field_schema: { type: 'object', additionalProperties: false, properties: { legal_name: { type: 'string', maxLength: 200 }, website: { type: 'string', maxLength: 500 } } },
+  },
+  contact: {
+    label: 'Contact', short_prefix: 'CON', icon: 'contact',
+    field_schema: { type: 'object', additionalProperties: false, properties: { email: { type: 'string', maxLength: 320 }, phone: { type: 'string', maxLength: 60 }, role: { type: 'string', maxLength: 120 }, note: { type: 'string', maxLength: 500 } } },
+  },
+  quote: { label: 'Quote', short_prefix: 'QUO', icon: 'quote', field_schema: { type: 'object', properties: {} } },
+  cost_unit: { label: 'Cost unit', short_prefix: 'CU', icon: 'cost_unit', field_schema: { type: 'object' } },
+}
+const AREA_PLUGIN: Record<AreaId, string> = { costs: 'business_costs', crm: 'business_crm', quotes: 'business_quotes', hours: 'business_hours' }
+const AREA_KINDS: Record<AreaId, string[]> = { costs: ['cost_unit'], crm: ['organisation', 'contact'], quotes: ['quote'], hours: [] }
+
+// Business data shared by the overview, quotes, hours, organisations and rates.
+// Every list is a read model; the server checks every change again.
+export const useBusiness = defineStore('business', () => {
+  const session = useSession()
+  const projectStore = useProjects()
+  const plugins = ref<BusinessPlugin[] | null>(null)
+  const pluginsError = ref('')
+  const kinds = ref<Kind[]>([])
+  const principals = ref<Principal[]>([])
+  const costUnits = ref<CostUnit[]>([])
+  const costUnitsLoaded = ref(false)
+  const organisations = ref<ListItem[]>([])
+  const contacts = ref<ListItem[]>([])
+  const crmLoaded = ref(false)
+  const links = ref(new Map<string, OrgLinks>())
+  const contactOrg = ref(new Map<string, string>())
+  const quotes = ref<Quote[]>([])
+  const quotesLoaded = ref(false)
+  const quotesError = ref('')
+  const admin = computed(() => isTenantAdmin(session.identity))
+  const staff = computed(() => session.identity?.principal.kind === 'person' && (session.identity.principal.roles ?? []).some(role => role === 'admin' || role === 'member'))
+
+  // ---------- Plugins ----------
+  const open = computed<Record<AreaId, boolean>>(() => {
+    const out = { costs: false, crm: false, quotes: false, hours: false }
+    if (!plugins.value) return out
+    for (const area of businessSections) out[area.id as AreaId] = availability(area, plugins.value).open
+    return out
+  })
+  const anyOpen = computed(() => Object.values(open.value).some(Boolean))
+  const allOpen = computed(() => Object.values(open.value).every(Boolean))
+  let pluginRequest: Promise<void> | null = null
+  function loadPlugins(force = false): Promise<void> {
+    if (pluginRequest) return pluginRequest
+    if (plugins.value && !force) return Promise.resolve()
+    pluginRequest = (async () => {
+      try { plugins.value = await listPlugins(); pluginsError.value = '' }
+      catch (e) { pluginsError.value = e instanceof Error ? e.message : 'Business settings could not be loaded.'; if (!plugins.value) plugins.value = null }
+      finally { pluginRequest = null }
+    })()
+    return pluginRequest
+  }
+  async function loadKinds(force = false) {
+    if (kinds.value.length && !force) return
+    kinds.value = (await getKinds()).items
+  }
+  const kindBySlug = (slug: string) => kinds.value.find(kind => kind.slug === slug)
+  function fieldsOf(slug: string): string[] {
+    const properties = kindBySlug(slug)?.field_schema?.properties
+    return properties && typeof properties === 'object' ? Object.keys(properties) : []
+  }
+
+  // Enable plugins (compiled digest, manifest permissions) and add missing kinds.
+  async function enable(areas: AreaId[]) {
+    const catalog = plugins.value ?? await listPlugins()
+    const order: AreaId[] = ['costs', 'crm', 'quotes', 'hours']
+    for (const area of order.filter(a => areas.includes(a))) {
+      const plugin = catalog.find(item => item.id === AREA_PLUGIN[area])
+      if (!plugin) throw new Error(`${area} is not part of this build.`)
+      await configurePlugin(plugin.id, installationWrite(plugin, true))
+    }
+    await loadKinds(true)
+    for (const slug of new Set(areas.flatMap(area => AREA_KINDS[area]))) {
+      if (kindBySlug(slug)) continue
+      const setup = KIND_SETUP[slug]
+      const response = await api('/kinds', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ slug, allowed_child_kinds: [], ...setup }) })
+      if (!response.ok && response.status !== 409) throw new Error(`The ${setup.label.toLowerCase()} type could not be added.`)
+    }
+    await Promise.all([loadPlugins(true), loadKinds(true)])
+  }
+  async function disable(area: AreaId) {
+    const plugin = plugins.value?.find(item => item.id === AREA_PLUGIN[area])
+    if (!plugin) return
+    await configurePlugin(plugin.id, installationWrite(plugin, false))
+    await loadPlugins(true)
+  }
+
+  // ---------- People and agents ----------
+  let principalsRequest: Promise<void> | null = null
+  function loadPrincipals(force = false) {
+    if (principalsRequest) return principalsRequest
+    if (principals.value.length && !force) return Promise.resolve()
+    principalsRequest = listPrincipals().then(items => { principals.value = items }).catch(() => undefined).finally(() => { principalsRequest = null })
+    return principalsRequest
+  }
+  function nameOf(principalId: string | null | undefined): string {
+    if (!principalId) return '—'
+    if (principalId === session.identity?.principal.id) return session.identity.identity?.display_name?.trim() || session.identity.principal.name
+    return principals.value.find(p => p.id === principalId)?.name ?? 'Someone'
+  }
+  const people = computed(() => principals.value.filter(p => p.kind === 'person'))
+  // Staff who log time, and agents that are not system accounts.
+  const timeKeepers = computed(() => principals.value.filter(p =>
+    p.kind === 'person' ? p.roles.some(role => ['admin', 'member', 'super_admin'].includes(role)) : !p.roles.some(role => ['system', 'importer', 'operator'].includes(role))))
+
+  // ---------- Cost units and rates ----------
+  let costRequest: Promise<void> | null = null
+  function loadCostUnits(force = false) {
+    if (costRequest) return costRequest
+    if (costUnitsLoaded.value && !force) return Promise.resolve()
+    costRequest = (async () => {
+      try {
+        const page = await listNodes({ kind: ['cost_unit'], sort: 'key', limit: 200 })
+        const withRates = await Promise.all(page.items.map(async node => ({ node, rates: await listRates(node.id).catch(() => [] as CostRate[]) })))
+        costUnits.value = withRates
+        costUnitsLoaded.value = true
+      } finally { costRequest = null }
+    })()
+    return costRequest
+  }
+  function setRates(costUnitId: string, rates: CostRate[]) {
+    costUnits.value = costUnits.value.map(unit => unit.node.id === costUnitId ? { ...unit, rates } : unit)
+  }
+  function addCostUnit(node: ListItem) { costUnits.value = [...costUnits.value, { node, rates: [] }] }
+  const costUnit = (id: string) => costUnits.value.find(unit => unit.node.id === id)
+  // The bill rate in force on a UTC date (YYYY-MM-DD): half-open [from, until).
+  function rateOn(costUnitId: string, unit: Unit, currency: string, day = new Date().toISOString().slice(0, 10)): CostRate | null {
+    const rates = costUnit(costUnitId)?.rates ?? []
+    return rates.filter(rate => rate.unit === unit && rate.currency === currency && rate.effective_from <= day && (!rate.effective_until || rate.effective_until > day))
+      .sort((a, b) => b.effective_from.localeCompare(a.effective_from))[0] ?? null
+  }
+  const currencies = computed(() => [...new Set(costUnits.value.flatMap(unit => unit.rates.map(rate => rate.currency)))].sort())
+  // Cost units usable today for a unit and currency (live, not cancelled, with a rate).
+  function usable(unit: Unit | null, currency: string | null, day?: string) {
+    return costUnits.value.filter(entry => !['cancelled', 'archived', 'done'].includes(entry.node.state)
+      && entry.rates.some(rate => (!unit || rate.unit === unit) && (!currency || rate.currency === currency) && rate.effective_from <= (day ?? new Date().toISOString().slice(0, 10)) && (!rate.effective_until || rate.effective_until > (day ?? new Date().toISOString().slice(0, 10)))))
+  }
+
+  // ---------- Organisations and contacts ----------
+  let crmRequest: Promise<void> | null = null
+  function loadCRM(force = false) {
+    if (crmRequest) return crmRequest
+    if (crmLoaded.value && !force) return Promise.resolve()
+    crmRequest = (async () => {
+      try {
+        const [orgs, people] = await Promise.all([
+          listNodes({ kind: ['organisation'], sort: 'title', limit: 500 }),
+          listNodes({ kind: ['contact'], sort: 'title', limit: 500 }),
+        ])
+        organisations.value = orgs.items
+        contacts.value = people.items
+        crmLoaded.value = true
+      } finally { crmRequest = null }
+    })()
+    return crmRequest
+  }
+  // One relations request per organisation gives its contacts, projects and quotes.
+  async function loadLinks(ids: string[]) {
+    await projectStore.load()
+    const queue = [...ids]
+    const next = new Map(links.value)
+    const owners = new Map(contactOrg.value)
+    async function worker() {
+      for (let orgId = queue.shift(); orgId; orgId = queue.shift()) {
+        try {
+          const { items } = await getRelations(orgId)
+          next.set(orgId, linksFrom(orgId, items))
+          for (const rel of items) if (rel.type === 'contact_for' && rel.target_node_id === orgId) owners.set(rel.source_node_id, orgId)
+        } catch { /* counts show a dash */ }
+      }
+    }
+    await Promise.all(Array.from({ length: Math.min(6, queue.length) }, worker))
+    links.value = next
+    contactOrg.value = owners
+  }
+  // customer_of points at a project or a quote; projects are the ones the project list knows.
+  function linksFrom(orgId: string, relations: Relation[]): OrgLinks {
+    const customerOf = relations.filter(rel => rel.type === 'customer_of' && rel.source_node_id === orgId).map(rel => rel.target_node_id)
+    return {
+      contacts: relations.filter(rel => rel.type === 'contact_for' && rel.target_node_id === orgId).map(rel => rel.source_node_id),
+      projects: customerOf.filter(id => !!projectStore.byId(id)),
+      quotes: customerOf.filter(id => !projectStore.byId(id)),
+    }
+  }
+  const organisation = (id: string) => organisations.value.find(org => org.id === id)
+  const contact = (id: string) => contacts.value.find(c => c.id === id)
+  const contactsOf = (orgId: string) => (links.value.get(orgId)?.contacts ?? []).map(contact).filter((c): c is ListItem => !!c)
+  function upsertNode(list: 'organisations' | 'contacts', node: ListItem) {
+    const target = list === 'organisations' ? organisations : contacts
+    const index = target.value.findIndex(item => item.id === node.id)
+    target.value = index === -1 ? [...target.value, node].sort((a, b) => a.title.localeCompare(b.title)) : target.value.map(item => item.id === node.id ? node : item)
+  }
+  function removeNode(list: 'organisations' | 'contacts', id: string) {
+    const target = list === 'organisations' ? organisations : contacts
+    target.value = target.value.filter(item => item.id !== id)
+  }
+  function setLinks(orgId: string, next: OrgLinks) { links.value = new Map(links.value).set(orgId, next) }
+  function setContactOrg(contactId: string, orgId: string) { contactOrg.value = new Map(contactOrg.value).set(contactId, orgId) }
+  async function createCRMNode(slug: 'organisation' | 'contact', title: string, fields: Record<string, unknown> = {}) {
+    await loadKinds()
+    const kind = kindBySlug(slug)
+    if (!kind) throw new Error(`This workspace has no ${slug} type yet. An admin sets Business up first.`)
+    const node = await createNode({ kind_id: kind.id, title, fields, parent_id: null })
+    return { ...node, kind_slug: slug, kind_label: kind.label, priority: null, assignee: null, parent: null, children_count: 0, project: null } as ListItem
+  }
+
+  // ---------- Quotes ----------
+  let quoteRequest: Promise<void> | null = null
+  function loadQuotes(force = false) {
+    if (quoteRequest) return quoteRequest
+    if (quotesLoaded.value && !force) return Promise.resolve()
+    quoteRequest = (async () => {
+      try { quotes.value = await listQuotes(); quotesLoaded.value = true; quotesError.value = '' }
+      catch (e) { quotesError.value = e instanceof Error ? e.message : 'Quotes could not be loaded.' }
+      finally { quoteRequest = null }
+    })()
+    return quoteRequest
+  }
+  function upsertQuote(next: Quote) {
+    const index = quotes.value.findIndex(q => q.quote_node_id === next.quote_node_id)
+    quotes.value = index === -1 ? [next, ...quotes.value] : quotes.value.map(q => q.quote_node_id === next.quote_node_id ? next : q)
+  }
+  const quoteByKey = (key: string) => quotes.value.find(q => q.key.toLowerCase() === key.toLowerCase())
+
+  function reset() {
+    plugins.value = null; kinds.value = []; principals.value = []; costUnits.value = []; costUnitsLoaded.value = false
+    organisations.value = []; contacts.value = []; crmLoaded.value = false; links.value = new Map(); quotes.value = []; quotesLoaded.value = false
+  }
+
+  return {
+    plugins, pluginsError, open, anyOpen, allOpen, admin, staff, loadPlugins, enable, disable,
+    kinds, loadKinds, kindBySlug, fieldsOf,
+    principals, loadPrincipals, nameOf, people, timeKeepers,
+    costUnits, costUnitsLoaded, loadCostUnits, setRates, addCostUnit, costUnit, rateOn, currencies, usable,
+    organisations, contacts, crmLoaded, links, contactOrg, loadCRM, loadLinks, organisation, contact, contactsOf, upsertNode, removeNode, setLinks, setContactOrg, createCRMNode,
+    quotes, quotesLoaded, quotesError, loadQuotes, upsertQuote, quoteByKey,
+    reset,
+  }
+})
