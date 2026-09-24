@@ -233,10 +233,20 @@ func TestLimitSniffAndPatchPrecondition(t *testing.T) {
 	if w.Code != 413 {
 		t.Fatalf("limit %d %s", w.Code, w.Body.String())
 	}
+	// A file named .png that isn't one is kept as an opaque binary: the type
+	// comes from sniffing, never from the name, and it is served as a download.
 	ct, b = multipartFile(t, "fake.png", []byte{0, 1, 2, 3, 4})
 	w = request(t, mux, p, "POST", "/api/nodes/"+node+"/attachments", ct, b)
-	if w.Code != 415 {
+	if w.Code != 201 || !strings.Contains(w.Body.String(), `"content_type":"application/octet-stream"`) {
 		t.Fatalf("sniff %d %s", w.Code, w.Body.String())
+	}
+	var fake []Attachment
+	if err := json.Unmarshal(w.Body.Bytes(), &fake); err != nil || len(fake) != 1 {
+		t.Fatalf("sniff body %v %s", err, w.Body.String())
+	}
+	w = request(t, mux, p, "GET", "/api/attachments/"+fake[0].ID+"/content", "", nil)
+	if w.Code != 200 || !strings.HasPrefix(w.Header().Get("Content-Disposition"), "attachment") || w.Header().Get("X-Content-Type-Options") != "nosniff" {
+		t.Fatalf("opaque download %d %q", w.Code, w.Header().Get("Content-Disposition"))
 	}
 	ct, b = multipartFile(t, "note.txt", []byte("hello"))
 	w = request(t, mux, p, "POST", "/api/nodes/"+node+"/attachments", ct, b)

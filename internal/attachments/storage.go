@@ -24,6 +24,9 @@ import (
 
 const DefaultMaxSize int64 = 50 << 20
 
+// ErrUnsupportedType is returned for content outside the allow-list.
+var ErrUnsupportedType = errors.New("unsupported content type")
+
 // Store owns immutable, tenant-namespaced content and its image variants.
 // FilesDir defaults to AEON_FILES_DIR, then ./data/files.
 type Store struct {
@@ -142,9 +145,12 @@ func (s Store) Put(ctx context.Context, tenant string, src io.Reader) (Prepared,
 	if strings.HasPrefix(ct, "text/plain") {
 		ct = "text/plain; charset=utf-8"
 	}
-	allowed := ct == "image/png" || ct == "image/jpeg" || ct == "image/gif" || ct == "image/webp" || ct == "application/pdf" || ct == "application/zip" || ct == "text/plain; charset=utf-8"
+	// Unknown binaries (logs, exports, office files that don't sniff as zip)
+	// are stored too; they are only ever served as a download with nosniff
+	// and a sandboxing CSP, never inline.
+	allowed := ct == "image/png" || ct == "image/jpeg" || ct == "image/gif" || ct == "image/webp" || ct == "application/pdf" || ct == "application/zip" || ct == "text/plain; charset=utf-8" || ct == "application/octet-stream"
 	if !allowed {
-		return Prepared{}, fmt.Errorf("unsupported content type %s", ct)
+		return Prepared{}, fmt.Errorf("%w %s", ErrUnsupportedType, ct)
 	}
 	if _, err := tmp.Seek(0, io.SeekStart); err != nil {
 		return Prepared{}, err

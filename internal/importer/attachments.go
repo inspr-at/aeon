@@ -79,6 +79,10 @@ func ImportAttachments(ctx context.Context, pool *pgxpool.Pool, store attachment
 			}
 			blob, putErr := store.Put(ctx, tenantID, body)
 			closeErr := body.Close()
+			if errors.Is(putErr, attachments.ErrUnsupportedType) {
+				slog.Warn("classic attachment type not accepted; skipped", "attachment", attachmentID, "issue", issueID, "error", putErr)
+				continue
+			}
 			if putErr != nil {
 				return created, fmt.Errorf("store attachment %d: %w", attachmentID, putErr)
 			}
