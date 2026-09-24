@@ -25,8 +25,12 @@ RUN CGO_ENABLED=0 GOOS=linux GOARCH=amd64 go build \
     -ldflags "-X github.com/inspr-at/aeon/internal/version.Version=${VERSION}" \
     -o /aeon ./cmd/aeon
 
-FROM gcr.io/distroless/static:nonroot
+FROM alpine:3.24
+# Pin the Chromium runtime used for quote receipt evidence. Update it with a
+# render parity check and a renderer-version bump, not through floating apk.
+RUN apk add --no-cache ca-certificates chromium=152.0.7977.82-r0 \
+    && addgroup -S aeon && adduser -S -G aeon aeon
 COPY --from=build /aeon /aeon
-USER nonroot
+USER aeon
 EXPOSE 8080
 ENTRYPOINT ["/aeon", "serve"]

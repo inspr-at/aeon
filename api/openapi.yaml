@@ -1974,6 +1974,103 @@ paths:
       responses:
         '200': {description: Rendered offer, content: {text/markdown: {schema: {type: string}}, application/pdf: {schema: {type: string, format: binary}}}}
         '404': {$ref: '#/components/responses/Error'}
+  /quotes/{quoteId}/versions/{version}/public-link:
+    post:
+      operationId: createQuotePublicLink
+      summary: Create a scoped capability for the current issued document
+      description: Admin person only. The one-time token is returned only on creation and stored as a SHA-256 verifier. Revoke before reissue; expired links stay readable but cannot accept.
+      security: [{session: []}]
+      parameters: [{name: quoteId, in: path, required: true, schema: {type: string, format: uuid}}, {name: version, in: path, required: true, schema: {type: integer, minimum: 1}}]
+      requestBody: {required: true, content: {application/json: {schema: {type: object, additionalProperties: false, properties: {expires_at: {type: string, format: date-time}}}}}}
+      responses:
+        '201': {description: One-time link and metadata, content: {application/json: {schema: {$ref: '#/components/schemas/QuotePublicLink'}}}}
+        '409': {$ref: '#/components/responses/Error'}
+    get:
+      operationId: getQuotePublicLink
+      summary: Read link metadata without the secret token
+      security: [{session: []}]
+      parameters: [{name: quoteId, in: path, required: true, schema: {type: string, format: uuid}}, {name: version, in: path, required: true, schema: {type: integer, minimum: 1}}]
+      responses:
+        '200': {description: Metadata, content: {application/json: {schema: {$ref: '#/components/schemas/QuotePublicLink'}}}}
+  /quotes/{quoteId}/versions/{version}/public-link/revoke:
+    post:
+      operationId: revokeQuotePublicLink
+      summary: Revoke the active capability link
+      security: [{session: []}]
+      parameters: [{name: quoteId, in: path, required: true, schema: {type: string, format: uuid}}, {name: version, in: path, required: true, schema: {type: integer, minimum: 1}}]
+      responses:
+        '200': {description: Revoked metadata, content: {application/json: {schema: {$ref: '#/components/schemas/QuotePublicLink'}}}}
+  /public/quotes/{publicTenant}/{token}:
+    get:
+      operationId: readPublicQuote
+      summary: Read only the frozen document bound to a bearer capability
+      security: []
+      parameters: [{name: publicTenant, in: path, required: true, schema: {type: string}}, {name: token, in: path, required: true, schema: {type: string}}]
+      responses:
+        '200': {description: Scoped public document and state, headers: {Cache-Control: {schema: {type: string}}}, content: {application/json: {schema: {$ref: '#/components/schemas/QuotePublicDocument'}}}}
+        '404': {$ref: '#/components/responses/Error'}
+  /public/quotes/{publicTenant}/{token}/accept:
+    post:
+      operationId: acceptPublicQuote
+      summary: Accept the exact issued document through a capability
+      description: Name, company, note, explicit confirmation, version, digest and UUID mutation ID are required. One quote decision wins across both acceptance channels. Exact replays return the original acceptance.
+      security: []
+      parameters: [{name: publicTenant, in: path, required: true, schema: {type: string}}, {name: token, in: path, required: true, schema: {type: string}}]
+      requestBody: {required: true, content: {application/json: {schema: {$ref: '#/components/schemas/QuotePublicAcceptanceWrite'}}}}
+      responses:
+        '201': {description: Accepted; receipt rendering is queued, content: {application/json: {schema: {$ref: '#/components/schemas/QuotePublicAcceptance'}}}}
+        '200': {description: Exact replay, content: {application/json: {schema: {$ref: '#/components/schemas/QuotePublicAcceptance'}}}}
+        '409': {$ref: '#/components/responses/Error'}
+        '429': {$ref: '#/components/responses/Error'}
+  /public/quotes/{publicTenant}/{token}/pdf:
+    get:
+      operationId: printPublicQuote
+      summary: Render the frozen document with bundled Chromium
+      security: []
+      parameters: [{name: publicTenant, in: path, required: true, schema: {type: string}}, {name: token, in: path, required: true, schema: {type: string}}]
+      responses:
+        '200': {description: A4 PDF, content: {application/pdf: {schema: {type: string, format: binary}}}}
+        '503': {$ref: '#/components/responses/Error'}
+  /quotes/readiness:
+    get:
+      operationId: quoteConfirmationReadiness
+      summary: Report renderer availability and disabled email transport
+      security: [{session: []}]
+      responses:
+        '200': {description: Readiness, content: {application/json: {schema: {type: object, properties: {renderer_available: {type: boolean}, smtp_enabled: {type: boolean}, smtp_configured: {type: boolean}, email_delivery: {type: string}}}}}}
+  /quotes/acceptances:
+    get:
+      operationId: listQuoteAcceptanceNotices
+      summary: List recent acceptance notices for quote staff
+      security: [{session: []}]
+      responses:
+        '200': {description: Recent notices, content: {application/json: {schema: {type: array, items: {type: object}}}}}
+  /quotes/{quoteId}/versions/{version}/confirmation:
+    get:
+      operationId: getQuoteConfirmation
+      summary: Read the acceptance receipt job state
+      security: [{session: []}]
+      parameters: [{name: quoteId, in: path, required: true, schema: {type: string, format: uuid}}, {name: version, in: path, required: true, schema: {type: integer, minimum: 1}}]
+      responses:
+        '200': {description: Job state, content: {application/json: {schema: {$ref: '#/components/schemas/QuoteConfirmationJob'}}}}
+  /quotes/{quoteId}/versions/{version}/confirmation/receipt:
+    get:
+      operationId: getQuoteConfirmationReceipt
+      summary: Download the immutable accepted PDF receipt
+      security: [{session: []}]
+      parameters: [{name: quoteId, in: path, required: true, schema: {type: string, format: uuid}}, {name: version, in: path, required: true, schema: {type: integer, minimum: 1}}]
+      responses:
+        '200': {description: PDF receipt, content: {application/pdf: {schema: {type: string, format: binary}}}}
+  /quotes/{quoteId}/versions/{version}/confirmation/retry:
+    post:
+      operationId: retryQuoteConfirmation
+      summary: Retry a failed job or explicitly acknowledge an uncertain state
+      security: [{session: []}]
+      parameters: [{name: quoteId, in: path, required: true, schema: {type: string, format: uuid}}, {name: version, in: path, required: true, schema: {type: integer, minimum: 1}}]
+      requestBody: {required: true, content: {application/json: {schema: {type: object, additionalProperties: false, required: [acknowledge_uncertain], properties: {acknowledge_uncertain: {type: boolean}}}}}}
+      responses:
+        '200': {description: Requeued job, content: {application/json: {schema: {$ref: '#/components/schemas/QuoteConfirmationJob'}}}}
+        '409': {$ref: '#/components/responses/Error'}
   /time-periods:
     get:
       operationId: listTimePeriods
@@ -2892,6 +2989,64 @@ components:
         accepted_content_sha256: {type: string, pattern: '^[0-9a-f]{64}$'}
         accepted_at: {type: string, format: date-time}
         event_id: {type: integer, minimum: 1}
+    QuotePublicLink:
+      type: object
+      required: [id, public_tenant, quote_node_id, version, target_content_sha256, expires_at]
+      properties:
+        id: {type: string, format: uuid}
+        public_tenant: {type: string, description: Opaque selector; never a tenant slug}
+        quote_node_id: {type: string, format: uuid}
+        version: {type: integer, minimum: 1}
+        target_content_sha256: {type: string, pattern: '^[0-9a-f]{64}$'}
+        expires_at: {type: string, format: date-time}
+        revoked_at: {type: string, format: date-time}
+        path: {type: string, description: Returned only on creation}
+        token: {type: string, description: Returned only on creation}
+    QuotePublicDocument:
+      type: object
+      required: [document, offer_no, version, content_sha256, state, expires_at, acceptable, receipt_ready]
+      properties:
+        document: {$ref: '#/components/schemas/QuoteDocument'}
+        offer_no: {type: string}
+        version: {type: integer, minimum: 1}
+        content_sha256: {type: string, pattern: '^[0-9a-f]{64}$'}
+        state: {type: string, description: Current projection; an older accepted snapshot can remain readable}
+        expires_at: {type: string, format: date-time}
+        acceptable: {type: boolean}
+        receipt_ready: {type: boolean}
+        accepted_at: {type: string, format: date-time}
+    QuotePublicAcceptanceWrite:
+      type: object
+      additionalProperties: false
+      required: [version, expected_content_sha256, client_mutation_id, name, company, note, confirm]
+      properties:
+        version: {type: integer, minimum: 1}
+        expected_content_sha256: {type: string, pattern: '^[0-9a-f]{64}$'}
+        client_mutation_id: {type: string, format: uuid}
+        name: {type: string, minLength: 1, maxLength: 500}
+        company: {type: string, maxLength: 500}
+        note: {type: string, maxLength: 4000}
+        confirm: {const: true}
+    QuotePublicAcceptance:
+      type: object
+      required: [version, content_sha256, accepted_at, confirmation_state]
+      properties:
+        version: {type: integer, minimum: 1}
+        content_sha256: {type: string, pattern: '^[0-9a-f]{64}$'}
+        accepted_at: {type: string, format: date-time}
+        confirmation_state: {type: string, enum: [pending, rendering, ready, failed, uncertain]}
+    QuoteConfirmationJob:
+      type: object
+      required: [quote_node_id, version, state, attempts, next_attempt_at, updated_at]
+      properties:
+        quote_node_id: {type: string, format: uuid}
+        version: {type: integer, minimum: 1}
+        state: {type: string, enum: [pending, rendering, ready, sending, sent, failed, uncertain]}
+        attempts: {type: integer, minimum: 0}
+        next_attempt_at: {type: string, format: date-time}
+        receipt_sha256: {type: string, pattern: '^[0-9a-f]{64}$'}
+        renderer_version: {type: string}
+        updated_at: {type: string, format: date-time}
     TimePeriodWrite:
       type: object
       additionalProperties: false
