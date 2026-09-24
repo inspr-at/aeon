@@ -21,6 +21,7 @@ import (
 	"github.com/inspr-at/aeon/internal/agentruns"
 	"github.com/inspr-at/aeon/internal/approvals"
 	"github.com/inspr-at/aeon/internal/attachments"
+	"github.com/inspr-at/aeon/internal/brand"
 	"github.com/inspr-at/aeon/internal/embedding"
 	"github.com/inspr-at/aeon/internal/events"
 	"github.com/inspr-at/aeon/internal/greetings"
@@ -34,6 +35,7 @@ import (
 	"github.com/inspr-at/aeon/internal/plugins"
 	"github.com/inspr-at/aeon/internal/profile"
 	"github.com/inspr-at/aeon/internal/relations"
+	"github.com/inspr-at/aeon/internal/releasehistory"
 	"github.com/inspr-at/aeon/internal/releases"
 	"github.com/inspr-at/aeon/internal/requirements"
 	"github.com/inspr-at/aeon/internal/search"
@@ -138,11 +140,21 @@ func serveListener(ctx context.Context, cfg config.Config, ln net.Listener) erro
 	if embedProvider != nil {
 		go embedding.NewWorker(pool, embedProvider, embedding.Options{}).Run(ctx)
 	}
+	// A bad AEON_BRAND_FILE must stop startup, never fall back silently.
+	productBrand, err := brand.Load()
+	if err != nil {
+		return fmt.Errorf("brand: %w", err)
+	}
+	historyMod, err := releasehistory.New()
+	if err != nil {
+		return fmt.Errorf("release history: %w", err)
+	}
 	// R2: webhook wake for inbox deliveries.
 	go inbox.NewWorker(pool, inbox.WorkerOptions{}).Run(ctx)
 	api := &httpapi.Server{
-		Pool: pool,
-		Web:  webFS,
+		Pool:  pool,
+		Brand: &productBrand,
+		Web:   webFS,
 		Modules: []httpapi.Module{
 			authMod,
 			nodes.New(pool, nodes.SQLWriter{}),
@@ -153,6 +165,7 @@ func serveListener(ctx context.Context, cfg config.Config, ln net.Listener) erro
 			activity.New(pool),
 			attachments.New(pool, attachments.Store{FilesDir: cfg.FilesDir}),
 			greetingsMod,
+			historyMod,
 			profile.New(pool, attachments.Store{FilesDir: cfg.FilesDir}),
 			imports.New(pool),
 			// R2: agents
