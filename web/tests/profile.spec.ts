@@ -34,6 +34,9 @@ test('fields save one at a time, with Undo in the toast', async ({ page }) => {
   await expect(page.getByRole('textbox', { name: 'Email' })).toHaveCount(0)
 
   const preferred = page.getByLabel('What should we call you?')
+  // Empty, it shows what the greeting will use.
+  await expect(preferred).toHaveAttribute('placeholder', 'Markus')
+  await expect(page.locator('#profile-preferred_name-note')).toHaveText('Empty, so the greeting says Markus.')
   await preferred.fill('  Max ')
   await preferred.press('Enter')
   await expect.poll(() => data.patches).toEqual([{ preferred_name: 'Max' }])

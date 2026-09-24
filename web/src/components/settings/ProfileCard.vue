@@ -23,7 +23,7 @@ type TextField = 'first_name' | 'last_name' | 'preferred_name' | 'short_name' | 
 const TEXT: { key: TextField; label: string; hint?: string; placeholder?: string; wide?: boolean }[] = [
   { key: 'first_name', label: 'First name' },
   { key: 'last_name', label: 'Last name' },
-  { key: 'preferred_name', label: 'What should we call you?', hint: 'The greeting and your teammates use this.' },
+  { key: 'preferred_name', label: 'What should we call you?' },
   { key: 'short_name', label: 'Handle', hint: 'Lowercase letters, digits, dots, dashes and underscores.' },
   { key: 'initials', label: 'Initials', hint: 'Shown when there is no photo.' },
 ]
@@ -36,6 +36,8 @@ let savedTimer: ReturnType<typeof setTimeout> | undefined
 const p = computed(() => store.profile)
 // The stored override: the profile's initials, unless they are the derived ones.
 const derived = computed(() => deriveInitials({ ...draft }))
+// Left empty, the greeting and teammates use the first name (else the sign-in name's first word).
+const callName = computed(() => draft.first_name || (session.identity?.principal.name ?? '').split(/\s+/)[0] || '')
 const storedOverride = (profile: Profile) => profile.initials === deriveInitials(profile) ? '' : profile.initials
 function fill(profile: Profile | null) {
   if (!profile) return
@@ -177,13 +179,14 @@ const name = computed(() => [p.value?.first_name, p.value?.last_name].filter(Boo
           />
           <input
             v-else v-model="draft[field.key]" :id="`profile-${field.key}`" class="field" :autocomplete="field.key === 'first_name' ? 'given-name' : field.key === 'last_name' ? 'family-name' : field.key === 'preferred_name' ? 'nickname' : 'off'"
-            :placeholder="field.key === 'initials' ? derived : field.placeholder" :maxlength="field.key === 'initials' ? 3 : 100"
+            :placeholder="field.key === 'initials' ? derived : field.key === 'preferred_name' ? callName : field.placeholder" :maxlength="field.key === 'initials' ? 3 : 100"
             :aria-invalid="!!problem(field.key)" :aria-describedby="`profile-${field.key}-note`" @input="delete errors[field.key]" @change="commitText(field.key)" @keydown.enter.prevent="enter"
           />
         </div>
         <p :id="`profile-${field.key}-note`" class="note" :class="{ bad: !!problem(field.key) }" :role="problem(field.key) ? 'alert' : undefined">
           <template v-if="problem(field.key)"><AppIcon name="alert" :size="12" />{{ problem(field.key) }}</template>
           <template v-else-if="field.key === 'initials' && !draft.initials">Derived from your name: {{ derived }}</template>
+          <template v-else-if="field.key === 'preferred_name'">{{ draft.preferred_name ? 'The greeting and your teammates use this.' : callName ? `Empty, so the greeting says ${callName}.` : 'The greeting and your teammates use this.' }}</template>
           <template v-else>{{ field.hint }}</template>
         </p>
       </div>

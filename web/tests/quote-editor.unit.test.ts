@@ -1,8 +1,8 @@
 // SPDX-License-Identifier: AGPL-3.0-only
 import { describe, expect, it } from 'vitest'
 import { reactive } from 'vue'
-import { QuoteEditor } from '../src/lib/quotes/editor'
-import type { QuoteDocumentData } from '../src/lib/quotes/types'
+import { QuoteEditor } from '../src/lib/quotes/editor.ts'
+import type { QuoteDocumentData } from '../src/lib/quotes/types.ts'
 
 const sectionId = '11111111-1111-4111-8111-111111111111'
 const fixture = (): QuoteDocumentData => ({

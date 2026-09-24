@@ -58,7 +58,8 @@ test('members see only Personal; an admin section explains itself', async ({ pag
   await setup(page, { role: 'member' })
   await page.goto('/settings')
   await expect(page).toHaveURL('/settings/personal')
-  await expect(sections(page)).toHaveCount(0)
+  // Members get the same layout, with Personal as the only section.
+  await expect(sections(page).getByRole('link')).toHaveText([/^Personal/])
   await expect(page.getByRole('heading', { name: 'Greeting' })).toBeVisible()
   await page.goto('/settings/workspace')
   await expect(page.getByRole('heading', { name: 'Workspace settings are for workspace admins' })).toBeVisible()
