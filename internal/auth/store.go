@@ -205,7 +205,8 @@ func adminEmail(got, want string) bool {
 	return strings.EqualFold(strings.TrimSpace(got), want)
 }
 
-// personByEmail finds a person in the bootstrap tenant by identity email.
+// personByEmail resolves dev-login email to its canonical person in the tenant.
+// Prefer link targets over older imported identities with the same email.
 func (m *Module) personByEmail(ctx context.Context, tenantID, email string) (tenant.Principal, string, error) {
 	var p tenant.Principal
 	var identityID string
@@ -213,13 +214,20 @@ func (m *Module) personByEmail(ctx context.Context, tenantID, email string) (ten
 		var kind string
 		var roles pgtype.FlatArray[string]
 		err := tx.QueryRow(ctx, `
-			SELECT p.id::text, p.tenant_id::text, p.kind, p.name, p.roles, i.id::text
+			SELECT canonical.id::text, canonical.tenant_id::text, canonical.kind,
+			       canonical.name, canonical.roles, COALESCE(canonical.identity_id, p.identity_id)::text
 			FROM principals p
-			JOIN identities i ON i.id = p.identity_id
-			WHERE p.kind = 'person' AND lower(i.email) = lower($1)
-			ORDER BY p.created_at
+			LEFT JOIN identities i ON i.id = p.identity_id
+			JOIN principals canonical ON canonical.tenant_id=p.tenant_id
+			    AND canonical.id=COALESCE(p.linked_to,p.id)
+			WHERE p.tenant_id=$2::uuid AND p.kind='person'
+			    AND lower(COALESCE(NULLIF(p.email,''),i.email))=lower($1)
+			    AND COALESCE(canonical.identity_id,p.identity_id) IS NOT NULL
+			ORDER BY (EXISTS (SELECT 1 FROM principals source
+			    WHERE source.tenant_id=p.tenant_id AND source.linked_to=canonical.id)) DESC,
+			    (p.linked_to IS NULL) DESC, canonical.created_at, canonical.id, p.id
 			LIMIT 1
-		`, email).Scan(&p.ID, &p.TenantID, &kind, &p.Name, &roles, &identityID)
+		`, email, tenantID).Scan(&p.ID, &p.TenantID, &kind, &p.Name, &roles, &identityID)
 		if err != nil {
 			return err
 		}
@@ -276,10 +284,7 @@ func (m *Module) authenticateSession(ctx context.Context, raw []byte) (tenant.Pr
 	var p tenant.Principal
 	err = m.inTenant(ctx, m.pool, tenantID, func(tx pgx.Tx) error {
 		var scanErr error
-		p, scanErr = scanPrincipal(tx.QueryRow(ctx, `
-			SELECT id::text, tenant_id::text, kind, name, roles
-			FROM principals WHERE id = $1::uuid
-		`, principalID))
+		p, scanErr = displayPrincipal(ctx, tx, tenantID, principalID)
 		return scanErr
 	})
 	if errors.Is(err, pgx.ErrNoRows) {
@@ -520,6 +525,7 @@ func (m *Module) revokeAgentKey(ctx context.Context, tenantID, id string) error 
 }
 
 type meView struct {
+	Email     *string
 	Principal tenant.Principal
 	TenantID  string
 	Slug      string
@@ -541,10 +547,7 @@ func (m *Module) loadMe(ctx context.Context, p tenant.Principal) (meView, error)
 		if err := tx.QueryRow(ctx, `SELECT id::text,slug,name FROM tenants WHERE id=$1::uuid`, p.TenantID).Scan(&view.TenantID, &view.Slug, &view.Name); err != nil {
 			return err
 		}
-		fresh, err := scanPrincipal(tx.QueryRow(ctx, `
-			SELECT id::text, tenant_id::text, kind, name, roles
-			FROM principals WHERE id = $1::uuid
-		`, p.ID))
+		fresh, err := displayPrincipal(ctx, tx, p.TenantID, p.ID)
 		if err != nil {
 			return err
 		}
@@ -552,14 +555,20 @@ func (m *Module) loadMe(ctx context.Context, p tenant.Principal) (meView, error)
 		var iid, issuer, subject *string
 		var email, display *string
 		err = tx.QueryRow(ctx, `
-			SELECT i.id::text, i.issuer, i.subject, i.email, i.display_name
+			SELECT i.id::text, i.issuer, i.subject,
+			    COALESCE(NULLIF(profile.email,''),profile_identity.email),
+			    CASE WHEN pr.linked_to IS NOT NULL THEN profile.name ELSE i.display_name END
 			FROM principals pr
-			LEFT JOIN identities i ON i.id = pr.identity_id
-			WHERE pr.id = $1::uuid
-		`, p.ID).Scan(&iid, &issuer, &subject, &email, &display)
+			JOIN principals profile ON profile.tenant_id=pr.tenant_id
+			    AND profile.id=COALESCE(pr.linked_to,pr.id)
+			LEFT JOIN identities i ON i.id=pr.identity_id
+			LEFT JOIN identities profile_identity ON profile_identity.id=profile.identity_id
+			WHERE pr.tenant_id=$2::uuid AND pr.id=$1::uuid
+		`, p.ID, p.TenantID).Scan(&iid, &issuer, &subject, &email, &display)
 		if err != nil {
 			return err
 		}
+		view.Email = email
 		if iid != nil {
 			view.Identity = &identityView{
 				ID:          *iid,
@@ -579,4 +588,15 @@ func deref(s *string) string {
 		return ""
 	}
 	return *s
+}
+
+// Links change presentation only: retain the authenticated ID, kind and roles.
+// B4 enforces one-hop, same-tenant links to person targets.
+func displayPrincipal(ctx context.Context, tx pgx.Tx, tenantID, id string) (tenant.Principal, error) {
+	return scanPrincipal(tx.QueryRow(ctx, `
+		SELECT p.id::text,p.tenant_id::text,p.kind,COALESCE(target.name,p.name),p.roles
+		FROM principals p
+		LEFT JOIN principals target ON target.tenant_id=p.tenant_id AND target.id=p.linked_to
+		WHERE p.tenant_id=$1::uuid AND p.id=$2::uuid
+	`, tenantID, id))
 }

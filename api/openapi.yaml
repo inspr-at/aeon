@@ -63,29 +63,12 @@ paths:
         - {name: error, in: query, schema: {type: string}}
       responses:
         "302":
-          description: Session cookie set; redirect to the app
+          description: Session cookie set and redirect to the app on success; on failure redirect to /signin?error=denied|not_member|unavailable|expired|failed. Provider text is never included. State/cookie/nonce failures use expired; access denial uses denied; missing membership uses not_member; provider availability failures use unavailable; other failures use failed.
           headers:
+            Location:
+              schema: {type: string}
             Set-Cookie:
-              schema:
-                type: string
-        "400":
-          description: Sign-in failed
-          content:
-            text/html:
-              schema:
-                type: string
-        "403":
-          description: Not a member of this workspace yet
-          content:
-            text/html:
-              schema:
-                type: string
-        "500":
-          description: Workspace is not ready
-          content:
-            text/html:
-              schema:
-                type: string
+              schema: {type: string}
   /auth/logout:
     post:
       operationId: authLogout
@@ -98,7 +81,7 @@ paths:
     post:
       operationId: authDevLogin
       summary: Sign in by email when AEON_ENV=dev
-      description: Not mounted unless AEON_ENV=dev. Other environments respond 404.
+      description: Not mounted unless AEON_ENV=dev. Other environments respond 404. Email lookup prefers the canonical link target when persons share an email.
       security: []
       requestBody:
         required: true
@@ -151,7 +134,7 @@ paths:
           content:
             application/json:
               schema:
-                $ref: "#/components/schemas/Error"
+                $ref: "#/components/schemas/MeUnauthorized"
   /agent-keys:
     get:
       operationId: listAgentKeys
@@ -2262,6 +2245,9 @@ components:
           enum: [person, agent]
         name:
           type: string
+        email:
+          type: ["string", "null"]
+          description: Display email for auth responses, resolved from the link target when present.
         roles:
           type: array
           items:
@@ -2292,10 +2278,18 @@ components:
           type: ["string", "null"]
         display_name:
           type: ["string", "null"]
+    MeUnauthorized:
+      type: object
+      required: [error, dev_mode]
+      properties:
+        error: {type: string, enum: [unauthorized]}
+        dev_mode: {type: boolean, description: True only when AEON_ENV is explicitly dev.}
     Me:
       type: object
-      required: [principal, tenant, identity]
+      description: Linked persons use their target's name and email for display. Authenticated principal IDs and roles and OIDC identity IDs, issuers and subjects retain their original authority.
+      required: [principal, tenant, identity, dev_mode]
       properties:
+        dev_mode: {type: boolean, description: True only when AEON_ENV is explicitly dev.}
         principal:
           $ref: "#/components/schemas/Principal"
         tenant:

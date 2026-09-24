@@ -62,18 +62,7 @@ func setupDB() error {
 }
 
 func testInTenant(ctx context.Context, pool *pgxpool.Pool, tenantID string, fn func(pgx.Tx) error) error {
-	tx, err := pool.Begin(ctx)
-	if err != nil {
-		return err
-	}
-	defer tx.Rollback(ctx)
-	if _, err := tx.Exec(ctx, "SELECT set_config($1, $2, true)", db.TenantSetting, tenantID); err != nil {
-		return err
-	}
-	if err := fn(tx); err != nil {
-		return err
-	}
-	return tx.Commit(ctx)
+	return db.InTenant(ctx, pool, tenantID, fn)
 }
 
 func reset(t *testing.T) {

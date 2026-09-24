@@ -175,4 +175,11 @@ func TestFromEnv(t *testing.T) {
 	if len(cfg.SessionKey) != 32 || cfg.Dev() || cfg.BootstrapTenantSlug != "studio" {
 		t.Fatalf("prod cfg env %q slug %q key %d", cfg.Env, cfg.BootstrapTenantSlug, len(cfg.SessionKey))
 	}
+	for _, value := range []string{"", "test", "DEV"} {
+		t.Setenv(envAppEnv, value)
+		cfg, err = FromEnv()
+		if err != nil || cfg.Dev() {
+			t.Fatalf("non-dev environment %q enabled dev mode: %v", value, err)
+		}
+	}
 }

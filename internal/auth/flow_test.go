@@ -68,8 +68,8 @@ func TestOIDCTenantSelection(t *testing.T) {
 	login.Body.Close()
 	q = assertAuthURL(t, app.URL, login.Header.Get("Location"))
 	issuer.allow("unbound", q.Get("code_challenge"), q.Get("nonce"), "shared-subject", "customer@example.com", "Customer", false)
-	status, _, _ = do(t, other, http.MethodGet, callbackURL(app.URL, "unbound", q.Get("state")), "", nil)
-	if status != http.StatusForbidden {
+	status, _, response := do(t, other, http.MethodGet, callbackURL(app.URL, "unbound", q.Get("state")), "", nil)
+	if status != http.StatusFound || response.Header.Get("Location") != "/signin?error=not_member" {
 		t.Fatalf("cross-tenant sign-in %d", status)
 	}
 	if status, _, _ := do(t, other, http.MethodGet, app.URL+"/api/me", "", nil); status != http.StatusUnauthorized {
@@ -124,8 +124,8 @@ func TestOIDCSessionLifecycle(t *testing.T) {
 	q := assertAuthURL(t, app.URL, login.Header.Get("Location"))
 
 	issuer.allow("stranger", q.Get("code_challenge"), q.Get("nonce"), "sub-stranger", "stranger@example.com", "Stranger", false)
-	status, body, _ = do(t, c, http.MethodGet, callbackURL(app.URL, "stranger", q.Get("state")), "", nil)
-	if status != http.StatusForbidden || !strings.Contains(string(body), notMemberSentence) {
+	status, body, response := do(t, c, http.MethodGet, callbackURL(app.URL, "stranger", q.Get("state")), "", nil)
+	if status != http.StatusFound || response.Header.Get("Location") != "/signin?error=not_member" {
 		t.Fatalf("stranger %d %s", status, body)
 	}
 	if n := scalar(t, adminPool, `SELECT count(*) FROM identities`); n != 0 {
@@ -141,8 +141,8 @@ func TestOIDCSessionLifecycle(t *testing.T) {
 	}
 	login.Body.Close()
 	q = assertAuthURL(t, app.URL, login.Header.Get("Location"))
-	status, _, _ = do(t, c, http.MethodGet, callbackURL(app.URL, "nope", "wrong-state"), "", nil)
-	if status != http.StatusBadRequest {
+	status, _, response = do(t, c, http.MethodGet, callbackURL(app.URL, "nope", "wrong-state"), "", nil)
+	if status != http.StatusFound || response.Header.Get("Location") != "/signin?error=expired" {
 		t.Fatalf("bad state %d", status)
 	}
 
@@ -163,7 +163,7 @@ func TestOIDCSessionLifecycle(t *testing.T) {
 		t.Fatal(err)
 	}
 	res.Body.Close()
-	if res.StatusCode != http.StatusBadRequest {
+	if res.StatusCode != http.StatusFound || res.Header.Get("Location") != "/signin?error=expired" {
 		t.Fatalf("tamper %d", res.StatusCode)
 	}
 
@@ -174,8 +174,8 @@ func TestOIDCSessionLifecycle(t *testing.T) {
 	login.Body.Close()
 	q = assertAuthURL(t, app.URL, login.Header.Get("Location"))
 	issuer.allow("badnonce", q.Get("code_challenge"), q.Get("nonce"), "sub-admin", "Admin@Example.com", "Ada", true)
-	status, _, _ = do(t, c, http.MethodGet, callbackURL(app.URL, "badnonce", q.Get("state")), "", nil)
-	if status != http.StatusBadRequest {
+	status, _, response = do(t, c, http.MethodGet, callbackURL(app.URL, "badnonce", q.Get("state")), "", nil)
+	if status != http.StatusFound || response.Header.Get("Location") != "/signin?error=expired" {
 		t.Fatalf("bad nonce %d", status)
 	}
 

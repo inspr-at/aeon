@@ -40,7 +40,8 @@ const (
 )
 
 // New validates cfg and binds the module to pool. Tenant-scoped queries go
-// through db.InTenant.
+// through db.InTenant. The result implements httpapi.Module; register Middleware
+// alongside it (or use Attach). Auth is a core boundary, not a plugin.
 func New(cfg Config, pool *pgxpool.Pool) (*Module, error) {
 	if len(cfg.SessionKey) < minSessionKey {
 		return nil, errShortKey
@@ -107,7 +108,11 @@ func (m *Module) Middleware(next http.Handler) http.Handler {
 			r = r.WithContext(tenant.WithPrincipal(r.Context(), p))
 		}
 		if kind != credSession && kind != credAgent && isProtectedAPI(r.URL.Path) {
-			writeUnauthorized(w)
+			if r.URL.Path == "/api/me" {
+				m.writeMeUnauthorized(w)
+			} else {
+				writeUnauthorized(w)
+			}
 			return
 		}
 		next.ServeHTTP(w, r)

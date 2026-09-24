@@ -14,13 +14,6 @@ type errorJSON struct {
 
 const notMemberSentence = "Not a member of this workspace yet"
 
-const notMemberPage = `<!DOCTYPE html>
-<html lang="en">
-<head><meta charset="utf-8"><title>Not a member</title></head>
-<body><p>Not a member of this workspace yet</p></body>
-</html>
-`
-
 const signInFailedPage = `<!DOCTYPE html>
 <html lang="en">
 <head><meta charset="utf-8"><title>Sign-in failed</title></head>
@@ -66,4 +59,12 @@ func writeBadRequest(w http.ResponseWriter, msg string) {
 
 func writeInternal(w http.ResponseWriter) {
 	writeJSON(w, http.StatusInternalServerError, errorJSON{Error: "internal"})
+}
+
+// /api/me advertises dev login even before a session exists.
+func (m *Module) writeMeUnauthorized(w http.ResponseWriter) {
+	writeJSON(w, http.StatusUnauthorized, struct {
+		Error   string `json:"error"`
+		DevMode bool   `json:"dev_mode"`
+	}{Error: "unauthorized", DevMode: m.cfg.Dev()})
 }

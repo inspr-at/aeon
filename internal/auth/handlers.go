@@ -6,6 +6,8 @@ import (
 	"crypto/hmac"
 	"encoding/json"
 	"errors"
+	"log/slog"
+	"net"
 	"net/http"
 	"strings"
 	"time"
@@ -14,6 +16,7 @@ import (
 	"github.com/jackc/pgx/v5"
 	"golang.org/x/oauth2"
 
+	"github.com/inspr-at/aeon/internal/httpapi"
 	"github.com/inspr-at/aeon/internal/tenant"
 )
 
@@ -67,34 +70,74 @@ func (m *Module) handleLogin(w http.ResponseWriter, r *http.Request) {
 	http.Redirect(w, r, oc.AuthCodeURL(state, oidc.Nonce(nonce), oauth2.S256ChallengeOption(verifier)), http.StatusFound)
 }
 
+// callbackFailure uses only internal codes/reasons: provider responses may contain
+// credentials or user-controlled text and must never enter URLs or logs.
+func (m *Module) callbackFailure(w http.ResponseWriter, r *http.Request, code, reason string) {
+	m.clearOIDCCookie(w)
+	slog.WarnContext(r.Context(), "OIDC callback failed", "error", code, "reason", reason, "request_id", httpapi.RequestID(r.Context()))
+	w.Header().Set("Cache-Control", "no-store")
+	http.Redirect(w, r, "/signin?error="+code, http.StatusFound)
+}
+
 func (m *Module) handleCallback(w http.ResponseWriter, r *http.Request) {
 	q := r.URL.Query()
-	if q.Get("error") != "" || q.Get("code") == "" {
-		m.clearOIDCCookie(w)
-		writeHTML(w, http.StatusBadRequest, signInFailedPage)
+	fail := func(code, reason string) { m.callbackFailure(w, r, code, reason) }
+	switch q.Get("error") {
+	case "":
+	case "access_denied":
+		fail("denied", "provider_denied")
+		return
+	case "server_error", "temporarily_unavailable":
+		fail("unavailable", "provider_unavailable")
+		return
+	default:
+		fail("failed", "provider_error")
 		return
 	}
 	payload, err := m.readOIDCCookie(r)
 	if err != nil || !hmacEqual(payload.State, q.Get("state")) {
-		m.clearOIDCCookie(w)
-		writeHTML(w, http.StatusBadRequest, signInFailedPage)
+		fail("expired", "invalid_state_cookie")
 		return
 	}
-	m.clearOIDCCookie(w)
+	if q.Get("code") == "" {
+		fail("failed", "missing_code")
+		return
+	}
 	provider, oc, err := m.oidcProvider(r.Context())
 	if err != nil {
-		writeHTML(w, http.StatusInternalServerError, notReadyPage)
+		fail("unavailable", "provider_discovery")
 		return
 	}
 	tok, err := oc.Exchange(r.Context(), q.Get("code"), oauth2.VerifierOption(payload.Verifier))
 	if err != nil {
-		writeHTML(w, http.StatusBadRequest, signInFailedPage)
+		var response *oauth2.RetrieveError
+		var network net.Error
+		if errors.As(err, &network) || (errors.As(err, &response) &&
+			(response.ErrorCode == "server_error" || response.ErrorCode == "temporarily_unavailable" ||
+				(response.Response != nil && response.Response.StatusCode >= 500))) {
+			fail("unavailable", "token_endpoint_unavailable")
+		} else {
+			fail("failed", "token_exchange")
+		}
 		return
 	}
 	rawID, _ := tok.Extra("id_token").(string)
 	idt, err := provider.Verifier(&oidc.Config{ClientID: m.cfg.OIDCClientID}).Verify(r.Context(), rawID)
-	if err != nil || idt.Subject == "" || !hmacEqual(idt.Nonce, payload.Nonce) {
-		writeHTML(w, http.StatusBadRequest, signInFailedPage)
+	if err != nil {
+		var expired *oidc.TokenExpiredError
+		if errors.As(err, &expired) {
+			fail("expired", "id_token_expired")
+		} else {
+			fail("failed", "id_token_verification")
+		}
+		return
+	}
+	if !hmacEqual(idt.Nonce, payload.Nonce) {
+		fail("expired", "nonce_mismatch")
+		return
+	}
+	if idt.Subject == "" {
+		fail("failed", "missing_subject")
 		return
 	}
 	var claims struct {
@@ -103,33 +146,30 @@ func (m *Module) handleCallback(w http.ResponseWriter, r *http.Request) {
 		Preferred string `json:"preferred_username"`
 	}
 	if err := idt.Claims(&claims); err != nil {
-		writeHTML(w, http.StatusBadRequest, signInFailedPage)
+		fail("failed", "invalid_claims")
 		return
 	}
 	display := firstNonEmpty(claims.Name, claims.Preferred, claims.Email, idt.Subject)
 	tenantID, err := m.tenantBySlug(r.Context(), payload.Tenant)
-	if errors.Is(err, pgx.ErrNoRows) {
-		writeHTML(w, http.StatusInternalServerError, notReadyPage)
-		return
-	}
 	if err != nil {
-		writeHTML(w, http.StatusInternalServerError, notReadyPage)
+		fail("unavailable", "tenant_lookup")
 		return
 	}
 	principal, identityID, err := m.resolveOIDCPerson(r.Context(), tenantID, payload.Tenant, idt.Issuer, idt.Subject, claims.Email, display)
 	if errors.Is(err, errNotMember) {
-		writeHTML(w, http.StatusForbidden, notMemberPage)
+		fail("not_member", "tenant_membership")
 		return
 	}
 	if err != nil {
-		writeHTML(w, http.StatusInternalServerError, notReadyPage)
+		fail("unavailable", "principal_resolution")
 		return
 	}
 	token, err := m.startSession(r.Context(), identityID, principal.TenantID, principal.ID)
 	if err != nil {
-		writeHTML(w, http.StatusInternalServerError, notReadyPage)
+		fail("unavailable", "session_creation")
 		return
 	}
+	m.clearOIDCCookie(w)
 	m.setSessionCookie(w, token)
 	w.Header().Set("Cache-Control", "no-store")
 	http.Redirect(w, r, m.homeURL(), http.StatusFound)
@@ -152,19 +192,19 @@ func (m *Module) handleLogout(w http.ResponseWriter, r *http.Request) {
 func (m *Module) handleMe(w http.ResponseWriter, r *http.Request) {
 	p, ok := tenant.PrincipalFrom(r.Context())
 	if !ok {
-		writeUnauthorized(w)
+		m.writeMeUnauthorized(w)
 		return
 	}
 	view, err := m.loadMe(r.Context(), p)
 	if errors.Is(err, pgx.ErrNoRows) {
-		writeUnauthorized(w)
+		m.writeMeUnauthorized(w)
 		return
 	}
 	if err != nil {
 		writeInternal(w)
 		return
 	}
-	writeJSON(w, http.StatusOK, meJSONFrom(view))
+	writeJSON(w, http.StatusOK, m.meJSONFrom(view))
 }
 
 func (m *Module) handleDevLogin(w http.ResponseWriter, r *http.Request) {
@@ -229,7 +269,7 @@ func (m *Module) handleDevLogin(w http.ResponseWriter, r *http.Request) {
 		writeInternal(w)
 		return
 	}
-	writeJSON(w, http.StatusOK, meJSONFrom(view))
+	writeJSON(w, http.StatusOK, m.meJSONFrom(view))
 }
 
 func hmacEqual(a, b string) bool {
