@@ -122,8 +122,11 @@ type page struct {
 func (m *module) read(ctx context.Context, p tenant.Principal, node string, after int64, limit int) (page, error) {
 	result := page{Items: make([]Event, 0)}
 	err := db.InTenant(ctx, m.pool, p.TenantID, func(tx pgx.Tx) error {
+		// Quote events use the quote-scoped collaboration stream, which rechecks
+		// resource access and plugin installation. Never expose them on the
+		// tenant-wide list or stream, even when node_id is supplied.
 		rows, err := tx.Query(ctx, `SELECT id,actor_principal_id::text,node_id::text,type,before,after,at,undo_of
-   FROM events WHERE tenant_id=$1 AND id>$2 AND ($3::uuid IS NULL OR node_id=$3)
+   FROM events WHERE tenant_id=$1 AND id>$2 AND ($3::uuid IS NULL OR node_id=$3) AND type NOT LIKE 'quote.%'
    ORDER BY id LIMIT $4`, p.TenantID, after, nullable(node), limit+1)
 		if err != nil {
 			return err

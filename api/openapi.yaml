@@ -758,6 +758,7 @@ paths:
   /events:
     get:
       operationId: listEvents
+      description: Tenant-wide history excludes quote events, whose document metadata is available only through quote-scoped authorized routes.
       security: *auth
       parameters:
         - {name: node_id, in: query, schema: {type: string, format: uuid}}
@@ -771,7 +772,7 @@ paths:
   /events/stream:
     get:
       operationId: streamEvents
-      description: SSE id is the event ID; event is its type; data is Event JSON. LISTEN/NOTIFY wakes durable replay; periodic comments keep the connection alive.
+      description: SSE id is the event ID; event is its type; data is Event JSON. Quote events are excluded and use the authorized quote collaboration stream. LISTEN/NOTIFY wakes durable replay; periodic comments keep the connection alive.
       security: *auth
       parameters:
         - {name: Last-Event-ID, in: header, schema: {type: integer, format: int64, minimum: 0}}
@@ -1863,6 +1864,56 @@ paths:
         '200': {description: Mutation acknowledgement and canonical document for a new save, content: {application/json: {schema: {$ref: '#/components/schemas/QuoteMutationReceipt'}}}}
         '412': {$ref: '#/components/responses/Error'}
         '428': {$ref: '#/components/responses/Error'}
+  /quotes/{quoteId}/presence:
+    get:
+      operationId: listQuotePresence
+      summary: Read leased collaborator presence and current revisions
+      description: Authenticated staff or viewer only; names come from tenant principals. Presence expires after 45 seconds and is never part of quote documents or PDFs.
+      security: [{session: []}]
+      parameters: [{name: quoteId, in: path, required: true, schema: {type: string, format: uuid}}]
+      responses:
+        '200': {description: Current snapshot, content: {application/json: {schema: {$ref: '#/components/schemas/QuotePresenceSnapshot'}}}}
+        '403': {$ref: '#/components/responses/Error'}
+    post:
+      operationId: joinQuotePresence
+      summary: Join or resume a quote collaboration session
+      description: The server mints an opaque session ID. A resume ID is accepted only for the same live principal and quote. This is advisory presence, not a lock.
+      security: [{session: []}]
+      parameters: [{name: quoteId, in: path, required: true, schema: {type: string, format: uuid}}]
+      requestBody: {required: true, content: {application/json: {schema: {$ref: '#/components/schemas/QuotePresenceWrite'}}}}
+      responses:
+        '201': {description: Session and current snapshot, content: {application/json: {schema: {type: object, properties: {session_id: {type: string, format: uuid}, snapshot: {$ref: '#/components/schemas/QuotePresenceSnapshot'}}}}}}
+        '403': {$ref: '#/components/responses/Error'}
+        '429': {$ref: '#/components/responses/Error'}
+  /quotes/{quoteId}/presence/{sessionId}:
+    patch:
+      operationId: updateQuotePresence
+      summary: Heartbeat or bounded anchor update
+      description: At most five updates per second. An unverified precise anchor is reduced to section fidelity; no selected text is stored.
+      security: [{session: []}]
+      parameters: [{name: quoteId, in: path, required: true, schema: {type: string, format: uuid}}, {name: sessionId, in: path, required: true, schema: {type: string, format: uuid}}]
+      requestBody: {required: true, content: {application/json: {schema: {$ref: '#/components/schemas/QuotePresenceWrite'}}}}
+      responses:
+        '200': {description: Current snapshot, content: {application/json: {schema: {$ref: '#/components/schemas/QuotePresenceSnapshot'}}}}
+        '404': {$ref: '#/components/responses/Error'}
+        '429': {$ref: '#/components/responses/Error'}
+    delete:
+      operationId: leaveQuotePresence
+      summary: Best effort leave; otherwise lease expires
+      security: [{session: []}]
+      parameters: [{name: quoteId, in: path, required: true, schema: {type: string, format: uuid}}, {name: sessionId, in: path, required: true, schema: {type: string, format: uuid}}]
+      responses:
+        '204': {description: Session removed}
+  /quotes/{quoteId}/collaboration/stream:
+    get:
+      operationId: streamQuoteCollaboration
+      summary: Quote-scoped SSE presence snapshots and durable revision notices
+      description: Revalidates roles and plugin installation on every poll. Last-Event-ID resumes durable quote event IDs; each connection starts with a fresh transient presence snapshot. Notices exclude document content, cursors and acceptance secrets.
+      security: [{session: []}]
+      parameters: [{name: quoteId, in: path, required: true, schema: {type: string, format: uuid}}, {name: Last-Event-ID, in: header, schema: {type: string, pattern: '^[0-9]+$'}}]
+      responses:
+        '200': {description: text/event-stream with presence, quote_change and access_revoked events, content: {text/event-stream: {schema: {type: string}}}}
+        '403': {$ref: '#/components/responses/Error'}
   /quotes/{quoteId}/finalize:
     post:
       operationId: finalizeQuoteDraft
@@ -2789,6 +2840,48 @@ components:
         base_version: {type: integer, minimum: 0}
         updated_at: {type: string, format: date-time}
         updated_by_principal_id: {type: string, format: uuid}
+    QuotePresenceAnchor:
+      type: object
+      required: [section_id, observed_revision, fidelity]
+      properties:
+        section_id: {type: string, format: uuid}
+        node_id: {type: string, format: uuid}
+        observed_revision: {type: integer, minimum: 1}
+        text_sha256: {type: string, pattern: '^[0-9a-f]{64}$'}
+        anchor: {type: integer, minimum: 0, maximum: 65535, description: UTF-16 offset}
+        focus: {type: integer, minimum: 0, maximum: 65535, description: UTF-16 offset}
+        fidelity: {type: string, enum: [section, precise]}
+    QuotePresenceWrite:
+      type: object
+      additionalProperties: false
+      required: [mode, observed_revision]
+      properties:
+        resume_session_id: {type: string, format: uuid}
+        mode: {type: string, enum: [viewing, editing, idle]}
+        observed_revision: {type: integer, minimum: 1}
+        interacted: {type: boolean, description: True only when local editing or selection activity occurred; heartbeat alone does not prevent idle state}
+        anchor: {$ref: '#/components/schemas/QuotePresenceAnchor'}
+    QuotePresenceSnapshot:
+      type: object
+      required: [sessions, draft_revision, quote_revision, state]
+      properties:
+        sessions:
+          type: array
+          maxItems: 50
+          items:
+            type: object
+            required: [session_id, principal_id, name, mode, observed_revision, expires_at]
+            properties:
+              session_id: {type: string, format: uuid}
+              principal_id: {type: string, format: uuid}
+              name: {type: string}
+              mode: {type: string, enum: [viewing, editing, idle]}
+              anchor: {$ref: '#/components/schemas/QuotePresenceAnchor'}
+              observed_revision: {type: integer, minimum: 1}
+              expires_at: {type: string, format: date-time}
+        draft_revision: {type: integer, minimum: 1}
+        quote_revision: {type: integer, minimum: 1}
+        state: {type: string, enum: [draft, issued, accepted, void]}
     QuoteDraftWrite:
       type: object
       additionalProperties: false
