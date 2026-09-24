@@ -29,18 +29,6 @@ async function read<T>(path: string): Promise<T> {
 }
 export const statusOf = (error: unknown) => (error as { status?: number })?.status ?? 0
 
-// ---------- Profile (GET/PATCH /api/me/profile) ----------
-export interface Profile {
-  principal_id: string; email: string | null; first_name: string; last_name: string; preferred_name: string; short_name: string
-  initials: string; timezone: string; locale: string; greeting_enabled: boolean; avatar_color: string; week_start: number; revision: number
-}
-export const getProfile = () => read<Profile>('/me/profile')
-export async function patchProfile(fields: Partial<Pick<Profile, 'greeting_enabled'>>): Promise<Profile> {
-  const response = await api('/me/profile', { method: 'PATCH', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(fields) })
-  if (!response.ok) throw Object.assign(new Error('Your setting could not be saved.'), { status: response.status })
-  return response.json()
-}
-
 // ---------- Agent keys (GET /api/agent-keys, admins) ----------
 export interface AgentKey {
   id: string; principal_id: string; name: string; prefix: string; scopes: string[]

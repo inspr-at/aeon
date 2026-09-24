@@ -31,7 +31,7 @@ function move(event: KeyboardEvent) {
       <StatusIcon v-if="dimension === 'status'" :state="option.value" />
       <PriorityIcon v-else-if="dimension === 'priority' && option.value !== 'none'" :priority="option.value" />
       <span v-else-if="dimension === 'priority'" class="no-icon" />
-      <PersonAvatar v-else-if="dimension === 'assignee' && option.value !== 'none'" :name="option.label" :size="18" />
+      <PersonAvatar v-else-if="dimension === 'assignee' && option.value !== 'none'" :id="option.value" :name="option.label" :size="18" />
       <AppIcon v-else-if="dimension === 'assignee'" name="user" :size="14" class="unassigned" />
       <AppIcon v-else :name="option.value === 'epic' ? 'epic' : option.value === 'task' ? 'task' : 'ticket'" :size="14" class="kind" :class="option.value" />
       <span class="option-label">{{ option.label }}</span>

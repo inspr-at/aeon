@@ -41,6 +41,7 @@ function escape(event: KeyboardEvent) {
   event.preventDefault(); event.stopImmediatePropagation()
   emit('close', true)
 }
+let scrollFrame = 0
 function keydown(event: KeyboardEvent) {
   if (event.key === 'Tab') emit('close', false)
 }
@@ -48,13 +49,16 @@ onMounted(async () => {
   await nextTick()
   place()
   document.addEventListener('pointerdown', outside, true)
-  document.addEventListener('scroll', scrolled, true)
+  // A scroll already under way when the popover opens (the page settling after the
+  // click) is delivered before the next frame's callbacks: listen from then on.
+  scrollFrame = requestAnimationFrame(() => { scrollFrame = 0; document.addEventListener('scroll', scrolled, true) })
   window.addEventListener('resize', place)
   window.addEventListener('keydown', escape, true)
   const first = panel.value?.querySelector<HTMLElement>('[data-autofocus]') ?? panel.value?.querySelector<HTMLElement>('input, button, [tabindex="0"]')
   first?.focus({ preventScroll: true })
 })
 onBeforeUnmount(() => {
+  cancelAnimationFrame(scrollFrame)
   document.removeEventListener('pointerdown', outside, true)
   document.removeEventListener('scroll', scrolled, true)
   window.removeEventListener('resize', place)

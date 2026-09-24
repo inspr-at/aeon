@@ -6,6 +6,7 @@ import { useProjects, type Project } from '../stores/projects'
 import { useSession } from '../stores/session'
 import { absoluteTime, highlight, plural, relativeTime } from '../lib/work'
 import AppIcon from '../components/AppIcon.vue'
+import WelcomeBlock from '../components/WelcomeBlock.vue'
 import FloatingPanel from '../components/work/FloatingPanel.vue'
 import StatusIcon from '../components/work/StatusIcon.vue'
 
@@ -94,6 +95,7 @@ onBeforeUnmount(() => { window.removeEventListener('keydown', keydown); clearInt
 
 <template>
   <section class="projects-page" aria-labelledby="projects-title">
+    <WelcomeBlock />
     <header class="page-head">
       <p class="eyebrow">{{ session.identity?.tenant.name ?? 'Workspace' }}</p>
       <h1 id="projects-title">Projects</h1>

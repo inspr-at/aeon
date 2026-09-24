@@ -486,7 +486,7 @@ defineExpose({
               </td>
               <td v-else-if="column.id === 'assignee'" class="c-assignee">
                 <div class="cell">
-                  <template v-if="entry.row.assignee"><PersonAvatar :name="entry.row.assignee.name" :size="20" /><span class="person-name">{{ entry.row.assignee.name }}</span></template>
+                  <template v-if="entry.row.assignee"><PersonAvatar :id="entry.row.assignee.id" :name="entry.row.assignee.name" :size="20" /><span class="person-name">{{ entry.row.assignee.name }}</span></template>
                   <span v-else class="empty" aria-label="Unassigned">—</span>
                 </div>
               </td>

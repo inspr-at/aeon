@@ -43,7 +43,7 @@ function move(event: KeyboardEvent) {
           :data-autofocus="!searchable && option.value === current ? '' : undefined" @click="emit('choose', option.value)"
         >
           <template v-if="kind === 'priority'"><PriorityIcon v-if="option.value" :priority="option.value" /><span v-else class="none-mark" /></template>
-          <template v-else-if="kind === 'assignee'"><PersonAvatar v-if="option.value" :name="option.label" :size="18" /><AppIcon v-else name="user" :size="14" class="faint-icon" /></template>
+          <template v-else-if="kind === 'assignee'"><PersonAvatar v-if="option.value" :id="option.value" :name="option.label" :size="18" /><AppIcon v-else name="user" :size="14" class="faint-icon" /></template>
           <AppIcon v-else :name="option.value === 'epic' ? 'epic' : option.value === 'task' ? 'task' : 'ticket'" :size="14" :class="['kind-icon', option.value]" />
           <span class="label">{{ option.label }}</span>
           <span v-if="option.hint" class="hint">{{ option.hint }}</span>

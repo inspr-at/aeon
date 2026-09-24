@@ -64,6 +64,8 @@
   --skeleton-hi: rgba(255, 255, 255, 0.7);
   --track: rgba(32, 60, 61, 0.08);
   --avatar-bg: radial-gradient(circle at 30% 25%, #fff, var(--aqua-2));
+  /* Initials avatars: lightness of the palette colour behind and of the letters (hue per person). */
+  --avatar-l-bg: .9; --avatar-l-ink: .38; --avatar-rim: rgba(32, 60, 61, .08);
 
   /* Status (derived from the palette) */
   --st-new: #d69b31;
@@ -147,6 +149,7 @@
   --skeleton: rgba(237, 244, 240, 0.07); --skeleton-hi: rgba(237, 244, 240, 0.08);
   --track: rgba(237, 244, 240, 0.09);
   --avatar-bg: radial-gradient(circle at 30% 25%, rgba(164, 229, 223, 0.35), rgba(164, 229, 223, 0.1));
+  --avatar-l-bg: .38; --avatar-l-ink: .93; --avatar-rim: rgba(255, 255, 255, .08);
   --st-new: #e2b45a; --st-backlog: #7f9a99; --st-progress: #a4e5df; --st-qa-fill: rgba(164, 229, 223, 0.4); --st-qa-ring: #a4e5df; --st-ok: #7fd1a8; --st-closed: #6f8a89;
   --wash-1: rgba(164, 229, 223, 0.12); --wash-2: transparent; --wash-3: rgba(214, 155, 49, 0.08); --wash-4: transparent;
   --grain-opacity: 0;
@@ -186,6 +189,7 @@
     --skeleton: rgba(237, 244, 240, 0.07); --skeleton-hi: rgba(237, 244, 240, 0.08);
     --track: rgba(237, 244, 240, 0.09);
     --avatar-bg: radial-gradient(circle at 30% 25%, rgba(164, 229, 223, 0.35), rgba(164, 229, 223, 0.1));
+    --avatar-l-bg: .38; --avatar-l-ink: .93; --avatar-rim: rgba(255, 255, 255, .08);
     --st-new: #e2b45a; --st-backlog: #7f9a99; --st-progress: #a4e5df; --st-qa-fill: rgba(164, 229, 223, 0.4); --st-qa-ring: #a4e5df; --st-ok: #7fd1a8; --st-closed: #6f8a89;
     --wash-1: rgba(164, 229, 223, 0.12); --wash-2: transparent; --wash-3: rgba(214, 155, 49, 0.08); --wash-4: transparent;
     --grain-opacity: 0;

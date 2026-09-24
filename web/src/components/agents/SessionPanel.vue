@@ -8,6 +8,7 @@ import { absoluteTime, relativeTime } from '../../lib/work'
 import { useAgents, type SessionView } from '../../stores/agents'
 import { useSession } from '../../stores/session'
 import AppIcon from '../AppIcon.vue'
+import Avatar from '../Avatar.vue'
 import LiveDot from './LiveDot.vue'
 
 // One session in the docked panel: who and where, the bound ticket, recent runs with
@@ -166,6 +167,8 @@ defineExpose({ focus: () => root.value?.focus({ preventScroll: true }) })
         <ol v-else class="thread" aria-label="Messages">
           <li v-for="m in messages" :key="m.id" class="msg" :class="{ theirs: fromAgent(m), mine: m.sender_principal_id === me }">
             <p class="msg-meta">
+              <Avatar v-if="m.sender_principal_id === me" :id="me" :name="session.identity?.principal.name ?? 'You'" :size="18" />
+              <Avatar v-else :name="authorOf(m)" kind="agent" :size="18" />
               <span class="msg-author">{{ authorOf(m) }}</span>
               <span v-if="!fromAgent(m) && m.sender_principal_id !== me" class="muted">to {{ m.to }}</span>
               <span v-if="m.delivery_level === 'steer'" class="msg-chip steer"><AppIcon name="bolt" :size="10" />Steer</span>

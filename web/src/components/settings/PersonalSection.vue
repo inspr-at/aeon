@@ -2,23 +2,17 @@
 <script setup lang="ts">
 import { computed, nextTick, onMounted, ref } from 'vue'
 import { brand } from '../../lib/brand'
-import { accountEmail, accountName } from '../../lib/api'
 import { run } from '../../lib/commands'
-import { getProfile, patchProfile, type Profile } from '../../lib/settings'
 import { setTheme, themeChoice, type ThemeChoice } from '../../lib/theme'
 import { toast } from '../../lib/toast'
-import { initials } from '../../lib/work'
-import { useSession } from '../../stores/session'
+import { useProfile } from '../../stores/profile'
 import AppIcon from '../AppIcon.vue'
+import ProfileCard from './ProfileCard.vue'
 import SettingsCard from './SettingsCard.vue'
 
-// Everyone's own settings: who you are signed in as (profile editing arrives next),
+// Everyone's own settings: the profile (photo, names, handle, time zone, language),
 // the theme, the greeting, and the keys.
-const session = useSession()
-const name = computed(() => session.identity ? accountName(session.identity) : '')
-const email = computed(() => session.identity ? accountEmail(session.identity) : '')
-const roles = computed(() => session.identity?.principal.roles ?? [])
-const ROLE: Record<string, string> = { admin: 'Admin', member: 'Member', viewer: 'Viewer' }
+const store = useProfile()
 
 const themes: { value: ThemeChoice; label: string; icon: 'sun' | 'moon' | 'monitor' }[] = [
   { value: 'light', label: 'Light', icon: 'sun' }, { value: 'dark', label: 'Dark', icon: 'moon' }, { value: 'system', label: 'System', icon: 'monitor' },
@@ -33,27 +27,25 @@ function themeKeys(event: KeyboardEvent) {
 }
 
 // ---------- Greeting (profile.greeting_enabled) ----------
-const profile = ref<Profile | null>(null)
-const profileError = ref('')
+const profile = computed(() => store.profile)
+const profileError = computed(() => store.error ? 'Your profile could not be loaded.' : '')
 const saving = ref(false)
-async function load() {
-  profileError.value = ''
-  try { profile.value = await getProfile() } catch { profileError.value = 'Your greeting setting could not be loaded.' }
-}
+// The switch shows the new state at once; a failed save puts it back.
+const pending = ref<boolean | null>(null)
+const greetingOn = computed(() => pending.value ?? profile.value?.greeting_enabled ?? false)
+function load() { void store.load(true) }
 async function setGreeting(on: boolean) {
   if (!profile.value || saving.value) return
-  const before = profile.value.greeting_enabled
-  profile.value = { ...profile.value, greeting_enabled: on }
+  pending.value = on
   saving.value = true
   try {
-    profile.value = await patchProfile({ greeting_enabled: on })
-    toast(on ? 'The greeting is on.' : 'The greeting is off.')
+    await store.save({ greeting_enabled: on })
+    toast(on ? 'The greeting is on.' : 'The greeting is off.', { action: { label: 'Undo', run: () => void setGreeting(!on) } })
   } catch {
-    profile.value = { ...profile.value, greeting_enabled: before }
     toast('Your greeting setting could not be saved. Please try again.', { tone: 'error' })
-  } finally { saving.value = false }
+  } finally { pending.value = null; saving.value = false }
 }
-onMounted(load)
+onMounted(() => { void store.load() })
 
 const mac = /Mac|iPhone|iPad/.test(navigator.platform || navigator.userAgent)
 const KEYS: { keys: string[][]; label: string }[] = [
@@ -67,18 +59,8 @@ const KEYS: { keys: string[][]; label: string }[] = [
   <div class="section">
     <SettingsCard title="Profile" icon="user" anchor="profile">
       <template #lead>How you appear to people and agents in this workspace.</template>
-      <div class="who">
-        <span class="avatar" aria-hidden="true">{{ initials(name) }}</span>
-        <div class="who-text">
-          <p class="who-name">{{ name }}</p>
-          <p v-if="email" class="who-email">{{ email }}</p>
-          <p class="who-roles">
-            <span class="chip">{{ session.identity?.tenant.name }}</span>
-            <span v-for="role in roles" :key="role" class="chip">{{ ROLE[role] ?? role }}</span>
-          </p>
-        </div>
-      </div>
-      <p class="set-note next"><AppIcon name="info" :size="14" />Editing your name, photo, time zone and language arrives here next.</p>
+      <p v-if="profileError" class="set-note error" role="alert"><AppIcon name="alert" :size="14" />{{ profileError }}<button type="button" class="btn sm" @click="load">Try again</button></p>
+      <ProfileCard v-else />
     </SettingsCard>
 
     <SettingsCard title="Appearance" icon="sun" anchor="appearance">
@@ -98,8 +80,8 @@ const KEYS: { keys: string[][]; label: string }[] = [
         <span v-if="!profile && !profileError" class="skeleton switch-skeleton" role="status" aria-label="Loading" />
         <button v-else-if="profileError" type="button" class="btn sm" @click="load"><AppIcon name="refresh" :size="12" />Try again</button>
         <label v-else class="switch">
-          <input type="checkbox" :checked="profile!.greeting_enabled" :disabled="saving" aria-labelledby="greeting-title greeting-state" @change="setGreeting(($event.target as HTMLInputElement).checked)" />
-          <span id="greeting-state">{{ profile!.greeting_enabled ? 'On' : 'Off' }}</span>
+          <input type="checkbox" :checked="greetingOn" :disabled="saving" aria-labelledby="greeting-title greeting-state" @change="setGreeting(($event.target as HTMLInputElement).checked)" />
+          <span id="greeting-state">{{ greetingOn ? 'On' : 'Off' }}</span>
         </label>
       </template>
       <template v-if="profileError" #default><p class="error-line" role="alert"><AppIcon name="alert" :size="13" />{{ profileError }}</p></template>
@@ -120,13 +102,6 @@ const KEYS: { keys: string[][]; label: string }[] = [
 
 <style scoped>
 .section { display: grid; gap: 14px; }
-.who { display: flex; align-items: center; gap: 14px; }
-.avatar { display: grid; place-items: center; flex-shrink: 0; width: 52px; height: 52px; border-radius: 50%; background: var(--avatar-bg); color: var(--teal-ink); box-shadow: 0 0 0 1px var(--glass-rim); font: 700 16px/1 var(--mono); font-variant-ligatures: none; }
-.who-text { min-width: 0; display: grid; gap: 2px; }
-.who-name { font-weight: 650; font-size: 15px; color: var(--ink); overflow-wrap: anywhere; }
-.who-email { font-size: 13px; color: var(--ink-2); overflow-wrap: anywhere; }
-.who-roles { display: flex; flex-wrap: wrap; gap: 6px; margin-top: 4px; }
-.next { margin-top: 14px; }
 .seg button { height: 30px; }
 .switch-skeleton { width: 72px; height: 20px; }
 .error-line { display: flex; align-items: center; gap: 6px; font-size: 13px; color: var(--danger); }
