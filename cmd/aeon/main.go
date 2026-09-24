@@ -31,6 +31,13 @@ func main() {
 		}
 		return
 	}
+	if len(os.Args) > 2 && os.Args[1] == "import" && os.Args[2] == "paimos-attachments" {
+		if err := importPaimosAttachments(os.Args[3:], os.Stdout); err != nil {
+			fmt.Fprintln(os.Stderr, "import:", err)
+			os.Exit(1)
+		}
+		return
+	}
 	if len(os.Args) > 2 && os.Args[1] == "import" && os.Args[2] == "backfill-relations" {
 		if err := backfillRelations(os.Args[3:], os.Stdout); err != nil {
 			fmt.Fprintln(os.Stderr, "import:", err)
