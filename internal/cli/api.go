@@ -143,7 +143,9 @@ func (rt *runtime) walkNodes(q url.Values, stop func(apiNode) bool) ([]apiNode, 
 func (rt *runtime) nodeByKey(key string) (apiNode, error) {
 	key = strings.TrimSpace(key)
 	var found *apiNode
-	_, err := rt.walkNodes(url.Values{"sort": {"key"}}, func(n apiNode) bool {
+	// q matches keys first (exact and prefix), so the key's node is in the
+	// first page instead of a walk over every node in the tenant.
+	_, err := rt.walkNodes(url.Values{"q": {key}}, func(n apiNode) bool {
 		if n.Key == key {
 			found = &n
 			return true
@@ -180,7 +182,9 @@ func (rt *runtime) projectNode(ref string) (apiNode, error) {
 	var hits []apiNode
 	for _, n := range nodes {
 		fields := fieldMap(n.Fields)
-		if n.Key == ref || fieldString(fields, "project_key") == ref || keyPrefix(n.Key) == ref {
+		classic, _ := fields["classic"].(map[string]any)
+		classicKey, _ := classic["key"].(string)
+		if n.Key == ref || fieldString(fields, "project_key") == ref || keyPrefix(n.Key) == ref || (classicKey != "" && strings.EqualFold(classicKey, ref)) {
 			hits = append(hits, n)
 		}
 	}

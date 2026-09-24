@@ -45,6 +45,13 @@ func main() {
 		}
 		return
 	}
+	if len(os.Args) > 1 && os.Args[1] == "agent-key" {
+		if err := agentKeyCommand(os.Args[2:], os.Stdout); err != nil {
+			fmt.Fprintln(os.Stderr, "agent-key:", err)
+			os.Exit(1)
+		}
+		return
+	}
 	if len(os.Args) > 1 && os.Args[1] == "principal" {
 		if err := withPool(func(ctx context.Context, pool *pgxpool.Pool) error {
 			return principallink.Run(ctx, pool, os.Args[2:], os.Stdout)

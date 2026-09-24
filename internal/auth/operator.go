@@ -1,0 +1,35 @@
+// SPDX-License-Identifier: AGPL-3.0-only
+package auth
+
+import (
+	"context"
+	"time"
+
+	"github.com/jackc/pgx/v5/pgxpool"
+
+	"github.com/inspr-at/aeon/internal/db"
+	"github.com/inspr-at/aeon/internal/tenant"
+)
+
+// OperatorCreateAgentKey creates an agent key for the named agent principal
+// (created on first use) without an HTTP admin session. It is for the
+// operator-only CLI: the caller is responsible for writing the returned token
+// to a protected file and never printing it.
+func OperatorCreateAgentKey(ctx context.Context, pool *pgxpool.Pool, tenantID, name string, scopes []string, expires *time.Time) (id, principalID, token string, err error) {
+	clean, err := cleanScopes(scopes)
+	if err != nil {
+		return "", "", "", err
+	}
+	m := &Module{pool: pool, inTenant: db.InTenant}
+	rec, err := m.createAgentKey(ctx, tenant.Principal{TenantID: tenantID}, name, clean, expires)
+	if err != nil {
+		return "", "", "", err
+	}
+	return rec.ID, rec.PrincipalID, rec.Token, nil
+}
+
+// OperatorRevokeAgentKey revokes an agent key by id.
+func OperatorRevokeAgentKey(ctx context.Context, pool *pgxpool.Pool, tenantID, id string) error {
+	m := &Module{pool: pool, inTenant: db.InTenant}
+	return m.revokeAgentKey(ctx, tenantID, id)
+}

@@ -241,7 +241,7 @@ func TestCompatibilityVerbs(t *testing.T) {
 		}
 	}
 
-	code, _, errOut := runCLI([]string{"paimos", "--json", "harness", "register"}, "")
+	code, _, errOut := runCLI([]string{"paimos", "--json", "run-agent", "watch"}, "")
 	if code != 3 {
 		t.Fatalf("json code %d err %s", code, errOut)
 	}
@@ -249,7 +249,7 @@ func TestCompatibilityVerbs(t *testing.T) {
 	if err := json.Unmarshal([]byte(errOut), &body); err != nil {
 		t.Fatal(err)
 	}
-	if body["error"] != reasonHarness {
+	if body["error"] != reasonRunAgent {
 		t.Fatalf("json error %q", body["error"])
 	}
 }

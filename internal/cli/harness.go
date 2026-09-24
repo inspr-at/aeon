@@ -20,15 +20,7 @@ import (
 	"github.com/inspr-at/aeon/internal/client"
 )
 
-// Kept while the coordinator replaces the legacy cmdHarness/session-start
-// branches in compat_cmds.go with the constructors below.
-const (
-	reasonHarness = "harness command wiring awaits coordinator reconciliation"
-	reasonBundle  = "session full-bundle wiring awaits coordinator reconciliation"
-)
-
-// cmdHarnessV2 is the complete P5.3 command tree. The coordinator replaces
-// the legacy cmdHarness stub in compat_cmds.go with this constructor.
+// cmdHarnessV2 is the complete P5.3 harness command tree.
 func (rt *runtime) cmdHarnessV2() *Command {
 	return &Command{Name: "harness", Short: "Manage durable harness generations", Use: "harness <command>", subs: []*Command{
 		rt.harnessRegister(), rt.harnessRead("list"), rt.harnessRead("status"), rt.harnessRead("orchestrator"), rt.harnessBind(), rt.harnessWorker("heartbeat"), rt.harnessWorker("yield"), rt.harnessWorker("drain"), rt.harnessWorker("complete-delivery"), rt.harnessControl("interrupt"), rt.harnessControl("stop"), rt.harnessControl("complete-control"), rt.harnessWorker("mark-stopped"),
@@ -439,7 +431,7 @@ func (rt *runtime) harnessControl(kind string) *Command {
 	}}
 }
 
-// harnessSessionFull is called by the session-start branch in compat_cmds.go.
+// harnessSessionFull serves session start --bundle full / --format files.
 // The bundle is a tenant API snapshot, cached in a private per-instance file.
 func (rt *runtime) harnessSessionFull(project, agent, format, sid string) error {
 	if !validUUID(sid) || !agentNameRE.MatchString(agent) {

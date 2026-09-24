@@ -151,7 +151,7 @@ func (rt *runtime) cmdSessionStart() *Command {
 			fs.string(&project, "project", 0, "project key (required)")
 			fs.string(&agent, "agent", 0, "agent name (required)")
 			fs.string(&format, "format", 0, "env (default) or json")
-			fs.string(&bundle, "bundle", 0, "minimal (default); full is not available")
+			fs.string(&bundle, "bundle", 0, "minimal (default) or full")
 		},
 		run: func(args []string) error {
 			if strings.TrimSpace(project) == "" {
@@ -162,20 +162,19 @@ func (rt *runtime) cmdSessionStart() *Command {
 			}
 			bundle = strings.TrimSpace(strings.ToLower(bundle))
 			format = strings.TrimSpace(strings.ToLower(format))
-			if bundle == "full" || format == "files" {
-				return notYet(reasonBundle)
-			}
-			if bundle != "" && bundle != "minimal" {
+			full := bundle == "full" || format == "files"
+			if bundle != "" && bundle != "minimal" && bundle != "full" {
 				return usagef("--bundle must be minimal or full")
 			}
-			if format == "" {
+			// The full bundle (harnessSessionFull) validates its own format.
+			if !full && format == "" {
 				if rt.jsonOut {
 					format = "json"
 				} else {
 					format = "env"
 				}
 			}
-			if format != "env" && format != "json" {
+			if !full && format != "env" && format != "json" {
 				return usagef("invalid --format %q (expected env or json)", format)
 			}
 			name := strings.TrimSpace(agent)
@@ -188,6 +187,9 @@ func (rt *runtime) cmdSessionStart() *Command {
 			sid, err := newUUIDv4()
 			if err != nil {
 				return err
+			}
+			if full {
+				return rt.harnessSessionFull(project, name, format, sid)
 			}
 			if format == "json" {
 				return rt.printJSON(map[string]any{"agent_name": name, "session_id": sid})
@@ -533,12 +535,6 @@ func stubCommand(name, use, reason string, subs ...string) *Command {
 	}
 }
 
-func (rt *runtime) cmdHarness() *Command {
-	return stubCommand("harness", "harness <command>", reasonHarness,
-		"register", "list", "status", "orchestrator", "bind", "heartbeat", "yield",
-		"drain", "complete-delivery", "interrupt", "stop", "complete-control", "mark-stopped")
-}
-
 func (rt *runtime) compatStubs() []*Command {
 	return []*Command{
 		rt.cmdAnchors(),
@@ -546,6 +542,6 @@ func (rt *runtime) compatStubs() []*Command {
 		stubCommand("run-agent", "run-agent <watch>", reasonRunAgent, "watch"),
 		stubCommand("baseline-batch", "baseline-batch <report-built>", reasonBaseline, "report-built"),
 		rt.cmdSync(),
-		rt.cmdHarness(),
+		rt.cmdHarnessV2(),
 	}
 }
