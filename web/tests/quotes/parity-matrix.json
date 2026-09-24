@@ -8,9 +8,9 @@
   },
   "scope_note": "Each nonempty feature-list line and each open-ticket acceptance criterion has one result. Synthetic fixtures only. No classic instance, business data, migration execution, cutover or deployment. A pass applies only to its exact cited assertion.",
   "counts": {
-    "pass": 74,
+    "pass": 73,
     "gap": 20,
-    "deferred": 27
+    "deferred": 28
   },
   "features": [
     {
@@ -426,14 +426,14 @@
       "source": "feature-list.txt",
       "heading": "Zoom, pagination and PDF",
       "claim": "Draft/finalized ordinary PDF export uses browser print from the dedicated print view. Public readers can print too. Accepted confirmation PDF is separately rendered server-side by headless Chromium/chromedp using the same Vue OfferDocument entry and stored durably; download becomes available when prepared. It includes an acceptance stamp, signer/company/time and hash reference. The old reports_pdf.go/fpdf engine is not the commercial offer renderer.",
-      "status": "pass",
+      "status": "deferred",
       "owner": "P3/P5",
       "evidence": [
         "test:web/tests/quotes/print-receipt.spec.ts::print entry keeps inline marks and accepted receipt evidence",
         "test:internal/business/quotes/public/module_test.go::TestPublicCapabilityReplayPrivacyAndDecisionRace",
         "test:internal/quotepdf/render_test.go::TestBundledDocumentRendersA4"
       ],
-      "reason": "Cited integrated tests cover this claim."
+      "reason": "P5 print and receipt rendering pass; the coordinator must wire NewWithStore for accepted public PDF downloads."
     },
     {
       "id": "F10.04",
