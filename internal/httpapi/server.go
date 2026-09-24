@@ -9,6 +9,7 @@ import (
 	"net/http"
 	"sync"
 
+	"github.com/inspr-at/aeon/internal/brand"
 	"github.com/jackc/pgx/v5/pgxpool"
 )
 
@@ -26,6 +27,9 @@ type Server struct {
 	// Web is the SPA filesystem (AEON_WEB_DIR or the webembed dist).
 	// Nil serves a placeholder page.
 	Web fs.FS
+	// Brand is the product's names from AEON_BRAND_FILE (brand.Load at startup);
+	// nil serves the embedded brand.json.
+	Brand *brand.Brand
 
 	once    sync.Once
 	handler http.Handler

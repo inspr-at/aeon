@@ -6,6 +6,7 @@ import (
 	"log/slog"
 	"net/http"
 
+	"github.com/inspr-at/aeon/internal/brand"
 	"github.com/inspr-at/aeon/internal/version"
 )
 
@@ -15,8 +16,9 @@ type healthBody struct {
 }
 
 type versionBody struct {
-	Version string `json:"version"`
-	Scheme  string `json:"scheme"`
+	Version string      `json:"version"`
+	Scheme  string      `json:"scheme"`
+	Brand   brand.Brand `json:"brand"`
 }
 
 func (s *Server) handleHealth(w http.ResponseWriter, r *http.Request) {
@@ -31,6 +33,12 @@ func (s *Server) handleHealth(w http.ResponseWriter, r *http.Request) {
 	WriteJSON(w, http.StatusOK, healthBody{Status: "ok", DB: dbState})
 }
 
+// handleVersion answers the build's calendar version and the product's names
+// (brand.json, or the deployment's AEON_BRAND_FILE when the server was given one).
 func (s *Server) handleVersion(w http.ResponseWriter, _ *http.Request) {
-	WriteJSON(w, http.StatusOK, versionBody{Version: version.Version, Scheme: version.Scheme})
+	b := brand.Default()
+	if s.Brand != nil {
+		b = *s.Brand
+	}
+	WriteJSON(w, http.StatusOK, versionBody{Version: version.Version, Scheme: version.Scheme, Brand: b})
 }

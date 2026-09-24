@@ -9,3 +9,5 @@
 *.env
 .DS_Store
 /tmp/
+# The release history manifest is generated at build time (internal/releasehistory/generate).
+/internal/releasehistory/data/history.json

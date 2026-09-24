@@ -1,0 +1,110 @@
+// SPDX-License-Identifier: AGPL-3.0-only
+
+package releasehistory
+
+import (
+	"embed"
+	"encoding/json"
+	"fmt"
+	"net/http"
+	"strings"
+
+	"github.com/inspr-at/aeon/internal/httpapi"
+	"github.com/inspr-at/aeon/internal/tenant"
+	"github.com/inspr-at/aeon/internal/version"
+)
+
+// The generated manifest (data/history.json, written at build time and not
+// committed) wins over the committed empty one.
+//
+//go:embed data/*.json
+var data embed.FS
+
+// Embedded returns the history built into this binary.
+func Embedded() (History, error) {
+	for _, name := range []string{"data/history.json", "data/empty.json"} {
+		raw, err := data.ReadFile(name)
+		if err != nil {
+			continue
+		}
+		var h History
+		if err := json.Unmarshal(raw, &h); err != nil {
+			return History{}, fmt.Errorf("%s: %w", name, err)
+		}
+		if h.Schema != Schema {
+			return History{}, fmt.Errorf("%s: schema %q, want %q", name, h.Schema, Schema)
+		}
+		if h.Releases == nil {
+			h.Releases = []Release{}
+		}
+		return h, nil
+	}
+	return History{}, fmt.Errorf("no embedded release history")
+}
+
+// Module serves a History over HTTP.
+type Module struct {
+	history History
+	current string
+}
+
+// New serves the embedded history; current is the running version.
+func New() (*Module, error) {
+	h, err := Embedded()
+	if err != nil {
+		return nil, err
+	}
+	return NewWith(h, version.Version), nil
+}
+
+// NewWith serves the given history, for tests and other products.
+func NewWith(h History, current string) *Module { return &Module{history: h, current: current} }
+
+var _ httpapi.Module = (*Module)(nil)
+
+// Mount registers GET /api/releases and GET /api/releases/{version}.
+func (m *Module) Mount(mux *http.ServeMux) {
+	mux.HandleFunc("GET /api/releases", m.list)
+	mux.HandleFunc("GET /api/releases/{version}", m.one)
+}
+
+// Response is the history as served, with the running version.
+type Response struct {
+	History
+	Current string `json:"current"`
+}
+
+func authorized(w http.ResponseWriter, r *http.Request) bool {
+	if p, ok := tenant.PrincipalFrom(r.Context()); !ok || p.ID == "" {
+		httpapi.WriteError(w, http.StatusUnauthorized, "authentication required")
+		return false
+	}
+	return true
+}
+
+func (m *Module) list(w http.ResponseWriter, r *http.Request) {
+	if !authorized(w, r) {
+		return
+	}
+	w.Header().Set("Cache-Control", "no-store")
+	httpapi.WriteJSON(w, http.StatusOK, Response{History: m.history, Current: m.current})
+}
+
+func (m *Module) one(w http.ResponseWriter, r *http.Request) {
+	if !authorized(w, r) {
+		return
+	}
+	v := strings.TrimPrefix(r.PathValue("version"), "v")
+	if !ValidVersion(v) {
+		httpapi.WriteError(w, http.StatusBadRequest, "not an inspr-calendar-v2 version")
+		return
+	}
+	for _, rel := range m.history.Releases {
+		if rel.Version == v {
+			w.Header().Set("Cache-Control", "no-store")
+			httpapi.WriteJSON(w, http.StatusOK, rel)
+			return
+		}
+	}
+	httpapi.WriteError(w, http.StatusNotFound, "no such release in this build's history")
+}
