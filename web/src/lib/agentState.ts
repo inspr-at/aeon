@@ -40,12 +40,13 @@ export function stopReasonLabel(reason: string | null | undefined) {
   return reason.replace(/[_-]+/g, ' ').replace(/^./, c => c.toUpperCase())
 }
 
-// The agent's name is the name part of its message address ("claude:camy" is camy);
-// without one, the machine it runs on.
-export function agentName(session: Pick<HarnessSession, 'agent_principal_id' | 'host'>, addresses: Record<string, string>) {
+// The agent's name: the name part of its message address ("claude:camy" is camy),
+// else the agent principal's own name (aeon-coordinator); the machine it runs on
+// only as a last resort, since a host name is not who the agent is.
+export function agentName(session: Pick<HarnessSession, 'agent_principal_id' | 'host' | 'agent'>, addresses: Record<string, string>) {
   const address = addresses[session.agent_principal_id]
   const name = address?.split(':')[1]
-  return name || session.host
+  return name || session.agent?.name || session.host
 }
 
 export function needsYou(session: HarnessSession, pending: Approval[], held: ProjectMessage[]) {

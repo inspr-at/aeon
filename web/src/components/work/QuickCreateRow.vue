@@ -87,7 +87,9 @@ defineExpose({ focus: () => input.value?.focus(), isDirty: () => !!draft.title.t
 
 <style scoped>
 .create-row td { height: 44px; padding: 0 12px; background: var(--row-selected); border-bottom: 0; vertical-align: middle; }
-.create-row td:first-child { padding-left: 18px; box-shadow: inset 3px 0 0 var(--row-accent); }
+.create-row td:first-child { padding-left: 18px; }
+/* The row being created: a tint and a hairline ring round the row and its hint, no edge accent. */
+.create-row { outline: 1px solid var(--chip-teal-line); outline-offset: -1px; }
 .cell { display: flex; align-items: center; gap: 8px; min-width: 0; }
 .new-badge { display: inline-flex; align-items: center; height: 20px; padding: 0 8px; border-radius: 6px; background: var(--chip-teal-bg); box-shadow: inset 0 0 0 1px var(--chip-teal-line); color: var(--teal-ink); font: 600 10.5px/1 var(--mono); letter-spacing: .1em; text-transform: uppercase; font-variant-ligatures: none; }
 .create-title { gap: 10px; }
@@ -107,7 +109,7 @@ defineExpose({ focus: () => input.value?.focus(), isDirty: () => !!draft.title.t
 .create-hint-row td { padding: 0 18px 8px; background: var(--row-selected); border-bottom: 1px solid var(--line-2); }
 .create-hint { display: inline-flex; align-items: center; flex-wrap: wrap; gap: 4px; font-size: 11.5px; color: var(--ink-3); }
 @media (max-width: 720px) {
-  .create-row { display: flex; flex-wrap: wrap; gap: 8px; padding: 12px 14px 14px; background: var(--row-selected); box-shadow: inset 3px 0 0 var(--row-accent); border-bottom: 1px solid var(--line-2); }
+  .create-row { display: flex; flex-wrap: wrap; gap: 8px; padding: 12px 14px 14px; background: var(--row-selected); border-bottom: 1px solid var(--line-2); }
   .create-row td { display: block; height: auto; padding: 0 !important; background: none; box-shadow: none !important; }
   .c-key { display: none !important; }
   .c-title { flex: 1 0 100%; }

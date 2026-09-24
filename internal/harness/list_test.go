@@ -67,6 +67,10 @@ func TestTenantHarnessList(t *testing.T) {
 		if s.TicketNodeID != nil && (s.Ticket == nil || s.Ticket.ID != f.ticket || s.Ticket.Key != "HTS-2") {
 			t.Fatal("ticket summary missing")
 		}
+		// The agent's own name, not the host it runs on.
+		if s.Agent == nil || s.Agent.ID != f.agent.ID || s.Agent.Name != "worker" || s.Host != "test-host" {
+			t.Fatalf("agent summary %+v", s.Agent)
+		}
 		if out.Next == nil {
 			break
 		}

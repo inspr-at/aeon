@@ -235,7 +235,7 @@ defineExpose({ reveal })
 .nav.fade-r { mask-image: linear-gradient(90deg, #000 calc(100% - 48px), transparent); -webkit-mask-image: linear-gradient(90deg, #000 calc(100% - 48px), transparent); }
 .nav.fade-l.fade-r { mask-image: linear-gradient(90deg, transparent, #000 48px, #000 calc(100% - 48px), transparent); -webkit-mask-image: linear-gradient(90deg, transparent, #000 48px, #000 calc(100% - 48px), transparent); }
 .fg { display: grid; grid-template-rows: 20px 28px; row-gap: 5px; flex-shrink: 0; min-width: clamp(116px, var(--fw, 116px), 360px); }
-.fg + .fg { margin-left: 8px; padding-left: 10px; border-left: 1px solid color-mix(in oklab, var(--gold) 45%, transparent); }
+.fg + .fg { margin-left: 8px; padding-left: 10px; border-left: 1px solid var(--line-2); }
 .fl { display: flex; align-items: center; gap: 12px; height: 20px; min-width: 0; font: 500 12.5px/20px var(--font); color: var(--ink-2); }
 .flt { position: sticky; left: 6px; display: inline-flex; align-items: center; gap: 7px; min-width: 0; max-width: 300px; }
 .fn { min-width: 0; padding: 0; border: 0; background: transparent; color: inherit; font: inherit; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; cursor: pointer; }

@@ -259,7 +259,7 @@ tbody .org-row:last-child td { border-bottom: 0; }
 .c-num .cell { font-size: 13px; }
 @media (hover: hover) { .org-row:hover td { background: var(--row-hover); } }
 .org-row.cursor td, .org-row.open td { background: var(--row-selected); }
-.org-row.cursor td:first-child, .org-row.open td:first-child { box-shadow: inset 3px 0 0 var(--row-accent); }
+.org-row.open { outline: 1px solid var(--chip-teal-line); outline-offset: -1px; }
 .org-mark { display: grid; place-items: center; flex-shrink: 0; width: 30px; height: 30px; border-radius: 9px; background: var(--code-bg); color: var(--ink-2); }
 .open .org-mark, .cursor .org-mark { background: var(--chip-teal-bg); color: var(--teal-ink); }
 .name-text { display: grid; min-width: 0; }

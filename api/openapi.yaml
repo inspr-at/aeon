@@ -2391,13 +2391,19 @@ components:
       allOf:
         - {$ref: '#/components/schemas/HarnessSession'}
         - type: object
-          required: [project, ticket]
+          required: [project, ticket, agent]
           properties:
             project: {$ref: '#/components/schemas/NodeSummary'}
             ticket:
               oneOf:
                 - {$ref: '#/components/schemas/NodeSummary'}
                 - {type: 'null'}
+            agent:
+              description: The agent principal running the session (its name, not the host)
+              type: [object, 'null']
+              properties:
+                id: {type: string, format: uuid}
+                name: {type: string}
     ProjectMessage:
       allOf:
         - {$ref: './openapi-messaging.yaml#/components/schemas/Message'}

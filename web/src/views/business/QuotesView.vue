@@ -363,7 +363,7 @@ tbody .quote-row:last-child td { border-bottom: 0; }
 .c-total .cell, .c-updated .cell { justify-content: flex-end; }
 @media (hover: hover) { .quote-row:hover td { background: var(--row-hover); } }
 .quote-row.cursor td, .quote-row.open td { background: var(--row-selected); }
-.quote-row.cursor td:first-child, .quote-row.open td:first-child { box-shadow: inset 3px 0 0 var(--row-accent); }
+.quote-row.open { outline: 1px solid var(--chip-teal-line); outline-offset: -1px; }
 .key { font: 500 11.5px/18px var(--mono); color: var(--ink-2); letter-spacing: .01em; font-variant-ligatures: none; }
 .quote-row.open .key, .quote-row.cursor .key { color: var(--teal-ink); }
 .customer { overflow: hidden; text-overflow: ellipsis; color: var(--ink-2); }
@@ -400,7 +400,7 @@ tbody .quote-row:last-child td { border-bottom: 0; }
   .quotes thead { display: none; }
   .quote-row { display: grid; grid-template-columns: auto minmax(0, 1fr) auto; grid-template-areas: "key status total" "title title title" "customer customer updated"; gap: 4px 10px; height: auto; padding: 10px 14px 11px; border-bottom: 1px solid var(--line); }
   .quote-row td { display: block !important; height: auto; padding: 0 !important; border: 0; background: none !important; box-shadow: none !important; }
-  .quote-row.cursor, .quote-row.open { background: var(--row-selected); box-shadow: inset 3px 0 0 var(--row-accent); }
+  .quote-row.cursor, .quote-row.open { background: var(--row-selected); }
   .c-key { grid-area: key; } .c-status { grid-area: status; } .c-total { grid-area: total; } .c-title { grid-area: title; } .c-customer { grid-area: customer; } .c-updated { grid-area: updated; }
   .c-customer .cell, .c-updated .cell { display: flex !important; }
   .title-link { white-space: normal; font-size: 14.5px; line-height: 1.35; }

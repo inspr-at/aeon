@@ -12,8 +12,8 @@ export interface HarnessSession {
   work_shape: 'unknown' | 'ship' | 'scout'; advertised_capabilities: string[]
   phase: 'starting' | 'working' | 'yielded' | 'stopping' | 'stopped'; activity: 'unknown' | 'busy' | 'idle'
   activity_sequence: number; revision: number; heartbeat_at: string | null; stopped_at: string | null; stop_reason: string | null; created_at: string
-  // The tenant-wide list adds node summaries (B7).
-  project?: NodeSummary; ticket?: NodeSummary | null
+  // The tenant-wide list adds node summaries (B7) and the agent principal's name (U13).
+  project?: NodeSummary; ticket?: NodeSummary | null; agent?: { id: string; name: string } | null
 }
 export interface NodeSummary { id: string; key: string; title: string }
 export interface Paged<T> { items: T[]; next_cursor: string | null }

@@ -223,7 +223,7 @@ onBeforeUnmount(() => { window.removeEventListener('keydown', keydown); clearInt
 .project-row { position: relative; min-height: 60px; margin: 0 6px; padding: 8px 14px; border-radius: 10px; color: var(--ink); text-decoration: none; }
 @media (hover: hover) { .project-row:hover { background: var(--row-hover); } }
 .project-row:active { background: var(--row-selected); }
-.project-row:focus-visible { background: var(--row-selected); box-shadow: inset 3px 0 0 var(--row-accent), 0 0 0 1px var(--glass-rim); }
+.project-row:focus-visible { background: var(--row-selected); box-shadow: var(--focus-ring); }
 .project-row.archived { opacity: .72; }
 .key-badge { justify-self: start; }
 .project-text { display: grid; gap: 1px; min-width: 0; }

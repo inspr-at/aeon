@@ -196,8 +196,10 @@ defineExpose({ focusFirst: () => focusCell(0, 'description'), focusLast: () => f
 .line:focus-within { background: var(--row-selected); }
 .line.problem .c-pos { color: var(--gold-ink); }
 .line.dragging { opacity: .45; }
-.line.drop-before { box-shadow: inset 0 2px 0 var(--teal); }
-.line.drop-after { box-shadow: inset 0 -2px 0 var(--teal); }
+/* Where a dragged line lands: a caret in the gap between lines, not an edge of either. */
+.line.drop-before::before, .line.drop-after::after { content: ''; position: absolute; left: 10px; right: 10px; height: 2px; border-radius: 2px; background: var(--teal); pointer-events: none; }
+.line.drop-before::before { top: -1px; }
+.line.drop-after::after { bottom: -1px; }
 .c-grip { justify-content: center; color: var(--ink-3); cursor: grab; }
 .c-grip:not([draggable="true"]) { cursor: default; }
 .c-pos { justify-content: center; font-size: 11px; color: var(--ink-3); }

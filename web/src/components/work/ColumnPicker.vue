@@ -85,7 +85,9 @@ function drop(target: ColumnId) {
 .row:focus-within { background: var(--row-selected); }
 .row.off .name { color: var(--ink-2); }
 .row.dragging { opacity: .45; }
-.row.over { box-shadow: inset 0 2px 0 var(--teal); }
+/* Where a dragged column lands: a caret in the gap above the row. */
+.row { position: relative; }
+.row.over::before { content: ''; position: absolute; left: 8px; right: 8px; top: -2px; height: 2px; border-radius: 2px; background: var(--teal); pointer-events: none; }
 .row.pinned { gap: 9px; color: var(--ink-2); }
 .row.pinned:hover { background: transparent; }
 .row-label { display: flex; align-items: center; gap: 9px; flex: 1; min-width: 0; height: 100%; cursor: pointer; }
