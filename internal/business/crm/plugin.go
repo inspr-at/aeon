@@ -15,7 +15,7 @@ const (
 	// ID is the compiled plugin id.
 	ID = "business_crm"
 	// Version is the compiled manifest version.
-	Version = "1"
+	Version = "2"
 	// Owner is the accountable first-party package.
 	Owner = "internal/business/crm"
 	// OperationBind is the workflow step plugins.Enabled checks for a binding.
@@ -30,14 +30,38 @@ const (
 // digest; a mismatched installation fails closed.
 func Plugin() (plugins.Plugin, error) {
 	contactSchema, err := schema("urn:aeon:business_crm:contact", map[string]any{
-		"note": map[string]any{"type": "string", "maxLength": 500},
+		"email":             map[string]any{"type": "string", "maxLength": 320},
+		"phone":             map[string]any{"type": "string", "maxLength": 100},
+		"role":              map[string]any{"type": "string", "maxLength": 200},
+		"note":              map[string]any{"type": "string", "maxLength": 20000},
+		"external_provider": map[string]any{"type": "string", "maxLength": 100},
+		"external_id":       map[string]any{"type": "string", "maxLength": 500},
+		"external_url":      map[string]any{"type": "string", "maxLength": 1000},
 	})
 	if err != nil {
 		return plugins.Plugin{}, err
 	}
 	orgSchema, err := schema("urn:aeon:business_crm:organisation", map[string]any{
-		"legal_name": map[string]any{"type": "string", "maxLength": 200},
-		"website":    map[string]any{"type": "string", "maxLength": 500},
+		"legal_name":           map[string]any{"type": "string", "maxLength": 200},
+		"website":              map[string]any{"type": "string", "maxLength": 500},
+		"industry":             map[string]any{"type": "string", "maxLength": 200},
+		"domain":               map[string]any{"type": "string", "maxLength": 255},
+		"phone":                map[string]any{"type": "string", "maxLength": 100},
+		"description":          map[string]any{"type": "string", "maxLength": 20000},
+		"customer_notes":       map[string]any{"type": "string", "maxLength": 20000},
+		"vat_id":               map[string]any{"type": "string", "maxLength": 100},
+		"tax_id":               map[string]any{"type": "string", "maxLength": 100},
+		"register_no":          map[string]any{"type": "string", "maxLength": 100},
+		"employee_count":       map[string]any{"type": []string{"integer", "null"}, "minimum": 0},
+		"annual_revenue_minor": map[string]any{"type": []string{"integer", "null"}, "minimum": 0},
+		"currency":             map[string]any{"type": "string", "maxLength": 3},
+		"billing_address":      map[string]any{"type": []string{"object", "null"}},
+		"visiting_address":     map[string]any{"type": []string{"object", "null"}},
+		"hourly_rate_minor":    map[string]any{"type": []string{"integer", "null"}, "minimum": 0},
+		"lp_rate_minor":        map[string]any{"type": []string{"integer", "null"}, "minimum": 0},
+		"external_provider":    map[string]any{"type": "string", "maxLength": 100},
+		"external_id":          map[string]any{"type": "string", "maxLength": 500},
+		"external_url":         map[string]any{"type": "string", "maxLength": 1000},
 	})
 	if err != nil {
 		return plugins.Plugin{}, err
@@ -57,18 +81,20 @@ func Plugin() (plugins.Plugin, error) {
 				fence.PermNodesContribute,
 				fence.PermViewsProvide,
 				fence.PermStepsApply,
+				fence.PermIntegrationsCall,
 			},
 			NodeKinds:      kinds,
 			Views:          views,
 			WorkflowSteps:  []plugins.WorkflowStep{{Key: OperationBind, Gates: []string{fence.GateObservedState, fence.GatePersonDecision}}},
 			AgentTools:     []plugins.Capability{},
-			Integrations:   []plugins.Capability{},
+			Integrations:   []plugins.Capability{{ID: "crm_provider", Permission: fence.PermIntegrationsCall}},
 			BackgroundJobs: []plugins.Capability{},
 		},
 		StepPermissions: map[string]string{OperationBind: fence.PermStepsApply},
 		Kinds:           h,
 		Views:           h,
 		Steps:           bindStep{},
+		Integrations:    providerIntegration{},
 	}
 	sum, err := plugins.Digest(p)
 	if err != nil {
