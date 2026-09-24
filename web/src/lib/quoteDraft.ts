@@ -1,4 +1,6 @@
 // SPDX-License-Identifier: AGPL-3.0-only
+// Parked (AEON-70, 2026-09-24): quotes and organisations will be ported from Markus's
+// current classic Paimos quote builder; nothing routed or linked uses this file.
 // The next version of a quote while it is being written: lines as typed, their
 // exact amounts from the rates in force, the totals the server will freeze, and
 // what still blocks saving. No Vue here, so tests run it under plain Node.

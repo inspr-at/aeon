@@ -1,4 +1,5 @@
 <!-- SPDX-License-Identifier: AGPL-3.0-only -->
+<!-- Parked (AEON-70, 2026-09-24): quotes and organisations will be ported from Markus's current classic Paimos quote builder; this file is not routed or linked. -->
 <script setup lang="ts">
 import { computed, nextTick, reactive, ref, watch } from 'vue'
 import { useRouter } from 'vue-router'
@@ -10,7 +11,7 @@ import { absoluteTime, initials, relativeTime } from '../../lib/work'
 import type { SaveResult } from '../../lib/useTicket'
 import { useBusiness } from '../../stores/business'
 import { useProjects } from '../../stores/projects'
-import AppIcon from '../AppIcon.vue'
+import AppIcon from './BizIcon.vue'
 import FloatingPanel from '../work/FloatingPanel.vue'
 import InlineTitle from '../work/InlineTitle.vue'
 import MoneyText from './MoneyText.vue'

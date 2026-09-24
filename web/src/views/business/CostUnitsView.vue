@@ -1,310 +1,262 @@
 <!-- SPDX-License-Identifier: AGPL-3.0-only -->
 <script setup lang="ts">
-import { computed, onMounted, reactive, ref, watch } from 'vue'
-import { APIError, api, getKinds, getNodes, type WorkNode } from '../../lib/api'
-import { useSession } from '../../stores/session'
+import { computed, nextTick, onMounted, reactive, ref } from 'vue'
+import { APIError, createNode, type ListItem } from '../../lib/api'
+import { createRate, listRates, type CostRate, type Unit } from '../../lib/business'
+import { toast } from '../../lib/toast'
+import { plural } from '../../lib/work'
+import { formatAmount, parseAmountInput } from '../../components/business/money'
+import { useBusiness, type CostUnit } from '../../stores/business'
+import AppIcon from '../../components/business/BizIcon.vue'
+import BusinessPage from '../../components/business/BusinessPage.vue'
 
-interface Rate {
-  id: string
-  cost_unit_node_id: string
-  unit: string
-  currency: string
-  internal_amount: string
-  bill_amount: string
-  effective_from: string
-  effective_until: string | null
-  created_by_principal_id: string
-  created_at: string
-}
-
-const session = useSession()
-const units = ref<WorkNode[]>([])
-const selected = ref('')
-const rates = ref<Rate[]>([])
-const truncated = ref(false)
+// Rates per cost unit, each valid from a date. A new rate for the same unit and
+// currency closes the one in force at its start; nothing earlier changes, so
+// quotes and hours keep the rates they were made with.
+const business = useBusiness()
+const term = ref('')
+const showRetired = ref(false)
+const adding = ref('')
+const creating = ref(false)
+const newName = ref('')
 const busy = ref(false)
-const ratesBusy = ref(false)
-const pending = ref(false)
-const listError = ref('')
-const rateError = ref('')
-const actionError = ref('')
-const notice = ref('')
-const form = reactive({ unit: 'hour', currency: 'EUR', internal: '', bill: '', from: utcToday(), until: '' })
-
-const admin = computed(() => session.identity?.principal.kind === 'person' && !!session.identity.principal.roles?.includes('admin'))
-const current = computed(() => units.value.find(unit => unit.id === selected.value) ?? null)
-const groups = computed(() => {
-  const order: string[] = []
-  const grouped = new Map<string, Rate[]>()
-  for (const rate of rates.value) {
-    const rows = grouped.get(rate.currency)
-    if (!rows) { grouped.set(rate.currency, [rate]); order.push(rate.currency) }
-    else rows.push(rate)
-  }
-  return order.map(currency => ({ currency, rates: grouped.get(currency) ?? [] }))
+const error = ref('')
+const createInput = ref<HTMLInputElement>()
+const form = reactive({ unit: 'hour' as Unit, currency: 'EUR', bill: '', internal: '', from: '', until: '' })
+const UNITS: Unit[] = ['hour', 'day', 'item']
+const today = new Date().toISOString().slice(0, 10)
+const retired = (unit: CostUnit) => ['cancelled', 'archived', 'done'].includes(unit.node.state)
+const shown = computed(() => {
+  const needle = term.value.trim().toLowerCase()
+  return business.costUnits.filter(unit => showRetired.value || !retired(unit))
+    .filter(unit => !needle || `${unit.node.key} ${unit.node.title}`.toLowerCase().includes(needle))
+    .sort((a, b) => Number(retired(a)) - Number(retired(b)) || a.node.title.localeCompare(b.node.title))
 })
-
-onMounted(() => { void loadUnits() })
-watch(selected, () => { notice.value = ''; actionError.value = ''; void loadRates() })
-
-function utcToday(): string { return new Date().toISOString().slice(0, 10) }
-function classicRecord(node: WorkNode): Record<string, unknown> | null {
-  const classic = node.fields?.classic
-  if (!classic || typeof classic !== 'object' || Array.isArray(classic)) return null
-  return classic as Record<string, unknown>
+const retiredCount = computed(() => business.costUnits.filter(retired).length)
+const inForce = computed(() => business.costUnits.reduce((n, unit) => n + unit.rates.filter(r => status(r) === 'current').length, 0))
+function status(rate: CostRate): 'current' | 'scheduled' | 'ended' {
+  if (rate.effective_from > today) return 'scheduled'
+  if (rate.effective_until && rate.effective_until <= today) return 'ended'
+  return 'current'
 }
-function classicID(node: WorkNode): string {
-  const id = classicRecord(node)?.id
-  if (typeof id === 'string' && id.trim()) return id.trim()
-  if (typeof id === 'number' && Number.isInteger(id)) return String(id)
+const STATUS_LABEL = { current: 'In force', scheduled: 'Scheduled', ended: 'Ended' }
+function ordered(rates: CostRate[]) {
+  const rank = { current: 0, scheduled: 1, ended: 2 }
+  return [...rates].sort((a, b) => a.unit.localeCompare(b.unit) || a.currency.localeCompare(b.currency) || rank[status(a)] - rank[status(b)] || b.effective_from.localeCompare(a.effective_from))
+}
+const dateFormat = new Intl.DateTimeFormat('en-GB', { day: 'numeric', month: 'short', year: 'numeric', timeZone: 'UTC' })
+const day = (value: string | null) => value ? dateFormat.format(new Date(`${value}T00:00:00Z`)) : ''
+const money = (value: string, currency: string) => { try { return formatAmount(value, currency) } catch { return value } }
+// "2026-10-01", "1.10.2026" or "01/10/2026" as YYYY-MM-DD.
+function parseDate(text: string): string | null {
+  const value = text.trim()
+  let match = /^(\d{4})-(\d{1,2})-(\d{1,2})$/.exec(value)
+  let y: number, m: number, d: number
+  if (match) { y = +match[1]; m = +match[2]; d = +match[3] }
+  else if ((match = /^(\d{1,2})[./](\d{1,2})[./](\d{4})$/.exec(value))) { d = +match[1]; m = +match[2]; y = +match[3] }
+  else return null
+  const date = new Date(Date.UTC(y, m - 1, d))
+  return date.getUTCFullYear() === y && date.getUTCMonth() === m - 1 && date.getUTCDate() === d ? date.toISOString().slice(0, 10) : null
+}
+const problem = computed(() => {
+  if (!/^[A-Z]{3}$/.test(form.currency.trim().toUpperCase())) return 'Currency is a three-letter code like EUR.'
+  if (parseAmountInput(form.bill) === null) return 'Bill rate is an amount with at most four decimals.'
+  if (parseAmountInput(form.internal || '0') === null) return 'Internal rate is an amount with at most four decimals.'
+  if (!parseDate(form.from)) return 'Valid from is a date like 2026-10-01.'
+  if (form.until.trim() && (!parseDate(form.until) || parseDate(form.until)! <= parseDate(form.from)!)) return 'Valid until is a later date, or empty.'
   return ''
+})
+async function startAdd(unit: CostUnit) {
+  adding.value = unit.node.id; error.value = ''
+  const last = ordered(unit.rates)[0]
+  Object.assign(form, { unit: last?.unit ?? 'hour', currency: last?.currency ?? 'EUR', bill: '', internal: '', from: today, until: '' })
+  await nextTick(); document.querySelector<HTMLInputElement>(`[data-rate-form="${unit.node.id}"] [data-first]`)?.focus()
 }
-function classicSource(node: WorkNode): string {
-  const source = classicRecord(node)?.source_id
-  return typeof source === 'string' ? source : ''
-}
-function messageOf(cause: unknown, fallback: string): string {
-  return cause instanceof Error && cause.message ? cause.message : fallback
-}
-async function readBody(path: string, method = 'GET', raw?: string): Promise<string> {
-  const response = await api(path, {
-    method,
-    ...(raw === undefined ? {} : { headers: { 'Content-Type': 'application/json' }, body: raw }),
-  })
-  const text = await response.text()
-  if (!response.ok) {
-    let message = `Request failed (${response.status})`
-    try {
-      const data = JSON.parse(text) as { message?: unknown; error?: unknown }
-      if (typeof data.message === 'string' && data.message) message = data.message
-      else if (typeof data.error === 'string' && data.error) message = data.error
-    } catch { /* The status line is the fallback. */ }
-    throw new APIError(response.status, message)
-  }
-  return text
-}
-function parseRates(raw: string): Rate[] {
-  const preserved = raw.replace(/"(internal_amount|bill_amount)"\s*:\s*(-?\d+(?:\.\d+)?(?:[eE][+-]?\d+)?)/g, '"$1":"$2"')
-  const data: unknown = JSON.parse(preserved)
-  if (!Array.isArray(data)) throw new Error('Invalid rate list')
-  return data as Rate[]
-}
-async function loadUnits() {
-  busy.value = true
-  listError.value = ''
+async function save(unit: CostUnit) {
+  if (problem.value || busy.value) { error.value = problem.value; return }
+  busy.value = true; error.value = ''
   try {
-    const kinds = await getKinds()
-    const kind = kinds.items.find(item => item.slug === 'cost_unit')
-    if (!kind) { units.value = []; selected.value = ''; truncated.value = false; return }
-    const all: WorkNode[] = []
-    let cursor = ''
-    for (let page = 0; page < 40; page += 1) {
-      const response = await getNodes({ kind_id: kind.id, sort: 'key', direction: 'asc', limit: 50, ...(cursor ? { cursor } : {}) })
-      all.push(...response.items)
-      cursor = response.next_cursor ?? ''
-      if (!cursor) break
-    }
-    truncated.value = cursor !== ''
-    units.value = all
-    const previous = selected.value
-    if (!all.some(unit => unit.id === selected.value)) selected.value = all[0]?.id ?? ''
-    if (selected.value === previous) void loadRates()
-  } catch (cause) {
-    listError.value = messageOf(cause, 'Cost units are unavailable.')
+    await createRate(unit.node.id, {
+      unit: form.unit, currency: form.currency.trim().toUpperCase(), bill_amount: parseAmountInput(form.bill)!, internal_amount: parseAmountInput(form.internal || '0')!,
+      effective_from: parseDate(form.from)!, effective_until: form.until.trim() ? parseDate(form.until) : null,
+    })
+    business.setRates(unit.node.id, await listRates(unit.node.id))
+    toast(`Rate added to ${unit.node.title}.`)
+    adding.value = ''
+  } catch (e) {
+    error.value = e instanceof APIError && e.status === 409 ? `${e.message.replace(/^./, c => c.toUpperCase())}. Rates for one unit and currency cannot overlap.` : e instanceof Error ? e.message : 'The rate was not added.'
   } finally { busy.value = false }
 }
-async function loadRates() {
-  rateError.value = ''
-  if (!selected.value) { rates.value = []; return }
-  ratesBusy.value = true
+function formKeys(event: KeyboardEvent, unit: CostUnit) {
+  if (event.key === 'Enter') { event.preventDefault(); void save(unit) }
+  else if (event.key === 'Escape') { event.preventDefault(); event.stopPropagation(); adding.value = '' }
+}
+async function startCreate() { creating.value = true; await nextTick(); createInput.value?.focus() }
+async function create() {
+  const name = newName.value.trim()
+  if (!name || busy.value) return
+  busy.value = true
   try {
-    rates.value = parseRates(await readBody(`/cost-units/${encodeURIComponent(selected.value)}/rates`))
-  } catch (cause) {
-    rates.value = []
-    rateError.value = messageOf(cause, 'Rates are unavailable.')
-  } finally { ratesBusy.value = false }
+    await business.loadKinds()
+    const kind = business.kindBySlug('cost_unit')
+    if (!kind) throw new Error('This workspace has no cost unit type.')
+    const node = await createNode({ kind_id: kind.id, title: name, parent_id: null, state: 'new' })
+    const item = { ...node, kind_slug: 'cost_unit', kind_label: kind.label, priority: null, assignee: null, parent: null, children_count: 0, project: null } as ListItem
+    business.addCostUnit(item)
+    newName.value = ''; creating.value = false
+    toast(`Added ${name}. Give it a rate next.`)
+    await nextTick(); void startAdd(business.costUnit(node.id)!)
+  } catch (e) { toast(`Not added: ${e instanceof Error ? e.message : 'unknown error'}`, { tone: 'error' }) }
+  finally { busy.value = false }
 }
-function amountProblem(value: string, label: string): string {
-  if (!/^(?:0|[1-9]\d{0,13})(?:\.\d{1,4})?$/.test(value)) return `${label} must be a non-negative amount with at most 4 decimal places.`
-  return ''
-}
-function validateForm(): string {
-  form.currency = form.currency.trim().toUpperCase()
-  form.internal = form.internal.trim()
-  form.bill = form.bill.trim()
-  if (!['hour', 'day', 'item'].includes(form.unit)) return 'Choose hour, day, or item.'
-  if (!/^[A-Z]{3}$/.test(form.currency)) return 'Currency is a three-letter ISO code.'
-  const internal = amountProblem(form.internal, 'Internal amount')
-  if (internal) return internal
-  const bill = amountProblem(form.bill, 'Bill amount')
-  if (bill) return bill
-  if (!/^\d{4}-\d{2}-\d{2}$/.test(form.from)) return 'Effective from is a UTC date.'
-  if (form.until && (!/^\d{4}-\d{2}-\d{2}$/.test(form.until) || form.until <= form.from)) return 'Effective until is a UTC date after the start.'
-  return ''
-}
-function requestBody(): string {
-  const until = form.until ? `,"effective_until":${JSON.stringify(form.until)}` : ''
-  return `{"unit":${JSON.stringify(form.unit)},"currency":${JSON.stringify(form.currency)},"internal_amount":${form.internal},"bill_amount":${form.bill},"effective_from":${JSON.stringify(form.from)}${until}}`
-}
-async function submit() {
-  if (!current.value || pending.value || !admin.value) return
-  const problem = validateForm()
-  actionError.value = problem
-  if (problem) return
-  pending.value = true
-  notice.value = ''
-  try {
-    await readBody(`/cost-units/${encodeURIComponent(current.value.id)}/rates`, 'POST', requestBody())
-    form.internal = ''
-    form.bill = ''
-    form.until = ''
-    notice.value = 'Rate recorded.'
-    await loadRates()
-  } catch (cause) {
-    actionError.value = messageOf(cause, 'The rate was not recorded.')
-  } finally { pending.value = false }
-}
+onMounted(async () => { await business.loadPlugins(); if (business.open.costs) void business.loadCostUnits(true) })
 </script>
 
 <template>
-  <section class="cost-units" aria-labelledby="cost-units-title">
-    <header class="cost-head">
-      <div>
-        <p class="eyebrow">Rates</p>
-        <h1 id="cost-units-title">Cost units</h1>
-        <p>Each price starts on a UTC date and stays in its own currency. A later price does not rewrite an earlier one. This is not an invoice.</p>
-      </div>
-      <button class="button secondary" type="button" :disabled="busy" @click="loadUnits">
-        <svg class="glyph" viewBox="0 0 24 24" aria-hidden="true"><path d="M20 12a8 8 0 1 1-2.3-5.7" /><path d="M20 4v6h-6" /></svg>
-        Refresh
-      </button>
-    </header>
-    <p v-if="listError" class="error" role="alert">{{ listError }}</p>
-    <p v-if="truncated" class="notice">Showing the first 2,000 cost units, ordered by key.</p>
-    <div class="layout">
-      <div class="glass-card unit-list">
-        <h2>Units</h2>
-        <p v-if="busy" class="muted">Loading cost units…</p>
-        <p v-else-if="!units.length" class="muted">No cost units yet. Imported cost units keep their original keys under the cost_unit kind.</p>
-        <ul v-else>
-          <li v-for="unit in units" :key="unit.id">
-            <button type="button" :aria-current="unit.id === selected ? 'true' : undefined" @click="selected = unit.id">
-              <span class="key">{{ unit.key }}</span>
-              <span class="title">{{ unit.title }}</span>
-              <span v-if="classicRecord(unit)" class="badge">Imported</span>
-            </button>
-          </li>
-        </ul>
-      </div>
-      <div class="detail">
-        <article v-if="current" class="glass-card unit-card">
-          <div class="unit-heading">
-            <div>
-              <p class="eyebrow">{{ current.state }}</p>
-              <h2>{{ current.title }}</h2>
-            </div>
-            <p class="key-large">{{ current.key }}</p>
-          </div>
-          <dl>
-            <div><dt>Kind</dt><dd>cost_unit</dd></div>
-            <div v-if="classicID(current)"><dt>Classic id</dt><dd>{{ classicID(current) }}</dd></div>
-            <div v-if="classicSource(current)"><dt>Source</dt><dd>{{ classicSource(current) }}</dd></div>
-          </dl>
-          <p v-if="rateError" class="error" role="alert">{{ rateError }}</p>
-          <p v-else-if="ratesBusy" class="muted">Loading rates…</p>
-          <p v-else-if="!groups.length" class="muted">No rates for this cost unit.</p>
-          <section v-for="group in groups" :key="group.currency" class="currency-group">
-            <h3>{{ group.currency }}</h3>
-            <table>
-              <caption class="sr-only">{{ group.currency }} rates for {{ current.key }}</caption>
-              <thead><tr><th>From</th><th>Until</th><th>Unit</th><th>Internal</th><th>Bill</th></tr></thead>
-              <tbody>
-                <tr v-for="rate in group.rates" :key="rate.id">
-                  <td>{{ rate.effective_from }}</td>
-                  <td>{{ rate.effective_until ?? 'Open' }}</td>
-                  <td>{{ rate.unit }}</td>
-                  <td class="amount">{{ rate.internal_amount }}</td>
-                  <td class="amount">{{ rate.bill_amount }}</td>
-                </tr>
-              </tbody>
-            </table>
-          </section>
-        </article>
-        <p v-else class="glass-card empty-detail">Select a cost unit to see its rates.</p>
-        <form v-if="admin && current" class="glass-card rate-form" @submit.prevent="submit">
-          <h2>New rate</h2>
-          <p>Recording a price adds a row. If one open price in this currency and unit already covers the start date, it closes the day the new price begins.</p>
-          <div class="fields">
-            <label>Unit
-              <select v-model="form.unit" :disabled="pending">
-                <option value="hour">Hour</option>
-                <option value="day">Day</option>
-                <option value="item">Item</option>
-              </select>
-            </label>
-            <label>Currency
-              <input v-model="form.currency" maxlength="3" autocapitalize="characters" autocomplete="off" :disabled="pending" @change="form.currency = form.currency.toUpperCase()" />
-            </label>
-            <label>Internal amount
-              <input v-model="form.internal" inputmode="decimal" autocomplete="off" spellcheck="false" :disabled="pending" />
-            </label>
-            <label>Bill amount
-              <input v-model="form.bill" inputmode="decimal" autocomplete="off" spellcheck="false" :disabled="pending" />
-            </label>
-            <label>Effective from
-              <input v-model="form.from" type="date" :disabled="pending" />
-            </label>
-            <label>Effective until
-              <input v-model="form.until" type="date" :disabled="pending" />
-            </label>
-          </div>
-          <p v-if="actionError" class="error" role="alert">{{ actionError }}</p>
-          <p v-if="notice" role="status">{{ notice }}</p>
-          <button class="button" type="submit" :disabled="pending || ratesBusy">
-            <svg class="glyph" viewBox="0 0 24 24" aria-hidden="true"><path d="M12 5v14M5 12h14" /></svg>
-            Record rate
-          </button>
-        </form>
-        <p v-else-if="current" class="notice">A tenant admin records a new rate. Prices already stored stay as they are.</p>
-      </div>
+  <BusinessPage title="Rates" area="costs">
+    <template #summary>
+      <span v-if="business.costUnitsLoaded">{{ business.costUnits.length ? `${plural(business.costUnits.length - retiredCount, 'cost unit')} · ${plural(inForce, 'rate')} in force` : 'No cost units yet' }}</span>
+      <span v-else class="skeleton summary-skeleton" />
+    </template>
+
+    <div class="toolbar">
+      <label class="search-field list-search">
+        <AppIcon name="search" :size="14" />
+        <input v-model="term" class="field" type="search" placeholder="Find a cost unit" aria-label="Find a cost unit" autocomplete="off" />
+      </label>
+      <label v-if="retiredCount" class="switch"><input v-model="showRetired" type="checkbox" /><span>Retired</span><span class="mono faint">{{ retiredCount }}</span></label>
+      <span class="spacer" />
+      <p class="explain">{{ business.admin ? 'A new rate closes the one in force on its start date.' : 'Workspace admins set rates.' }}</p>
+      <button v-if="business.admin" type="button" class="btn primary" @click="startCreate"><AppIcon name="plus" :size="14" />New cost unit</button>
     </div>
-  </section>
+
+    <section class="card glass-card" aria-label="Cost units and their rates">
+      <div v-if="creating" class="create-row" @keydown.enter.prevent="create" @keydown.esc.stop.prevent="creating = false">
+        <AppIcon name="tag" :size="14" class="create-icon" />
+        <input ref="createInput" v-model="newName" class="field" placeholder="Cost unit name, like Development" aria-label="New cost unit name" maxlength="512" autocomplete="off" />
+        <button type="button" class="btn sm" @click="creating = false">Cancel</button>
+        <button type="button" class="btn sm on" :disabled="!newName.trim() || busy" @click="create">Add</button>
+      </div>
+      <div v-if="!business.costUnitsLoaded" class="sk" aria-hidden="true"><span v-for="i in 4" :key="i" class="skeleton" /></div>
+      <div v-else-if="!shown.length && !creating" class="state">
+        <span class="state-icon"><AppIcon name="tag" :size="18" /></span>
+        <h2>{{ term ? `No cost unit matches “${term}”` : 'No cost units yet' }}</h2>
+        <p>A cost unit prices work: Development, Design, Consulting. Each gets bill and internal rates per hour, day or item.</p>
+        <button v-if="business.admin && !term" type="button" class="btn" @click="startCreate"><AppIcon name="plus" :size="14" />New cost unit</button>
+      </div>
+      <div v-for="unit in shown" :key="unit.node.id" class="unit" :class="{ retired: retired(unit) }">
+        <header class="unit-head">
+          <span class="unit-mark" aria-hidden="true"><AppIcon name="tag" :size="13" /></span>
+          <h2 class="unit-name">{{ unit.node.title }}</h2>
+          <span class="key mono">{{ unit.node.key }}</span>
+          <span v-if="retired(unit)" class="chip retired-chip">Retired</span>
+          <span class="spacer" />
+          <button v-if="business.admin && adding !== unit.node.id" type="button" class="link-btn" @click="startAdd(unit)"><AppIcon name="plus" :size="12" />Add rate</button>
+        </header>
+        <table v-if="unit.rates.length || adding === unit.node.id" class="rates" :aria-label="`Rates of ${unit.node.title}`">
+          <thead><tr><th scope="col">Unit</th><th scope="col">Currency</th><th scope="col" class="num">Bill</th><th scope="col" class="num">Internal</th><th scope="col">Valid</th><th scope="col">Status</th></tr></thead>
+          <tbody>
+            <tr v-for="rate in ordered(unit.rates)" :key="rate.id" :class="status(rate)">
+              <td>per {{ rate.unit }}</td>
+              <td class="mono">{{ rate.currency }}</td>
+              <td class="num mono strong">{{ money(rate.bill_amount, rate.currency) }}</td>
+              <td class="num mono">{{ money(rate.internal_amount, rate.currency) }}</td>
+              <td class="valid">{{ rate.effective_until ? `${day(rate.effective_from)} – ${day(rate.effective_until)}` : `from ${day(rate.effective_from)}` }}</td>
+              <td><span class="status-chip" :class="status(rate)">{{ STATUS_LABEL[status(rate)] }}</span></td>
+            </tr>
+            <tr v-if="adding === unit.node.id" class="form-row">
+              <td colspan="6">
+                <div class="rate-form" :data-rate-form="unit.node.id" @keydown="formKeys($event, unit)">
+                  <label class="select-label"><span>Unit</span><select v-model="form.unit" class="field select" data-first><option v-for="u in UNITS" :key="u" :value="u">per {{ u }}</option></select><AppIcon name="chevron" :size="12" class="select-chev" /></label>
+                  <label><span>Currency</span><input v-model="form.currency" class="field mono" maxlength="3" autocomplete="off" /></label>
+                  <label><span>Bill rate</span><input v-model="form.bill" class="field mono" inputmode="decimal" placeholder="95.00" autocomplete="off" /></label>
+                  <label><span>Internal rate</span><input v-model="form.internal" class="field mono" inputmode="decimal" placeholder="60.00" autocomplete="off" /></label>
+                  <label><span>Valid from</span><input v-model="form.from" class="field mono" placeholder="YYYY-MM-DD" autocomplete="off" /></label>
+                  <label><span>Valid until</span><input v-model="form.until" class="field mono" placeholder="open" autocomplete="off" /></label>
+                  <div class="form-actions">
+                    <p class="form-note" :class="{ warn: !!error }" role="status">{{ error || 'Enter saves · Esc cancels' }}</p>
+                    <button type="button" class="btn sm" @click="adding = ''">Cancel</button>
+                    <button type="button" class="btn sm on" :disabled="busy" @click="save(unit)">{{ busy ? 'Adding…' : 'Add rate' }}</button>
+                  </div>
+                </div>
+              </td>
+            </tr>
+          </tbody>
+        </table>
+        <p v-else class="no-rates">No rate yet, so quotes and hours cannot use it.</p>
+      </div>
+    </section>
+  </BusinessPage>
 </template>
 
 <style scoped>
-.cost-units { max-width: 1120px; margin: 0 auto; padding: 28px 28px 48px; display: grid; gap: 22px; }
-.cost-head, .unit-heading { display: flex; justify-content: space-between; align-items: flex-start; gap: 16px; }
-.cost-head h1, .unit-card h2, .rate-form h2, .unit-list h2 { margin-top: 6px; }
-.layout { display: grid; grid-template-columns: minmax(240px, 320px) minmax(0, 1fr); gap: 20px; align-items: start; }
-.detail { min-width: 0; }
-.unit-list, .unit-card, .rate-form, .empty-detail { padding: 22px; }
-.unit-list ul { list-style: none; margin: 16px 0 0; padding: 0; display: grid; gap: 8px; }
-.unit-list button { width: 100%; min-height: 64px; padding: 10px 12px; display: grid; grid-template-columns: auto 1fr; gap: 4px 10px; align-items: center; text-align: left; border: 1px solid var(--line); border-radius: var(--radius-s); background: var(--surface); color: var(--ink); }
-.unit-list button[aria-current="true"] { border-color: var(--teal); background: var(--aqua-3); }
-.key, .key-large, .amount { font-family: var(--mono); }
-.key { color: var(--teal-ink); font-size: 12px; }
-.title { overflow-wrap: anywhere; }
-.badge { grid-column: 1 / -1; justify-self: start; border: 1px solid var(--line-2); border-radius: 20px; padding: 2px 8px; font: 11px/1.4 var(--mono); color: var(--ink-2); }
-.key-large { margin: 0; font-size: 18px; color: var(--teal-ink); }
-.unit-card dl { display: grid; grid-template-columns: repeat(3, minmax(0, 1fr)); gap: 14px; margin: 18px 0 0; }
-.unit-card dt, .muted { color: var(--ink-2); }
-.unit-card dd { margin: 2px 0 0; overflow-wrap: anywhere; }
-.currency-group { margin-top: 18px; overflow-x: auto; max-width: 100%; }
-.currency-group h3 { margin: 0 0 8px; font: 600 14px/1.4 var(--mono); letter-spacing: .08em; }
-table { width: 100%; border-collapse: collapse; font-size: 14px; }
-th, td { text-align: left; padding: 8px 6px; border-bottom: 1px solid var(--line); }
-th { color: var(--ink-2); font-weight: 500; }
-.amount { text-align: right; }
-.rate-form { display: grid; gap: 14px; margin-top: 20px; }
-.fields { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 14px; }
-.fields label { display: grid; gap: 6px; color: var(--ink-2); font-size: 13px; }
-.fields input, .fields select { width: 100%; min-width: 0; min-height: 44px; padding: 10px 12px; border: 1px solid var(--line-2); border-radius: var(--radius-s); background: var(--surface); color: var(--ink); font: inherit; }
-.notice { margin: 0; color: var(--ink-2); }
-.glyph { width: 18px; height: 18px; fill: none; stroke: currentColor; stroke-width: 1.8; stroke-linecap: round; stroke-linejoin: round; }
-.empty-detail { color: var(--ink-2); }
-@media (max-width: 800px) {
-  .cost-units { padding: 20px 16px 36px; }
-  .layout, .fields, .unit-card dl, .cost-head { grid-template-columns: 1fr; }
-  .cost-head { display: grid; }
+.summary-skeleton { display: inline-block; width: 220px; }
+.toolbar { display: flex; align-items: center; flex-wrap: wrap; gap: 10px 14px; min-height: 48px; margin-bottom: 12px; }
+.list-search { width: 260px; }
+.list-search .field { height: 32px; font-size: 13.5px; }
+.faint { color: var(--ink-3); font-size: 11px; }
+.spacer { flex: 1; }
+.explain { font-size: 12.5px; color: var(--ink-3); }
+.card { overflow: clip; container: rates / inline-size; }
+.create-row { display: flex; align-items: center; gap: 10px; padding: 12px 18px; border-bottom: 1px solid var(--line); background: var(--row-selected); }
+.create-row .field { flex: 1; height: 32px; }
+.create-icon { color: var(--teal); }
+.sk { display: grid; gap: 14px; padding: 20px; } .sk .skeleton { height: 12px; }
+.unit { padding: 4px 0 12px; border-bottom: 1px solid var(--line); }
+.unit:last-child { border-bottom: 0; }
+.unit.retired { opacity: .7; }
+.unit-head { display: flex; align-items: center; gap: 10px; min-height: 48px; padding: 6px 18px 2px; }
+.unit-mark { display: grid; place-items: center; width: 28px; height: 28px; border-radius: 8px; background: var(--chip-teal-bg); box-shadow: inset 0 0 0 1px var(--chip-teal-line); color: var(--teal-ink); }
+.unit-name { font-size: 14.5px; font-weight: 650; }
+.key { font-size: 11px; color: var(--ink-3); }
+.retired-chip { height: 18px; font-size: 10px; text-transform: uppercase; letter-spacing: .08em; }
+.link-btn { display: inline-flex; align-items: center; gap: 5px; height: 26px; padding: 0 10px; border: 0; border-radius: 999px; background: transparent; color: var(--teal-ink); font-size: 12.5px; font-weight: 600; }
+.link-btn:hover { background: var(--row-hover); }
+.link-btn:focus-visible { box-shadow: var(--focus-ring); }
+.rates { width: calc(100% - 36px); margin: 4px 18px 0; border-collapse: collapse; table-layout: fixed; font-size: 13px; }
+.rates th:nth-child(1) { width: 16%; } .rates th:nth-child(2) { width: 11%; } .rates th:nth-child(3), .rates th:nth-child(4) { width: 14%; } .rates th:nth-child(5) { width: 27%; }
+.rates th { height: 28px; padding: 0 10px; text-align: left; font: 500 9.5px/1 var(--mono); letter-spacing: .12em; text-transform: uppercase; color: var(--ink-3); border-bottom: 1px solid var(--line-2); font-variant-ligatures: none; }
+.rates td { height: 36px; padding: 0 10px; border-bottom: 1px solid var(--line); }
+.rates tbody tr:last-child td { border-bottom: 0; }
+.num { text-align: right; }
+.mono { font-family: var(--mono); font-variant-numeric: tabular-nums; font-variant-ligatures: none; font-size: 12.5px; }
+.strong { font-weight: 650; }
+.valid { color: var(--ink-2); white-space: nowrap; }
+tr.ended td:not(:last-child) { color: var(--ink-3); }
+.status-chip { display: inline-flex; align-items: center; height: 20px; padding: 0 8px; border-radius: 999px; font: 600 10px/1 var(--mono); letter-spacing: .06em; text-transform: uppercase; font-variant-ligatures: none; background: var(--chip-bg); box-shadow: inset 0 0 0 1px var(--chip-line); color: var(--ink-2); }
+.status-chip.current { background: rgba(47, 122, 90, .1); box-shadow: inset 0 0 0 1px rgba(47, 122, 90, .3); color: var(--ok); }
+.status-chip.scheduled { background: var(--chip-teal-bg); box-shadow: inset 0 0 0 1px var(--chip-teal-line); color: var(--teal-ink); }
+.form-row td { height: auto; padding: 10px 0; background: var(--surface-sunken); }
+.rate-form { display: grid; grid-template-columns: 1fr 90px 1fr 1fr 1.1fr 1.1fr; gap: 10px; padding: 0 10px; }
+.rate-form label { display: grid; gap: 5px; }
+.rate-form label span { font: 500 10px/1 var(--mono); letter-spacing: .12em; text-transform: uppercase; color: var(--ink-3); font-variant-ligatures: none; }
+.rate-form .field { height: 32px; font-size: 13px; }
+.select-label { position: relative; }
+.select { appearance: none; padding-right: 26px; cursor: pointer; }
+.select-chev { position: absolute; right: 10px; bottom: 10px; color: var(--ink-3); pointer-events: none; }
+.form-actions { grid-column: 1 / -1; display: flex; align-items: center; gap: 8px; }
+.form-note { flex: 1; font-size: 12px; color: var(--ink-3); }
+.form-note.warn { color: var(--gold-ink); }
+.no-rates { padding: 2px 18px 6px 56px; font-size: 12.5px; color: var(--ink-3); }
+.state { display: grid; justify-items: center; gap: 8px; padding: 48px 24px 56px; text-align: center; }
+.state h2 { font-size: 17px; }
+.state p { max-width: 460px; font-size: 13.5px; }
+.state .btn { margin-top: 8px; }
+.state-icon { display: grid; place-items: center; width: 44px; height: 44px; margin-bottom: 4px; border-radius: 50%; background: var(--chip-teal-bg); box-shadow: inset 0 0 0 1px var(--chip-teal-line); color: var(--teal-ink); }
+@container rates (max-width: 700px) {
+  .rates th:nth-child(4), .rates td:nth-child(4) { display: none; }
+  .rate-form { grid-template-columns: 1fr 1fr; }
+}
+@media (max-width: 720px) {
+  .toolbar { gap: 8px; }
+  .list-search { flex: 1 1 100%; width: auto; }
+  .list-search .field { height: 44px; font-size: 16px; }
+  .explain { flex-basis: 100%; order: 5; }
+  .unit-head { padding: 6px 12px 2px; }
+  .rates { width: calc(100% - 16px); margin: 4px 8px 0; }
+  .rates th:nth-child(2), .rates td:nth-child(2) { display: none; }
+  .valid { white-space: normal; font-size: 12px; }
+  .rate-form .field { height: 44px; font-size: 16px; }
+  .no-rates { padding-left: 12px; }
 }
 </style>

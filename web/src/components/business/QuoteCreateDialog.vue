@@ -1,10 +1,11 @@
 <!-- SPDX-License-Identifier: AGPL-3.0-only -->
+<!-- Parked (AEON-70, 2026-09-24): quotes and organisations will be ported from Markus's current classic Paimos quote builder; this file is not routed or linked. -->
 <script setup lang="ts">
 import { computed, nextTick, ref } from 'vue'
 import { createQuote, createRelation, type Quote } from '../../lib/business'
 import { useBusiness } from '../../stores/business'
 import { useProjects } from '../../stores/projects'
-import AppIcon from '../AppIcon.vue'
+import AppIcon from './BizIcon.vue'
 import PickerMenu, { type PickOption } from './PickerMenu.vue'
 
 // A quote belongs to one customer organisation and one project. When the two are

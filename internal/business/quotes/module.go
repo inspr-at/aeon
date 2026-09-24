@@ -220,11 +220,21 @@ func (m *Module) list(w http.ResponseWriter, r *http.Request) {
 		respond(w, 0, nil, bad("invalid filter"))
 		return
 	}
-	var out []quoteView
+	out := []quote{}
 	e = m.tx(r.Context(), p, fence.PermViewsProvide, false, func(tx pgx.Tx) error {
-		var err error
-		out, err = listViews(r.Context(), tx, p, project, org)
-		return err
+		rows, err := tx.Query(r.Context(), `SELECT quote_node_id::text,project_node_id::text,customer_org_node_id::text,current_version,state,revision FROM business_quotes WHERE ($1::text='' OR project_node_id=NULLIF($1,'')::uuid) AND ($2::text='' OR customer_org_node_id=NULLIF($2,'')::uuid) ORDER BY created_at DESC,quote_node_id LIMIT 200`, project, org)
+		if err != nil {
+			return err
+		}
+		defer rows.Close()
+		for rows.Next() {
+			var q quote
+			if err := rows.Scan(&q.QuoteNodeID, &q.ProjectNodeID, &q.CustomerOrgNodeID, &q.CurrentVersion, &q.State, &q.Revision); err != nil {
+				return err
+			}
+			out = append(out, q)
+		}
+		return rows.Err()
 	})
 	respond(w, 200, out, e)
 }
@@ -239,8 +249,8 @@ func (m *Module) get(w http.ResponseWriter, r *http.Request) {
 		respond(w, 0, nil, e)
 		return
 	}
-	var out quoteView
-	e = m.tx(r.Context(), p, fence.PermViewsProvide, false, func(tx pgx.Tx) error { var err error; out, err = readView(r.Context(), tx, p, id); return err })
+	var out quote
+	e = m.tx(r.Context(), p, fence.PermViewsProvide, false, func(tx pgx.Tx) error { var err error; out, err = readQuote(r.Context(), tx, id, false); return err })
 	respond(w, 200, out, e)
 }
 
@@ -265,7 +275,6 @@ func (m *Module) create(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	var out quote
-	var view quoteView
 	e = m.tx(r.Context(), p, fence.PermNodesContribute, true, func(tx pgx.Tx) error {
 		var exists bool
 		err := tx.QueryRow(r.Context(), `SELECT EXISTS(SELECT 1 FROM node_relations rel JOIN nodes org ON org.tenant_id=rel.tenant_id AND org.id=rel.source_node_id JOIN node_kinds ok ON ok.tenant_id=org.tenant_id AND ok.id=org.kind_id JOIN nodes prj ON prj.tenant_id=rel.tenant_id AND prj.id=rel.target_node_id JOIN node_kinds pk ON pk.tenant_id=prj.tenant_id AND pk.id=prj.kind_id WHERE rel.type='customer_of' AND rel.source_node_id=$1::uuid AND rel.target_node_id=$2::uuid AND org.deleted_at IS NULL AND prj.deleted_at IS NULL AND ok.slug='organisation' AND pk.slug='project')`, in.CustomerOrgNodeID, in.ProjectNodeID).Scan(&exists)
@@ -294,11 +303,7 @@ func (m *Module) create(w http.ResponseWriter, r *http.Request) {
 		if err != nil {
 			return err
 		}
-		if err = appendEvent(r.Context(), tx, p, out.QuoteNodeID, "quote.created", nil, out); err != nil {
-			return err
-		}
-		view, err = readView(r.Context(), tx, p, out.QuoteNodeID)
-		return err
+		return appendEvent(r.Context(), tx, p, out.QuoteNodeID, "quote.created", nil, out)
 	})
-	respond(w, 201, view, e)
+	respond(w, 201, out, e)
 }

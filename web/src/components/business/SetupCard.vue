@@ -6,7 +6,7 @@ import { confirmAction } from '../../lib/confirm'
 import { toast } from '../../lib/toast'
 import { availability, statusLabel } from './catalog'
 import { businessSections } from './areas'
-import AppIcon, { type IconName } from '../AppIcon.vue'
+import AppIcon, { type BizIconName as IconName } from './BizIcon.vue'
 
 // Workspace admins enable the four business parts here. Enabling pins each
 // plugin to this build with the permissions it declares and adds the node
@@ -16,10 +16,10 @@ const emit = defineEmits<{ done: [] }>()
 const business = useBusiness()
 const busy = ref<string | null>(null)
 const error = ref('')
+// Quotes and organisations come later (ported from classic Paimos); this card
+// offers the parts Aeon ships today.
 const AREAS: { id: AreaId; label: string; icon: IconName; needs: AreaId[] }[] = [
   { id: 'costs', label: 'Rates', icon: 'tag', needs: [] },
-  { id: 'crm', label: 'Organisations', icon: 'building', needs: [] },
-  { id: 'quotes', label: 'Quotes', icon: 'document', needs: ['costs', 'crm'] },
   { id: 'hours', label: 'Hours', icon: 'clock', needs: ['costs'] },
 ]
 const LABEL: Record<AreaId, string> = { costs: 'Rates', crm: 'Organisations', quotes: 'Quotes', hours: 'Hours' }
@@ -30,6 +30,7 @@ const rows = computed(() => AREAS.map(area => {
   return { ...area, summary: section.summary, on: business.open[area.id], state, status: state ? statusLabel(state) : '', missing }
 }))
 const closedIds = computed(() => rows.value.filter(row => !row.on).map(row => row.id))
+const allOn = computed(() => rows.value.every(row => row.on))
 
 async function enable(ids: AreaId[]) {
   const withNeeds = [...new Set(ids.flatMap(id => [...AREAS.find(a => a.id === id)!.needs, id]))]
@@ -37,7 +38,7 @@ async function enable(ids: AreaId[]) {
   try {
     await business.enable(withNeeds)
     toast(ids.length > 1 ? 'Business is enabled for this workspace.' : `${LABEL[ids[0]]} is enabled.`)
-    if (business.allOpen) emit('done')
+    if (allOn.value) emit('done')
   } catch (e) { error.value = e instanceof Error ? e.message : 'Business could not be enabled. Please try again.' }
   finally { busy.value = null }
 }
@@ -65,7 +66,7 @@ void props
       <div>
         <h2 id="setup-title">{{ variant === 'intro' ? 'Set up Business' : 'Business parts' }}</h2>
         <p>{{ variant === 'intro'
-          ? 'Quotes, hours, customers and rates for this workspace. Each part is a first-party plugin: enabling it pins it to this version of Aeon and adds the types it needs. Your projects and tickets stay as they are.'
+          ? 'Hours on tickets, priced by cost unit rates, with an admin’s approval per period. Each part is a first-party plugin: enabling it pins it to this version of Aeon. Your projects and tickets stay as they are.'
           : 'Enable or disable each part for everyone in this workspace. Disabling closes a part; nothing is deleted.' }}</p>
       </div>
     </header>
@@ -85,7 +86,7 @@ void props
     <p v-if="error" class="setup-error" role="alert"><AppIcon name="alert" :size="14" />{{ error }}</p>
     <footer v-if="closedIds.length > 1 && business.admin" class="setup-foot">
       <span class="foot-note">You can disable any part later from this overview.</span>
-      <button type="button" class="btn primary" :disabled="!!busy" @click="enable(closedIds)"><AppIcon name="check" :size="14" />{{ busy === 'all' ? 'Enabling…' : closedIds.length === 4 ? 'Enable Business' : 'Enable the rest' }}</button>
+      <button type="button" class="btn primary" :disabled="!!busy" @click="enable(closedIds)"><AppIcon name="check" :size="14" />{{ busy === 'all' ? 'Enabling…' : closedIds.length === rows.length ? 'Enable Business' : 'Enable the rest' }}</button>
     </footer>
   </section>
 </template>

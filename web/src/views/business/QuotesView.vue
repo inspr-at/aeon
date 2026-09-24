@@ -1,4 +1,5 @@
 <!-- SPDX-License-Identifier: AGPL-3.0-only -->
+<!-- Parked (AEON-70, 2026-09-24): quotes and organisations will be ported from Markus's current classic Paimos quote builder; this file is not routed or linked. -->
 <script setup lang="ts">
 import { computed, nextTick, onBeforeUnmount, onMounted, ref, watch } from 'vue'
 import { useRoute, useRouter } from 'vue-router'
@@ -8,7 +9,7 @@ import { toast } from '../../lib/toast'
 import { absoluteTime, highlight, plural, relativeTime } from '../../lib/work'
 import { compareAmounts, sumAmounts } from '../../components/business/money'
 import { useBusiness } from '../../stores/business'
-import AppIcon from '../../components/AppIcon.vue'
+import AppIcon from '../../components/business/BizIcon.vue'
 import BusinessPage from '../../components/business/BusinessPage.vue'
 import ChoiceFacet from '../../components/business/ChoiceFacet.vue'
 import MoneyText from '../../components/business/MoneyText.vue'

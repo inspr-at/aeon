@@ -1,12 +1,12 @@
 <!-- SPDX-License-Identifier: AGPL-3.0-only -->
 <script lang="ts">
-import type { IconName } from '../AppIcon.vue'
-export interface PickOption { value: string; label: string; hint?: string; badge?: string; icon?: IconName; disabled?: boolean; note?: string }
+import type { BizIconName } from './BizIcon.vue'
+export interface PickOption { value: string; label: string; hint?: string; badge?: string; icon?: BizIconName; disabled?: boolean; note?: string }
 </script>
 <script setup lang="ts">
 import { computed, onBeforeUnmount, ref, useId, watch } from 'vue'
-import AppIcon from '../AppIcon.vue'
-import FloatingPanel from '../work/FloatingPanel.vue'
+import AppIcon from './BizIcon.vue'
+import FloatingPanel from './BusinessPopover.vue'
 
 // A searchable choice popover: type to filter (or search the server), arrows to
 // move, Enter to choose. An optional last row creates what was typed.

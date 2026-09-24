@@ -45,7 +45,7 @@ func (m *Module) issue(w http.ResponseWriter, r *http.Request) {
 		respond(w, 0, nil, e)
 		return
 	}
-	var out quoteView
+	var out quote
 	e = m.tx(r.Context(), p, fence.PermStepsApply, true, func(tx pgx.Tx) error {
 		q, err := readQuote(r.Context(), tx, id, true)
 		if err != nil {
@@ -88,7 +88,7 @@ func (m *Module) issue(w http.ResponseWriter, r *http.Request) {
 		if err != nil {
 			return err
 		}
-		out, err = readView(r.Context(), tx, p, id)
+		out, err = readQuote(r.Context(), tx, id, false)
 		return err
 	})
 	respond(w, 200, out, e)

@@ -194,24 +194,9 @@ func TestQuoteFlowAndGates(t *testing.T) {
 	if status != 409 {
 		t.Fatalf("stale revision: %d", status)
 	}
-	status, q = call("admin", "GET", "/api/quotes/"+quoteID, "")
-	current, _ := q["current"].(map[string]any)
-	if status != 200 || q["key"] == "" || q["title"] != "Offer" || current == nil || current["total"] != json.Number("71.9640") || current["line_count"] != json.Number("1") || q["issued_at"] != nil || q["viewer_can_accept"] != false {
-		t.Fatalf("draft summary %d %v", status, q)
-	}
 	status, q = call("admin", "POST", "/api/quotes/"+quoteID+"/versions/1/issue", "")
-	if status != 200 || q["state"] != "issued" || q["issued_at"] == nil {
+	if status != 200 || q["state"] != "issued" {
 		t.Fatalf("issue %d %v", status, q)
-	}
-	// The acceptance hint follows the contact binding; it is display only.
-	if _, q = call("customer", "GET", "/api/quotes/"+quoteID, ""); q["viewer_can_accept"] != true {
-		t.Fatalf("bound customer hint %v", q)
-	}
-	if _, q = call("admin", "GET", "/api/quotes/"+quoteID, ""); q["viewer_can_accept"] != false {
-		t.Fatalf("unbound admin hint %v", q)
-	}
-	if _, v = call("admin", "GET", "/api/quotes/"+quoteID+"/versions/1", ""); v["issue"] == nil || v["acceptance"] != nil {
-		t.Fatalf("issued version decisions %v", v)
 	}
 	status, _ = call("agent", "POST", "/api/quotes/"+quoteID+"/versions/1/accept", fmt.Sprintf(`{"expected_content_sha256":%q}`, digest))
 	if status != 403 {
@@ -228,56 +213,6 @@ func TestQuoteFlowAndGates(t *testing.T) {
 	status, _ = call("customer", "POST", "/api/quotes/"+quoteID+"/versions/1/accept", fmt.Sprintf(`{"expected_content_sha256":%q}`, digest))
 	if status != 201 {
 		t.Fatalf("replay %d", status)
-	}
-	listed := func() []map[string]any {
-		t.Helper()
-		req := httptest.NewRequest("GET", "/api/quotes", nil)
-		req = req.WithContext(tenant.WithPrincipal(req.Context(), as("admin")))
-		rec := httptest.NewRecorder()
-		mux.ServeHTTP(rec, req)
-		var items []map[string]any
-		decoder := json.NewDecoder(strings.NewReader(rec.Body.String()))
-		decoder.UseNumber()
-		if rec.Code != 200 || decoder.Decode(&items) != nil {
-			t.Fatalf("list %d %s", rec.Code, rec.Body.String())
-		}
-		return items
-	}
-	if items := listed(); len(items) != 1 || items[0]["state"] != "accepted" || items[0]["accepted_at"] == nil || items[0]["viewer_can_accept"] != false {
-		t.Fatalf("accepted list %v", items)
-	}
-	req := httptest.NewRequest("GET", "/api/quotes/"+quoteID+"/versions", nil)
-	req = req.WithContext(tenant.WithPrincipal(req.Context(), as("admin")))
-	rec := httptest.NewRecorder()
-	mux.ServeHTTP(rec, req)
-	var versions []map[string]any
-	if err := json.Unmarshal(rec.Body.Bytes(), &versions); err != nil || len(versions) != 1 {
-		t.Fatalf("versions %s", rec.Body.String())
-	}
-	acceptance, _ := versions[0]["acceptance"].(map[string]any)
-	if acceptance == nil || acceptance["customer_principal_id"] != ids["customer"] || acceptance["accepted_content_sha256"] != digest || versions[0]["issue"] == nil {
-		t.Fatalf("version decisions %v", versions[0])
-	}
-	// A deleted quote node leaves the list; its versions stay readable.
-	e = db.InTenant(ctx, database.App, tenantID, func(tx pgx.Tx) error {
-		_, err := tx.Exec(ctx, `UPDATE nodes SET deleted_at=now() WHERE id=$1::uuid`, quoteID)
-		return err
-	})
-	if e != nil {
-		t.Fatal(e)
-	}
-	if items := listed(); len(items) != 0 {
-		t.Fatalf("deleted quote listed %v", items)
-	}
-	if status, _ = call("admin", "GET", "/api/quotes/"+quoteID+"/versions/1", ""); status != 200 {
-		t.Fatalf("deleted quote version %d", status)
-	}
-	e = db.InTenant(ctx, database.App, tenantID, func(tx pgx.Tx) error {
-		_, err := tx.Exec(ctx, `UPDATE nodes SET deleted_at=NULL WHERE id=$1::uuid`, quoteID)
-		return err
-	})
-	if e != nil {
-		t.Fatal(e)
 	}
 	var count int
 	e = db.InTenant(ctx, database.App, tenantID, func(tx pgx.Tx) error {

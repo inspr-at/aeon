@@ -4,7 +4,7 @@ import { computed, onMounted } from 'vue'
 import { useRoute } from 'vue-router'
 import { useBusiness, type AreaId } from '../../stores/business'
 import { useSession } from '../../stores/session'
-import AppIcon, { type IconName } from '../AppIcon.vue'
+import AppIcon, { type BizIconName as IconName } from './BizIcon.vue'
 
 // The frame every Business page shares: eyebrow, title, one summary line, the
 // section tabs, and the closed state when the page's plugin is not enabled.
@@ -14,9 +14,7 @@ const session = useSession()
 const route = useRoute()
 const tabs: { to: string; label: string; icon: IconName; area?: AreaId }[] = [
   { to: '/business', label: 'Overview', icon: 'briefcase' },
-  { to: '/business/quotes', label: 'Quotes', icon: 'document', area: 'quotes' },
   { to: '/business/hours', label: 'Hours', icon: 'clock', area: 'hours' },
-  { to: '/business/organisations', label: 'Organisations', icon: 'building', area: 'crm' },
   { to: '/business/rates', label: 'Rates', icon: 'tag', area: 'costs' },
 ]
 const shown = computed(() => tabs.filter(tab => !tab.area || business.open[tab.area]))

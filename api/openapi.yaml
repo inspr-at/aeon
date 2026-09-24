@@ -1394,22 +1394,11 @@ paths:
       responses:
         '201': {description: Binding, content: {application/json: {schema: {$ref: '#/components/schemas/CRMContactPrincipal'}}}}
         '409': {$ref: '#/components/responses/Error'}
-    get:
-      operationId: listCRMContactPrincipals
-      summary: List the principals bound to a contact node
-      description: Admin or member person. A binding shown here grants nothing; acceptance rechecks it. Fails closed while business_crm is disabled or lacks views.provide.
-      security: [{session: []}]
-      parameters: [{name: contactId, in: path, required: true, schema: {type: string, format: uuid}}]
-      responses:
-        '200': {description: Bindings, content: {application/json: {schema: {type: array, items: {$ref: '#/components/schemas/CRMContactBinding'}}}}}
-        '403': {$ref: '#/components/responses/Error'}
-        '404': {$ref: '#/components/responses/Error'}
-        '409': {$ref: '#/components/responses/Error'}
   /business/principals:
     get:
       operationId: listBusinessPrincipals
       summary: Name the tenant's people and agents for business screens
-      description: Admin or member person, while at least one business plugin is enabled at its compiled digest. A read model of principals; grants nothing.
+      description: Admin or member person, while at least one business plugin is enabled at its compiled digest. A read model of principals (who logged time, whose period waits for approval); grants nothing.
       security: [{session: []}]
       responses:
         '200': {description: Principals, people first, content: {application/json: {schema: {type: array, items: {$ref: '#/components/schemas/BusinessPrincipal'}}}}}
@@ -1935,10 +1924,6 @@ components:
       allOf:
         - {$ref: '#/components/schemas/CRMContactPrincipalWrite'}
         - {type: object, required: [contact_node_id, bound_by_principal_id, bound_at], properties: {contact_node_id: {type: string, format: uuid}, bound_by_principal_id: {type: string, format: uuid}, bound_at: {type: string, format: date-time}}}
-    CRMContactBinding:
-      allOf:
-        - {$ref: '#/components/schemas/CRMContactPrincipal'}
-        - {type: object, required: [principal_name, principal_kind], properties: {principal_name: {type: string}, principal_kind: {type: string, enum: [person, agent]}}}
     BusinessPrincipal:
       type: object
       required: [id, kind, name, roles]
@@ -1965,28 +1950,6 @@ components:
         current_version: {type: integer, minimum: 0}
         state: {type: string, enum: [draft, issued, accepted, void]}
         revision: {type: integer, minimum: 1}
-        key: {type: string, description: R1 quote node key}
-        title: {type: string, description: R1 quote node title}
-        created_at: {type: string, format: date-time}
-        updated_at: {type: string, format: date-time, description: Latest of node edit, version, issue and acceptance}
-        current: {oneOf: [{$ref: '#/components/schemas/QuoteVersionSummary'}, {type: 'null'}], description: Current frozen version without lines; null before the first version}
-        issued_at: {type: [string, 'null'], format: date-time, description: Issue time of the current version}
-        accepted_at: {type: [string, 'null'], format: date-time, description: Acceptance time of the current version}
-        viewer_can_accept: {type: boolean, description: Display hint that the caller is a person bound to the issued current version's recipient; accept rechecks it}
-    QuoteVersionSummary:
-      type: object
-      required: [version, title, currency, recipient_contact_node_id, subtotal, tax_total, total, content_sha256, line_count, created_at]
-      properties:
-        version: {type: integer, minimum: 1}
-        title: {type: string}
-        currency: {type: string, pattern: '^[A-Z]{3}$'}
-        recipient_contact_node_id: {type: string, format: uuid}
-        subtotal: {type: number, minimum: 0}
-        tax_total: {type: number, minimum: 0}
-        total: {type: number, minimum: 0}
-        content_sha256: {type: string, pattern: '^[0-9a-f]{64}$'}
-        line_count: {type: integer, minimum: 0}
-        created_at: {type: string, format: date-time}
     QuoteLineWrite:
       type: object
       additionalProperties: false
@@ -2029,16 +1992,6 @@ components:
         content_sha256: {type: string, pattern: '^[0-9a-f]{64}$'}
         created_by_principal_id: {type: string, format: uuid}
         created_at: {type: string, format: date-time}
-        issue:
-          description: Present on read when this version was issued
-          type: object
-          required: [issued_by_principal_id, issued_at, event_id]
-          properties: {issued_by_principal_id: {type: string, format: uuid}, issued_at: {type: string, format: date-time}, event_id: {type: integer, minimum: 1}}
-        acceptance:
-          description: Present on read when the customer accepted this version
-          type: object
-          required: [customer_principal_id, accepted_content_sha256, accepted_at, event_id]
-          properties: {customer_principal_id: {type: string, format: uuid}, accepted_content_sha256: {type: string, pattern: '^[0-9a-f]{64}$'}, accepted_at: {type: string, format: date-time}, event_id: {type: integer, minimum: 1}}
     QuoteAcceptanceWrite:
       type: object
       additionalProperties: false

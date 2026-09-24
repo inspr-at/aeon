@@ -1,11 +1,12 @@
 <!-- SPDX-License-Identifier: AGPL-3.0-only -->
 <script setup lang="ts">
 import { nextTick, onBeforeUnmount, onMounted, ref } from 'vue'
-// A popover anchored to a trigger. It is teleported to <body> so table cells
+// A popover anchored to a trigger, like work/FloatingPanel, that can also render
+// inside a modal dialog (`to`), where anything outside is inert. It is teleported so table cells
 // and sticky toolbars never clip it; it flips above the trigger near the
 // bottom edge, closes on Escape, outside clicks and page scroll, and hands
 // focus back to the trigger when it closes by keyboard.
-const props = withDefaults(defineProps<{ anchor: HTMLElement | null; align?: 'start' | 'end'; width?: number; label: string }>(), { align: 'start', width: 240 })
+const props = withDefaults(defineProps<{ anchor: HTMLElement | null; align?: 'start' | 'end'; width?: number; label: string; to?: string }>(), { align: 'start', width: 240, to: 'body' })
 const emit = defineEmits<{ close: [restoreFocus: boolean] }>()
 const panel = ref<HTMLElement>()
 const x = ref(-9999)
@@ -64,7 +65,7 @@ defineExpose({ place })
 </script>
 
 <template>
-  <Teleport to="body">
+  <Teleport :to="to">
     <div ref="panel" class="floating pop" :class="{ above }" role="dialog" :aria-label="label" :style="{ transform: `translate(${x}px, ${y}px)`, width: `${Math.min(width, 9999)}px`, maxHeight: `${maxHeight}px` }" @keydown="keydown">
       <slot />
     </div>

@@ -1,4 +1,5 @@
 <!-- SPDX-License-Identifier: AGPL-3.0-only -->
+<!-- Parked (AEON-70, 2026-09-24): quotes and organisations will be ported from Markus's current classic Paimos quote builder; this file is not routed or linked. -->
 <script setup lang="ts">
 import { computed, onMounted, ref, watch } from 'vue'
 import { useRoute, useRouter } from 'vue-router'
@@ -7,7 +8,7 @@ import { useBusiness } from '../../stores/business'
 import { useProjects } from '../../stores/projects'
 import { useSession } from '../../stores/session'
 import { formatAmount, lineTax, ratePercent, sumAmounts } from '../../components/business/money'
-import AppIcon from '../../components/AppIcon.vue'
+import AppIcon from '../../components/business/BizIcon.vue'
 import MarkdownBody from '../../components/MarkdownBody.vue'
 
 // The offer as the customer reads it: one frozen version on a sheet of paper,

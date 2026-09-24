@@ -1,11 +1,12 @@
 <!-- SPDX-License-Identifier: AGPL-3.0-only -->
+<!-- Parked (AEON-70, 2026-09-24): quotes and organisations will be ported from Markus's current classic Paimos quote builder; this file is not routed or linked. -->
 <script setup lang="ts">
 import { computed, nextTick, ref } from 'vue'
 import type { QuoteVersion, Unit } from '../../lib/business'
 import { blankLine, isBlank, moveLine, type Draft, type LineResult } from '../../lib/quoteDraft'
 import { formatAmount, ratePercent } from './money'
 import { useBusiness } from '../../stores/business'
-import AppIcon from '../AppIcon.vue'
+import AppIcon from './BizIcon.vue'
 
 // Line items like a small spreadsheet: Tab to the next cell, Enter to the same
 // cell in the next line (a new line at the end), Shift+Enter back up, Alt+arrows
@@ -69,7 +70,8 @@ function keydown(event: KeyboardEvent) {
   if (event.key === 'Enter' && !event.altKey) {
     event.preventDefault()
     if (row < lines.length - 1) focusCell(row + 1, col)
-    else if (!isBlank(lines[row])) { addAfter(row); focusCell(row + 1, col === 'tax' || col === 'unit' || col === 'cost' ? 'description' : col) }
+    // A new line starts with what it offers.
+    else if (!isBlank(lines[row])) { addAfter(row); focusCell(row + 1, 'description') }
     return
   }
   if (event.altKey && (event.key === 'ArrowUp' || event.key === 'ArrowDown')) { event.preventDefault(); move(row, row + (event.key === 'ArrowUp' ? -1 : 1), col); return }

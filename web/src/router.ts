@@ -15,18 +15,15 @@ export const router = createRouter({
     { path: '/workspace', component: () => import('./views/HomeView.vue'), meta: { title: 'Workspace', legacySearch: true, fill: true } },
     { path: '/projects/:projectId', component: () => import('./views/JourneyView.vue'), meta: { title: 'Journey', fill: true } },
     { path: '/projects/:projectId/journey/:stage', component: () => import('./views/JourneyView.vue'), meta: { title: 'Journey', fill: true } },
-    // Business: an overview and four parts. Quotes and organisations keep one record for
-    // the list and its open item, so opening the panel never remounts the list.
+    // Business: an overview, hours and rates. Quotes and organisations are parked
+    // (their views stay in views/business, unrouted) until they are ported from classic Paimos.
     { path: '/business', component: () => import('./views/business/BusinessHome.vue'), meta: { title: 'Business' } },
-    { path: '/business/quotes/:quoteKey/document', component: () => import('./views/business/QuoteDocumentView.vue'), meta: { title: 'Quote' } },
-    { path: '/business/quotes/:quoteKey?', component: () => import('./views/business/QuotesView.vue'), meta: { title: 'Quotes' } },
     { path: '/business/hours', component: () => import('./views/business/HoursView.vue'), meta: { title: 'Hours' } },
-    { path: '/business/organisations/:orgKey?', component: () => import('./views/business/CRMView.vue'), meta: { title: 'Organisations' } },
     { path: '/business/rates', component: () => import('./views/business/CostUnitsView.vue'), meta: { title: 'Rates' } },
-    { path: '/business/crm', redirect: '/business/organisations' },
     { path: '/business/costs', redirect: '/business/rates' },
     { path: '/business/cost-units', redirect: '/business/rates' },
-    { path: '/crm', redirect: '/business/organisations' },
+    { path: '/business/:parked(quotes|organisations|crm)/:rest(.*)*', redirect: '/business' },
+    { path: '/crm', redirect: '/business' },
     // One record for the overview and its open session, so opening the panel never remounts the page.
     { path: '/agents/:sessionId?', component: () => import('./views/AgentsView.vue'), meta: { title: 'Agents', fill: false } },
     // Earlier separate pages now live inside Agents.

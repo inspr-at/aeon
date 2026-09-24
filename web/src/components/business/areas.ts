@@ -64,12 +64,10 @@ export const businessAreas: readonly BusinessArea[] = [
 
 export const businessSections = businessAreas.filter((area): area is BusinessArea & { pluginId: string } => area.pluginId !== null)
 
-// View files for the coordinator. Sibling packages own every view except BusinessHome.
+// Routed business pages. Quotes and organisations are parked until they are ported.
 export const businessViews = {
   overview: { path: '/business', title: 'Business', view: 'web/src/views/business/BusinessHome.vue' },
   costs: { path: '/business/rates', title: 'Rates', view: 'web/src/views/business/CostUnitsView.vue' },
-  crm: { path: '/business/organisations', title: 'Organisations', view: 'web/src/views/business/CRMView.vue' },
-  quotes: { path: '/business/quotes', title: 'Quotes', view: 'web/src/views/business/QuotesView.vue' },
   hours: { path: '/business/hours', title: 'Hours', view: 'web/src/views/business/HoursView.vue' },
 } as const
 

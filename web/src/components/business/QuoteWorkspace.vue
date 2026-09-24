@@ -1,4 +1,5 @@
 <!-- SPDX-License-Identifier: AGPL-3.0-only -->
+<!-- Parked (AEON-70, 2026-09-24): quotes and organisations will be ported from Markus's current classic Paimos quote builder; this file is not routed or linked. -->
 <script setup lang="ts">
 import { computed, nextTick, onBeforeUnmount, ref, watch } from 'vue'
 import { useRouter } from 'vue-router'
@@ -12,7 +13,7 @@ import type { SaveResult } from '../../lib/useTicket'
 import { diffAmounts, formatAmount, isZero, lineTax, ratePercent, sumAmounts } from './money'
 import { useBusiness } from '../../stores/business'
 import { useProjects } from '../../stores/projects'
-import AppIcon from '../AppIcon.vue'
+import AppIcon from './BizIcon.vue'
 import InlineTitle from '../work/InlineTitle.vue'
 import MarkdownBody from '../MarkdownBody.vue'
 import MarkdownEditor from '../work/MarkdownEditor.vue'

@@ -340,19 +340,6 @@ func (f fixture) setInstall(t *testing.T, enabled bool, digest string, perms []s
 	}
 }
 
-func (f fixture) setInstallFor(t *testing.T, tenantID string, enabled bool, digest string, perms []string) {
-	t.Helper()
-	err := db.InTenant(t.Context(), f.db.App, tenantID, func(tx pgx.Tx) error {
-		_, err := tx.Exec(t.Context(), `UPDATE plugin_installations
-			SET enabled = $3, manifest_digest_sha256 = $4, permissions = $5
-			WHERE tenant_id = $1 AND plugin_id = $2`, tenantID, ID, enabled, digest, perms)
-		return err
-	})
-	if err != nil {
-		t.Fatal(err)
-	}
-}
-
 func insertPrincipal(t *testing.T, tx pgx.Tx, tenantID, kind, name string, roles []string) (string, error) {
 	t.Helper()
 	if roles == nil {

@@ -14,6 +14,7 @@ import { initials } from '../lib/work'
 import { fatal } from '../lib/fatal'
 import { accountEmail, accountName } from '../lib/api'
 import AppIcon from './AppIcon.vue'
+import BizIcon from './business/BizIcon.vue'
 import CommandPalette from './CommandPalette.vue'
 import VersionDisplay from './VersionDisplay.vue'
 
@@ -48,12 +49,7 @@ const pageTitle = computed(() => !onProjects.value && !projectKey.value && route
 const agentsPage = computed(() => route.path === '/agents' || route.path.startsWith('/agents/'))
 // Business also sits beside Projects: Business / Quotes / QUO-3.
 const businessPage = computed(() => route.path === '/business' || route.path.startsWith('/business/'))
-const businessCrumbs = computed(() => {
-  if (!businessPage.value || route.path === '/business') return []
-  const area = route.path.startsWith('/business/quotes') ? { label: 'Quotes', to: '/business/quotes' } : { label: String(route.meta.title ?? ''), to: route.path }
-  const key = typeof route.params.quoteKey === 'string' && (route.query.view === 'full' || route.path.endsWith('/document')) ? route.params.quoteKey.toUpperCase() : ''
-  return key ? [{ label: area.label, to: area.to }, { label: key, to: '' }] : [{ label: area.label, to: '' }]
-})
+const businessCrumbs = computed(() => businessPage.value && route.path !== '/business' ? [{ label: String(route.meta.title ?? ''), to: '' }] : [])
 
 async function toggleMenu() {
   open.value = !open.value
@@ -150,7 +146,7 @@ onBeforeUnmount(() => { document.removeEventListener('pointerdown', outside); wi
         <template v-for="crumb in businessCrumbs" :key="crumb.label">
           <span class="sep" aria-hidden="true">/</span>
           <RouterLink v-if="crumb.to" class="crumb" :to="crumb.to">{{ crumb.label }}</RouterLink>
-          <span v-else class="crumb current" :class="{ 'mono-crumb': /^[A-Z]+-\d+$/.test(crumb.label) }" aria-current="page">{{ crumb.label }}</span>
+          <span v-else class="crumb current" aria-current="page">{{ crumb.label }}</span>
         </template>
       </template>
       <template v-else-if="pageTitle">
@@ -160,7 +156,7 @@ onBeforeUnmount(() => { document.removeEventListener('pointerdown', outside); wi
     </nav>
     <span class="spacer" />
     <RouterLink v-if="session.identity && business.anyOpen" class="agents-link business-link" to="/business" :aria-current="businessPage ? 'page' : undefined" aria-label="Business">
-      <AppIcon name="briefcase" :size="16" /><span class="agents-text">Business</span>
+      <BizIcon name="briefcase" :size="16" /><span class="agents-text">Business</span>
     </RouterLink>
     <RouterLink
       v-if="session.identity" class="agents-link" to="/agents" :aria-current="agentsPage ? 'page' : undefined"

@@ -1,9 +1,9 @@
 // SPDX-License-Identifier: AGPL-3.0-only
 
 // Package directory serves the tenant's people and agents by name for the
-// business screens: who logged time, whose period waits for approval, who is
-// bound to a contact, who issued or accepted an offer. It is a read model of
-// principals (id, kind, name, roles) and grants nothing.
+// business screens: whose week of hours is shown, who logged time, whose period
+// waits for approval and who approved it. It is a read model of principals
+// (id, kind, name, roles) and grants nothing.
 //
 // Route, mounted by the coordinator next to the business plugin modules:
 //

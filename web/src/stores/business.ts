@@ -61,7 +61,8 @@ export const useBusiness = defineStore('business', () => {
     return out
   })
   const anyOpen = computed(() => Object.values(open.value).some(Boolean))
-  const allOpen = computed(() => Object.values(open.value).every(Boolean))
+  // The parts offered today; quotes and organisations are parked until they are ported.
+  const allOpen = computed(() => open.value.costs && open.value.hours)
   let pluginRequest: Promise<void> | null = null
   function loadPlugins(force = false): Promise<void> {
     if (pluginRequest) return pluginRequest
