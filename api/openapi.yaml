@@ -1449,6 +1449,15 @@ paths:
       responses:
         '201': {description: Binding, content: {application/json: {schema: {$ref: '#/components/schemas/CRMContactPrincipal'}}}}
         '409': {$ref: '#/components/responses/Error'}
+  /business/principals:
+    get:
+      operationId: listBusinessPrincipals
+      summary: Name the tenant's people and agents for business screens
+      description: Admin or member person, while at least one business plugin is enabled at its compiled digest. A read model of principals (who logged time, whose period waits for approval); grants nothing.
+      security: [{session: []}]
+      responses:
+        '200': {description: Principals, people first, content: {application/json: {schema: {type: array, items: {$ref: '#/components/schemas/BusinessPrincipal'}}}}}
+        '403': {$ref: '#/components/responses/Error'}
   /quotes:
     get:
       operationId: listQuotes
@@ -1970,6 +1979,14 @@ components:
       allOf:
         - {$ref: '#/components/schemas/CRMContactPrincipalWrite'}
         - {type: object, required: [contact_node_id, bound_by_principal_id, bound_at], properties: {contact_node_id: {type: string, format: uuid}, bound_by_principal_id: {type: string, format: uuid}, bound_at: {type: string, format: date-time}}}
+    BusinessPrincipal:
+      type: object
+      required: [id, kind, name, roles]
+      properties:
+        id: {type: string, format: uuid}
+        kind: {type: string, enum: [person, agent]}
+        name: {type: string}
+        roles: {type: array, items: {type: string}}
     QuoteCreate:
       type: object
       additionalProperties: false

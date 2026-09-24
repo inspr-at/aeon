@@ -1,125 +1,183 @@
 // SPDX-License-Identifier: AGPL-3.0-only
-// Coordinator: npx playwright test -c playwright.ui.config.ts hours.spec.ts
-// Mounts the owned view through Vite; production router is coordinator-owned.
+// Hours: the week grid, fast entry, people and agents, period review and approval.
 import { test, expect, type Page } from '@playwright/test'
+import { fixtures, me, mockWork, watchErrors } from './work-fixtures'
+import { businessData, mira, mockBusiness, nova, WEEK39, type BusinessMockOptions } from './business-fixtures'
 
 test.use({ timezoneId: 'Europe/Vienna' })
 
-const person = '10000000-0000-4000-8000-000000000001'
-const periodID = '20000000-0000-4000-8000-000000000001'
-const root = '30000000-0000-4000-8000-000000000001'
-const cost = '40000000-0000-4000-8000-000000000001'
-const digest = 'a'.repeat(64)
-const stamp = '2026-09-23T12:00:00Z'
-async function setup(page: Page, options: { approved?: boolean; member?: boolean; disabled?: boolean; empty?: boolean } = {}) {
-  const period = { id: periodID, principal_id: person, starts_at: '2026-09-01T00:00:00Z', ends_at: '2026-10-01T00:00:00Z', state: options.approved ? 'approved' : 'open', revision: 4, approval: options.approved ? { approved_by_principal_id: person, total_seconds: 3600 } : null }
-  const state = { period, conflict: false, disabled: options.disabled || false, entries: options.empty ? [] : [{ id: 'entry', principal_id: person, node_id: root, source: 'manual', started_at: stamp, duration_seconds: 3600, rate_amount: '99999999999999.9999', amount: '99999999999999.9999', currency: 'EUR', note: 'Recorded work' }] }
-  const calls: { path: string; method: string; body: any }[] = []
-  await page.addInitScript(() => { class MockEventSource { addEventListener() {} close() {} }; Object.assign(window, { EventSource: MockEventSource }) })
-  await page.route('**/api/**', async route => {
-    const url = new URL(route.request().url()), path = url.pathname, method = route.request().method(), body = route.request().postDataJSON()
-    calls.push({ path: path + url.search, method, body })
-    if (path === '/api/me') return route.fulfill({ json: { principal: { id: person, kind: 'person', name: 'Markus Barta', roles: [options.member ? 'member' : 'admin'] }, tenant: { id: 'tenant', name: 'INSPR' } } })
-    if (path === '/api/version') return route.fulfill({ json: { version: '260923180522.0.0', scheme: 'inspr-calendar-v2' } })
-    if (state.disabled && (path.includes('time-') || path.includes('time-totals'))) return route.fulfill({ status: 403, json: { error: 'Required business plugin is disabled' } })
-    if (path === '/api/time-periods') {
-      if (method === 'POST') Object.assign(state.period, body, { state: 'open', revision: 1 })
-      return route.fulfill({ status: method === 'POST' ? 201 : 200, json: method === 'POST' ? state.period : [state.period] })
-    }
-    if (path.endsWith('/approve')) {
-      if (state.conflict) return route.fulfill({ status: 409, json: { error: 'Period changed; reload before approving' } })
-      Object.assign(state.period, { state: 'approved', approval: { approved_by_principal_id: person, total_seconds: 3600 } })
-      return route.fulfill({ json: state.period })
-    }
-    if (path === `/api/time-periods/${periodID}`) return route.fulfill({ json: state.period, headers: { 'X-Entries-SHA256': digest } })
-    if (path === '/api/time-entries') {
-      if (method === 'POST') { state.period.revision++; return route.fulfill({ status: 201, json: { id: 'new-entry', ...body } }) }
-      // Deliberately return JSON number tokens beyond Number's exact range.
-      const raw = JSON.stringify(state.entries).replace(/"(99999999999999\.9999)"/g, '$1')
-      return route.fulfill({ contentType: 'application/json', body: raw })
-    }
-    if (path.endsWith('/time-totals')) return route.fulfill({ contentType: 'application/json', body: '{"duration_seconds":3600,"amounts":[{"currency":"EUR","amount":99999999999999.9999},{"currency":"USD","amount":0.0001}]}' })
-    if (path === '/api/kinds') return route.fulfill({ json: { items: [{ id: 'cost-kind', slug: 'cost_unit', label: 'Cost unit' }] } })
-    if (path === '/api/nodes') return route.fulfill({ json: { items: [{ id: root, key: 'PRJ-1', title: 'Delivery', kind_id: 'project' }, { id: cost, key: 'CU-1', title: 'Hourly work', kind_id: 'cost-kind' }], next_cursor: null } })
-    if (path === '/api/views' || path === '/api/nodes/tree') return route.fulfill({ json: { items: [], next_cursor: null } })
-    return route.fulfill({ status: 404, json: { error: 'Unmocked route' } })
-  })
-  return { state, calls }
+async function setup(page: Page, options: BusinessMockOptions = {}) {
+  await mockWork(page, fixtures())
+  const data = businessData(options)
+  const calls = await mockBusiness(page, data, options)
+  return { data, calls }
 }
-async function mount(page: Page) {
-  await page.goto('/')
-  await page.evaluate(async () => {
-    const routerPath = '/src/router.ts', viewPath = '/src/views/business/HoursView.vue'
-    const { router } = await import(routerPath), { default: component } = await import(viewPath)
-    router.addRoute({ path: '/business/hours', component })
-    await router.push('/business/hours')
-  })
-  await expect(page.getByRole('heading', { name: 'Hours', exact: true })).toBeVisible()
+async function openWeek(page: Page, path = '/business/hours') {
+  await page.goto(path)
+  await expect(page.getByRole('heading', { name: 'Hours', level: 1 })).toBeVisible()
+  await expect(page.getByRole('table', { name: 'Hours per ticket and day' })).toBeVisible()
 }
+const grid = (page: Page) => page.getByRole('table', { name: 'Hours per ticket and day' })
+const form = (page: Page) => page.getByRole('form', { name: 'Log time' })
 
-test('approval pins reviewed revision/digest and seals the period', async ({ page }) => {
-  const { calls } = await setup(page); await mount(page)
-  await expect(page.getByRole('cell', { name: 'EUR 99999999999999.9999', exact: true })).toHaveCount(2)
-  const approve = page.getByRole('button', { name: 'Approve and close period' })
-  await expect(approve).toBeDisabled()
-  await page.getByRole('checkbox', { name: 'I have reviewed these entries' }).check()
-  await approve.click()
-  await expect(page.getByRole('heading', { name: 'Approved period', exact: true })).toBeVisible()
-  const call = calls.find(c => c.path.endsWith('/approve'))!
-  expect(call.body).toEqual({ expected_revision: 4, expected_entries_sha256: digest })
-  await expect(page.getByText('Record time', { exact: true })).toHaveCount(0)
+test('the week grid sums per ticket and day with exact amounts', async ({ page }) => {
+  const errors = watchErrors(page)
+  await setup(page)
+  await openWeek(page)
+  await expect(page.getByText('Week 39 · 21–27 Sep 2026 · 8h 30m logged')).toBeVisible()
+  const rows = grid(page).locator('tbody tr')
+  await expect(rows).toHaveCount(3)
+  await expect(rows.first()).toContainText('PHAROS-11')
+  await expect(rows.first().locator('td')).toHaveText(['2:00', '3:30', '·', '·', '·', '·', '·', '5:30'])
+  await expect(grid(page).locator('tfoot td')).toHaveText(['2:00', '3:30', '1:30', '1:30', '·', '·', '·', '8:30'])
+  await expect(grid(page).locator('thead th.today')).toContainText('Thu')
+  // 5.5h × 95 + 1.5h × 95 + 1.5h × 85, exactly.
+  await expect(page.locator('.week-foot')).toContainText('792.50 EUR')
+  await expect(page.locator('.period-chip')).toHaveText('21–27 Sep 2026')
+  const entries = page.getByRole('region', { name: 'Entries' })
+  await expect(entries.getByText('Thu 24')).toBeVisible()
+  await expect(entries.locator('.entry').first()).toContainText('08:00–09:30')
+  await expect(entries.locator('.entry').first()).toContainText('127.50')
+  expect(errors).toEqual([])
 })
-test('stale approval preserves the open period and requires renewed review', async ({ page }) => {
-  const { state } = await setup(page); state.conflict = true; await mount(page)
-  await page.getByRole('checkbox', { name: 'I have reviewed these entries' }).check()
-  await page.getByRole('button', { name: 'Approve and close period' }).click()
-  await expect(page.getByRole('alert')).toContainText('Period changed')
-  await expect(page.getByRole('heading', { name: 'Open period', exact: true })).toBeVisible()
-  await expect(page.getByRole('button', { name: 'Approve and close period' })).toBeDisabled()
+
+test('logging time: ticket, duration like 1h30, Enter', async ({ page }) => {
+  const { data, calls } = await setup(page)
+  await openWeek(page)
+  await form(page).getByRole('combobox', { name: 'Cost unit' }).selectOption({ label: 'Development' })
+  await form(page).getByRole('button', { name: /^Ticket:/ }).click()
+  await page.getByRole('combobox', { name: 'Ticket' }).fill('oracle')
+  await expect(page.getByRole('option', { name: /PHAROS-12/ })).toBeVisible()
+  await page.keyboard.press('Enter')
+  await expect(form(page).getByRole('textbox', { name: 'Duration' })).toBeFocused()
+  await page.keyboard.type('1h30')
+  await expect(form(page)).toContainText('1h 30m · 142.50 EUR')
+  await page.keyboard.press('Enter')
+  await expect(page.getByText('Logged 1h 30m on PHAROS-12.')).toBeVisible()
+  const post = calls.find(c => c.path === '/api/time-entries' && c.method === 'POST')!
+  // Thursday, after the day's last entry (08:00–09:30), in the open week period.
+  expect(post.body).toEqual({
+    period_id: 'p-me-39', cost_unit_node_id: 'cu-dev', currency: 'EUR', principal_id: me.id, node_id: 'n-2',
+    started_at: '2026-09-24T07:30:00.000Z', ended_at: '2026-09-24T09:00:00.000Z', note: '', source: 'manual',
+  })
+  await expect(grid(page).locator('tfoot td').last()).toHaveText('10:00')
+  // The ticket, cost unit and day stay; the duration is cleared for the next entry.
+  await expect(form(page).getByRole('textbox', { name: 'Duration' })).toHaveValue('')
+  await expect(form(page).getByRole('button', { name: /^Ticket: PHAROS-12/ })).toBeVisible()
+  expect(data.entries.length).toBe(8)
 })
-test('terminal run conversion sends no client time or principal facts', async ({ page }) => {
-  const { calls } = await setup(page); await mount(page)
-  await page.locator('summary').filter({ hasText: /^Record time$/ }).click()
-  await page.getByLabel('Source', { exact: true }).selectOption('agent_run')
-  await page.getByLabel('Agent run ID', { exact: true }).fill('50000000-0000-4000-8000-000000000001')
-  await page.getByLabel('Cost unit', { exact: true }).selectOption(cost)
-  await page.getByRole('button', { name: 'Record time', exact: true }).click()
-  await expect(page.getByRole('status', { name: 'Hours status', exact: true })).toHaveText('Time recorded.')
-  const call = calls.find(c => c.path === '/api/time-entries' && c.method === 'POST')!
-  expect(call.body).toEqual({ period_id: periodID, source: 'agent_run', cost_unit_node_id: cost, currency: 'EUR', agent_run_id: '50000000-0000-4000-8000-000000000001', note: '' })
+
+test('a new week opens its period with the first entry; bad input never posts', async ({ page }) => {
+  const { calls } = await setup(page)
+  await openWeek(page, '/business/hours?week=2026-09-28')
+  await expect(page.getByText('No period for this week yet. The first entry opens one, Monday to Sunday.')).toBeVisible()
+  await form(page).getByRole('button', { name: /^Ticket:/ }).click()
+  await page.getByRole('combobox', { name: 'Ticket' }).fill('PHAROS-11')
+  await expect(page.getByRole('option', { name: /PHAROS-11/ })).toBeVisible()
+  await page.keyboard.press('Enter')
+  await page.keyboard.type('45')
+  await page.keyboard.press('Enter')
+  await expect(form(page)).toContainText('Choose a cost unit.')
+  await form(page).getByRole('combobox', { name: 'Cost unit' }).selectOption({ label: 'Design' })
+  await form(page).getByRole('textbox', { name: 'Duration' }).fill('45')
+  await form(page).getByRole('textbox', { name: 'Duration' }).press('Enter')
+  await expect(form(page)).toContainText('Use a duration like 1h30, 90m or 1.5')
+  expect(calls.some(c => c.method === 'POST')).toBe(false)
+  await form(page).getByRole('radio', { name: 'Mon 28' }).click()
+  await form(page).getByRole('textbox', { name: 'Start time (optional)' }).fill('14:00')
+  await form(page).getByRole('textbox', { name: 'Duration' }).fill('45m')
+  await form(page).getByRole('textbox', { name: 'Duration' }).press('Enter')
+  await expect(page.getByText('Logged 45m on PHAROS-11.')).toBeVisible()
+  const period = calls.find(c => c.path === '/api/time-periods' && c.method === 'POST')!
+  expect(period.body).toEqual({ principal_id: me.id, starts_at: '2026-09-27T22:00:00.000Z', ends_at: '2026-10-04T22:00:00.000Z' })
+  const entry = calls.find(c => c.path === '/api/time-entries' && c.method === 'POST')!
+  expect(entry.body).toMatchObject({ started_at: '2026-09-28T12:00:00.000Z', ended_at: '2026-09-28T12:45:00.000Z', cost_unit_node_id: 'cu-design' })
 })
-test('subtree totals keep currencies separate and exact', async ({ page }) => {
-  const { calls } = await setup(page, { approved: true }); await mount(page)
-  await page.getByLabel('Root work item', { exact: true }).selectOption(root)
-  await page.getByRole('checkbox', { name: 'Approved periods only' }).check()
-  await page.getByRole('button', { name: 'Calculate totals' }).click()
-  const totals = page.getByRole('status', { name: 'Subtree totals', exact: true })
-  await expect(totals.locator('p')).toHaveText(['EUR 99999999999999.9999', 'USD 0.0001'])
-  await expect(totals.getByText('USD 0.0001', { exact: true })).toBeVisible()
-  expect(calls.some(c => c.path.endsWith('/time-totals?approved_only=true'))).toBeTruthy()
-  await expect(page.getByRole('button', { name: 'Approve and close period' })).toHaveCount(0)
+
+test('weeks move with the arrow keys; l focuses the entry line', async ({ page }) => {
+  await setup(page)
+  await openWeek(page)
+  await page.keyboard.press('ArrowLeft')
+  await expect(page).toHaveURL(/week=2026-09-14/)
+  await expect(page.getByText('Week 38 · 14–20 Sep 2026 · 6h 15m logged')).toBeVisible()
+  await page.keyboard.press('t')
+  await expect(page).not.toHaveURL(/week=/)
+  await expect(page.getByText('Week 39 · 21–27 Sep 2026 · 8h 30m logged')).toBeVisible()
+  await page.keyboard.press('l')
+  await expect(form(page).getByRole('button', { name: /^Ticket:/ })).toBeFocused()
 })
-test('disabled installations hide forms and a member has no approval controls', async ({ page }) => {
-  const { state } = await setup(page, { disabled: true, member: true, empty: true }); await mount(page)
-  await expect(page.getByRole('alert')).toContainText('plugin is disabled')
-  await expect(page.getByLabel('Period', { exact: true })).toHaveCount(0)
-  state.disabled = false
-  await page.getByRole('button', { name: 'Reload', exact: true }).click()
-  await expect(page.getByText('No time entries in this period.')).toBeVisible()
-  await expect(page.getByRole('button', { name: 'Approve and close period' })).toHaveCount(0)
+
+test('admins switch to a colleague or an agent; agents have no manual entry', async ({ page }) => {
+  await setup(page)
+  await openWeek(page)
+  await page.getByRole('button', { name: 'Hours of You. Choose a person or agent' }).click()
+  const picker = page.getByRole('combobox', { name: 'Hours of' })
+  await expect(page.getByRole('listbox', { name: 'Hours of' }).getByRole('option')).toHaveText([/You/, /Mira Holm/, /Nova/])
+  await picker.fill('mira')
+  await page.keyboard.press('Enter')
+  await expect(page).toHaveURL(new RegExp(`person=${mira.id}`))
+  await expect(page.getByText('Approved by Markus Barta. Closed for new entries.')).toHaveCount(0)
+  await page.goto(`/business/hours?person=${mira.id}&week=2026-09-14`)
+  await expect(page.getByText(/Approved by Markus Barta\. Closed for new entries\./)).toBeVisible()
+  await expect(form(page)).toHaveCount(0)
+  await page.goto(`/business/hours?person=${nova.id}`)
+  await expect(page.getByText('An agent’s time comes from its finished runs, one entry per run.')).toBeVisible()
+  await expect(form(page)).toHaveCount(0)
 })
-test('manual entry submits the selected principal and UTC interval', async ({ page }) => {
-  const { calls } = await setup(page); await mount(page)
-  await page.locator('summary').filter({ hasText: /^Record time$/ }).click()
-  await page.getByLabel('Work item', { exact: true }).selectOption(root)
-  await page.getByLabel('Started', { exact: true }).fill('2026-09-23T12:00')
-  await page.getByLabel('Ended', { exact: true }).fill('2026-09-23T13:00')
-  await page.getByLabel('Cost unit', { exact: true }).selectOption(cost)
-  await page.getByRole('button', { name: 'Record time', exact: true }).click()
-  await expect(page.getByRole('status', { name: 'Hours status', exact: true })).toHaveText('Time recorded.')
-  const writes = calls.filter(c => c.path === '/api/time-entries' && c.method === 'POST')
-  expect(writes).toHaveLength(1)
-  expect(writes[0]!.body).toEqual({ period_id: periodID, principal_id: person, node_id: root, source: 'manual', cost_unit_node_id: cost, currency: 'EUR', note: '', started_at: '2026-09-23T10:00:00.000Z', ended_at: '2026-09-23T11:00:00.000Z' })
-  expect(writes[0]!.body.started_at).toMatch(/Z$/)
-  expect(Date.parse(writes[0]!.body.ended_at) - Date.parse(writes[0]!.body.started_at)).toBe(3600000)
+
+test('members see only their own week, without approvals', async ({ page }) => {
+  await setup(page, { role: 'member' })
+  await openWeek(page, `/business/hours?person=${mira.id}`)
+  await expect(page.getByRole('radio', { name: /Approvals/ })).toHaveCount(0)
+  await expect(page.getByRole('button', { name: /^Hours of/ })).toHaveCount(0)
+  await expect(grid(page).locator('tbody tr')).toHaveCount(3)
+})
+
+test('approving a period sends the reviewed revision and digest', async ({ page }) => {
+  const errors = watchErrors(page)
+  const { data, calls } = await setup(page)
+  await page.goto('/business/hours?view=approvals')
+  const waiting = page.getByRole('region', { name: 'Waiting for approval' })
+  await expect(waiting.getByRole('button')).toHaveCount(1)
+  await expect(waiting.getByRole('button').first()).toContainText('6h 15m')
+  await expect(page.getByRole('radio', { name: /Approvals/ })).toContainText('1')
+  await waiting.getByRole('button').first().click()
+  const panel = page.getByRole('complementary', { name: 'Period review' })
+  await expect(panel.getByRole('heading', { name: 'Markus Barta' })).toBeVisible()
+  await expect(panel.getByText('14–20 Sep 2026')).toBeVisible()
+  await expect(panel.locator('.metric').first()).toContainText('6h 15m')
+  await expect(panel.locator('.metric').last()).toContainText('593.75 EUR')
+  await panel.getByRole('button', { name: 'Approve period' }).click()
+  const dialog = page.getByRole('dialog', { name: /Approve Markus Barta’s hours for 14–20 Sep 2026\?/ })
+  await expect(dialog).toContainText('2 entries, 6h 15m')
+  await dialog.getByRole('button', { name: 'Approve period' }).click()
+  await expect(page.getByText('Approved Markus Barta’s hours for 14–20 Sep 2026.')).toBeVisible()
+  const approve = calls.find(c => c.path.endsWith('/approve'))!
+  expect(approve.body).toEqual({ expected_revision: 3, expected_entries_sha256: '03'.repeat(32) })
+  expect(data.periods.find(p => p.id === 'p-me-38')?.state).toBe('approved')
+  await expect(panel.getByText('Approved', { exact: true })).toBeVisible()
+  await expect(panel.getByRole('button', { name: 'Approve period' })).toHaveCount(0)
+  await page.keyboard.press('Escape')
+  await expect(panel).toHaveCount(0)
+  expect(errors).toEqual([])
+})
+
+test('a changed period refuses the approval and says so', async ({ page }) => {
+  await setup(page, { approveConflict: true })
+  await page.goto('/business/hours?view=approvals&period=p-me-38')
+  const panel = page.getByRole('complementary', { name: 'Period review' })
+  await panel.getByRole('button', { name: 'Approve period' }).click()
+  await page.getByRole('dialog').getByRole('button', { name: 'Approve period' }).click()
+  await expect(page.getByText('Entries changed since you opened this period. The latest entries are shown; review them again.')).toBeVisible()
+  await expect(panel.getByRole('button', { name: 'Approve period' })).toBeVisible()
+})
+
+test('a running period can be reviewed from the week strip', async ({ page }) => {
+  await setup(page)
+  await openWeek(page)
+  await page.getByRole('button', { name: 'Review' }).click()
+  const panel = page.getByRole('complementary', { name: 'Period review' })
+  await expect(panel.getByText('Running', { exact: true })).toBeVisible()
+  await expect(panel.getByText('Still running: approving closes it now.')).toBeVisible()
+  expect(WEEK39.starts_at).toBe('2026-09-20T22:00:00.000Z')
 })
