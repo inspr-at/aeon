@@ -16,11 +16,11 @@ import (
 	"testing"
 	"time"
 
+	"github.com/inspr-at/aeon/internal/business/costunits"
 	"github.com/inspr-at/aeon/internal/db"
 	"github.com/inspr-at/aeon/internal/dbtest"
 	"github.com/inspr-at/aeon/internal/events"
 	"github.com/inspr-at/aeon/internal/plugins"
-	"github.com/inspr-at/aeon/internal/plugins/fence"
 	"github.com/inspr-at/aeon/internal/tenant"
 	"github.com/jackc/pgx/v5"
 )
@@ -69,8 +69,7 @@ func setup(t *testing.T) *fixture {
 	if err != nil {
 		t.Fatal(err)
 	}
-	costs := plugins.Plugin{Manifest: plugins.Manifest{ID: "business_costs", Version: "1", Owner: "inspr-at", Permissions: []string{fence.PermStepsApply, fence.PermViewsProvide}, Views: []plugins.View{{ID: "cost_units", Panels: []string{"cost_units"}}}, WorkflowSteps: []plugins.WorkflowStep{{Key: "cost_rate_change", Gates: []string{fence.GateObservedState}}}}, StepPermissions: map[string]string{"cost_rate_change": fence.PermStepsApply}, Steps: extension{}, Views: extension{}}
-	costs.Manifest.DigestSHA256, err = plugins.Digest(costs)
+	costs, err := costunits.Plugin()
 	if err != nil {
 		t.Fatal(err)
 	}

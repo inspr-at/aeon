@@ -39,6 +39,8 @@ func New(pool *pgxpool.Pool, registry *plugins.Registry, writer ...Writer) *Modu
 	return m
 }
 func (m *Module) Mount(mux *http.ServeMux) {
+	mux.HandleFunc("PATCH /api/time-entries/{id}", m.mutateEntry)
+	mux.HandleFunc("DELETE /api/time-entries/{id}", m.mutateEntry)
 	for _, route := range []struct {
 		pattern, operation string
 		status             int
@@ -82,6 +84,9 @@ func (m *Module) Mount(mux *http.ServeMux) {
 				v, err := route.fn(r, tx, p)
 				if period, ok := v.(Period); ok && err == nil && period.digest != "" {
 					w.Header().Set("X-Entries-SHA256", period.digest)
+				}
+				if entry, ok := v.(Entry); ok && err == nil {
+					w.Header().Set("ETag", entryTag(entry))
 				}
 				return v, err
 			})(w, r)
