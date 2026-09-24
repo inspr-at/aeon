@@ -245,7 +245,9 @@ issued = call('POST', f'/api/quotes/{quote_id}/finalize', {'expected_quote_revis
     'expected_document_sha256': receipt['document_sha256']})
 assert issued['state'] == 'issued'
 version = call('GET', f'/api/quotes/{quote_id}/versions/1')
-link = call('POST', f'/api/quotes/{quote_id}/versions/1/public-link', {})
+# Finalization allocates the customer capability in the same tenant transaction.
+link = call('GET', f'/api/quotes/{quote_id}/versions/1/public-link')
+assert link['path'].startswith('/offers/')
 public_api = '/api/public/quotes/' + link['path'].removeprefix('/offers/')
 # A fresh opener carries no dev-login session. The image connects as aeon,
 # the non-superuser role used by the production service.

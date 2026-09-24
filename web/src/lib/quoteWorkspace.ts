@@ -26,6 +26,7 @@ export interface LiveQuote {
   readonly draftMissing: Ref<boolean>
   editor: QuoteEditor | null
   presenceClient: QuotePresence | null
+  canSaveNow: (() => boolean) | null
   refresh(): Promise<void>
 }
 interface Entry { quote: LiveQuote; holders: number; timer: number | undefined; dispose(): void }
@@ -38,11 +39,18 @@ function open(scope: Scope, quoteId: string): Entry {
   const quote: LiveQuote = {
     quoteId, session,
     view: shallowRef(null), presence: shallowRef(null), recovery: shallowRef(null), projection: shallowRef(null), frozen: shallowRef(null),
-    error: ref(''), draftMissing: ref(false), editor: null, presenceClient: null,
+    error: ref(''), draftMissing: ref(false), editor: null, presenceClient: null, canSaveNow: null,
     refresh,
   }
   let closed = false
-  const unsubscribe = session.subscribe(next => { quote.view.value = { ...next } })
+  let autosaveTimer: number | undefined
+  const unsubscribe = session.subscribe(next => {
+    quote.view.value = { ...next }
+    window.clearTimeout(autosaveTimer)
+    if (!closed && next.local === 'dirty' && next.remote === 'current') {
+      autosaveTimer = window.setTimeout(() => { if (quote.canSaveNow?.() !== false) void session.save() }, 700)
+    }
+  })
   async function refresh() {
     const projection = await getQuote(quoteId)
     if (closed) return
@@ -80,7 +88,7 @@ function open(scope: Scope, quoteId: string): Entry {
   })()
   return {
     quote, holders: 0, timer: undefined,
-    dispose() { closed = true; unsubscribe(); quote.presenceClient?.stop(); quote.presenceClient = null; session.dispose() },
+    dispose() { closed = true; window.clearTimeout(autosaveTimer); unsubscribe(); quote.presenceClient?.stop(); quote.presenceClient = null; session.dispose() },
   }
 }
 

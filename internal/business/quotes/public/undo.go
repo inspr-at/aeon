@@ -51,5 +51,8 @@ func undoCreatedLink(ctx context.Context, tx pgx.Tx, p tenant.Principal, origina
 	if _, err := tx.Exec(ctx, `UPDATE quote_public_links SET revoked_at=clock_timestamp(),revoked_by_principal_id=$2::uuid,revoked_event_id=$3 WHERE id=$1::uuid`, after.LinkID, p.ID, event.ID); err != nil {
 		return events.Change{}, err
 	}
+	if _, err := tx.Exec(ctx, `DELETE FROM quote_public_link_tokens WHERE link_id=$1::uuid`, after.LinkID); err != nil {
+		return events.Change{}, err
+	}
 	return events.Change{NodeID: &quoteID, Type: "quote.public_link_undone", Before: map[string]any{"link_id": after.LinkID, "version": version}, After: map[string]any{"link_id": after.LinkID, "version": version, "revoked": true}}, nil
 }

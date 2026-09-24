@@ -268,11 +268,16 @@ func (m *Module) notices(w http.ResponseWriter, r *http.Request) {
 		ConfirmationState string    `json:"confirmation_state"`
 	}
 	out := []Notice{}
+	createdByMe := r.URL.Query().Get("created_by_me") == "true"
+	limit := 100
+	if createdByMe {
+		limit = 20
+	}
 	err := db.InTenant(r.Context(), m.pool, p.TenantID, func(tx pgx.Tx) error {
 		if err := m.gate(r.Context(), tx, p.TenantID, fence.PermViewsProvide); err != nil {
 			return err
 		}
-		rows, err := tx.Query(r.Context(), `SELECT d.quote_node_id::text,d.version,d.channel,d.decided_at,coalesce(j.state,'pending') FROM quote_decisions d LEFT JOIN quote_confirmation_jobs j ON j.tenant_id=d.tenant_id AND j.quote_node_id=d.quote_node_id AND j.version=d.version ORDER BY d.decided_at DESC,d.quote_node_id LIMIT 100`)
+		rows, err := tx.Query(r.Context(), `SELECT d.quote_node_id::text,d.version,d.channel,d.decided_at,coalesce(j.state,'pending') FROM quote_decisions d JOIN quote_versions v ON v.tenant_id=d.tenant_id AND v.quote_node_id=d.quote_node_id AND v.version=d.version LEFT JOIN quote_confirmation_jobs j ON j.tenant_id=d.tenant_id AND j.quote_node_id=d.quote_node_id AND j.version=d.version WHERE (NOT $1::boolean OR v.created_by_principal_id=$2::uuid) ORDER BY d.decided_at DESC,d.quote_node_id LIMIT $3`, createdByMe, p.ID, limit)
 		if err != nil {
 			return err
 		}

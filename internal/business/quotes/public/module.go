@@ -259,6 +259,10 @@ func (m *Module) createLink(w http.ResponseWriter, r *http.Request) {
 			return err
 		}
 		_, err = tx.Exec(r.Context(), `INSERT INTO quote_public_links(tenant_id,id,quote_node_id,version,token_sha256,target_content_sha256,issued_by_principal_id,issued_event_id,expires_at) VALUES($1::uuid,$2::uuid,$3::uuid,$4,$5,$6,$7::uuid,$8,$9)`, p.TenantID, out.ID, id, version, hash(token), digest, p.ID, event.ID, input.ExpiresAt)
+		if err != nil {
+			return err
+		}
+		_, err = tx.Exec(r.Context(), `INSERT INTO quote_public_link_tokens(tenant_id,link_id,token) VALUES($1::uuid,$2::uuid,$3)`, p.TenantID, out.ID, token)
 		out.Path = "/offers/" + publicTenant + "/" + token
 		return err
 	})
@@ -285,7 +289,12 @@ func (m *Module) linkInfo(w http.ResponseWriter, r *http.Request) {
 		if err := m.gate(r.Context(), tx, p.TenantID, fence.PermViewsProvide); err != nil {
 			return err
 		}
-		return tx.QueryRow(r.Context(), `SELECT l.id::text,s.selector,l.quote_node_id::text,l.version,l.target_content_sha256,l.expires_at,l.revoked_at FROM quote_public_links l JOIN quote_public_tenant_selectors s ON s.tenant_id=l.tenant_id WHERE l.quote_node_id=$1::uuid AND l.version=$2 ORDER BY l.issued_at DESC LIMIT 1`, id, version).Scan(&out.ID, &out.PublicTenant, &out.QuoteNodeID, &out.Version, &out.TargetContentSHA256, &out.ExpiresAt, &out.RevokedAt)
+		var token *string
+		err := tx.QueryRow(r.Context(), `SELECT l.id::text,s.selector,l.quote_node_id::text,l.version,l.target_content_sha256,l.expires_at,l.revoked_at,t.token FROM quote_public_links l JOIN quote_public_tenant_selectors s ON s.tenant_id=l.tenant_id LEFT JOIN quote_public_link_tokens t ON t.tenant_id=l.tenant_id AND t.link_id=l.id WHERE l.quote_node_id=$1::uuid AND l.version=$2 ORDER BY l.issued_at DESC LIMIT 1`, id, version).Scan(&out.ID, &out.PublicTenant, &out.QuoteNodeID, &out.Version, &out.TargetContentSHA256, &out.ExpiresAt, &out.RevokedAt, &token)
+		if err == nil && token != nil && out.RevokedAt == nil {
+			out.Path = "/offers/" + out.PublicTenant + "/" + *token
+		}
+		return err
 	})
 	if err != nil {
 		fail(w, 404, "link not found")
@@ -321,7 +330,11 @@ func (m *Module) revokeLink(w http.ResponseWriter, r *http.Request) {
 		if err != nil {
 			return err
 		}
-		return tx.QueryRow(r.Context(), `UPDATE quote_public_links SET revoked_at=clock_timestamp(),revoked_by_principal_id=$2::uuid,revoked_event_id=$3 WHERE id=$1::uuid RETURNING id::text,quote_node_id::text,version,target_content_sha256,expires_at,revoked_at`, linkID, p.ID, event.ID).Scan(&out.ID, &out.QuoteNodeID, &out.Version, &out.TargetContentSHA256, &out.ExpiresAt, &out.RevokedAt)
+		if err := tx.QueryRow(r.Context(), `UPDATE quote_public_links SET revoked_at=clock_timestamp(),revoked_by_principal_id=$2::uuid,revoked_event_id=$3 WHERE id=$1::uuid RETURNING id::text,quote_node_id::text,version,target_content_sha256,expires_at,revoked_at`, linkID, p.ID, event.ID).Scan(&out.ID, &out.QuoteNodeID, &out.Version, &out.TargetContentSHA256, &out.ExpiresAt, &out.RevokedAt); err != nil {
+			return err
+		}
+		_, err = tx.Exec(r.Context(), `DELETE FROM quote_public_link_tokens WHERE link_id=$1::uuid`, linkID)
+		return err
 	})
 	if err != nil {
 		fail(w, 409, "active link not found")

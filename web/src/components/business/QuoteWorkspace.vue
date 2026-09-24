@@ -1,6 +1,7 @@
 <!-- SPDX-License-Identifier: AGPL-3.0-only -->
 <script setup lang="ts">
 import { computed, nextTick, onBeforeUnmount, onMounted, ref, shallowRef, watch } from 'vue'
+import { useRouter } from 'vue-router'
 import { setPageTitle } from '../../lib/brand'
 import { headerFolded } from '../../lib/chrome'
 import { confirmAction } from '../../lib/confirm'
@@ -10,7 +11,7 @@ import type { ConflictChoices } from '../../lib/quoteMerge'
 import { acquireQuote, dropQuote, releaseQuote, type LiveQuote, type Scope } from '../../lib/quoteWorkspace'
 import { getDraft } from '../../lib/quotes/api'
 import { QuoteEditor } from '../../lib/quotes/editor'
-import { branchQuote, duplicateQuote, finalizeQuote, getVersion, lifecycleError, setArchived, type QuoteVersion } from '../../lib/quotes/lifecycle'
+import { branchQuote, duplicateQuote, finalizeQuote, getLink, getVersion, lifecycleError, linkUrl, setArchived, type QuoteVersion } from '../../lib/quotes/lifecycle'
 import { statusOf } from '../../lib/quotes/list'
 import { readZoom, zoomPercent, type ZoomMode } from '../../lib/quotes/zoom'
 import type { QuoteDocumentData } from '../../lib/quotes/types'
@@ -34,6 +35,7 @@ import AppIcon from '../AppIcon.vue'
 // presence and undo history) from lib/quoteWorkspace, so switching between them
 // keeps unsaved work and never rejoins. Its layout follows its own width.
 const props = defineProps<{ quoteId: string; layout: 'full' | 'dock' }>()
+const router = useRouter()
 const emit = defineEmits<{ close: []; expand: []; collapse: []; open: [quoteId: string] }>()
 const identity = useSession()
 const business = useBusiness()
@@ -48,15 +50,16 @@ const scope = computed<Scope | null>(() => identity.identity ? { tenantId: ident
 const live = shallowRef<LiveQuote | null>(null)
 let held: { scope: Scope; quote: LiveQuote } | null = null
 function hold() {
-  if (held) releaseQuote(held.scope, held.quote)
+  if (held) { if (held.quote.canSaveNow === numericValid) held.quote.canSaveNow = null; releaseQuote(held.scope, held.quote) }
   held = null; live.value = null; viewing.value = null
   if (!scope.value) return
   const quote = acquireQuote(scope.value, props.quoteId)
+  quote.canSaveNow = numericValid
   held = { scope: scope.value, quote }; live.value = quote
 }
 const viewing = ref<number | null>(null)
 watch(() => [props.quoteId, scope.value?.principalId], hold, { immediate: true })
-onBeforeUnmount(() => { if (held) releaseQuote(held.scope, held.quote); held = null })
+onBeforeUnmount(() => { if (held) { if (held.quote.canSaveNow === numericValid) held.quote.canSaveNow = null; releaseQuote(held.scope, held.quote) }; held = null })
 
 const view = computed(() => live.value?.view.value ?? null)
 const projection = computed(() => live.value?.projection.value ?? null)
@@ -70,6 +73,19 @@ const isDraft = computed(() => !projection.value || projection.value.state === '
 const revising = computed(() => isDraft.value && (projection.value?.current_version ?? 0) > 0)
 const admin = computed(() => business.admin)
 const staff = computed(() => business.staff)
+const publicUrl = ref('')
+let linkRead = 0
+async function loadPublicLink() {
+  const current = ++linkRead
+  publicUrl.value = ''
+  const version = projection.value?.current_version
+  if (!admin.value || isDraft.value || !version) return
+  try {
+    const link = await getLink(props.quoteId, version)
+    if (current === linkRead) publicUrl.value = link?.path ? linkUrl(link) : ''
+  } catch { /* The document remains printable without a customer link. */ }
+}
+watch(() => [props.quoteId, projection.value?.current_version, projection.value?.state, admin.value], () => { void loadPublicLink() }, { immediate: true })
 const canSave = computed(() => view.value?.local === 'dirty' || view.value?.local === 'failed' || view.value?.local === 'offline')
 const editable = computed(() => isDraft.value && viewing.value === null && !!view.value && view.value.local !== 'read-only' && view.value.local !== 'loading' && staff.value)
 // An older version picked in Details, the frozen current version once issued, else the draft.
@@ -104,7 +120,14 @@ function edit(value: QuoteDocumentData) {
     void selectionAnchor(paper.value.editor.selection, value, revision).then(anchor => { if (client === quote.presenceClient) client.setSelection(anchor, 'editing', revision) })
   }
 }
-function save() { void live.value?.session.save() }
+function numericValid() {
+  const invalid = root.value?.querySelector<HTMLInputElement>('input:invalid')
+  if (!invalid) return true
+  invalid.reportValidity()
+  toast('Correct the highlighted number before saving.', { tone: 'error' })
+  return false
+}
+function save() { if (numericValid()) void live.value?.session.save() }
 function useRecovery() { const quote = live.value; if (quote?.recovery.value) { quote.session.restore(quote.recovery.value); quote.recovery.value = null } }
 async function useServer() { const quote = live.value; if (!quote) return; quote.recovery.value = null; await quote.session.reload(true) }
 
@@ -168,10 +191,12 @@ watch(root, el => { rootSizer?.disconnect(); if (el) { rootSizer = new ResizeObs
 const printing = ref(false)
 async function print() {
   if (printing.value) return
+  if (!numericValid()) return
   printing.value = true
   try {
     if (canSave.value) await live.value?.session.save()
-    if (view.value?.local === 'failed' || view.value?.local === 'conflict') { toast('Save the quote before printing it.', { tone: 'error' }); return }
+    if (isDraft.value && view.value?.local !== 'clean') { toast('Save the quote before printing it.', { tone: 'error' }); return }
+    if (!isDraft.value && admin.value && !publicUrl.value) await loadPublicLink()
     await paper.value?.whenReady()
     await nextTick()
     window.print()
@@ -191,6 +216,7 @@ const FINALIZE: [RegExp, string][] = [
 async function issue() {
   const quote = live.value, current = projection.value
   if (!quote || !current || busy.value) return
+  if (!numericValid()) return
   const next = current.current_version + 1
   const ok = await confirmAction({
     title: `Issue ${offerNo.value || 'this quote'} as version ${next}?`, confirmLabel: 'Issue quote',
@@ -316,8 +342,29 @@ function keys(event: KeyboardEvent) {
     if (props.layout === 'dock' && !target.isContentEditable) { event.preventDefault(); emit('close') }
   }
 }
-onMounted(() => { window.addEventListener('keydown', keys); phoneQuery.addEventListener('change', phoneChange) })
-onBeforeUnmount(() => { window.removeEventListener('keydown', keys); phoneQuery.removeEventListener('change', phoneChange); sizer?.disconnect(); rootSizer?.disconnect() })
+function hasLocalWork() {
+  return !!root.value?.querySelector('input:invalid') || (!!view.value && ['dirty', 'saving', 'failed', 'offline', 'conflict'].includes(view.value.local))
+}
+function beforeUnload(event: BeforeUnloadEvent) {
+  if (!hasLocalWork()) return
+  event.preventDefault()
+  event.returnValue = ''
+}
+const removeRouteGuard = router.beforeEach(async to => {
+  const sameQuote = to.path === `/business/quotes/${props.quoteId}` || (to.path === '/business/quotes' && to.query.quote === props.quoteId)
+  if (sameQuote || !hasLocalWork()) return true
+  const quote = live.value
+  if (quote && view.value?.local === 'dirty' && view.value.remote === 'current' && numericValid()) await quote.session.save()
+  if (!hasLocalWork()) return true
+  return confirmAction({
+    title: 'Leave with unsaved changes?', confirmLabel: 'Leave and keep a recovery copy',
+    body: 'Your edits could not be saved. A recovery copy remains in this browser tab so you can restore them when you reopen the quote.',
+  })
+})
+onMounted(() => { window.addEventListener('keydown', keys); window.addEventListener('beforeunload', beforeUnload); phoneQuery.addEventListener('change', phoneChange) })
+onBeforeUnmount(() => { removeRouteGuard(); window.removeEventListener('keydown', keys); window.removeEventListener('beforeunload', beforeUnload); phoneQuery.removeEventListener('change', phoneChange); sizer?.disconnect(); rootSizer?.disconnect() })
+onBeforeUnmount(() => { linkRead++ })
+function detailsChanged() { void live.value?.refresh(); void loadPublicLink() }
 // Clicking the footer mark on a page opens its settings on the Document tab.
 const reveal = ref<{ tab: 'document'; target: string; n: number } | null>(null)
 function revealMark() {
@@ -363,7 +410,7 @@ defineExpose({ focus: () => root.value?.focus({ preventScroll: true }) })
         <div v-if="document" class="desk-inner">
           <div ref="host" class="paper-stack" :style="{ zoom: percent / 100 }">
             <QuoteDocument
-              :key="`${quoteId}:${viewing ?? (isDraft ? 'draft' : 'frozen')}`" ref="paper" :document="document" :offer-no="offerNo" :editable="editable" :editor="editor"
+              :key="`${quoteId}:${viewing ?? (isDraft ? 'draft' : 'frozen')}`" ref="paper" :document="document" :offer-no="offerNo" :editable="editable" :editor="editor" :public-link="viewing === null && !isDraft ? publicUrl : ''" :draft-preview="viewing === null && isDraft"
               @update:document="edit" @mark="revealMark"
             />
           </div>
@@ -382,7 +429,7 @@ defineExpose({ focus: () => root.value?.focus({ preventScroll: true }) })
           <div class="details-body">
             <QuoteDetails
               :quote-id="quoteId" :offer-no="offerNo" :projection="projection" :frozen="frozen" :local="view?.local ?? 'loading'" :admin="admin" :staff="staff"
-              :customer-name="customerName" :viewing="viewing" :busy="busy" @issue="issue" @revise="revise" @view="showVersion" @changed="live?.refresh()"
+              :customer-name="customerName" :viewing="viewing" :busy="busy" @issue="issue" @revise="revise" @view="showVersion" @changed="detailsChanged"
             />
           </div>
         </aside>

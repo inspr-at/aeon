@@ -100,6 +100,29 @@ test('bold and italic toggle on the selection the page keeps; Cmd or Ctrl+B and 
   await expect(bold).toHaveAttribute('aria-pressed', 'mixed')
 })
 
+test('formatting a range across paragraphs preserves both runs and undo', async ({ page }) => {
+  await page.setViewportSize({ width: 1440, height: 900 })
+  await open(page)
+  await text(page, NODES[0]!).click()
+  await page.evaluate(([first, second]) => {
+    const node = (id: string) => {
+      const walker = document.createTreeWalker(document.querySelector(`.quote-page [data-text-id="${id}"]`)!, NodeFilter.SHOW_TEXT)
+      let current: Node | null
+      while ((current = walker.nextNode())) if ((current.textContent?.length ?? 0) > 5) return current
+      throw new Error('Text node missing')
+    }
+    const start = node(first), end = node(second)
+    getSelection()!.setBaseAndExtent(start, 4, end, 5)
+  }, [NODES[0]!, NODES[1]!])
+  await page.keyboard.press('Shift+ArrowRight'); await page.keyboard.press('Shift+ArrowLeft')
+  await inspector(page).getByRole('button', { name: 'Bold' }).click()
+  await expect(text(page, NODES[0]!).locator('strong')).toContainText('bestehende')
+  await expect(text(page, NODES[1]!).locator('strong')).toContainText('Ziel')
+  await page.getByRole('button', { name: 'Undo', exact: true }).click()
+  await expect(text(page, NODES[0]!).locator('strong')).toHaveCount(0)
+  await expect(text(page, NODES[1]!).locator('strong')).toHaveCount(0)
+})
+
 test('the list type is one segmented control; numbering options show only for numbers, with a labelled preview', async ({ page }) => {
   await page.setViewportSize({ width: 1440, height: 900 })
   await open(page)

@@ -36,6 +36,7 @@ let mutationID = crypto.randomUUID()
 const version = useVersion()
 void version.load()
 const apiPath = computed(() => `/api/public/quotes/${encodeURIComponent(props.publicTenant)}/${encodeURIComponent(props.token)}`)
+const publicURL = computed(() => `${location.origin}/offers/${encodeURIComponent(props.publicTenant)}/${encodeURIComponent(props.token)}`)
 const pdfPath = computed(() => `${apiPath.value}/pdf`)
 const sender = computed(() => quote.value?.document.sender.company?.trim() || '')
 const recipient = computed(() => quote.value?.document.recipient.name?.trim() || '')
@@ -174,7 +175,7 @@ onBeforeUnmount(() => { sizer?.disconnect(); cancelAnimationFrame(frame); window
       <p v-if="overflow" role="alert" class="pq-wrap pq-note">{{ t.overflow(overflow) }}</p>
       <section ref="desk" class="pq-desk" :aria-label="t.documentRegion">
         <div class="pq-paper" :style="{ zoom: scale }">
-          <QuoteDocument :document="quote.document" :offer-no="quote.offer_no" :editable="false" @overflow="overflow = $event ?? ''" />
+          <QuoteDocument :document="quote.document" :offer-no="quote.offer_no" :editable="false" :public-link="publicURL" @overflow="overflow = $event ?? ''" />
         </div>
       </section>
 

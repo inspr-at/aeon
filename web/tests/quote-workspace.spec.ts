@@ -48,13 +48,13 @@ test('docked beside the list, then on its own page and back: one session, unsave
   await title.click()
   await page.keyboard.press('End')
   await page.keyboard.type(' 2027')
-  await expect(dock.getByRole('button', { name: 'Save draft' })).toBeEnabled()
+  await expect(dock.getByRole('button', { name: 'Save draft' })).toBeVisible()
 
   await dock.getByRole('button', { name: 'Open on its own page' }).click()
   await expect(page).toHaveURL(new RegExp(`/business/quotes/${Q.draft}$`))
   const editor = page.getByRole('region', { name: 'Quote editor' })
   await expect(editor.getByRole('textbox', { name: 'Angebotstitel' })).toHaveText('Relaunch des Kundenportals 2027')
-  await expect(editor.getByRole('button', { name: 'Save draft' })).toBeEnabled()
+  await expect(editor.getByRole('button', { name: 'Save draft' })).toBeVisible()
   await expect(editor.getByRole('button', { name: 'Undo', exact: true })).toBeEnabled()
   // The history made in the panel is the one here: undo steps back through it.
   await editor.getByRole('button', { name: 'Undo', exact: true }).click()
@@ -69,10 +69,81 @@ test('docked beside the list, then on its own page and back: one session, unsave
   // One presence session the whole way: joined once, never left.
   expect(calls.filter(c => c.method === 'POST' && c.path.endsWith('/presence'))).toHaveLength(1)
   expect(calls.filter(c => c.method === 'DELETE' && c.path.includes('/presence/'))).toHaveLength(0)
-  await dock.getByRole('button', { name: 'Save draft' }).click()
-  await expect.poll(() => calls.filter(c => c.method === 'PATCH' && c.path.endsWith('/draft')).length).toBe(1)
+  if (await dock.getByRole('button', { name: 'Save draft' }).isEnabled()) await dock.getByRole('button', { name: 'Save draft' }).click()
+  await expect.poll(() => calls.filter(c => c.method === 'PATCH' && c.path.endsWith('/draft')).length).toBeGreaterThanOrEqual(1)
   await expect(page.locator(`#quote-${Q.draft}`)).toContainText('Relaunch des Kundenportals')
   expect(errors).toEqual([])
+})
+
+test('autosave waits 700 ms, navigation saves first, and unload warns for local edits', async ({ page }) => {
+  await page.setViewportSize({ width: 1440, height: 900 })
+  const { calls } = await setup(page)
+  await full(page, Q.draft)
+  const title = page.getByRole('textbox', { name: 'Angebotstitel' })
+  await title.fill('Autosave evidence')
+  await expect(page.getByRole('status').filter({ hasText: 'Unsaved changes' }).first()).toBeVisible()
+  expect(await page.evaluate(() => { const event = new Event('beforeunload', { cancelable: true }); window.dispatchEvent(event); return event.defaultPrevented })).toBe(true)
+  await expect.poll(() => calls.filter(c => c.method === 'PATCH' && c.path.endsWith('/draft')).length).toBe(1)
+  await expect(page.getByRole('status').filter({ hasText: 'Saved' }).first()).toBeVisible()
+  await title.fill('Navigation evidence')
+  await page.getByRole('link', { name: 'Back to Quotes' }).click()
+  await expect(page).toHaveURL(/\/business\/quotes$/)
+  expect(calls.filter(c => c.method === 'PATCH' && c.path.endsWith('/draft')).length).toBe(2)
+  expect(calls.filter(c => c.method === 'PATCH' && c.path.endsWith('/draft')).at(-1)?.body).toMatchObject({ document: { title: 'Navigation evidence' } })
+})
+
+test('invalid quantities block automatic save, explicit save, print and navigation save', async ({ page }) => {
+  const { calls } = await setup(page)
+  await full(page, Q.draft)
+  await page.getByRole('textbox', { name: 'Angebotstitel' }).fill('Edited while a number is invalid')
+  const quantity = page.getByRole('textbox', { name: 'Menge Position 1' })
+  await quantity.fill('1.234')
+  expect(await quantity.evaluate((input: HTMLInputElement) => input.checkValidity())).toBe(false)
+  await page.waitForTimeout(900)
+  expect(calls.filter(c => c.method === 'PATCH' && c.path.endsWith('/draft'))).toHaveLength(0)
+  await page.getByRole('button', { name: 'Save draft' }).click()
+  await page.getByRole('button', { name: 'PDF', exact: true }).click()
+  expect(calls.filter(c => c.method === 'PATCH' && c.path.endsWith('/draft'))).toHaveLength(0)
+  await page.getByRole('link', { name: 'Back to Quotes' }).click()
+  await expect(page.getByRole('dialog', { name: 'Leave with unsaved changes?' })).toBeVisible()
+  expect(calls.filter(c => c.method === 'PATCH' && c.path.endsWith('/draft'))).toHaveLength(0)
+  await page.getByRole('dialog', { name: 'Leave with unsaved changes?' }).getByRole('button', { name: 'Cancel' }).click()
+  await quantity.fill('1.25')
+  await expect.poll(() => calls.filter(c => c.method === 'PATCH' && c.path.endsWith('/draft')).length).toBe(1)
+})
+
+test('the paper edits its cover, dates, recipient, sender contact, positions and acceptance text', async ({ page }) => {
+  const { calls } = await setup(page)
+  await full(page, Q.draft)
+  const fields: [string, string][] = [
+    ['Angebotstitel', 'Neues Angebot'], ['Untertitel', 'Eine Beschreibung'],
+    ['Firma des Kunden', 'Neue Firma'], ['Kundenanschrift', 'Neue Straße 2'],
+    ['Kundenkontakt', 'Dana Beispiel'], ['Land des Kunden', 'Österreich'],
+    ['Ansprechpartner', 'Alex Neu'], ['Projektreferenz', 'P-44'],
+    ['Einleitung', 'Wir bieten an.'], ['Umsatzsteuerhinweis', 'USt. laut Gesetz.'],
+    ['Annahmetext', 'Hiermit angenommen.'], ['Leistung Position 1', 'Neue Leistung'],
+    ['Einheit Position 1', 'Tag'], ['Beschreibung Position 1', 'Langer Text'],
+  ]
+  for (const [name, value] of fields) await page.getByRole('textbox', { name, exact: true }).fill(value)
+  await page.getByRole('textbox', { name: 'Menge Position 1' }).fill('1.5')
+  await page.getByRole('textbox', { name: 'Einzelpreis Position 1' }).fill('99.99')
+  for (const [name, date] of [['Angebotsdatum', '25.09.2026'], ['Gültig bis', '30.10.2026']]) {
+    await page.getByRole('button', { name: new RegExp(`^${name}:`) }).click()
+    await page.getByRole('dialog', { name }).getByRole('textbox', { name: 'Date' }).fill(date)
+    await page.getByRole('dialog', { name }).getByRole('button', { name: 'Set' }).click()
+  }
+  await page.getByRole('button', { name: 'Save draft' }).click()
+  await expect.poll(() => calls.filter(c => c.method === 'PATCH' && c.path.endsWith('/draft')).length).toBeGreaterThan(0)
+  const saved = calls.filter(c => c.method === 'PATCH' && c.path.endsWith('/draft')).at(-1)?.body as { document: Record<string, unknown> }
+  expect(saved.document).toMatchObject({
+    title: 'Neues Angebot', subtitle: 'Eine Beschreibung', project_ref: 'P-44', offer_date: '2026-09-25', valid_until: '2026-10-30',
+    recipient: { name: 'Neue Firma', address: 'Neue Straße 2', contact: 'Dana Beispiel', country: 'Österreich', customer_no: 'K26091' },
+    sender: { contact_person: 'Alex Neu' },
+    legal: { intro: 'Wir bieten an.', vat_note: 'USt. laut Gesetz.', accept_text: 'Hiermit angenommen.' },
+  })
+  expect((saved.document.positions as Record<string, unknown>[])[0]).toMatchObject({ short_text: 'Neue Leistung', unit_label: 'Tag', long_text: 'Langer Text', quantity: '1.5', unit_price_cents: 9999 })
+  await expect(page.locator('.quote-document')).toContainText('1 / 3')
+  await expect(page.locator('.quote-document')).toContainText('A260922-12')
 })
 
 test('issuing freezes the saved draft with its fingerprint and offers the customer link', async ({ page }) => {
@@ -90,29 +161,43 @@ test('issuing freezes the saved draft with its fingerprint and offers the custom
   await expect(details(page).getByRole('heading', { name: 'Issued' })).toBeVisible()
   await expect(details(page).locator('.d-digest').first()).toContainText('55555555…')
   await expect(details(page).getByRole('heading', { name: 'Customer link' })).toBeVisible()
-  await expect(details(page).getByRole('button', { name: 'Create link' })).toBeVisible()
+  await expect(details(page).getByRole('textbox', { name: 'Customer link' })).toHaveValue(/\/offers\/sel-demo\/tok-link-auto-/)
   // Frozen: nothing on the paper can be edited, and Format steps aside.
   await expect(page.getByRole('button', { name: 'Format panel' })).toHaveCount(0)
   await expect(page.getByRole('textbox', { name: 'Angebotstitel' })).toHaveCount(0)
   await expect(page.locator('.quote-document')).toContainText('Relaunch des Kundenportals')
 })
 
-test('the customer link: an end date, shown once to copy, then only its state; revoking asks first', async ({ page, context }) => {
+test('an issued quote has no advertised reject action', async ({ page }) => {
+  await setup(page)
+  await full(page, Q.issued)
+  await page.getByRole('button', { name: 'Details' }).click()
+  await expect(page.getByRole('button', { name: /decline|reject/i })).toHaveCount(0)
+})
+
+test('the customer link: an end date, a stable copy and exact QR; revoking asks first', async ({ page, context }) => {
   await context.grantPermissions(['clipboard-read', 'clipboard-write'])
   await page.setViewportSize({ width: 1440, height: 900 })
   const { calls } = await setup(page)
   await full(page, Q.issued)
   const card = details(page).locator('section', { has: page.getByRole('heading', { name: 'Customer link' }) })
   await expect(card).toContainText('Whoever has it can read the quote and accept it')
-  await expect(card).toContainText('stores the link only as a fingerprint')
+  await expect(card).toContainText('verifier and admin-only copy are stored separately')
   await card.getByLabel('Link ends after').selectOption('14')
   await card.getByRole('button', { name: 'Create link' }).click()
   await expect.poll(() => calls.some(c => c.method === 'POST' && c.path.endsWith('/public-link'))).toBe(true)
   const post = calls.find(c => c.method === 'POST' && c.path.endsWith('/public-link'))!
   const days = (Date.parse(String((post.body as { expires_at: string }).expires_at)) - Date.now()) / 86_400_000
   expect(days).toBeGreaterThan(13.9); expect(days).toBeLessThan(14.1)
-  const url = card.getByLabel('Copy it now: it is shown only this once')
+  const url = card.getByRole('textbox', { name: 'Customer link' })
   await expect(url).toHaveValue(/\/offers\/sel-demo\/tok-link-\d+$/)
+  const originalUrl = await url.inputValue()
+  await card.getByRole('button', { name: 'QR code' }).click()
+  const encoded = await page.evaluate(async () => {
+    const { decodeQuoteQr } = await import('/tests/quotes/qr-decode-harness.ts')
+    return decodeQuoteQr('#quote-link-qr')
+  })
+  expect(encoded).toBe(await url.inputValue())
   await card.getByRole('button', { name: 'Copy' }).click()
   await expect(card.getByRole('button', { name: 'Copied' })).toBeVisible()
   expect(await page.evaluate(() => navigator.clipboard.readText())).toMatch(/\/offers\/sel-demo\/tok-link-\d+$/)
@@ -120,8 +205,7 @@ test('the customer link: an end date, shown once to copy, then only its state; r
 
   await page.reload()
   await expect(card.getByText(/^Opens this version until/)).toBeVisible()
-  await expect(card.getByLabel('Copy it now: it is shown only this once')).toHaveCount(0)
-  await expect(card.getByText('Lost the link? For privacy it was shown only once.')).toBeVisible()
+  await expect(card.getByRole('textbox', { name: 'Customer link' })).toHaveValue(originalUrl)
   await card.getByRole('button', { name: 'Revoke link' }).click()
   await page.getByRole('dialog', { name: 'Revoke the customer link?' }).getByRole('button', { name: 'Revoke link' }).click()
   await expect(card.getByText(/^Revoked on/)).toBeVisible()
@@ -256,6 +340,39 @@ test('a member reads issued quotes and cannot issue or share', async ({ page }) 
   await full(page, Q.issued)
   await expect(details(page)).toContainText('An admin shares quotes with customers through a link.')
   await expect(details(page).getByRole('button', { name: /Revise/ })).toHaveCount(0)
+})
+
+test('a second tenant browser opens its own draft while the first tenant keeps its edits', async ({ browser }) => {
+  const a = await browser.newContext(), b = await browser.newContext()
+  try {
+    const first = await a.newPage(), second = await b.newPage()
+    await setup(first)
+    await setup(second, { tune: world => { world.drafts.get(Q.draft)!.document.title = 'Tenant B quote' } })
+    await second.route('**/api/me', route => route.fulfill({ json: { principal: { id: 'bbbbbbbb-0000-4000-8000-bbbbbbbbbbbb', name: 'Tenant B editor', kind: 'person', roles: ['admin'] }, tenant: { id: 'tenant-b', name: 'Tenant B' } } }))
+    await Promise.all([full(first, Q.draft), full(second, Q.draft)])
+    await expect(first.getByRole('textbox', { name: 'Angebotstitel' })).toHaveText('Relaunch des Kundenportals')
+    await expect(second.getByRole('textbox', { name: 'Angebotstitel' })).toHaveText('Tenant B quote')
+    await first.getByRole('textbox', { name: 'Angebotstitel' }).fill('Tenant A edit')
+    await expect(second.getByRole('textbox', { name: 'Angebotstitel' })).toHaveText('Tenant B quote')
+  } finally { await a.close(); await b.close() }
+})
+
+test('a representative quote with 20 sections, 100 positions and 12 collaborators opens within ten seconds', async ({ page }) => {
+  await page.setViewportSize({ width: 1440, height: 900 })
+  await setup(page, { tune: world => {
+    const draft = world.drafts.get(Q.draft)!
+    const section = draft.document.sections[0]!
+    draft.document.sections = Array.from({ length: 20 }, (_, i) => ({ ...structuredClone(section), id: `11111111-1111-4111-8111-${String(i + 1).padStart(12, '0')}`, heading: `Section ${i + 1}`, nodes: [{ ...structuredClone(section.nodes[0]!), id: `22222222-2222-4222-8222-${String(i + 1).padStart(12, '0')}` }] }))
+    const position = draft.document.positions[0]!
+    draft.document.positions = Array.from({ length: 100 }, (_, i) => ({ ...structuredClone(position), id: `33333333-3333-4333-8333-${String(i + 1).padStart(12, '0')}`, short_text: `Position ${i + 1}` }))
+    world.presence = Array.from({ length: 12 }, (_, i) => ({ session_id: `44444444-4444-4444-8444-${String(i + 1).padStart(12, '0')}`, principal_id: `55555555-5555-4555-8555-${String(i + 1).padStart(12, '0')}`, name: `Editor ${i + 1}`, mode: 'editing', observed_revision: 3, expires_at: '2099-01-01', anchor: { section_id: draft.document.sections[i]!.id, observed_revision: 3, fidelity: 'section' } }))
+  } })
+  const started = Date.now()
+  await full(page, Q.draft)
+  expect(Date.now() - started).toBeLessThan(10_000)
+  await expect(page.locator('.quote-page .quote-positions tbody')).toHaveCount(100)
+  await expect(page.getByRole('button', { name: '12 other people here, 12 editing' })).toBeVisible()
+  await expect(page.locator('.quote-presence-overlays .mark')).toHaveCount(1)
 })
 
 test('phones: the details come up as a sheet, nothing is cut at 390', async ({ page }) => {

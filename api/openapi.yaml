@@ -1926,7 +1926,7 @@ paths:
     post:
       operationId: finalizeQuoteDraft
       summary: Freeze and issue the exact saved draft atomically
-      description: Admin person only. Does not send email or create a public link. Creates an immutable document-v1 snapshot with cent-half-up-v1 pricing and digest; existing R4 versions retain r4-v1.
+      description: Admin person only. Does not send email. Creates an immutable document-v1 snapshot with cent-half-up-v1 pricing and digest plus a scoped public link in the same transaction; existing R4 versions retain r4-v1.
       security: [{session: []}]
       parameters: [{name: quoteId, in: path, required: true, schema: {type: string, format: uuid}}]
       requestBody: {required: true, content: {application/json: {schema: {$ref: '#/components/schemas/QuoteFinalizeWrite'}}}}
@@ -2037,16 +2037,16 @@ paths:
     post:
       operationId: createQuotePublicLink
       summary: Create a scoped capability for the current issued document
-      description: Admin person only. The one-time token is returned only on creation and stored as a SHA-256 verifier. Revoke before reissue; expired links stay readable but cannot accept.
+      description: Admin person only. Finalization creates the first link. Explicit creation is for a historical issued version without one, or reissue after revocation. The projection stores only a SHA-256 verifier; the capability is kept separately for repeat copying by admins. Revoke before reissue; expired links stay readable but cannot accept.
       security: [{session: []}]
       parameters: [{name: quoteId, in: path, required: true, schema: {type: string, format: uuid}}, {name: version, in: path, required: true, schema: {type: integer, minimum: 1}}]
       requestBody: {required: false, content: {application/json: {schema: {type: object, additionalProperties: false, properties: {expires_at: {type: string, format: date-time}}}}}}
       responses:
-        '201': {description: One-time link and metadata, content: {application/json: {schema: {$ref: '#/components/schemas/QuotePublicLink'}}}}
+        '201': {description: Link and metadata, content: {application/json: {schema: {$ref: '#/components/schemas/QuotePublicLink'}}}}
         '409': {$ref: '#/components/responses/Error'}
     get:
       operationId: getQuotePublicLink
-      summary: Read link metadata without the secret token
+      summary: Read link metadata and the stable path as an admin
       security: [{session: []}]
       parameters: [{name: quoteId, in: path, required: true, schema: {type: string, format: uuid}}, {name: version, in: path, required: true, schema: {type: integer, minimum: 1}}]
       responses:
@@ -2100,8 +2100,9 @@ paths:
   /quotes/acceptances:
     get:
       operationId: listQuoteAcceptanceNotices
-      summary: List recent acceptance notices for quote staff
+      summary: List recent acceptance notices for quote staff, optionally limited to the signed-in offer creator's latest 20
       security: [{session: []}]
+      parameters: [{name: created_by_me, in: query, schema: {type: boolean, default: false}, description: Return at most 20 notices for offers created by the signed-in principal}]
       responses:
         '200': {description: Recent notices, content: {application/json: {schema: {type: array, items: {type: object}}}}}
   /quotes/{quoteId}/versions/{version}/confirmation:
@@ -3119,7 +3120,7 @@ components:
         target_content_sha256: {type: string, pattern: '^[0-9a-f]{64}$'}
         expires_at: {type: string, format: date-time}
         revoked_at: {type: string, format: date-time}
-        path: {type: string, description: Returned only on creation}
+        path: {type: string, description: Returned to admins for an active link when its capability is retained; historical links without a retained capability omit it}
         token: {type: string, description: Returned only on creation}
     QuotePublicDocument:
       type: object

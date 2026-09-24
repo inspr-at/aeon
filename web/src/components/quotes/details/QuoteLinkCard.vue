@@ -2,15 +2,15 @@
 <script setup lang="ts">
 import './details.css'
 import { computed, ref, watch } from 'vue'
-import qrcode from 'qrcode-generator'
+import { quoteQr } from '../../../lib/quotes/qr'
 import { confirmAction } from '../../../lib/confirm'
 import { createLink, getLink, lifecycleError, linkUrl, revokeLink, type PublicLink } from '../../../lib/quotes/lifecycle'
 import { toast } from '../../../lib/toast'
 import AppIcon from '../../AppIcon.vue'
 import BizIcon from '../../business/BizIcon.vue'
 
-// The customer link for one issued version: create it with an end date, copy it
-// while it is shown (once: only its fingerprint is kept), revoke it any time.
+// The customer link for one issued version: finalization creates it, while an
+// admin can create one for older issued history, copy it again or revoke it.
 // The link opens this frozen version and nothing else, and it can accept it
 // until it ends, the quote is revised or someone revokes it.
 const props = defineProps<{ quoteId: string; version: number; admin: boolean; acceptable: boolean; accepted: boolean }>()
@@ -36,7 +36,7 @@ const endsOn = computed(() => new Intl.DateTimeFormat('en-GB', { day: 'numeric',
 async function load() {
   error.value = ''
   if (!props.admin) { loaded.value = true; return }
-  try { link.value = await getLink(props.quoteId, props.version); now.value = Date.now() }
+  try { link.value = await getLink(props.quoteId, props.version); fresh.value = link.value?.path ? linkUrl(link.value) : ''; now.value = Date.now() }
   catch (e) { error.value = lifecycleError(e, 'The link could not be read.') }
   finally { loaded.value = true }
 }
@@ -72,16 +72,7 @@ async function copy() {
 function selectAll(event: FocusEvent) { (event.target as HTMLInputElement).select() }
 // The same link as a QR code, for a printed page or a phone across the table.
 const showQr = ref(false)
-const qr = computed(() => {
-  if (!fresh.value) return null
-  const code = qrcode(0, 'M')
-  code.addData(fresh.value)
-  code.make()
-  const size = code.getModuleCount()
-  let path = ''
-  for (let row = 0; row < size; row++) for (let col = 0; col < size; col++) if (code.isDark(row, col)) path += `M${col} ${row}h1v1h-1z`
-  return { size, path }
-})
+const qr = computed(() => fresh.value ? quoteQr(fresh.value) : null)
 </script>
 
 <template>
@@ -98,7 +89,7 @@ const qr = computed(() => {
     <div v-else-if="!loaded" class="sk" aria-hidden="true"><span class="skeleton" /><span class="skeleton short" /></div>
     <template v-else>
       <div v-if="fresh" class="fresh">
-        <label class="d-label" for="quote-link-url">Copy it now: it is shown only this once</label>
+        <label class="d-label" for="quote-link-url">Customer link</label>
         <div class="url-row">
           <input id="quote-link-url" class="field url" :value="fresh" readonly @focus="selectAll" />
           <button type="button" class="btn sm primary" @click="copy"><AppIcon :name="copied ? 'check' : 'copy'" :size="13" />{{ copied ? 'Copied' : 'Copy' }}</button>
@@ -118,7 +109,7 @@ const qr = computed(() => {
       <p v-else-if="accepted" class="d-text">This version was accepted without a link.</p>
       <p v-else class="d-text">Share this version with a link. Whoever has it can read the quote and accept it, without an account.</p>
 
-      <div v-if="state !== 'active' && acceptable" class="create-row">
+      <div v-if="(state === 'none' || state === 'revoked') && acceptable" class="create-row">
         <label class="d-label" for="quote-link-days">Link ends after</label>
         <div class="create-controls">
           <select id="quote-link-days" v-model.number="days" class="field days">
@@ -128,13 +119,13 @@ const qr = computed(() => {
         </div>
         <p class="hint">Ends on {{ endsOn }}.</p>
       </div>
-      <div v-if="state === 'active'" class="actions">
+      <div v-if="state === 'active' || state === 'expired'" class="actions">
         <button type="button" class="btn sm ghost danger-text" :disabled="busy" @click="revoke">Revoke link</button>
       </div>
-      <p v-if="state === 'active' && !fresh && acceptable" class="hint">Lost the link? For privacy it was shown only once. Revoke it and create a new one.</p>
+      <p v-if="state === 'active' && !fresh && acceptable" class="hint">This older link cannot be copied again. Revoke it to create a new one.</p>
       <p v-if="error" class="d-error" role="alert"><AppIcon name="alert" :size="13" />{{ error }}</p>
 
-      <p class="privacy"><BizIcon name="lock" :size="13" /><span>The page shows only this frozen version: no other quotes, customers or people. It is never cached or indexed, and it stores the link only as a fingerprint.</span></p>
+      <p class="privacy"><BizIcon name="lock" :size="13" /><span>The page shows only this frozen version: no other quotes, customers or people. It is never cached or indexed. The verifier and admin-only copy are stored separately.</span></p>
     </template>
   </section>
 </template>

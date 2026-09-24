@@ -48,6 +48,12 @@ const problems = computed(() => ({
   title: !title.value.trim() ? 'A title is needed.' : title.value.trim().length > 512 ? 'At most 512 characters.' : '',
 }))
 const dirty = computed(() => !!title.value.trim() || (!fixedCustomer.value && !!customerId.value))
+function senderReady(s: Awaited<ReturnType<typeof getSettings>>) {
+  if (s.revision < 1 || !s.numbering_time_zone || !/^[A-Z]{3}$/.test(s.default_currency)) return false
+  const required = ['company', 'street', 'postal_code', 'city', 'country']
+  return required.every(key => typeof s.sender?.[key] === 'string' && (s.sender[key] as string).trim())
+    && typeof s.sender?.email === 'string' && /^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(s.sender.email)
+}
 
 async function open(options: { customerId?: string; customerName?: string } = {}) {
   opener = document.activeElement as HTMLElement
@@ -57,7 +63,7 @@ async function open(options: { customerId?: string; customerName?: string } = {}
   settings.value = 'loading'
   dialog.value?.showModal()
   void customers.load()
-  void getSettings().then(s => { settings.value = s.revision > 0 ? 'ready' : 'missing' }).catch(() => { settings.value = 'error' })
+  void getSettings().then(s => { settings.value = senderReady(s) ? 'ready' : 'missing' }).catch(() => { settings.value = 'error' })
   await nextTick()
   ;(customerId.value ? titleInput.value : customerInput.value)?.focus()
 }
