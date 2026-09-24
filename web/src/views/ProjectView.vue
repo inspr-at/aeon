@@ -8,6 +8,8 @@ import { confirmAction } from '../lib/confirm'
 import { asListItem, guardedMove, keyPrefix, kinds } from '../lib/useTicket'
 import { useOutline } from '../lib/useOutline'
 import { density } from '../lib/prefs'
+import { orderOf, type ColumnId, type ListPrefs } from '../lib/columns'
+import { usePreference } from '../lib/preferences'
 import { toast } from '../lib/toast'
 import { command, consume, run } from '../lib/commands'
 import { remember } from '../lib/recents'
@@ -17,6 +19,7 @@ import { absoluteTime, cycleSort, relativeTime, statusMeta, type SortField } fro
 import { useProjects } from '../stores/projects'
 import { useSession } from '../stores/session'
 import AppIcon from '../components/AppIcon.vue'
+import PanelSplitter from '../components/PanelSplitter.vue'
 import FilterSheet from '../components/work/FilterSheet.vue'
 import ListToolbar from '../components/work/ListToolbar.vue'
 import StatusIcon from '../components/work/StatusIcon.vue'
@@ -35,6 +38,15 @@ const ticketKey = computed(() => typeof route.params.ticketKey === 'string' ? ro
 const project = computed(() => projects.byRouteKey(projectKey.value))
 const projectId = computed(() => project.value?.id ?? null)
 const routeKey = computed(() => project.value?.routeKey ?? projectKey.value)
+
+// ---------- Columns: the person's order, visibility and widths for this project ----------
+const listPref = computed(() => projectId.value ? usePreference<ListPrefs>(`list:${projectId.value}`) : null)
+const listPrefs = computed(() => listPref.value?.value.value ?? null)
+const tableLayout = ref<{ visible: ColumnId[]; customised: boolean }>({ visible: [], customised: false })
+const toolbarColumns = computed(() => ({ order: orderOf(listPrefs.value), visible: tableLayout.value.visible, customised: tableLayout.value.customised }))
+function saveColumns(order: ColumnId[], visible: ColumnId[]) { listPref.value?.save({ ...(listPrefs.value ?? {}), order, visible }, 0) }
+function resetColumns() { const { order: _order, visible: _visible, ...rest } = listPrefs.value ?? {}; listPref.value?.save(rest, 0) }
+function saveWidths(widths: Partial<Record<ColumnId, number>>) { listPref.value?.save({ ...(listPrefs.value ?? {}), widths }) }
 const filters = computed(() => filtersFromQuery(route.query))
 const list = useTicketList(projectId, filters)
 const now = ref(Date.now())
@@ -216,8 +228,10 @@ const people = computed(() => projectPeople.value.map(id => ({ id, name: list.na
 let openedFromList = false
 let openedQuery = ''
 function ticketPath(key: string) { return `/p/${encodeURIComponent(routeKey.value)}/${encodeURIComponent(key)}` }
+// List navigation (open from the list, j/k, next/previous) replaces the open ticket
+// and clears the back trail; following a link inside the panel pushes a step.
 function openKey(key: string) {
-  const location = { path: ticketPath(key), query: route.query }
+  const location = { path: ticketPath(key), query: route.query, state: { trail: [] } }
   if (ticketKey.value) { void router.replace(location); return }
   openedFromList = true
   openedQuery = JSON.stringify(route.query)
@@ -232,7 +246,8 @@ function closePanel() {
   if (!ticketKey.value) return
   const back = !fullView.value && openedFromList && JSON.stringify(route.query) === openedQuery && typeof window.history.state?.back === 'string'
   openedFromList = false
-  if (back) router.back()
+  // Back past every followed link to the list entry the panel was opened from.
+  if (back) router.go(-(trail.value.length + 1))
   else void router.replace({ path: `/p/${encodeURIComponent(routeKey.value)}`, query: listQuery() })
   void nextTick(() => table.value?.focusGrid())
 }
@@ -256,16 +271,31 @@ function collapse() {
   else void router.replace({ path: route.path, query: listQuery() })
   expandedFromPanel = false
 }
+// ---------- Back trail: links followed inside the panel ----------
+const trail = ref<string[]>([])
+function readTrail() {
+  const saved = window.history.state?.trail
+  trail.value = Array.isArray(saved) ? saved.filter((key): key is string => typeof key === 'string') : []
+}
+watch(() => route.fullPath, readTrail, { immediate: true })
+function follow(path: string) {
+  const current = panelItem.value?.key ?? ticketKey.value.toUpperCase()
+  void router.push({ path, query: route.query, state: { trail: [...trail.value, current] } })
+}
+function trailBack(steps = 1) { if (trail.value.length) router.go(-Math.min(steps, trail.value.length)) }
 // Related tickets can live in another project: open them where they belong.
-async function openRelated(key: string) {
-  if (key.split('-')[0] === routeKey.value || list.rows.value.some(row => row.key === key)) { openKey(key); return }
-  try {
-    const page = await listNodes({ q: key, limit: 25 })
-    const owner = page.items.find(item => item.key === key)?.project
-    const target = owner ? projects.byId(owner.id) : undefined
-    if (target && target.id !== projectId.value) { void router.push(`/p/${encodeURIComponent(target.routeKey)}/${encodeURIComponent(key)}`); return }
-  } catch { /* fall back to this project, where the panel explains */ }
-  openKey(key)
+async function openRelated(key: string, newTabRequested = false) {
+  if (newTabRequested) { newTab(key); return }
+  const here = key.split('-')[0] === routeKey.value || list.rows.value.some(row => row.key === key)
+  if (!here) {
+    try {
+      const page = await listNodes({ q: key, limit: 25 })
+      const owner = page.items.find(item => item.key === key)?.project
+      const target = owner ? projects.byId(owner.id) : undefined
+      if (target && target.id !== projectId.value) { follow(`/p/${encodeURIComponent(target.routeKey)}/${encodeURIComponent(key)}`); return }
+    } catch { /* fall back to this project, where the panel explains */ }
+  }
+  if (ticketKey.value) follow(ticketPath(key)); else openKey(key)
 }
 watch(ticketKey, key => { if (!key) openedFromList = false })
 
@@ -273,7 +303,10 @@ watch(ticketKey, key => { if (!key) openedFromList = false })
 function copyKey(key: string) {
   navigator.clipboard.writeText(key).then(() => toast(`Copied ${key}`), () => toast(`${key} could not be copied`, { tone: 'error' }))
 }
-function newTab(key: string) { window.open(ticketPath(key), '_blank', 'noopener') }
+function newTab(key: string) {
+  const project = projects.projects.find(p => key.startsWith(`${p.routeKey}-`))
+  window.open(project ? `/p/${encodeURIComponent(project.routeKey)}/${encodeURIComponent(key)}` : ticketPath(key), '_blank', 'noopener')
+}
 function openStatus(row: ListItem, anchor: HTMLElement, from: 'list' | 'panel') {
   statusMenu.value = statusMenu.value?.row.id === row.id && statusMenu.value.from === from ? null : { row, anchor, from }
 }
@@ -411,6 +444,7 @@ async function move(step: number) {
   table.value?.focusGrid()
 }
 function keydown(event: KeyboardEvent) {
+  if (event.altKey && event.key === 'ArrowLeft' && ticketKey.value && trail.value.length && !typing(event.target as HTMLElement | null)) { event.preventDefault(); trailBack(); return }
   if (event.defaultPrevented || event.metaKey || event.ctrlKey || event.altKey) return
   if (document.querySelector('dialog[open]')) return
   const target = event.target as HTMLElement | null
@@ -434,7 +468,7 @@ function keydown(event: KeyboardEvent) {
       break
     case '/': if (!fullView.value) { event.preventDefault(); toolbar.value?.focusSearch() } break
     case 'n': event.preventDefault(); void startCreate(outlineActive.value && !ticketKey.value && row?.kind_slug === 'epic' ? row : null); break
-    case 'e': if (ticketKey.value) { event.preventDefault(); panel.value?.editTitle() } break
+    case 'e': if (ticketKey.value) { event.preventDefault(); void panel.value?.startEdit() } break
     case 's':
       if (ticketKey.value) { event.preventDefault(); panel.value?.openStatus() }
       else if (row) { const anchor = document.querySelector<HTMLElement>(`#row-${row.id} .status-btn`); if (anchor) { event.preventDefault(); openStatus(row, anchor, 'list') } }
@@ -547,6 +581,7 @@ watch([project, panelItem], ([current, item]) => {
           @show-closed="value => update({ showClosed: value })" @group="setGroup" @density="setDensity"
           @open-sheet="filterSheet?.open()" @need-names="list.resolveNames(options('assignee').map(o => o.value))" @create="startCreate()"
           :view="viewMode" @view="setView" @expand-all="outline.expandAll()" @collapse-all="outline.collapseAll()"
+          :columns="toolbarColumns" @columns="saveColumns" @columns-reset="resetColumns"
         />
       </div>
 
@@ -558,7 +593,8 @@ watch([project, panelItem], ([current, item]) => {
         :has-more="outlineActive ? outline.hasMoreRoot.value : !!list.cursor.value" :filtered="filtered" :hiding-closed="!filters.showClosed"
         :collapsed="collapsed" :total="total" :project-key="routeKey" :scroll-root="scrollRoot" :now="now" :show-assignee="showAssignee"
         :creating="creating" :project-id="project.id" :known-states="knownStates" :create="quickCreate" @close-create="closeCreate"
-        :outline="outlineActive ? outline.entries.value : null" :can-drag="outlineActive && writable"
+        :outline="outlineActive ? outline.entries.value : null" :can-drag="outlineActive && writable" :prefs="listPrefs"
+        @layout="(visible, customised) => tableLayout = { visible, customised }" @widths="saveWidths"
         @toggle-row="outline.toggle" @toggle-no-epic="outline.noEpicCollapsed.value = !outline.noEpicCollapsed.value"
         @more-children="id => id === project!.id ? outline.loadMoreRoot() : outline.loadChildren(id, true)" @move="moveRow"
         @open="openRow" @cursor="id => cursorId = id" @sort="sortBy" @status="(row, anchor) => openStatus(row, anchor, 'list')"
@@ -572,12 +608,13 @@ watch([project, panelItem], ([current, item]) => {
       </p>
       </div>
 
+      <PanelSplitter v-if="ticketKey && !fullView" />
       <TicketWorkspace
         v-if="ticketKey" ref="panel" :item="panelItem" :ticket-key="ticketKey.toUpperCase()" :resolving="panelLoading" :resolve-error="panelError"
         :position="panelPosition" :now="now" :mode="fullView ? 'full' : 'panel'" :project="{ id: project.id, routeKey: project.routeKey }"
         :names="list.names" :me="me" :can-write="writable" :people="people"
         @close="closePanel" @prev="move(-1)" @next="move(1)" @expand="expand" @collapse="collapse" @new-tab="newTab(panelItem?.key ?? ticketKey)"
-        @status="anchor => panelItem && openStatus(panelItem, anchor, 'panel')" @open-key="openRelated" @removed="removed" @created="childCreated" @moved="childMoved" @retry="resolvePanel"
+        @status="anchor => panelItem && openStatus(panelItem, anchor, 'panel')" @open-key="openRelated" :trail="trail" @trail-back="trailBack" @removed="removed" @created="childCreated" @moved="childMoved" @retry="resolvePanel"
       />
       <StatusMenu v-if="statusMenu" :anchor="statusMenu.anchor" :current="statusMenu.row.state" :known-states="knownStates" :ticket-key="statusMenu.row.key" @choose="chooseStatus" @close="closeStatus" />
       <FilterSheet
@@ -606,7 +643,8 @@ watch([project, panelItem], ([current, item]) => {
 </template>
 
 <style scoped>
-.project-page { width: 100%; max-width: 1600px; margin: 0 auto; padding: 22px 28px 12px; }
+/* Lists use the full width; the gutter grows with the screen. */
+.project-page { width: 100%; margin: 0; padding: 22px var(--gutter) 12px; }
 .project-head { display: flex; align-items: flex-end; justify-content: space-between; gap: 32px; padding: 4px 0 14px; }
 .head-main { min-width: 0; flex: 1; }
 .title-line { display: flex; align-items: center; gap: 12px; min-width: 0; }
@@ -624,7 +662,7 @@ watch([project, panelItem], ([current, item]) => {
 .activity { font-size: 12px; color: var(--ink-3); }
 .activity time { color: var(--ink-2); }
 .stick-mark { height: 1px; margin-bottom: -1px; }
-.toolbar-wrap { position: sticky; top: 0; z-index: 5; margin: 0 -28px; padding: 0 28px; container: toolbar / inline-size; }
+.toolbar-wrap { position: sticky; top: 0; z-index: 5; margin: 0 calc(-1 * var(--gutter)); padding: 0 var(--gutter); container: toolbar / inline-size; }
 .toolbar-wrap.stuck { background: var(--glass); box-shadow: 0 1px 0 var(--line), 0 12px 24px -20px rgba(16, 35, 39, .35); backdrop-filter: blur(18px) saturate(1.2); -webkit-backdrop-filter: blur(18px) saturate(1.2); }
 .hint { display: flex; align-items: center; justify-content: center; flex-wrap: wrap; gap: 5px; padding: 16px 0 6px; font-size: 12px; color: var(--ink-3); }
 /* The hint waits for the rows, like the footer, so it never jumps while they load. */

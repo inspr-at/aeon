@@ -51,12 +51,12 @@ test('the panel shows title, properties, Markdown sections, relations and the ti
   expect(errors).toEqual([])
 })
 
-test('titles edit inline with e, save with Enter under a precondition, and cancel with Esc', async ({ page }) => {
+test('titles edit inline on click, save with Enter under a precondition, and cancel with Esc', async ({ page }) => {
   const calls = await mockWork(page, fixtures())
   await page.goto('/p/PHAROS/PHAROS-12')
   const ws = panel(page)
   await expect(ws.getByRole('heading', { name: 'Add an Oracle Cloud connector' })).toBeVisible()
-  await page.keyboard.press('e')
+  await ws.getByRole('heading', { name: 'Add an Oracle Cloud connector' }).click()
   const input = ws.getByLabel('Title', { exact: true })
   await expect(input).toBeFocused()
   await input.fill('Add an Oracle Cloud Always Free connector')
@@ -333,10 +333,10 @@ test('Tab walks the panel in reading order; Esc closes a popover before the pane
     await page.keyboard.press('Tab')
   }
   expect(order).toEqual([
-    'Copy PHAROS-12', 'Previous ticket', 'Next ticket', 'Open as full page', 'Open in a new tab', 'More actions', 'Close ticket details',
-    'Add an Oracle Cloud connector', 'Status: Backlog. Change status', 'Priority: Medium. Change priority', 'Assignee: nobody. Change assignee', 'PHAROS-10Guarded multi-cloud p', 'Add a description',
+    'Copy PHAROS-12', 'Previous ticket', 'Next ticket', 'Edit', 'Open as full page', 'Open in a new tab', 'More actions', 'Close ticket details',
+    'Add an Oracle Cloud connector', 'Status: Backlog. Change status', 'Priority: Medium. Change priority', 'Assignee: nobody. Change assignee', 'PHAROS-10Guarded multi-cloud p',
   ])
-  await page.keyboard.press('Shift+Tab'); await page.keyboard.press('Shift+Tab'); await page.keyboard.press('Shift+Tab'); await page.keyboard.press('Shift+Tab'); await page.keyboard.press('Shift+Tab')
+  await page.keyboard.press('Shift+Tab'); await page.keyboard.press('Shift+Tab'); await page.keyboard.press('Shift+Tab'); await page.keyboard.press('Shift+Tab')
   await expect(ws.getByRole('button', { name: /Status: Backlog/ })).toBeFocused()
   await page.keyboard.press('Enter')
   await expect(page.getByRole('menu', { name: 'Status of PHAROS-12' })).toBeVisible()

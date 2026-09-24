@@ -24,6 +24,7 @@ export interface MockOptions {
   failPatch?: boolean
   conflictOn?: string
   bigProject?: number
+  failUpload?: boolean
 }
 
 const CLOSED = ['done', 'cancelled', 'archived', 'delivered', 'accepted']
@@ -69,8 +70,24 @@ export function fixtures(options: MockOptions = {}) {
     { id: 'r-1', source_node_id: 'n-4', target_node_id: 'n-1', type: 'blocks', created_at: ago(40) },
     { id: 'r-2', source_node_id: 'n-1', target_node_id: 'n-5', type: 'relates', created_at: ago(40) },
   ]
-  return { projects, nodes, people: [me, mira], activity, relations, counter: { next: 100 } }
+  // Attachments per node (B8 shape: decimal-string positions, created_by is an id).
+  const attachment = (id: string, node: string, name: string, position: number, extra: Record<string, unknown> = {}) => ({
+    id, node_id: node, sha256: id.padEnd(64, '0'), name, content_type: 'image/png', size: 184_320 + position, width: 1440, height: 900, caption: '',
+    position: String(position), created_by: me.id, created_at: ago(30 - position / 1024), updated_at: ago(30 - position / 1024), deleted_at: null, ...extra,
+  })
+  const attachments: Record<string, ReturnType<typeof attachment>[]> = {
+    'n-1': [
+      attachment('att-1', 'n-1', 'fleet-list-before.png', 1024, { caption: 'Before: card grid' }),
+      attachment('att-2', 'n-1', 'fleet-list-after.png', 2048, { caption: 'After: compact list' }),
+      attachment('att-3', 'n-1', 'phone.png', 3072, { width: 390, height: 844 }),
+      attachment('att-4', 'n-1', 'provider-notes.pdf', 4096, { content_type: 'application/pdf', width: null, height: null, size: 48_200 }),
+    ],
+  }
+  const preferences: Record<string, Record<string, unknown>> = {}
+  return { projects, nodes, people: [me, mira], activity, relations, attachments, preferences, counter: { next: 100 } }
 }
+// A 1x1 PNG for every attachment variant.
+export const PNG = Buffer.from('iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAYAAAAfFcSJAAAADUlEQVR42mNk+M9QDwADhgGAWjR9awAAAABJRU5ErkJggg==', 'base64')
 
 export type Fixtures = ReturnType<typeof fixtures>
 export interface Call { path: string; method: string; query: URLSearchParams; body: unknown; headers: Record<string, string> }
@@ -233,6 +250,47 @@ export async function mockWork(page: Page, data: Fixtures, options: MockOptions 
       const q = (query.get('q') ?? '').toLowerCase()
       const hits = data.nodes.filter(n => n.title.toLowerCase().includes(q)).map(n => ({ node: { ...item(n, data) }, score: 0.9 }))
       return route.fulfill({ json: { items: hits, next_cursor: null } })
+    }
+    // ---------- Preferences ----------
+    const prefPath = /^\/api\/preferences\/([^/]+)$/.exec(path)
+    if (prefPath) {
+      const key = prefPath[1]
+      if (method === 'PUT') { data.preferences[key] = (body as { value: Record<string, unknown> }).value; return route.fulfill({ json: { key, value: data.preferences[key], updated_at: new Date(now).toISOString() } }) }
+      return route.fulfill({ json: { key, value: data.preferences[key] ?? null, updated_at: null } })
+    }
+    // ---------- Attachments ----------
+    const listPath = /^\/api\/nodes\/([^/]+)\/attachments$/.exec(path)
+    if (listPath) {
+      const list = (data.attachments[listPath[1]] ??= [])
+      if (method === 'GET') return route.fulfill({ json: [...list].sort((a, b) => Number(a.position) - Number(b.position)) })
+      if (options.failUpload) return route.fulfill({ status: 413, json: { error: 'The file is too large' } })
+      const raw = request.postDataBuffer()?.toString('latin1') ?? ''
+      const files = [...raw.matchAll(/name="file"; filename="([^"]*)"\r\nContent-Type: ([^\r]+)/g)]
+      const created = files.map(([, name, type], i) => {
+        const id = `att-new-${calls.length}-${i}`
+        const last = Math.max(0, ...list.map(a => Number(a.position)))
+        const item = { id, node_id: listPath[1], sha256: id.padEnd(64, '0'), name, content_type: type, size: 1024, width: type.startsWith('image/') ? 800 : null, height: type.startsWith('image/') ? 500 : null, caption: '', position: String(last + 1024), created_by: me.id, created_at: new Date(now).toISOString(), updated_at: new Date(now).toISOString(), deleted_at: null }
+        list.push(item)
+        return item
+      })
+      return route.fulfill({ status: 201, json: created })
+    }
+    const attPath = /^\/api\/attachments\/([^/]+)(\/content)?$/.exec(path)
+    if (attPath) {
+      const [, id, content] = attPath
+      if (content) return route.fulfill({ contentType: 'image/png', body: PNG })
+      for (const list of Object.values(data.attachments)) {
+        const index = list.findIndex(a => a.id === id)
+        if (index === -1) continue
+        if (method === 'DELETE') { list.splice(index, 1); return route.fulfill({ status: 204 }) }
+        if (method === 'PATCH') {
+          const expected = request.headers()['if-unmodified-since']
+          if (expected && expected !== list[index].updated_at) return route.fulfill({ status: 412, json: { error: 'stale attachment' } })
+          Object.assign(list[index], body as object, { updated_at: new Date(now + 1000 * calls.length).toISOString() })
+          return route.fulfill({ json: list[index] })
+        }
+      }
+      return route.fulfill({ status: 404, json: { error: 'attachment not found' } })
     }
     return route.fulfill({ status: 404, json: { error: 'Unmocked route' } })
   })

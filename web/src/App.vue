@@ -84,7 +84,7 @@ main:focus-visible { box-shadow: none; }
 .page-flow.fill > :first-child { flex: 1 1 auto; min-height: 0; }
 /* The vendored version renderer nudges separators with transforms; clip them to the bar. */
 .app-footer {
-  display: flex; flex-shrink: 0; justify-content: space-between; align-items: center; gap: 12px; height: 44px; padding: 0 28px; overflow: clip;
+  display: flex; flex-shrink: 0; justify-content: space-between; align-items: center; gap: 12px; height: 44px; padding: 0 var(--gutter); overflow: clip;
   box-shadow: inset 0 1px 0 var(--line); color: var(--ink-2);
 }
 .footer-name { font: 600 10.5px/1.5 var(--mono); letter-spacing: .22em; color: var(--ink-2); }
