@@ -24,6 +24,6 @@ export async function saveDraft(quoteId: string, draftRevision: number, document
   if (!Number.isSafeInteger(draftRevision) || draftRevision < 1) throw new Error('Invalid draft revision')
   return parse<MutationReceipt>(await api(quotePath(quoteId), {
     method: 'PATCH', headers: { 'Content-Type': 'application/json', 'If-Match': `"qd-${draftRevision}"` },
-    body: JSON.stringify({ client_session_id: clientSessionId, mutation_id: mutationId, writer_version: 1, document }),
+    body: JSON.stringify({ client_session_id: clientSessionId, mutation_id: mutationId, writer_version: 2, document }),
   }))
 }

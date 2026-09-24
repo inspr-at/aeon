@@ -1854,7 +1854,7 @@ paths:
     patch:
       operationId: saveQuoteDraft
       summary: Save one full document with compare and swap
-      description: Requires If-Match "qd-N", client_session_id, mutation_id and writer_version. The mutation receipt is durable and replays the acknowledgement for the same payload. A stale precondition returns 412; no document content enters the event stream.
+      description: Requires If-Match "qd-N", client_session_id, mutation_id and writer_version. Writer version 2 preserves inline marks; a marked document raises the minimum writer version to 2, including on later edits that remove its marks. Unformatted version-1 drafts remain writable by version-1 clients. The mutation receipt is durable and replays the acknowledgement for the same payload. A stale precondition returns 412; no document content enters the event stream.
       security: [{session: []}]
       parameters:
         - {name: quoteId, in: path, required: true, schema: {type: string, format: uuid}}
@@ -2855,7 +2855,7 @@ components:
       required: [schema_version, minimum_writer_version, title, subtitle, project_ref, offer_date, valid_until, currency, sender, recipient, legal, layout, sections, positions, net_total_cents]
       properties:
         schema_version: {type: integer, const: 1}
-        minimum_writer_version: {type: integer, const: 1}
+        minimum_writer_version: {type: integer, enum: [1, 2]}
         title: {type: string, maxLength: 512}
         subtitle: {type: string, maxLength: 512}
         project_ref: {type: string, maxLength: 512}
@@ -2986,7 +2986,7 @@ components:
       properties:
         client_session_id: {type: string, format: uuid}
         mutation_id: {type: string, format: uuid}
-        writer_version: {type: integer, const: 1}
+        writer_version: {type: integer, enum: [1, 2]}
         document: {$ref: '#/components/schemas/QuoteDocument'}
     QuoteMutationReceipt:
       type: object

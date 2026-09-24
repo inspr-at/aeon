@@ -43,6 +43,11 @@ func readDraft(ctx context.Context, tx pgx.Tx, id string, lock bool) (draftRow, 
 	if err == nil {
 		sum := sha256.Sum256(d.Document)
 		d.DocumentSHA256 = hex.EncodeToString(sum[:])
+		// Documents saved before writer 2 may contain marks while their row
+		// still advertises writer 1. Enforce the effective floor on reads too.
+		if doc, decodeErr := decodeDocument(d.Document); decodeErr == nil {
+			d.MinimumWriterVersion = max(d.MinimumWriterVersion, documentMinimumWriterVersion(doc))
+		}
 	}
 	if errors.Is(err, pgx.ErrNoRows) {
 		return d, missing()
@@ -126,7 +131,7 @@ func (m *Module) draftPatch(w http.ResponseWriter, r *http.Request) {
 		respond(w, 0, nil, e)
 		return
 	}
-	if !uuidRe.MatchString(in.ClientSessionID) || !uuidRe.MatchString(in.MutationID) || len(in.Document) == 0 || in.WriterVersion != 1 {
+	if !uuidRe.MatchString(in.ClientSessionID) || !uuidRe.MatchString(in.MutationID) || len(in.Document) == 0 || in.WriterVersion < 1 || in.WriterVersion > 2 {
 		respond(w, 0, nil, bad("invalid draft mutation"))
 		return
 	}
@@ -175,9 +180,11 @@ func (m *Module) draftPatch(w http.ResponseWriter, r *http.Request) {
 		if current.DraftRevision != expected {
 			return failure{412, "draft revision is stale"}
 		}
-		if in.WriterVersion < current.MinimumWriterVersion {
+		minimumWriter := max(current.MinimumWriterVersion, documentMinimumWriterVersion(doc))
+		if in.WriterVersion < minimumWriter {
 			return conflict("document requires a newer writer")
 		}
+		doc.MinimumWriterVersion = minimumWriter
 		var customerNo string
 		err = tx.QueryRow(r.Context(), `SELECT customer_no FROM crm_customer_numbers WHERE organisation_node_id=$1::uuid`, q.CustomerOrgNodeID).Scan(&customerNo)
 		if err != nil {
@@ -206,7 +213,7 @@ func (m *Module) draftPatch(w http.ResponseWriter, r *http.Request) {
 		if err != nil {
 			return err
 		}
-		_, err = tx.Exec(r.Context(), `UPDATE quote_drafts SET document=$1::jsonb,draft_revision=draft_revision+1,updated_at=clock_timestamp(),updated_by_principal_id=$2::uuid WHERE quote_node_id=$3::uuid`, string(raw), p.ID, id)
+		_, err = tx.Exec(r.Context(), `UPDATE quote_drafts SET document=$1::jsonb,minimum_writer_version=$2,draft_revision=draft_revision+1,updated_at=clock_timestamp(),updated_by_principal_id=$3::uuid WHERE quote_node_id=$4::uuid`, string(raw), minimumWriter, p.ID, id)
 		if err != nil {
 			return err
 		}

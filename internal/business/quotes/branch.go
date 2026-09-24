@@ -3,6 +3,7 @@
 package quotes
 
 import (
+	"encoding/json"
 	"fmt"
 	"net/http"
 
@@ -69,11 +70,16 @@ func (m *Module) branchDraft(w http.ResponseWriter, r *http.Request) {
 		if sum != v.ContentSHA256 {
 			return conflict("source document digest mismatch")
 		}
+		doc.MinimumWriterVersion = documentMinimumWriterVersion(doc)
 		_, err = tx.Exec(r.Context(), `UPDATE business_quotes SET state='draft',revision=revision+1 WHERE quote_node_id=$1::uuid`, id)
 		if err != nil {
 			return err
 		}
-		_, err = tx.Exec(r.Context(), `INSERT INTO quote_drafts(tenant_id,quote_node_id,document,schema_version,minimum_writer_version,base_version,updated_by_principal_id) VALUES($1::uuid,$2::uuid,$3::jsonb,1,1,$4,$5::uuid) ON CONFLICT(tenant_id,quote_node_id) DO UPDATE SET document=excluded.document,schema_version=excluded.schema_version,minimum_writer_version=excluded.minimum_writer_version,base_version=excluded.base_version,draft_revision=quote_drafts.draft_revision+1,updated_at=clock_timestamp(),updated_by_principal_id=excluded.updated_by_principal_id`, p.TenantID, id, string(v.Document), v.Version, p.ID)
+		raw, err := json.Marshal(doc)
+		if err != nil {
+			return err
+		}
+		_, err = tx.Exec(r.Context(), `INSERT INTO quote_drafts(tenant_id,quote_node_id,document,schema_version,minimum_writer_version,base_version,updated_by_principal_id) VALUES($1::uuid,$2::uuid,$3::jsonb,1,$4,$5,$6::uuid) ON CONFLICT(tenant_id,quote_node_id) DO UPDATE SET document=excluded.document,schema_version=excluded.schema_version,minimum_writer_version=excluded.minimum_writer_version,base_version=excluded.base_version,draft_revision=quote_drafts.draft_revision+1,updated_at=clock_timestamp(),updated_by_principal_id=excluded.updated_by_principal_id`, p.TenantID, id, string(raw), doc.MinimumWriterVersion, v.Version, p.ID)
 		if err != nil {
 			return err
 		}
