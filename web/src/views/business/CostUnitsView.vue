@@ -253,9 +253,18 @@ tr.ended td:not(:last-child) { color: var(--ink-3); }
   .list-search .field { height: 44px; font-size: 16px; }
   .explain { flex-basis: 100%; order: 5; }
   .unit-head { padding: 6px 12px 2px; }
+  /* Phones: one rate per two lines, unit and amount first, validity under them. */
   .rates { width: calc(100% - 16px); margin: 4px 8px 0; }
-  .rates th:nth-child(2), .rates td:nth-child(2) { display: none; }
-  .valid { white-space: normal; font-size: 12px; }
+  .rates thead { display: none; }
+  .rates tbody tr:not(.form-row) { display: grid; grid-template-columns: auto auto auto minmax(0, 1fr) auto; grid-template-areas: "unit bill cur . status" "valid valid valid valid valid"; align-items: baseline; column-gap: 8px; padding: 8px 2px; border-bottom: 1px solid var(--line); }
+  .rates tbody tr:not(.form-row):last-child { border-bottom: 0; }
+  .rates tbody tr:not(.form-row) td { height: auto; padding: 0; border: 0; }
+  .rates td:nth-child(1) { grid-area: unit; } .rates td:nth-child(3) { grid-area: bill; } .rates td:nth-child(6) { grid-area: status; }
+  .rates td:nth-child(5) { grid-area: valid; font-size: 12px; color: var(--ink-3); }
+  .rates td:nth-child(2) { grid-area: cur; font-size: 10.5px; color: var(--ink-3); letter-spacing: .06em; }
+  .rates td:nth-child(4) { display: none; }
+  .rates .form-row { display: block; }
+  .rates .form-row td { display: block; }
   .rate-form .field { height: 44px; font-size: 16px; }
   .no-rates { padding-left: 12px; }
 }

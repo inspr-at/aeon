@@ -279,7 +279,8 @@ a.ticket-chip:hover { text-decoration: underline; }
 @media (max-width: 1180px) { .week-body { grid-template-columns: minmax(0, 1fr); gap: 16px; } }
 @media (max-width: 1040px) { .layout { grid-template-columns: minmax(0, 1fr); } .side-col { position: static; } }
 @media (max-width: 720px) {
-  .card-head { flex-wrap: wrap; padding: 12px 14px 8px; }
+  .card-head { flex-wrap: wrap; padding: 12px 14px 8px; row-gap: 2px; }
+  .card-head .sub { order: 3; flex-basis: 100%; }
   .week-body { padding: 4px 14px 14px; }
   .ticket-row { grid-template-columns: max-content minmax(0, 1fr) 44px; }
   .t-bar { display: none; }

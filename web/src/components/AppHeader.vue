@@ -123,7 +123,7 @@ onBeforeUnmount(() => { document.removeEventListener('pointerdown', outside); wi
 
 <template>
   <header class="app-header">
-    <RouterLink class="lockup" to="/" aria-label="PAIMOS AEON home" :class="{ compact: !!projectKey || !!pageTitle }">
+    <RouterLink class="lockup" to="/" aria-label="PAIMOS AEON home" :class="{ compact: !!projectKey || !!pageTitle || business.anyOpen }">
       <span class="mark-backing"><img :src="mark" width="26" height="26" alt="" /></span>
       <span class="wordmark">PAIMOS<sup>AEON</sup></span>
     </RouterLink>
