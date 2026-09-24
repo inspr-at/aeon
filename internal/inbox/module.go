@@ -80,7 +80,7 @@ func principal(w http.ResponseWriter, r *http.Request) (tenant.Principal, bool) 
 
 func isAdmin(p tenant.Principal) bool {
 	for _, role := range p.Roles {
-		if role == "admin" {
+		if role == "admin" || role == "super_admin" {
 			return true
 		}
 	}

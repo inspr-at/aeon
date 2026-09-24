@@ -67,6 +67,7 @@ func (m *messaging) Mount(mux *http.ServeMux) {
 	mux.HandleFunc("GET /api/projects/{projectId}/message-targets", m.getTargets)
 	mux.HandleFunc("POST /api/projects/{projectId}/messages", m.sendMessage)
 	mux.HandleFunc("GET /api/projects/{projectId}/messages", m.inspectMessages)
+	mux.HandleFunc("POST /api/projects/{projectId}/messages/{messageId}/resolution", m.resolveMessage)
 	mux.HandleFunc("GET /api/projects/{projectId}/messages/listen", m.listenMessages)
 	mux.HandleFunc("GET /api/projects/{projectId}/message-deliveries", m.getDeliveries)
 }

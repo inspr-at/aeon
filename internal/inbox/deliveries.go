@@ -9,7 +9,9 @@ import (
 	"encoding/json"
 	"errors"
 	"net/http"
+	"strconv"
 	"strings"
+	"time"
 	"unicode/utf8"
 
 	"github.com/inspr-at/aeon/internal/db"
@@ -31,26 +33,28 @@ type compatSend struct {
 // CompatMessage holds recipient-visible content. Never put this object in a
 // tenant event: event readers need only the IDs and controlled status fields.
 type CompatMessage struct {
-	ID                   string  `json:"id"`
-	SenderPrincipalID    string  `json:"sender_principal_id"`
-	RecipientPrincipalID string  `json:"recipient_principal_id"`
-	To                   string  `json:"to"`
-	Body                 string  `json:"body"`
-	ReplyTo              *string `json:"reply_to,omitempty"`
-	SentEventID          int64   `json:"sent_event_id"`
-	ActionRequest        bool    `json:"is_action_request"`
-	ExpectsReply         bool    `json:"expects_reply"`
-	Level                string  `json:"delivery_level"`
-	Status               string  `json:"status"`
-	ReplyObligation      string  `json:"reply_obligation"`
+	CreatedAt              time.Time `json:"created_at"`
+	HumanResolutionOutcome *string   `json:"human_resolution_outcome"`
+	ID                     string    `json:"id"`
+	SenderPrincipalID      string    `json:"sender_principal_id"`
+	RecipientPrincipalID   string    `json:"recipient_principal_id"`
+	To                     string    `json:"to"`
+	Body                   string    `json:"body"`
+	ReplyTo                *string   `json:"reply_to,omitempty"`
+	SentEventID            int64     `json:"sent_event_id"`
+	ActionRequest          bool      `json:"is_action_request"`
+	ExpectsReply           bool      `json:"expects_reply"`
+	Level                  string    `json:"delivery_level"`
+	Status                 string    `json:"status"`
+	ReplyObligation        string    `json:"reply_obligation"`
 }
 
-const compatMessageCols = `c.id::text,c.sender_principal_id::text,c.recipient_principal_id::text,c.recipient_address,c.body,c.reply_to_id::text,c.sent_event_id,c.is_action_request,c.expects_reply,c.delivery_level,CASE WHEN c.is_action_request THEN 'held' ELSE 'accepted' END,CASE WHEN o.message_id IS NULL THEN 'none' WHEN o.closed_at IS NULL THEN 'open' ELSE 'closed' END`
+const compatMessageCols = `c.id::text,c.sender_principal_id::text,c.recipient_principal_id::text,c.recipient_address,c.body,c.reply_to_id::text,c.sent_event_id,c.is_action_request,c.expects_reply,c.delivery_level,CASE WHEN c.is_action_request THEN 'held' ELSE 'accepted' END,CASE WHEN o.message_id IS NULL THEN 'none' WHEN o.closed_at IS NULL THEN 'open' ELSE 'closed' END,c.created_at,(SELECT e.after->>'decision' FROM events e WHERE e.type='inbox.action_resolved' AND e.node_id=c.project_id AND e.after->>'message_id'=c.id::text ORDER BY e.id LIMIT 1)`
 const compatObligationJoin = ` LEFT JOIN inbox_reply_obligations o ON o.tenant_id=c.tenant_id AND o.message_id=c.id `
 
 func scanCompatMessage(row pgx.Row) (CompatMessage, error) {
 	var v CompatMessage
-	err := row.Scan(&v.ID, &v.SenderPrincipalID, &v.RecipientPrincipalID, &v.To, &v.Body, &v.ReplyTo, &v.SentEventID, &v.ActionRequest, &v.ExpectsReply, &v.Level, &v.Status, &v.ReplyObligation)
+	err := row.Scan(&v.ID, &v.SenderPrincipalID, &v.RecipientPrincipalID, &v.To, &v.Body, &v.ReplyTo, &v.SentEventID, &v.ActionRequest, &v.ExpectsReply, &v.Level, &v.Status, &v.ReplyObligation, &v.CreatedAt, &v.HumanResolutionOutcome)
 	return v, err
 }
 func messageDigest(v any) string {
@@ -303,17 +307,55 @@ func (m *messaging) readMessages(w http.ResponseWriter, r *http.Request, inspect
 	}
 	if q.Has("limit") {
 		limit, err = parseNonNeg(q.Get("limit"))
-		if err != nil || limit < 1 || limit > 10 {
+		if err != nil || limit < 1 || limit > 200 || (!inspect && limit > 10) {
 			messagingFailure(w, badRequest("invalid limit"))
 			return
 		}
+	}
+	newest, pending := false, false
+	for name, dst := range map[string]*bool{"newest_first": &newest, "pending": &pending} {
+		if q.Has(name) {
+			value, e := strconv.ParseBool(q.Get(name))
+			if e != nil || !inspect {
+				messagingFailure(w, badRequest("invalid inspection option"))
+				return
+			}
+			*dst = value
+		}
+	}
+	address := q.Get("address")
+	if address != "" && q.Get("to") != "" && address != q.Get("to") {
+		messagingFailure(w, badRequest("conflicting address filters"))
+		return
+	}
+	if address == "" {
+		address = q.Get("to")
+	}
+	if address != "" {
+		if _, valid := parseUUID(address); !valid && !messageAddressRE.MatchString(address) {
+			messagingFailure(w, badRequest("invalid address"))
+			return
+		}
+	}
+	var thread any
+	if q.Has("thread") {
+		id, valid := parseUUID(q.Get("thread"))
+		if !valid || !inspect {
+			messagingFailure(w, badRequest("invalid thread"))
+			return
+		}
+		thread = id
+	}
+	order, comparison := "ASC", "c.sent_event_id>$2"
+	if newest {
+		order, comparison = "DESC", "($2=0 OR c.sent_event_id<$2)"
 	}
 	page := compatPage{Items: []CompatMessage{}, NextAfter: after, Preamble: untrustedMessagePreamble}
 	err = db.InTenant(r.Context(), m.base.pool, p.TenantID, func(tx pgx.Tx) error {
 		if err := messagingProject(r.Context(), tx, project); err != nil {
 			return err
 		}
-		to := q.Get("to")
+		to := address
 		if to != "" && !inspect {
 			recipient, err := resolveAddress(r.Context(), tx, project, to)
 			if err != nil {
@@ -323,7 +365,20 @@ func (m *messaging) readMessages(w http.ResponseWriter, r *http.Request, inspect
 				return errForbidden
 			}
 		}
-		rows, err := tx.Query(r.Context(), `SELECT `+compatMessageCols+` FROM inbox_compat_messages c `+compatObligationJoin+` LEFT JOIN inbox_messages i ON i.tenant_id=c.tenant_id AND i.id=c.inbox_message_id WHERE c.project_id=$1::uuid AND c.sent_event_id>$2 AND ($3 OR (c.recipient_principal_id=$4::uuid AND NOT c.is_action_request AND i.acked_at IS NULL AND (i.expires_at IS NULL OR i.expires_at>clock_timestamp()))) AND ($5='' OR c.recipient_address=$5) ORDER BY c.sent_event_id LIMIT $6`, project, after, inspect, p.ID, to, limit)
+		rows, err := tx.Query(r.Context(), `WITH RECURSIVE ancestors AS (
+ SELECT id,reply_to_id FROM inbox_compat_messages WHERE project_id=$1::uuid AND id=$7::uuid
+ UNION SELECT c.id,c.reply_to_id FROM inbox_compat_messages c JOIN ancestors a ON c.id=a.reply_to_id WHERE c.project_id=$1::uuid
+ ), thread AS (
+ SELECT id FROM ancestors WHERE reply_to_id IS NULL
+ UNION SELECT c.id FROM inbox_compat_messages c JOIN thread t ON c.reply_to_id=t.id WHERE c.project_id=$1::uuid
+ ) SELECT `+compatMessageCols+` FROM inbox_compat_messages c `+compatObligationJoin+`
+ LEFT JOIN inbox_messages i ON i.tenant_id=c.tenant_id AND i.id=c.inbox_message_id
+ WHERE c.project_id=$1::uuid AND `+comparison+`
+ AND ($3 OR (c.recipient_principal_id=$4::uuid AND NOT c.is_action_request AND i.acked_at IS NULL AND (i.expires_at IS NULL OR i.expires_at>clock_timestamp())))
+ AND ($5='' OR c.recipient_address=$5)
+ AND ($7::uuid IS NULL OR c.id IN (SELECT id FROM thread))
+ AND (NOT $8 OR (c.is_action_request AND NOT EXISTS(SELECT 1 FROM events e WHERE e.type='inbox.action_resolved' AND e.node_id=c.project_id AND e.after->>'message_id'=c.id::text)))
+ ORDER BY c.sent_event_id `+order+` LIMIT $6`, project, after, inspect, p.ID, to, limit, thread, pending)
 		if err != nil {
 			return err
 		}

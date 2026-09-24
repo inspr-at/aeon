@@ -20,6 +20,11 @@
 // approved request. Revoke writes approval.revoked, closes the grant, and
 // a repeat is idempotent (no second event).
 //
+// B7 adds computed risk to every Approval response and event snapshot:
+// tenant-wide resources or control/deploy/delete scope segments are high;
+// read-only operations (including dotted read refinements) are low; all other
+// requests are medium. Risk is presentation metadata and grants no authority.
+//
 // Every read and write runs inside db.InTenant. The mutation and its event
 // share that transaction via events.Append. LiveGrant checks expiry,
 // revocation and the acting key's ceiling; callers use it inside the
