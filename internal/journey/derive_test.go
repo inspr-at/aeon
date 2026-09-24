@@ -270,3 +270,24 @@ func state(j Journey, key string) string {
 func unix(sec int64) time.Time {
 	return time.Unix(sec, 0).UTC()
 }
+
+func TestStageSource(t *testing.T) {
+	for _, tc := range []struct {
+		name  string
+		facts facts
+		want  string
+	}{
+		{"native journey", facts{Profile: "personal"}, "journey"},
+		{"imported plan", facts{Profile: "personal", ImportedStage: stagePlan}, "derived"},
+		{"recorded current release", facts{Profile: "personal", ImportedStage: stagePlan, CurrentReleaseRecorded: true, Release: &releaseFacts{State: "planning"}}, "journey"},
+		{"recorded candidate", facts{Profile: "personal", ImportedStage: stageBuild, Release: &releaseFacts{State: "candidate"}}, "journey"},
+		{"imported build", facts{Profile: "personal", ImportedStage: stageBuild, Release: &releaseFacts{ID: "release", State: "planning"}}, "derived"},
+		{"imported live", facts{Profile: "personal", ImportedStage: stageLive, Release: &releaseFacts{ID: "release", State: "planning"}}, "derived"},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			if got := derive(tc.facts).StageSource; got != tc.want {
+				t.Fatalf("stage source %q, want %q", got, tc.want)
+			}
+		})
+	}
+}

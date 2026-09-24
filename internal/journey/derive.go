@@ -100,6 +100,7 @@ type facts struct {
 	DraftCount                 int
 	Release                    *releaseFacts
 	ImportedStage              string
+	CurrentReleaseRecorded     bool
 	RequirementsDigest         string
 	OpenReleaseTickets         int
 	NextReleaseNumber          int
@@ -136,6 +137,13 @@ type facts struct {
 
 func derive(f facts) Journey {
 	stage, nextKey, available, reason, approvalID, blocked := project(f)
+	stageSource := "journey"
+	// Imported release registrations remain in planning until a Journey action
+	// records real progress. An explicitly selected current release also comes
+	// from Journey history, even when the project itself was imported.
+	if f.ImportedStage != "" && !f.CurrentReleaseRecorded && (f.Release == nil || f.Release.State == "planning") {
+		stageSource = "derived"
+	}
 	relID := ""
 	if f.Release != nil {
 		relID = f.Release.ID
@@ -145,6 +153,7 @@ func derive(f facts) Journey {
 		Profile:              f.Profile,
 		Revision:             f.Revision,
 		Stage:                stage,
+		StageSource:          stageSource,
 		Stages:               stageRail(f, stage, blocked),
 		NextAction:           nextAction(f, stage, nextKey, available, reason, approvalID),
 		RequirementsRevision: f.RequirementsRevision,

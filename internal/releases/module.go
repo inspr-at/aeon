@@ -25,12 +25,14 @@ import (
 type module struct{ pool *pgxpool.Pool }
 
 // New returns an httpapi.Module serving walker GET and revision-fenced plan
-// PUT. Clients retain their own remembered partial feature selections; PUT
+// PUT and ticket creation POST. No additional plugin registration is needed.
+// Clients retain their own remembered partial feature selections; PUT
 // persists only the complete eligible ticket order and selected ticket set.
 func New(pool *pgxpool.Pool) httpapi.Module { return &module{pool} }
 func (m *module) Mount(mux *http.ServeMux) {
 	mux.HandleFunc("GET /api/projects/{projectId}/releases/{releaseId}/walker", m.get)
 	mux.HandleFunc("PUT /api/projects/{projectId}/releases/{releaseId}/plan", m.put)
+	mux.HandleFunc("POST /api/projects/{projectId}/releases/{releaseId}/tickets", m.createTicket)
 }
 
 type Walker struct {

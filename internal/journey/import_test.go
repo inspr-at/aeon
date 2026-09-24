@@ -72,7 +72,7 @@ func TestImportedJourneyStagesAndReleaseBackfill(t *testing.T) {
 	before := f.eventCount(t)
 	for _, tc := range []struct{ project, stage, action string }{{live, "live", "plan_next_release"}, {build, "build", "wait_for_build"}, {plan, "plan", "open_first_release"}} {
 		v := f.journey(t, f.person, http.MethodGet, "/api/projects/"+tc.project+"/journey", "")
-		if v.Stage != tc.stage || v.NextAction.Key != tc.action {
+		if v.Stage != tc.stage || v.NextAction.Key != tc.action || v.StageSource != "derived" {
 			t.Fatalf("%s: stage %s action %s", tc.project, v.Stage, v.NextAction.Key)
 		}
 		if !strings.HasPrefix(v.RequirementsScope, "journey.requirements.r1.d") || len(v.RequirementsDigest) != 64 {
@@ -94,14 +94,14 @@ func TestImportedJourneyStagesAndReleaseBackfill(t *testing.T) {
 
 	planView := f.journey(t, f.person, http.MethodGet, "/api/projects/"+plan+"/journey", "")
 	planView = f.journey(t, f.person, http.MethodPost, "/api/projects/"+plan+"/journey/actions", actionJSON("open_first_release", planView.Revision, "first-release", "", "", ""))
-	if planView.Stage != "plan" || planView.CurrentReleaseID == nil {
+	if planView.StageSource != "journey" || planView.Stage != "plan" || planView.CurrentReleaseID == nil {
 		t.Fatalf("first release %+v", planView)
 	}
 	if f.events(t, "journey.derived") != 1 || f.events(t, "journey.release_opened") != 1 {
 		t.Fatal("first action did not record derivation and release")
 	}
 	planView = f.journey(t, f.person, http.MethodGet, "/api/projects/"+plan+"/journey", "")
-	if planView.Stage != "plan" || f.events(t, "journey.derived") != 1 {
+	if planView.StageSource != "journey" || planView.Stage != "plan" || f.events(t, "journey.derived") != 1 {
 		t.Fatal("read changed derivation")
 	}
 
@@ -130,7 +130,7 @@ func TestImportedCandidateRefusal(t *testing.T) {
 	f.setTicketState(t, "IMP-11", "done")
 	mark := f.grant(t, f.agent.ID, f.person.ID, journey.ScopeBuild, release)
 	v = f.journey(t, f.person, http.MethodPost, "/api/projects/"+project+"/journey/actions", actionJSON("mark_candidate", v.Revision, "candidate", mark, release, ""))
-	if f.releaseState(t, release) != "candidate" {
+	if v.StageSource != "journey" || f.releaseState(t, release) != "candidate" {
 		t.Fatal("candidate not persisted")
 	}
 	reject := f.grant(t, f.agent.ID, f.person.ID, journey.ScopeCandidate, release)

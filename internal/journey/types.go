@@ -27,6 +27,7 @@ type Journey struct {
 	Profile              string            `json:"profile"`
 	Revision             int64             `json:"revision"`
 	Stage                string            `json:"stage"`
+	StageSource          string            `json:"stage_source"`
 	Stages               []JourneyStage    `json:"stages"`
 	NextAction           JourneyNextAction `json:"next_action"`
 	RequirementsRevision int64             `json:"requirements_revision"`
