@@ -8,8 +8,8 @@
   },
   "scope_note": "Each nonempty feature-list line and each open-ticket acceptance criterion has one result. Synthetic fixtures only. No classic instance, business data, migration execution, cutover or deployment. A pass applies only to its exact cited assertion.",
   "counts": {
-    "pass": 67,
-    "gap": 43,
+    "pass": 79,
+    "gap": 31,
     "deferred": 11
   },
   "features": [
@@ -105,9 +105,11 @@
       "status": "gap",
       "owner": "P1/P7",
       "evidence": [
+        "test:web/tests/quotes-tab.spec.ts::a new quote from a customer’s page names the customer and needs no choice",
+        "test:web/tests/quotes-tab.spec.ts::without a sender the dialog says what to set up first and creates nothing",
         "inspect:internal/business/quotes/quotes_test.go"
       ],
-      "reason": "The complete source claim needs direct integrated evidence."
+      "reason": "UI creates from a customer and leads to settings when the sender is missing (P7 done). P1: new drafts leave the recipient address and contact empty and add no initial quantity-1 position."
     },
     {
       "id": "F03.02",
@@ -117,33 +119,38 @@
       "status": "gap",
       "owner": "P1/P7",
       "evidence": [
+        "test:web/tests/quote-workspace.spec.ts::archive and duplicate live in the quote’s menu",
         "inspect:internal/business/quotes/quotes_test.go"
       ],
-      "reason": "The complete source claim needs direct integrated evidence."
+      "reason": "UI duplicates into a new numbered draft and opens it (P7 done). P1 evidence for same customer, reset dates, refreshed email and nothing copied beyond the document remains."
     },
     {
       "id": "F04.01",
       "source": "feature-list.txt",
       "heading": "Status lifecycle",
       "claim": "Draft: editable by administrators; automatic/manual saving increments revision. Draft has no live customer capability.",
-      "status": "gap",
+      "status": "pass",
       "owner": "P1/P5/P7",
       "evidence": [
-        "inspect:internal/business/quotes/public/module_test.go"
+        "test:web/tests/quote-workspace.spec.ts::docked beside the list, then on its own page and back: one session, unsaved work and undo kept",
+        "test:web/tests/quote-parity-gaps.spec.ts::a draft offers no customer capability; issuing sends nothing; the link goes out by copy, QR or PDF",
+        "test:internal/business/quotes/quotes_test.go::TestQuoteFlowAndGates"
       ],
-      "reason": "The complete source claim needs direct integrated evidence."
+      "reason": "Drafts are edited by staff and each save advances the draft revision; a draft shows no customer link and the server refuses one. Aeon saves explicitly; autosave is traced in F05.01."
     },
     {
       "id": "F04.02",
       "source": "feature-list.txt",
       "heading": "Status lifecycle",
       "claim": "Sent: the user has finalized the offer. Content is frozen, sent_at is recorded and a customer link is allocated. Finalization DOES NOT send an offer email. Distribution is manual through copied link, QR or PDF.",
-      "status": "gap",
+      "status": "pass",
       "owner": "P1/P5/P7",
       "evidence": [
-        "inspect:internal/business/quotes/public/module_test.go"
+        "test:web/tests/quote-parity-gaps.spec.ts::a draft offers no customer capability; issuing sends nothing; the link goes out by copy, QR or PDF",
+        "test:web/tests/quote-workspace.spec.ts::the customer link: an end date, shown once to copy, then only its state; revoking asks first",
+        "test:internal/business/quotes/quotes_test.go::TestQuoteFlowAndGates"
       ],
-      "reason": "The complete source claim needs direct integrated evidence."
+      "reason": "Issuing freezes the content (read-only paper, fingerprint) and records issued_at; nothing is emailed; the customer link is created in one explicit step and goes out by copy, QR code or PDF."
     },
     {
       "id": "F04.03",
@@ -153,9 +160,11 @@
       "status": "gap",
       "owner": "P5",
       "evidence": [
+        "test:web/tests/quote-workspace.spec.ts::an accepted quote shows its acceptance, the receipt as fixed evidence and its versions",
+        "test:web/tests/quote-workspace.spec.ts::a receipt still being made updates by itself; a failed one can be made again",
         "inspect:internal/business/quotes/public/module_test.go"
       ],
-      "reason": "The complete source claim needs direct integrated evidence."
+      "reason": "UI shows the immutable acceptance and the asynchronous receipt (P7 done); the P5 queue, immutability and email-independence evidence remains."
     },
     {
       "id": "F04.04",
@@ -354,12 +363,12 @@
       "source": "feature-list.txt",
       "heading": "Inspector and document history",
       "claim": "The selected footer mark can be resized 18..96 mm and offset vertically -6..10 mm in tenths. Existing legacy layout remains representable. Clicking the mark on a later page targets the clicked mark correctly. Embedded tenant-specific artwork and dimensions are not generic product content.",
-      "status": "gap",
+      "status": "pass",
       "owner": "P4",
       "evidence": [
-        "inspect:web/tests/quote-inspector.spec.ts"
+        "test:web/tests/quote-parity-gaps.spec.ts::footer mark: sized 18..96 mm and moved -6..10 mm in tenths; the clicked page’s mark is the one selected; legacy values stay"
       ],
-      "reason": "The complete source claim needs direct integrated evidence."
+      "reason": "The mark on every page takes one width (18..96 mm) and offset (-6..10 mm) in tenths; out-of-range input is named, not clamped; a legacy 22.5 mm layout is shown and kept; clicking the mark on the last page selects that mark and opens its settings. No artwork ships in product code. Showing the file on print and public pages needs a served mark asset (P5)."
     },
     {
       "id": "F09.01",
@@ -648,12 +657,14 @@
       "source": "feature-list.txt",
       "heading": "Accepted port scope and backlog traceability",
       "claim": "Keep readable labels, semantic SVGs and selected/disabled states for insert/move/delete/list/indent/numbering/template actions. Use Aeon's existing icon vocabulary; do not widen the inspector simply for icons.",
-      "status": "gap",
+      "status": "pass",
       "owner": "P4",
       "evidence": [
-        "inspect:web/tests/quote-inspector.spec.ts"
+        "test:web/tests/quote-parity-gaps.spec.ts::inspector icons: labelled actions carry decorative icons from the product set, sized like Undo",
+        "test:web/tests/quote-parity-gaps.spec.ts::inspector icons: numbering and reset actions are consistent, nothing doubled or drawn with text glyphs",
+        "test:web/tests/quote-parity-gaps.spec.ts::inspector icons: labels stay whole on one line without overflow at every panel width"
       ],
-      "reason": "The complete source claim needs direct integrated evidence."
+      "reason": "Readable labels with the product icon set, consistent selected/disabled states, no widening of the inspector."
     },
     {
       "id": "F15.08",
@@ -676,9 +687,11 @@
       "status": "gap",
       "owner": "P4/P5",
       "evidence": [
-        "inspect:web/tests/quote-inspector.spec.ts"
+        "test:web/tests/quote-parity-gaps.spec.ts::inline styles persist through save and reload and render the same on the customer’s page",
+        "test:web/tests/quote-inspector.spec.ts::bold and italic toggle",
+        "test:web/tests/quote-editor-input.spec.ts::plain paste, Unicode composition"
       ],
-      "reason": "The complete source claim needs direct integrated evidence."
+      "reason": "Editor, reload and customer page render the same runs; partial-word, mixed, clear and shortcut paths pass (P4 done). The generated PDF surface and writer-version protection remain with P5/P1."
     },
     {
       "id": "F15.10",
@@ -797,12 +810,13 @@
       "source": "feature-list.txt",
       "heading": "Aeon baseline and parity gaps",
       "claim": "At Aeon 8f767a703736b178ec861875dd028919411c34e9, CRM/quote Vue surfaces exist but are PARKED by AEON-70: router redirects quotes/organisations/crm to /business. Their code is a reuse candidate, not a currently reachable delivered quote tool.",
-      "status": "gap",
+      "status": "pass",
       "owner": "P7",
       "evidence": [
-        "inspect:web/src/router.ts"
+        "test:web/tests/quote-parity-gaps.spec.ts::the customer page and the Quotes tab are reachable routes, not parked ones",
+        "test:web/tests/quotes-tab.spec.ts::the list shows every live quote with number, title, customer, status, dates and amount"
       ],
-      "reason": "Baseline gap must be rechecked after P7 shell integration."
+      "reason": "Quotes, the docked and full workspace and the customer page are routed and delivered; the remaining parked files are not routed."
     },
     {
       "id": "F16.02",
@@ -1066,12 +1080,13 @@
       "id": "PAI-1064.AC06",
       "source": "backlog-open.txt",
       "claim": "Document scroll/caret behaviour, inspector visibility, printing and offer data remain unaffected; browser checks cover fit modes, 25%, 800% and a narrow viewport.",
-      "status": "gap",
+      "status": "pass",
       "owner": "P4",
       "evidence": [
-        "inspect:web/tests/quote-inspector.spec.ts"
+        "test:web/tests/quote-parity-gaps.spec.ts::zoom: fit width, fit page, 25 % and 800 % keep the caret, panel, print size and data; phones fit the width",
+        "test:web/tests/quote-inspector.spec.ts::the title bar: compact zoom"
       ],
-      "reason": "The complete criterion needs an integrated test or operator inspection."
+      "reason": "Fit width, fit page, 25 % and 800 %: the caret still types where placed, the panel stays, print resets the paper to 1:1, nothing is saved by zooming; 390 fits the width without sideways scroll."
     },
     {
       "id": "PAI-1065.AC01",
@@ -1143,67 +1158,69 @@
       "id": "PAI-1066.AC01",
       "source": "backlog-open.txt",
       "claim": "Text-only inspector action buttons have semantically appropriate SVG icons alongside their existing labels, including section actions, list types, indentation, insertion and template editing.",
-      "status": "gap",
+      "status": "pass",
       "owner": "P4",
       "evidence": [
-        "inspect:web/tests/quote-inspector.spec.ts"
+        "test:web/tests/quote-parity-gaps.spec.ts::inspector icons: labelled actions carry decorative icons from the product set, sized like Undo"
       ],
-      "reason": "The complete criterion needs an integrated test or operator inspection."
+      "reason": "Section actions, list types, indentation, insertion, numbering and template editing each carry a semantic SVG beside the label."
     },
     {
       "id": "PAI-1066.AC02",
       "source": "backlog-open.txt",
       "claim": "Remaining numbering/reset actions are reviewed for consistency; existing icon-bearing and glyph-only controls are not duplicated or cluttered.",
-      "status": "gap",
+      "status": "pass",
       "owner": "P4",
       "evidence": [
-        "inspect:web/tests/quote-inspector.spec.ts"
+        "test:web/tests/quote-parity-gaps.spec.ts::inspector icons: numbering and reset actions are consistent, nothing doubled or drawn with text glyphs"
       ],
-      "reason": "The complete criterion needs an integrated test or operator inspection."
+      "reason": "Every radio group is all icons, all glyph previews or all words; one icon per option; no text glyph drawn as an icon; resets carry the same icon."
     },
     {
       "id": "PAI-1066.AC03",
       "source": "backlog-open.txt",
       "claim": "Icons use the existing product library and match Undo/Redo in size, stroke, alignment and spacing; disabled and selected states remain clear.",
-      "status": "gap",
+      "status": "pass",
       "owner": "P4",
       "evidence": [
-        "inspect:web/tests/quote-inspector.spec.ts"
+        "test:web/tests/quote-parity-gaps.spec.ts::inspector icons: labelled actions carry decorative icons from the product set, sized like Undo"
       ],
-      "reason": "The complete criterion needs an integrated test or operator inspection."
+      "reason": "Icons share Undo/Redo’s 16-unit grid, 1.8 stroke and 15 px size and are centred in their controls; selected and disabled states are covered by the inspector suite."
     },
     {
       "id": "PAI-1066.AC04",
       "source": "backlog-open.txt",
       "claim": "Text remains readable at the normal sidebar width and narrow supported layouts, with no overlap, unnecessary wrapping or added horizontal scrolling.",
-      "status": "gap",
+      "status": "pass",
       "owner": "P4",
       "evidence": [
-        "inspect:web/tests/quote-inspector.spec.ts"
+        "test:web/tests/quote-parity-gaps.spec.ts::inspector icons: labels stay whole on one line without overflow at every panel width"
       ],
-      "reason": "The complete criterion needs an integrated test or operator inspection."
+      "reason": "At 1440 (docked), 1024 (floating) and 390 (sheet) no label wraps or is cut and the panel never scrolls sideways."
     },
     {
       "id": "PAI-1066.AC05",
       "source": "backlog-open.txt",
       "claim": "Button accessible names remain meaningful; decorative SVGs are hidden from assistive technology. Keyboard/focus behaviour is unchanged.",
-      "status": "gap",
+      "status": "pass",
       "owner": "P4",
       "evidence": [
-        "inspect:web/tests/quote-inspector.spec.ts"
+        "test:web/tests/quote-parity-gaps.spec.ts::inspector icons: labelled actions carry decorative icons from the product set, sized like Undo",
+        "test:web/tests/quote-parity-gaps.spec.ts::inspector icons: every context behaves as before and nothing reaches the saved document or the PDF"
       ],
-      "reason": "The complete criterion needs an integrated test or operator inspection."
+      "reason": "Every control has a meaningful name; icons are aria-hidden and not focusable; arrow keys still walk the list types."
     },
     {
       "id": "PAI-1066.AC06",
       "source": "backlog-open.txt",
       "claim": "Browser smoke check covers all inspector contexts and confirms unchanged action behaviour; no change to saved offers or PDF output.",
-      "status": "gap",
+      "status": "pass",
       "owner": "P4",
       "evidence": [
-        "inspect:web/tests/quote-inspector.spec.ts"
+        "test:web/tests/quote-parity-gaps.spec.ts::inspector icons: every context behaves as before and nothing reaches the saved document or the PDF",
+        "test:web/tests/quote-parity-gaps.spec.ts::inspector icons: labels stay whole on one line without overflow at every panel width"
       ],
-      "reason": "The complete criterion needs an integrated test or operator inspection."
+      "reason": "Text, section, document and section-menu contexts visited; list, indent and section actions behave and undo; the saved document holds no icon markup and print hides the panel."
     },
     {
       "id": "PAI-1068.AC01",
@@ -1475,13 +1492,15 @@
     },
     {
       "id": "QP8.SHELL-WIRING",
-      "status": "gap",
+      "status": "pass",
       "owner": "P7/coordinator",
       "evidence": [
-        "inspect:web/src/router.ts",
-        "test:web/tests/quotes/parity-flow.spec.ts"
+        "test:web/tests/quotes-tab.spec.ts::a new quote from the list: choose the customer by typing, name it, open it",
+        "test:web/tests/quotes-tab.spec.ts::a new quote from a customer’s page names the customer and needs no choice",
+        "test:web/tests/quote-workspace.spec.ts::issuing freezes the saved draft with its fingerprint and offers the customer link",
+        "inspect:web/src/router.ts"
       ],
-      "reason": "Customer creation is routed; quote create/issue still needs P7 shell UI and coordinator route/manifest wiring."
+      "reason": "The shell creates quotes from the Quotes tab and a customer page and issues them from the workspace; routes live in web/src/router.ts. Plugin manifest registration stays with the coordinator."
     }
   ]
 }

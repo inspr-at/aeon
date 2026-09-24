@@ -2,6 +2,7 @@
 <script setup lang="ts">
 import './details.css'
 import { computed, ref, watch } from 'vue'
+import qrcode from 'qrcode-generator'
 import { confirmAction } from '../../../lib/confirm'
 import { createLink, getLink, lifecycleError, linkUrl, revokeLink, type PublicLink } from '../../../lib/quotes/lifecycle'
 import { toast } from '../../../lib/toast'
@@ -69,6 +70,18 @@ async function copy() {
   catch { toast('Copying did not work here. Select the link and copy it.', { tone: 'error' }) }
 }
 function selectAll(event: FocusEvent) { (event.target as HTMLInputElement).select() }
+// The same link as a QR code, for a printed page or a phone across the table.
+const showQr = ref(false)
+const qr = computed(() => {
+  if (!fresh.value) return null
+  const code = qrcode(0, 'M')
+  code.addData(fresh.value)
+  code.make()
+  const size = code.getModuleCount()
+  let path = ''
+  for (let row = 0; row < size; row++) for (let col = 0; col < size; col++) if (code.isDark(row, col)) path += `M${col} ${row}h1v1h-1z`
+  return { size, path }
+})
 </script>
 
 <template>
@@ -90,7 +103,13 @@ function selectAll(event: FocusEvent) { (event.target as HTMLInputElement).selec
           <input id="quote-link-url" class="field url" :value="fresh" readonly @focus="selectAll" />
           <button type="button" class="btn sm primary" @click="copy"><AppIcon :name="copied ? 'check' : 'copy'" :size="13" />{{ copied ? 'Copied' : 'Copy' }}</button>
         </div>
-        <a class="open" :href="fresh" target="_blank" rel="noopener noreferrer">Open as the customer sees it<AppIcon name="external" :size="12" /></a>
+        <div class="fresh-actions">
+          <a class="open" :href="fresh" target="_blank" rel="noopener noreferrer">Open as the customer sees it<AppIcon name="external" :size="12" /></a>
+          <button type="button" class="open" :aria-expanded="showQr" aria-controls="quote-link-qr" @click="showQr = !showQr">{{ showQr ? 'Hide QR code' : 'QR code' }}</button>
+        </div>
+        <svg v-if="showQr && qr" id="quote-link-qr" class="qr" :viewBox="`-2 -2 ${qr.size + 4} ${qr.size + 4}`" role="img" aria-label="QR code of the customer link" shape-rendering="crispEdges">
+          <rect x="-2" y="-2" :width="qr.size + 4" :height="qr.size + 4" fill="#fff" /><path :d="qr.path" fill="#000" />
+        </svg>
       </div>
 
       <p v-if="state === 'active'" class="d-text">Opens this version until <strong>{{ when(link!.expires_at) }}</strong>{{ acceptable ? ', and can accept it.' : '. Acceptance is closed.' }}</p>
@@ -124,7 +143,9 @@ function selectAll(event: FocusEvent) { (event.target as HTMLInputElement).selec
 .fresh { display: grid; gap: 6px; padding: 10px; border-radius: 10px; background: var(--row-selected); box-shadow: inset 0 0 0 1px var(--chip-teal-line); }
 .url-row { display: flex; gap: 6px; }
 .url { flex: 1; min-width: 0; height: 32px; padding: 0 9px; font: 500 12px/1 var(--mono); font-variant-ligatures: none; }
-.open { display: inline-flex; align-items: center; gap: 5px; width: fit-content; font-size: 12.5px; font-weight: 600; color: var(--teal-ink); text-decoration: none; }
+.open { display: inline-flex; align-items: center; gap: 5px; width: fit-content; padding: 0; border: 0; background: none; font-size: 12.5px; font-weight: 600; color: var(--teal-ink); text-decoration: none; cursor: pointer; }
+.fresh-actions { display: flex; flex-wrap: wrap; gap: 4px 16px; }
+.qr { width: 148px; height: 148px; justify-self: start; border-radius: 6px; box-shadow: 0 0 0 1px var(--line-2); }
 .open:hover { text-decoration: underline; }
 .open:focus-visible { box-shadow: var(--focus-ring); border-radius: 4px; }
 .create-row { display: grid; gap: 6px; }

@@ -27,7 +27,7 @@ const BULLETS: Segment<Bullet>[] = [
   { value: 'square', label: 'Square', glyph: '▪' }, { value: 'dash', label: 'Dash', glyph: '–' },
 ]
 const SEQUENCE: Segment<'follow' | 'continue' | 'start'>[] = [
-  { value: 'follow', label: 'Automatic', tip: 'Counts on within the list; text in between starts it again at 1' },
+  { value: 'follow', label: 'Automatic', icon: 'list-follow', tip: 'Counts on within the list; text in between starts it again at 1' },
   { value: 'continue', label: 'Continue', icon: 'list-continue', tip: 'Carries on from the list before the text in between' },
   { value: 'start', label: 'Start at', icon: 'list-restart', tip: 'Starts at a number you set; 1 restarts the count' },
 ]
@@ -82,10 +82,10 @@ const isItem = computed(() => s.value.list === 'bullet' || s.value.list === 'num
       <h3 id="text-style" class="group-title">Style</h3>
       <div class="style-row">
         <div class="toggles" role="group" aria-label="Character style">
-          <button type="button" class="tool" :aria-pressed="pressed(s.bold)" :disabled="disabled" :data-tip="`Bold · ${mod}B`" aria-label="Bold" :aria-keyshortcuts="mac ? 'Meta+B' : 'Control+B'" @mousedown.prevent @click="run(() => editor.setMarks('bold'))"><QuoteIcon name="bold" /></button>
-          <button type="button" class="tool" :aria-pressed="pressed(s.italic)" :disabled="disabled" :data-tip="`Italic · ${mod}I`" aria-label="Italic" :aria-keyshortcuts="mac ? 'Meta+I' : 'Control+I'" @mousedown.prevent @click="run(() => editor.setMarks('italic'))"><QuoteIcon name="italic" /></button>
+          <button type="button" class="tool" :aria-pressed="pressed(s.bold)" :disabled="disabled" :data-tip="`Bold · ${mod}B`" aria-label="Bold" :aria-keyshortcuts="mac ? 'Meta+B' : 'Control+B'" @mousedown.prevent @click="run(() => editor.setMarks('bold'))"><QuoteIcon name="bold" :size="15" /></button>
+          <button type="button" class="tool" :aria-pressed="pressed(s.italic)" :disabled="disabled" :data-tip="`Italic · ${mod}I`" aria-label="Italic" :aria-keyshortcuts="mac ? 'Meta+I' : 'Control+I'" @mousedown.prevent @click="run(() => editor.setMarks('italic'))"><QuoteIcon name="italic" :size="15" /></button>
         </div>
-        <button type="button" class="tool plain" :disabled="disabled || (s.bold === false && s.italic === false)" data-tip="Remove bold and italic" aria-label="Clear formatting" @mousedown.prevent @click="run(() => editor.setMarks('normal'))"><QuoteIcon name="clear-format" /></button>
+        <button type="button" class="tool plain" :disabled="disabled || (s.bold === false && s.italic === false)" data-tip="Remove bold and italic" aria-label="Clear formatting" @mousedown.prevent @click="run(() => editor.setMarks('normal'))"><QuoteIcon name="clear-format" :size="15" /></button>
         <p class="state-note">{{ s.bold === 'mixed' || s.italic === 'mixed' ? 'Mixed styles' : s.collapsed ? 'For what you type next' : 'On the selection' }}</p>
       </div>
     </section>
@@ -97,8 +97,8 @@ const isItem = computed(() => s.value.list === 'bullet' || s.value.list === 'num
       <div class="level-row">
         <span class="level-text">{{ level ? `Level ${level}` : s.depth === 'mixed' ? 'Mixed levels' : 'Not in a list' }}<span v-if="level" class="level-of"> of 6</span></span>
         <div class="level-tools">
-          <button type="button" class="tool" :disabled="disabled || !s.canOutdent" :data-tip="s.canOutdent ? 'Outdent · ⇧Tab' : 'Already at the outermost level'" aria-label="Outdent" @mousedown.prevent @click="run(() => editor.outdent())"><QuoteIcon name="outdent" /></button>
-          <button type="button" class="tool" :disabled="disabled || !s.canIndent" :data-tip="s.canIndent ? 'Indent · Tab' : 'Already at the deepest level'" aria-label="Indent" @mousedown.prevent @click="run(() => editor.indent())"><QuoteIcon name="indent" /></button>
+          <button type="button" class="tool" :disabled="disabled || !s.canOutdent" :data-tip="s.canOutdent ? 'Outdent · ⇧Tab' : 'Already at the outermost level'" aria-label="Outdent" @mousedown.prevent @click="run(() => editor.outdent())"><QuoteIcon name="outdent" :size="15" /></button>
+          <button type="button" class="tool" :disabled="disabled || !s.canIndent" :data-tip="s.canIndent ? 'Indent · Tab' : 'Already at the deepest level'" aria-label="Indent" @mousedown.prevent @click="run(() => editor.indent())"><QuoteIcon name="indent" :size="15" /></button>
         </div>
       </div>
     </section>

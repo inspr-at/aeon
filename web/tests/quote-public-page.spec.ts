@@ -69,7 +69,7 @@ test('the customer sees the sender, the facts and the frozen document, and accep
   expect(posted[0]).toMatchObject({ version: 1, expected_content_sha256: expect.stringMatching(/^1{8}/), name: 'Jana Hofer', company: 'Hofer Backwaren GmbH', confirm: true })
   await expect(page.getByRole('heading', { name: 'Thank you, Jana Hofer' })).toBeVisible()
   await expect(page.getByRole('heading', { name: 'Thank you, Jana Hofer' }).locator('..')).toBeFocused()
-  await expect(page.locator('.pq-status')).toContainText('Accepted')
+  await expect(page.locator('.pq-status')).toContainText('This quote has been accepted.')
 })
 
 test('at 390 the paper shrinks to the screen and nothing scrolls sideways or is cut', async ({ page }) => {
@@ -99,7 +99,7 @@ test('an ended link reads, but cannot accept; an unknown link says so plainly', 
 
 test('once accepted, the page says when and offers the receipt', async ({ page }) => {
   await open(page, { acceptable: false, accepted: true, receiptReady: true })
-  await expect(page.locator('.pq-status')).toContainText(/^Accepted on /)
+  await expect(page.locator('.pq-status')).toContainText(/^This quote has been accepted\. Accepted on /)
   await expect(page.getByRole('link', { name: /^Receipt \(PDF\)/ })).toHaveAttribute('href', '/api/public/quotes/sel-demo/tok-example/pdf')
 })
 

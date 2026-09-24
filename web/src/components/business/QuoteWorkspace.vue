@@ -318,6 +318,13 @@ function keys(event: KeyboardEvent) {
 }
 onMounted(() => { window.addEventListener('keydown', keys); phoneQuery.addEventListener('change', phoneChange) })
 onBeforeUnmount(() => { window.removeEventListener('keydown', keys); phoneQuery.removeEventListener('change', phoneChange); sizer?.disconnect(); rootSizer?.disconnect() })
+// Clicking the footer mark on a page opens its settings on the Document tab.
+const reveal = ref<{ tab: 'document'; target: string; n: number } | null>(null)
+function revealMark() {
+  if (!editable.value) return
+  openPane('format')
+  reveal.value = { tab: 'document', target: 'quote-footer-mark', n: (reveal.value?.n ?? 0) + 1 }
+}
 function jump(id: string) { paper.value?.jump(id); if (sideMode.value === 'sheet') floating.value = null }
 defineExpose({ focus: () => root.value?.focus({ preventScroll: true }) })
 </script>
@@ -357,7 +364,7 @@ defineExpose({ focus: () => root.value?.focus({ preventScroll: true }) })
           <div ref="host" class="paper-stack" :style="{ zoom: percent / 100 }">
             <QuoteDocument
               :key="`${quoteId}:${viewing ?? (isDraft ? 'draft' : 'frozen')}`" ref="paper" :document="document" :offer-no="offerNo" :editable="editable" :editor="editor"
-              @update:document="edit"
+              @update:document="edit" @mark="revealMark"
             />
           </div>
         </div>
@@ -365,7 +372,7 @@ defineExpose({ focus: () => root.value?.focus({ preventScroll: true }) })
       <div v-if="document && pane" id="quote-side" class="quote-inspector-slot">
         <QuoteInspector
           v-if="pane === 'format' && paper && editor" :editor="paper.editor" :version="version" :offer-no="offerNo" :editable="editable" :admin="admin" :actions="paper.actions" :mode="sideMode"
-          @close="floating = null" @jump="jump"
+          :mark-page="paper.markPage" :reveal="reveal" @close="floating = null" @jump="jump"
         />
         <aside v-else-if="pane === 'details'" class="details-pane" aria-label="Details">
           <header class="details-head">

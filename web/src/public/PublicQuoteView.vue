@@ -84,7 +84,7 @@ async function accept() {
         client_mutation_id: mutationID, name: name.value.trim(), company: company.value.trim(), note: note.value.trim(), confirm: true }),
     })
     if (response.status === 429) throw new Error('Too many attempts in a short time. Please wait a minute and try again.')
-    if (!response.ok) throw new Error(response.status === 409 ? 'This quote can no longer be accepted: it changed, ended or was already decided. Reload the page to see where it stands.' : 'Your acceptance could not be saved. Nothing was recorded; please try again.')
+    if (!response.ok) throw new Error(response.status === 409 ? 'This quote can no longer be accepted. It changed, ended or was already decided; reload the page to see where it stands.' : 'Your acceptance could not be saved. Nothing was recorded; please try again.')
     const body = await response.json().catch(() => ({})) as { accepted_at?: string }
     acceptedNow.value = { name: name.value.trim(), at: body.accepted_at ?? new Date().toISOString() }
     await load(true)
@@ -152,7 +152,7 @@ onBeforeUnmount(() => { sizer?.disconnect(); cancelAnimationFrame(frame); window
             <div><dt>Dated</dt><dd>{{ dayText(quote.document.offer_date) }}</dd></div>
             <div><dt>Valid until</dt><dd>{{ dayText(quote.document.valid_until) }}</dd></div>
           </dl>
-          <p v-if="accepted" class="pq-status ok" role="status"><svg width="16" height="16" viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><circle cx="8" cy="8" r="6.2" /><path d="m5.3 8.2 1.9 1.9 3.6-3.9" /></svg><span>Accepted{{ quote.accepted_at ? ` on ${when(quote.accepted_at)}` : '' }}.</span></p>
+          <p v-if="accepted" class="pq-status ok" role="status"><svg width="16" height="16" viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><circle cx="8" cy="8" r="6.2" /><path d="m5.3 8.2 1.9 1.9 3.6-3.9" /></svg><span>This quote has been accepted.<template v-if="quote.accepted_at"> Accepted on {{ when(quote.accepted_at) }}.</template></span></p>
           <p v-else-if="quote.acceptable" class="pq-status">Please read the quote below. If it suits you, you can accept it at the end of this page; no account is needed.</p>
           <p v-else class="pq-status muted">This quote remains available to read. Acceptance is closed. {{ closedReason }}</p>
           <div class="pq-actions">

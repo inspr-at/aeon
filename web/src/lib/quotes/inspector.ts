@@ -138,6 +138,9 @@ export function sectionLabel(position: number, style: SectionNumberingStyle | un
 export interface MmRange { min: number; max: number }
 export const OFFSET_RANGES = { markerX: { min: -30, max: 30 }, markerY: { min: -20, max: 20 }, textStart: { min: -20, max: 40 } } as const
 export const SPACING_RANGE: MmRange = { min: 0, max: 40 }
+// The footer mark: width and vertical offset for every page (F08.03).
+export const MARK_RANGES = { width: { min: 18, max: 96 }, offset: { min: -6, max: 10 } } as const
+export const MARK_DEFAULT_MM = 32
 export const round1 = (value: number) => Math.round(value * 10) / 10
 export const clampMm = (value: number, range: MmRange) => round1(Math.min(range.max, Math.max(range.min, value)))
 // Text typed in a millimetre field ("2,5", "2.5 mm", "-3") as a number, or null.
