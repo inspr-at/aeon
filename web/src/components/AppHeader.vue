@@ -10,6 +10,7 @@ import { dark, setTheme, themeChoice, toggleTheme, type ThemeChoice } from '../l
 import { canWrite } from '../lib/activity'
 import { command, consume, run } from '../lib/commands'
 import { initials } from '../lib/work'
+import { fatal } from '../lib/fatal'
 import { accountEmail, accountName } from '../lib/api'
 import AppIcon from './AppIcon.vue'
 import CommandPalette from './CommandPalette.vue'
@@ -116,7 +117,7 @@ onBeforeUnmount(() => { document.removeEventListener('pointerdown', outside); wi
       <span class="mark-backing"><img :src="mark" width="26" height="26" alt="" /></span>
       <span class="wordmark">PAIMOS<sup>AEON</sup></span>
     </RouterLink>
-    <nav v-if="session.identity" class="crumbs" :class="{ deep: !!projectKey || !!pageTitle }" aria-label="Breadcrumb">
+    <nav v-if="session.identity && !fatal" class="crumbs" :class="{ deep: !!projectKey || !!pageTitle }" aria-label="Breadcrumb">
       <RouterLink v-if="!agentsPage" class="crumb home-crumb" to="/" :aria-current="onProjects ? 'page' : undefined">Projects</RouterLink>
       <template v-if="projectKey">
         <span class="sep" aria-hidden="true">/</span>
@@ -268,7 +269,8 @@ onBeforeUnmount(() => { document.removeEventListener('pointerdown', outside); wi
   .search-pill { width: 44px; height: 44px; padding: 0; justify-content: center; }
   .pill-text, .pill-keys { display: none; }
   .header-btn, .avatar-btn { width: 44px; height: 44px; }
-  .agents-link { width: 44px; height: 44px; padding: 0; justify-content: center; }
+  /* On phones it is a round header button like search and the avatar. */
+  .agents-link { width: 44px; height: 44px; padding: 0; justify-content: center; border: 1px solid var(--glass-edge); background: var(--btn-bg); box-shadow: var(--shadow-btn); }
   .agents-text { display: none; }
   .needs-badge { position: absolute; top: 3px; right: 1px; }
   /* The theme lives in the account menu on phones. */

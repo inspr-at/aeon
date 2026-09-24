@@ -3,7 +3,7 @@ import { test, expect, type Page } from '@playwright/test'
 import { fixtures, mockWork, watchErrors } from './work-fixtures'
 
 const palette = (page: Page) => page.getByRole('dialog', { name: 'Search and commands' })
-const group = (page: Page, name: string) => palette(page).getByRole('region', { name }).getByRole('option')
+const group = (page: Page, name: string) => palette(page).getByRole('group', { name }).getByRole('option')
 const rows = (page: Page) => page.locator('tr.ticket-row:not(.ghost)')
 const nodeQueries = (calls: Awaited<ReturnType<typeof mockWork>>) => calls.filter(c => c.path === '/api/nodes' && c.method === 'GET' && c.query.get('q'))
 const searches = (calls: Awaited<ReturnType<typeof mockWork>>) => calls.filter(c => c.path === '/api/search').map(c => c.query.get('q'))

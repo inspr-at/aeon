@@ -60,7 +60,7 @@ function resource(approval: Approval): Resource {
 function openAgent(principalId: string) {
   const views = agents.byAgent(principalId)
   const target = views.find(v => v.status.group !== 'stopped') ?? views[0]
-  if (target) void router.push(`/agents/${target.session.id}`)
+  if (target) openSession(target.session.id)
   else toast('This agent has no session listed right now.')
 }
 
@@ -110,15 +110,27 @@ function review(approval: Approval) {
 }
 
 // ---------- Panel ----------
+// Like the ticket panel: opening from the list adds one history entry, switching
+// sessions replaces it, and closing goes back to the list entry instead of adding one.
+let openedFromList = false
 function openSession(id: string) {
   cursor.value = `s:${id}`
+  if (sessionId.value) { void router.replace({ path: `/agents/${id}`, query: route.query }); return }
+  openedFromList = true
   void router.push({ path: `/agents/${id}`, query: route.query })
 }
 // Focus returns to the session's row once the panel is gone.
 async function closePanel() {
   const id = sessionId.value
   if (id) cursor.value = `s:${id}`
-  await router.push({ path: '/agents', query: route.query })
+  const back = openedFromList && typeof window.history.state?.back === 'string' && window.history.state.back.startsWith('/agents')
+  openedFromList = false
+  if (back) {
+    const closed = new Promise<void>(resolve => { const stop = watch(sessionId, value => { if (!value) { stop(); resolve() } }); setTimeout(() => { stop(); resolve() }, 1000) })
+    router.back()
+    await closed
+  }
+  else await router.replace({ path: '/agents', query: route.query })
   await nextTick()
   if (id) focusRow(cursor.value)
 }

@@ -90,6 +90,14 @@ const counts = computed(() => {
   const p = project.value
   return p ? { open: p.open, progress: p.in_progress, done: p.done, cancelled: p.cancelled, total: p.total, percent: p.percent } : null
 })
+// The skeleton holds about the height the first page will take, so the hint and
+// footer below the table do not jump when rows arrive.
+const expectedRows = computed(() => {
+  const c = counts.value
+  if (!c || filtered.value) return 8
+  if (outlineActive.value) return 12
+  return filters.value.showClosed ? c.total : c.open + c.progress
+})
 const knownStates = computed(() => Object.keys(list.facets.value.state ?? {}))
 const filtered = computed(() => hasFilters(filters.value))
 
@@ -543,7 +551,7 @@ watch([project, panelItem], ([current, item]) => {
       </div>
 
       <TicketTable
-        ref="table" :groups="groups" :group="filters.group" :rows-by-id="rowsById" :cursor-id="cursorId" :open-id="panelItem?.id ?? null"
+        ref="table" :expected-rows="expectedRows" :groups="groups" :group="filters.group" :rows-by-id="rowsById" :cursor-id="cursorId" :open-id="panelItem?.id ?? null"
         :query="filters.q" :sort="filters.sort" :density="density"
         :loading="outlineActive ? outline.loading.value : list.loading.value" :loading-more="outlineActive ? outline.loadingMoreRoot.value : list.loadingMore.value"
         :error="outlineActive ? outline.error.value || list.error.value : list.error.value" :more-error="list.moreError.value"
@@ -619,6 +627,8 @@ watch([project, panelItem], ([current, item]) => {
 .toolbar-wrap { position: sticky; top: 0; z-index: 5; margin: 0 -28px; padding: 0 28px; container: toolbar / inline-size; }
 .toolbar-wrap.stuck { background: var(--glass); box-shadow: 0 1px 0 var(--line), 0 12px 24px -20px rgba(16, 35, 39, .35); backdrop-filter: blur(18px) saturate(1.2); -webkit-backdrop-filter: blur(18px) saturate(1.2); }
 .hint { display: flex; align-items: center; justify-content: center; flex-wrap: wrap; gap: 5px; padding: 16px 0 6px; font-size: 12px; color: var(--ink-3); }
+/* The hint waits for the rows, like the footer, so it never jumps while they load. */
+.project-page:has(.skeleton-body) .hint { visibility: hidden; }
 .hint .keycap + .keycap { margin-left: 2px; }
 .hint-link { display: inline-flex; align-items: center; gap: 5px; padding: 0; border: 0; background: transparent; color: var(--ink-3); font-size: 12px; }
 .hint-link:hover { color: var(--teal-ink); }
