@@ -22,6 +22,7 @@ import (
 	"github.com/inspr-at/aeon/internal/approvals"
 	"github.com/inspr-at/aeon/internal/embedding"
 	"github.com/inspr-at/aeon/internal/events"
+	"github.com/inspr-at/aeon/internal/harness"
 	"github.com/inspr-at/aeon/internal/imports"
 	"github.com/inspr-at/aeon/internal/inbox"
 	"github.com/inspr-at/aeon/internal/intake"
@@ -98,7 +99,20 @@ func serveListener(ctx context.Context, cfg config.Config, ln net.Listener) erro
 		return err
 	}
 	// R1: embeddings are optional; without AEON_EMBEDDING_URL search is lexical only.
-	pluginRegistry, err := plugins.Builtin(costunits.Plugin, crm.Plugin, quotes.ManifestPlugin, hours.Plugin)
+	extraPlugins := []func() (plugins.Plugin, error){costunits.Plugin, crm.Plugin, quotes.ManifestPlugin, hours.Plugin}
+	var messagingMod httpapi.Module
+	if cfg.MessagingKey != nil {
+		m, err := inbox.NewMessaging(pool, cfg.MessagingKey)
+		if err != nil {
+			_ = ln.Close()
+			return fmt.Errorf("messaging: %w", err)
+		}
+		messagingMod = m
+		extraPlugins = append(extraPlugins, inbox.MessagingPlugin)
+	} else {
+		slog.Warn("messaging disabled: AEON_MESSAGING_KEY_FILE is not set")
+	}
+	pluginRegistry, err := plugins.Builtin(extraPlugins...)
 	if err != nil {
 		_ = ln.Close()
 		return fmt.Errorf("plugins: %w", err)
@@ -132,6 +146,7 @@ func serveListener(ctx context.Context, cfg config.Config, ln net.Listener) erro
 			imports.New(pool),
 			// R2: agents
 			inbox.New(pool),
+			harness.New(pool),
 			workorders.New(pool),
 			agentruns.New(pool, settleUsage),
 			approvals.New(pool),
@@ -152,6 +167,9 @@ func serveListener(ctx context.Context, cfg config.Config, ln net.Listener) erro
 			hours.New(pool, pluginRegistry),
 		},
 		Middleware: []func(http.Handler) http.Handler{authMod.Middleware},
+	}
+	if messagingMod != nil {
+		api.Modules = append(api.Modules, messagingMod)
 	}
 	srv := &http.Server{
 		Handler:           api.Handler(),

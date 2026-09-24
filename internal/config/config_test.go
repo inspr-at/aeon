@@ -3,6 +3,8 @@
 package config
 
 import (
+	"os"
+	"path/filepath"
 	"testing"
 )
 
@@ -62,5 +64,38 @@ func TestFromEnvRejects(t *testing.T) {
 	t.Setenv("AEON_ENV", "staging")
 	if _, err := FromEnv(); err == nil {
 		t.Fatal("expected invalid env to fail")
+	}
+}
+
+func TestMessagingKey(t *testing.T) {
+	t.Setenv("AEON_DATABASE_URL", "postgres://aeon@localhost/aeon")
+	dir := t.TempDir()
+	file := filepath.Join(dir, "messaging-key")
+	if err := os.WriteFile(file, []byte("0123456789abcdefghijklmnopqrstuvwxyzABCD\n"), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	t.Setenv("AEON_ENV", "prod")
+	t.Setenv("AEON_MESSAGING_KEY_FILE", file)
+	cfg, err := FromEnv()
+	if err != nil || len(cfg.MessagingKey) != 32 {
+		t.Fatalf("key from file: %v %d", err, len(cfg.MessagingKey))
+	}
+	again, _ := FromEnv()
+	if string(again.MessagingKey) != string(cfg.MessagingKey) {
+		t.Fatal("key from the same file must be stable")
+	}
+	if err := os.WriteFile(file, []byte("short"), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := FromEnv(); err == nil {
+		t.Fatal("expected a short key file to fail")
+	}
+	t.Setenv("AEON_MESSAGING_KEY_FILE", "")
+	if cfg, err := FromEnv(); err != nil || cfg.MessagingKey != nil {
+		t.Fatalf("prod without a file must disable messaging: %v %v", err, cfg.MessagingKey)
+	}
+	t.Setenv("AEON_ENV", "dev")
+	if cfg, err := FromEnv(); err != nil || len(cfg.MessagingKey) != 32 {
+		t.Fatalf("dev without a file gets an in-memory key: %v", err)
 	}
 }
