@@ -1,7 +1,14 @@
 // SPDX-License-Identifier: AGPL-3.0-only
 import { defineStore } from 'pinia'
 import { ref } from 'vue'
-import { api, getSession, type Identity } from '../lib/api'
+import { api, getSession, probeDevLogin, type Identity } from '../lib/api'
+
+export class SignInError extends Error {
+  readonly reason: 'not_member' | 'disabled' | 'invalid' | 'network' | 'failed'
+  constructor(reason: SignInError['reason']) { super(reason); this.reason = reason }
+}
+
+let probe: Promise<boolean> | undefined
 
 export const useSession = defineStore('session', () => {
   const identity = ref<Identity | null>(null)
@@ -14,6 +21,7 @@ export const useSession = defineStore('session', () => {
       const session = await getSession()
       identity.value = session.identity
       devMode.value = session.devMode
+      if (!session.identity && !session.devModeReported) devMode.value = await (probe ??= probeDevLogin())
     } catch {
       identity.value = null
       devMode.value = false
@@ -27,14 +35,21 @@ export const useSession = defineStore('session', () => {
     identity.value = null
   }
 
+  // Errors carry a reason the sign-in page can explain: not_member, disabled, invalid, network, failed.
   async function devLogin(email: string) {
-    if (!devMode.value) throw new Error('Development sign-in is unavailable')
-    const response = await api('/auth/dev-login', {
-      method: 'POST',
-      headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ email }),
-    })
-    if (!response.ok) throw new Error('Sign in failed')
+    if (!devMode.value) throw new SignInError('disabled')
+    let response: Response
+    try {
+      response = await api('/auth/dev-login', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ email }),
+      })
+    } catch { throw new SignInError('network') }
+    if (response.status === 403) throw new SignInError('not_member')
+    if (response.status === 404) throw new SignInError('disabled')
+    if (response.status === 400) throw new SignInError('invalid')
+    if (!response.ok) throw new SignInError('failed')
   }
 
   return { identity, devMode, error, refresh, signOut, devLogin }

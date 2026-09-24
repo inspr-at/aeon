@@ -1,16 +1,17 @@
 <!-- SPDX-License-Identifier: AGPL-3.0-only -->
 <script setup lang="ts">
-import { computed, nextTick, onBeforeUnmount, onMounted, ref } from 'vue'
+import { computed, nextTick, onBeforeUnmount, onMounted, ref, watch } from 'vue'
 import { useRoute, useRouter } from 'vue-router'
 import mark from '../assets/brand/aeon-mark.svg'
 import { useSession } from '../stores/session'
 import { useProjects } from '../stores/projects'
-import { dark, toggleTheme } from '../lib/theme'
-import { listNodes, type WorkNode } from '../lib/api'
-import { toast } from '../lib/toast'
+import { dark, setTheme, themeChoice, toggleTheme, type ThemeChoice } from '../lib/theme'
+import { canWrite } from '../lib/activity'
+import { command, consume, run } from '../lib/commands'
 import { initials } from '../lib/work'
+import { accountEmail, accountName } from '../lib/api'
 import AppIcon from './AppIcon.vue'
-import SearchPalette from './SearchPalette.vue'
+import CommandPalette from './CommandPalette.vue'
 import VersionDisplay from './VersionDisplay.vue'
 
 const session = useSession()
@@ -22,8 +23,12 @@ const busy = ref(false)
 const error = ref('')
 const account = ref<HTMLElement>()
 const trigger = ref<HTMLButtonElement>()
-const signOutButton = ref<HTMLButtonElement>()
-const palette = ref<InstanceType<typeof SearchPalette>>()
+const panel = ref<HTMLElement>()
+const palette = ref<InstanceType<typeof CommandPalette>>()
+const themes: { value: ThemeChoice; label: string; icon: 'sun' | 'moon' | 'monitor' }[] = [{ value: 'light', label: 'Light', icon: 'sun' }, { value: 'dark', label: 'Dark', icon: 'moon' }, { value: 'system', label: 'System', icon: 'monitor' }]
+const writable = computed(() => canWrite(session.identity?.principal.roles))
+const name = computed(() => session.identity ? accountName(session.identity) : '')
+const email = computed(() => session.identity ? accountEmail(session.identity) : '')
 const mac = /Mac|iPhone|iPad/.test(navigator.platform || navigator.userAgent)
 
 // The legacy workspace view keeps its own search; everywhere else search is global.
@@ -37,8 +42,28 @@ const pageTitle = computed(() => !onProjects.value && !projectKey.value && route
 
 async function toggleMenu() {
   open.value = !open.value
-  if (open.value) { await nextTick(); signOutButton.value?.focus() }
+  if (open.value) { await nextTick(); focusTheme() }
 }
+function focusTheme() { panel.value?.querySelector<HTMLElement>('[role="radio"][aria-checked="true"]')?.focus() }
+// Up and down walk the menu's rows (the theme group is one stop); left and right choose a theme.
+function menuKeys(event: KeyboardEvent) {
+  // Keys pressed inside the menu belong to it, not to the page underneath (Escape and ⌘K still pass).
+  if (event.key !== 'Escape' && !event.metaKey && !event.ctrlKey) event.stopPropagation()
+  if (event.key !== 'ArrowDown' && event.key !== 'ArrowUp') return
+  const items = [...(panel.value?.querySelectorAll<HTMLElement>('button:not(:disabled):not([role="radio"][aria-checked="false"]), [role="button"]') ?? [])]
+  const index = items.indexOf(document.activeElement as HTMLElement)
+  event.preventDefault()
+  items[(index + (event.key === 'ArrowDown' ? 1 : -1) + items.length) % items.length]?.focus()
+}
+function themeKeys(event: KeyboardEvent) {
+  if (event.key !== 'ArrowLeft' && event.key !== 'ArrowRight') return
+  event.preventDefault()
+  const index = themes.findIndex(theme => theme.value === themeChoice.value)
+  setTheme(themes[(index + (event.key === 'ArrowRight' ? 1 : -1) + themes.length) % themes.length].value)
+  void nextTick(focusTheme)
+}
+function showShortcuts() { closeMenu(); run({ name: 'shortcuts' }) }
+watch(command, value => { if (value?.command.name === 'palette') { consume(); palette.value?.open() } })
 function closeMenu(restoreFocus = false) {
   open.value = false
   if (restoreFocus) trigger.value?.focus()
@@ -59,24 +84,17 @@ async function signOut() {
   } catch { error.value = 'Sign out didn’t complete. Please try again.' }
   finally { busy.value = false }
 }
+function typing(target: EventTarget | null) {
+  return target instanceof HTMLElement && (target.isContentEditable || ['INPUT', 'TEXTAREA', 'SELECT'].includes(target.tagName))
+}
+// Pages with their own list search keep '/'; everywhere else it opens the palette.
+const pageOwnsSlash = computed(() => route.path === '/' || (!!projectKey.value && route.query.view !== 'full'))
 function shortcut(event: KeyboardEvent) {
   if (!globalSearch.value) return
-  if ((event.metaKey || event.ctrlKey) && !event.altKey && event.key.toLowerCase() === 'k') { event.preventDefault(); palette.value?.open() }
-}
-// A search hit opens in its project: projects open their list, work opens in the side panel.
-async function openHit(node: WorkNode) {
-  await projects.load()
-  const direct = projects.byId(node.id)
-  if (direct) { await router.push(`/p/${encodeURIComponent(direct.routeKey)}`); return }
-  try {
-    const page = await listNodes({ q: node.key, limit: 25 })
-    const item = page.items.find(candidate => candidate.id === node.id)
-    const owner = item?.project ? projects.byId(item.project.id) : undefined
-    if (owner) { await router.push(`/p/${encodeURIComponent(owner.routeKey)}/${encodeURIComponent(node.key)}`); return }
-    toast(`${node.key} is not part of a project, so it has no list to open in.`)
-  } catch (e) {
-    toast(`${node.key} could not be opened: ${e instanceof Error ? e.message : 'unknown error'}`, { tone: 'error' })
-  }
+  if ((event.metaKey || event.ctrlKey) && !event.altKey && event.key.toLowerCase() === 'k') { event.preventDefault(); palette.value?.open(); return }
+  if (event.metaKey || event.ctrlKey || event.altKey || event.defaultPrevented || typing(event.target) || document.querySelector('dialog[open], .floating')) return
+  if (event.key === '/' && !pageOwnsSlash.value) { event.preventDefault(); palette.value?.open() }
+  else if (event.key === '?') { event.preventDefault(); run({ name: 'shortcuts' }) }
 }
 onMounted(() => { document.addEventListener('pointerdown', outside); window.addEventListener('keydown', shortcut) })
 onBeforeUnmount(() => { document.removeEventListener('pointerdown', outside); window.removeEventListener('keydown', shortcut) })
@@ -116,23 +134,31 @@ onBeforeUnmount(() => { document.removeEventListener('pointerdown', outside); wi
       <AppIcon :name="dark ? 'sun' : 'moon'" />
     </button>
     <div v-if="session.identity" ref="account" class="account" @keydown.esc.stop.prevent="closeMenu(true)" @focusout="focusOut">
-      <button ref="trigger" class="avatar-btn header-btn" type="button" :aria-expanded="open" aria-controls="account-panel" :aria-label="`Account for ${session.identity.principal.name}`" @click="toggleMenu">
-        {{ initials(session.identity.principal.name) }}
+      <button ref="trigger" class="avatar-btn header-btn" type="button" :aria-expanded="open" aria-controls="account-panel" :aria-label="`Account for ${name}`" @click="toggleMenu">
+        {{ initials(name) }}
       </button>
-      <div v-if="open" id="account-panel" class="account-panel pop">
+      <div v-if="open" id="account-panel" ref="panel" class="account-panel pop" role="dialog" aria-label="Account" @keydown="menuKeys">
         <div class="who">
-          <span class="who-avatar" aria-hidden="true">{{ initials(session.identity.principal.name) }}</span>
+          <span class="who-avatar" aria-hidden="true">{{ initials(name) }}</span>
           <div class="who-text">
-            <p class="account-name">{{ session.identity.principal.name }}</p>
-            <p class="account-tenant">{{ session.identity.tenant.name }}</p>
+            <p class="account-name">{{ name }}</p>
+            <p v-if="email" class="account-email">{{ email }}</p>
+            <p class="account-tenant" title="Workspace"><AppIcon name="folder" :size="12" /><span class="sr-only">Workspace: </span>{{ session.identity.tenant.name }}</p>
           </div>
         </div>
-        <button ref="signOutButton" class="menu-row" type="button" :disabled="busy" @click="signOut"><AppIcon name="logout" />{{ busy ? 'Signing out…' : 'Sign out' }}</button>
-        <div class="menu-version"><span class="eyebrow">Version</span><VersionDisplay /></div>
+        <div class="menu-block">
+          <p class="eyebrow">Theme</p>
+          <div class="seg theme-seg" role="radiogroup" aria-label="Theme" @keydown="themeKeys">
+            <button v-for="option in themes" :key="option.value" type="button" role="radio" :aria-checked="themeChoice === option.value" :tabindex="themeChoice === option.value ? 0 : -1" @click="setTheme(option.value)"><AppIcon :name="option.icon" :size="13" />{{ option.label }}</button>
+          </div>
+        </div>
+        <button class="menu-row" type="button" aria-keyshortcuts="?" @click="showShortcuts"><AppIcon name="keyboard" />Keyboard shortcuts<kbd class="keycap row-key" aria-hidden="true">?</kbd></button>
+        <button class="menu-row" type="button" :disabled="busy" @click="signOut"><AppIcon name="logout" />{{ busy ? 'Signing out…' : 'Sign out' }}</button>
         <p v-if="error" class="error" role="alert">{{ error }}</p>
+        <div class="menu-version"><span class="eyebrow">PAIMOS AEON</span><VersionDisplay /></div>
       </div>
     </div>
-    <SearchPalette v-if="globalSearch" ref="palette" @select="openHit" />
+    <CommandPalette v-if="globalSearch" ref="palette" :can-write="writable" />
   </header>
 </template>
 
@@ -180,17 +206,26 @@ onBeforeUnmount(() => { document.removeEventListener('pointerdown', outside); wi
 .avatar-btn:hover, .avatar-btn[aria-expanded="true"] { box-shadow: 0 0 0 1px var(--teal), 0 2px 8px rgba(32, 60, 61, .18); }
 .avatar-btn:active { filter: brightness(.96); }
 .avatar-btn:focus-visible { box-shadow: var(--focus-ring); }
-.account-panel { position: absolute; right: 0; top: 44px; width: min(280px, calc(100vw - 24px)); padding: 8px; }
-.who { display: flex; align-items: center; gap: 12px; padding: 10px 10px 14px; margin-bottom: 6px; border-bottom: 1px solid var(--line); }
-.who-avatar { display: grid; place-items: center; width: 38px; height: 38px; border-radius: 50%; background: var(--avatar-bg); color: var(--teal-ink); box-shadow: 0 0 0 1px var(--glass-rim); font: 700 13px/1 var(--mono); font-variant-ligatures: none; }
+.account-panel { position: absolute; right: 0; top: 44px; width: min(300px, calc(100vw - 24px)); padding: 8px; }
+.who { display: flex; align-items: center; gap: 12px; padding: 10px 10px 12px; margin-bottom: 4px; border-bottom: 1px solid var(--line); }
+.who-avatar { display: grid; place-items: center; flex-shrink: 0; width: 40px; height: 40px; border-radius: 50%; background: var(--avatar-bg); color: var(--teal-ink); box-shadow: 0 0 0 1px var(--glass-rim); font: 700 13px/1 var(--mono); font-variant-ligatures: none; }
 .who-text { min-width: 0; }
 .account-name { color: var(--ink); font-weight: 650; font-size: 14px; overflow-wrap: anywhere; }
-.account-tenant { font-size: 12.5px; color: var(--ink-2); overflow-wrap: anywhere; }
+.account-email { font-size: 12.5px; color: var(--ink-2); overflow-wrap: anywhere; }
+.account-tenant { display: inline-flex; align-items: center; gap: 5px; margin-top: 4px; padding: 2px 8px 2px 6px; border-radius: 999px; background: var(--code-bg); font-size: 11.5px; color: var(--ink-2); }
+.menu-block { display: grid; gap: 6px; padding: 8px 10px 10px; }
+.menu-block .eyebrow { margin: 0; }
+.theme-seg { display: grid; grid-template-columns: repeat(3, 1fr); }
+.theme-seg button { height: 30px; gap: 5px; padding: 0 6px; }
 .menu-row { display: flex; align-items: center; gap: 10px; width: 100%; height: 36px; padding: 0 10px; border: 0; border-radius: 8px; background: transparent; color: var(--ink); font-size: 13.5px; text-align: left; }
 .menu-row svg { color: var(--ink-2); }
-.menu-row:hover, .menu-row:focus-visible { background: var(--row-selected); box-shadow: none; }
+@media (hover: hover) { .menu-row:hover:not(:disabled) { background: var(--row-hover); } }
+.menu-row:active:not(:disabled) { background: var(--row-selected); }
+.menu-row:focus-visible { background: var(--row-selected); box-shadow: inset 0 0 0 1px var(--glass-rim); }
+.row-key { margin-left: auto; }
 .error { margin: 8px 10px 4px; }
 .menu-version { display: flex; align-items: center; justify-content: space-between; gap: 10px; margin-top: 6px; padding: 0 10px; border-top: 1px solid var(--line); }
+.menu-version .eyebrow { letter-spacing: .2em; }
 .menu-version .eyebrow { margin: 0; }
 @media (max-width: 900px) { .search-pill { width: 180px; } }
 @media (max-width: 600px) {

@@ -9,6 +9,8 @@ import { asListItem, guardedMove, keyPrefix, kinds } from '../lib/useTicket'
 import { useOutline } from '../lib/useOutline'
 import { density } from '../lib/prefs'
 import { toast } from '../lib/toast'
+import { command, consume, run } from '../lib/commands'
+import { remember } from '../lib/recents'
 import { apiParams, effectiveSort, facetOptions, filtersFromQuery, filtersToQuery, groupRows, hasFilters, orderByStatus, totalFrom, WORK_KINDS, type Dimension, type EpicRef, type GroupBy, type ListFilters } from '../lib/ticketList'
 import { useTicketList } from '../lib/useTicketList'
 import { absoluteTime, cycleSort, relativeTime, statusMeta, type SortField } from '../lib/work'
@@ -17,7 +19,6 @@ import { useSession } from '../stores/session'
 import AppIcon from '../components/AppIcon.vue'
 import FilterSheet from '../components/work/FilterSheet.vue'
 import ListToolbar from '../components/work/ListToolbar.vue'
-import ShortcutSheet from '../components/work/ShortcutSheet.vue'
 import StatusIcon from '../components/work/StatusIcon.vue'
 import StatusMenu from '../components/work/StatusMenu.vue'
 import TicketTable from '../components/work/TicketTable.vue'
@@ -50,7 +51,6 @@ const stickMark = ref<HTMLElement>()
 const toolbar = ref<InstanceType<typeof ListToolbar>>()
 const table = ref<InstanceType<typeof TicketTable>>()
 const panel = ref<InstanceType<typeof TicketWorkspace>>()
-const shortcuts = ref<InstanceType<typeof ShortcutSheet>>()
 const filterSheet = ref<InstanceType<typeof FilterSheet>>()
 const scrollRoot = ref<HTMLElement | null>(null)
 const toolbarHeight = ref(52)
@@ -345,6 +345,20 @@ function removed(item: ListItem) {
   void router.replace({ path: `/p/${encodeURIComponent(routeKey.value)}`, query: listQuery() }).finally(() => { skipGuard = false })
 }
 
+// Commands from the palette: New ticket in this project.
+watch(command, value => {
+  const next = value?.command
+  if (next?.name !== 'new-ticket' || !project.value || next.projectKey !== project.value.routeKey) return
+  consume()
+  if (ticketKey.value) closePanel()
+  void nextTick(() => startCreate())
+}, { immediate: true })
+// Recently opened work and projects, for the palette.
+watch(panelItem, item => {
+  if (item && project.value) remember({ type: 'ticket', key: item.key, title: item.title, state: item.state, kind: item.kind_slug, projectKey: project.value.routeKey })
+})
+watch(project, current => { if (current) remember({ type: 'project', key: current.routeKey, title: current.title }) }, { immediate: true })
+
 // ---------- Unsaved changes ----------
 function dirty() { return !!panel.value?.isDirty() }
 async function confirmDiscard() {
@@ -411,7 +425,6 @@ function keydown(event: KeyboardEvent) {
       else if (ticketKey.value) { event.preventDefault(); closePanel() }
       break
     case '/': if (!fullView.value) { event.preventDefault(); toolbar.value?.focusSearch() } break
-    case '?': event.preventDefault(); shortcuts.value?.open(); break
     case 'n': event.preventDefault(); void startCreate(outlineActive.value && !ticketKey.value && row?.kind_slug === 'epic' ? row : null); break
     case 'e': if (ticketKey.value) { event.preventDefault(); panel.value?.editTitle() } break
     case 's':
@@ -547,7 +560,7 @@ watch([project, panelItem], ([current, item]) => {
 
       <p class="hint">
         <kbd class="keycap">j</kbd><kbd class="keycap">k</kbd> move · <kbd class="keycap"><AppIcon name="enter" /></kbd> open · <kbd class="keycap">/</kbd> search ·
-        <button type="button" class="hint-link" @click="shortcuts?.open()"><kbd class="keycap">?</kbd> all shortcuts</button>
+        <button type="button" class="hint-link" @click="run({ name: 'shortcuts' })"><kbd class="keycap">?</kbd> all shortcuts</button>
       </p>
       </div>
 
@@ -559,7 +572,6 @@ watch([project, panelItem], ([current, item]) => {
         @status="anchor => panelItem && openStatus(panelItem, anchor, 'panel')" @open-key="openRelated" @removed="removed" @created="childCreated" @moved="childMoved" @retry="resolvePanel"
       />
       <StatusMenu v-if="statusMenu" :anchor="statusMenu.anchor" :current="statusMenu.row.state" :known-states="knownStates" :ticket-key="statusMenu.row.key" @choose="chooseStatus" @close="closeStatus" />
-      <ShortcutSheet ref="shortcuts" />
       <FilterSheet
         ref="filterSheet" :filters="filters" :options="options" :total="total" :view="viewMode" @expand-all="outline.expandAll()" @collapse-all="outline.collapseAll()"
         @toggle="toggleValue" @clear-all="clearFilters" @show-closed="value => update({ showClosed: value })" @group="setGroup"

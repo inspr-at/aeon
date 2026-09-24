@@ -69,7 +69,9 @@ for (const viewport of [{ width: 1280, height: 720 }, { width: 390, height: 844 
         await expect(page.locator('footer [data-version-view="pretty"]')).toBeVisible()
         await page.evaluate(() => document.fonts.ready)
         await noOverflow(page)
-        expect(await page.locator('.app-header').evaluate(el => el.getBoundingClientRect().height)).toBe(56)
+        // Sign-in is a bare page: no header, the card carries brand, version and theme.
+        if (screen.startsWith('signin')) await expect(page.locator('.app-header')).toHaveCount(0)
+        else expect(await page.locator('.app-header').evaluate(el => el.getBoundingClientRect().height)).toBe(56)
         // Phones get 44px touch targets; a desktop pointer works with the compact rail.
         const min = viewport.width < 600 ? 44 : 20
         for (const control of await page.locator('button:visible, a:visible:not(.skip-link), input:visible, [role="button"]:visible').all()) {
@@ -91,7 +93,7 @@ test('401 redirects, production hides email sign-in, INSPR navigates to login', 
   await page.goto('/')
   await expect(page).toHaveURL('/signin')
   await expect(page.getByLabel('Email address')).toHaveCount(0)
-  await page.getByRole('link', { name: 'Sign in with INSPR' }).click()
+  await page.getByRole('link', { name: 'Sign in with INSPR ID' }).click()
   await expect(page).toHaveURL('/api/auth/login')
 })
 
@@ -103,7 +105,8 @@ test('server-authorized email login and account logout use POST', async ({ page 
   await expect(page).toHaveURL('/')
   await expect(page.getByRole('heading', { name: 'Projects', level: 1 })).toBeVisible()
   await page.getByRole('button', { name: 'Account for Markus Barta' }).click()
-  await expect(page.getByRole('button', { name: 'Sign out', exact: true })).toBeFocused()
+  // Focus lands on the chosen theme; the account menu is a small dialog.
+  await expect(page.getByRole('radio', { name: 'System' })).toBeFocused()
   await page.keyboard.press('Escape')
   await expect(page.getByRole('button', { name: 'Account for Markus Barta' })).toBeFocused()
   await page.keyboard.press('Enter')
@@ -138,7 +141,7 @@ test('failed dev login remains on sign-in with an accessible error', async ({ pa
   await page.goto('/signin')
   await page.getByLabel('Email address').fill('markus@barta.com')
   await page.getByRole('button', { name: 'Continue with email' }).click()
-  await expect(page.getByRole('alert')).toContainText('Sign in didn’t complete')
+  await expect(page.getByRole('alert')).toContainText('This email is not a member of this workspace yet.')
   await expect(page).toHaveURL('/signin')
 })
 
@@ -179,6 +182,6 @@ test('version uses Pretty mode, keyboard reveal, exact clipboard and one request
 test('dev version remains plain text', async ({ page }) => {
   await mockAPI(page, { signedIn: false, version: 'dev' })
   await page.goto('/signin')
-  await expect(page.locator('.version-coordinate')).toHaveText(['dev', 'dev'])
+  await expect(page.locator('.version-coordinate')).toHaveText(['dev'])
   await expect(page.locator('.version-coordinate[role="button"]')).toHaveCount(0)
 })

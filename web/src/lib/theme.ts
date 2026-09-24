@@ -1,15 +1,22 @@
 // SPDX-License-Identifier: AGPL-3.0-only
 import { ref } from 'vue'
 
-// Follow the OS until the user explicitly chooses a theme. No device storage.
+// Light, Dark, or System (follow the OS). The choice lasts for the session; no device storage.
+export type ThemeChoice = 'light' | 'dark' | 'system'
 const preference = window.matchMedia('(prefers-color-scheme: dark)')
+export const themeChoice = ref<ThemeChoice>('system')
 export const dark = ref(preference.matches)
-let chosen = false
 preference.addEventListener('change', (event) => {
-  if (!chosen) dark.value = event.matches
+  if (themeChoice.value === 'system') dark.value = event.matches
 })
-export function toggleTheme() {
-  chosen = true
-  dark.value = !dark.value
-  document.documentElement.dataset.theme = dark.value ? 'dark' : 'light'
+export function setTheme(choice: ThemeChoice) {
+  themeChoice.value = choice
+  if (choice === 'system') {
+    delete document.documentElement.dataset.theme
+    dark.value = preference.matches
+  } else {
+    document.documentElement.dataset.theme = choice
+    dark.value = choice === 'dark'
+  }
 }
+export function toggleTheme() { setTheme(dark.value ? 'light' : 'dark') }

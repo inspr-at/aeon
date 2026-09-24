@@ -58,6 +58,9 @@
   --tip-bg: rgba(32, 60, 61, 0.95);
   --tip-ink: #f3f7f5;
   --scrim: rgba(16, 35, 39, 0.28);
+  --palette-scrim: rgba(32, 60, 61, 0.1);
+  --signin-art-opacity: 0.6;
+  --signin-art-filter: none;
   --skeleton: rgba(32, 60, 61, 0.07);
   --skeleton-hi: rgba(255, 255, 255, 0.7);
   --track: rgba(32, 60, 61, 0.08);
@@ -135,7 +138,7 @@
   --danger-bg: rgba(239, 157, 149, 0.1); --danger-line: rgba(239, 157, 149, 0.35);
   --mark-hl: rgba(214, 155, 49, 0.38);
   --tip-bg: rgba(6, 18, 20, 0.96); --tip-ink: #edf4f0;
-  --scrim: rgba(3, 10, 12, 0.5);
+  --scrim: rgba(3, 10, 12, 0.5); --palette-scrim: rgba(3, 10, 12, 0.32); --signin-art-opacity: 0.2; --signin-art-filter: saturate(0.7) brightness(0.9) contrast(1.1);
   --skeleton: rgba(237, 244, 240, 0.07); --skeleton-hi: rgba(237, 244, 240, 0.08);
   --track: rgba(237, 244, 240, 0.09);
   --avatar-bg: radial-gradient(circle at 30% 25%, rgba(164, 229, 223, 0.35), rgba(164, 229, 223, 0.1));
@@ -174,7 +177,7 @@
     --danger-bg: rgba(239, 157, 149, 0.1); --danger-line: rgba(239, 157, 149, 0.35);
     --mark-hl: rgba(214, 155, 49, 0.38);
     --tip-bg: rgba(6, 18, 20, 0.96); --tip-ink: #edf4f0;
-    --scrim: rgba(3, 10, 12, 0.5);
+    --scrim: rgba(3, 10, 12, 0.5); --palette-scrim: rgba(3, 10, 12, 0.32); --signin-art-opacity: 0.2; --signin-art-filter: saturate(0.7) brightness(0.9) contrast(1.1);
     --skeleton: rgba(237, 244, 240, 0.07); --skeleton-hi: rgba(237, 244, 240, 0.08);
     --track: rgba(237, 244, 240, 0.09);
     --avatar-bg: radial-gradient(circle at 30% 25%, rgba(164, 229, 223, 0.35), rgba(164, 229, 223, 0.1));
