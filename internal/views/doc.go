@@ -5,4 +5,8 @@
 // event in the same tenant transaction through EventWriter; until the shared
 // internal/events writer is available, the default writer inserts the event
 // row directly.
+//
+// It also serves GET and PUT /api/preferences/{key}: small per-person JSON
+// objects for UI state such as list columns, widths and the panel split
+// (migration 0540). They are private to the calling principal and append no event.
 package views
