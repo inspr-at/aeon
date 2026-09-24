@@ -216,6 +216,44 @@ func (f *fixture) issued() (string, string, string) {
 func acceptanceBody(digest, mutation string) string {
 	return fmt.Sprintf(`{"version":1,"expected_content_sha256":%q,"client_mutation_id":%q,"name":"Customer Example","company":"Example Co","note":"Approved","confirm":true}`, digest, mutation)
 }
+
+func TestPublicSelectorUnderForcedRLS(t *testing.T) {
+	f := newFixture(t)
+	var superuser, bypassRLS, forcedRLS bool
+	err := db.InTenant(t.Context(), f.pool.App, zeroTenant, func(tx pgx.Tx) error {
+		return tx.QueryRow(t.Context(), `SELECT r.rolsuper,r.rolbypassrls,c.relforcerowsecurity
+			FROM pg_roles r CROSS JOIN pg_class c
+			WHERE r.rolname=current_user AND c.oid='quote_public_tenant_selectors'::regclass`).Scan(&superuser, &bypassRLS, &forcedRLS)
+	})
+	if err != nil || superuser || bypassRLS || !forcedRLS {
+		t.Fatalf("public lookup requires a forced-RLS service role: super=%t bypass=%t forced=%t err=%v", superuser, bypassRLS, forcedRLS, err)
+	}
+	quoteID, digest, path := f.issued()
+	api := "/api/public/quotes/" + strings.TrimPrefix(path, "/offers/")
+	status, body := f.call(nil, "GET", api, "")
+	if status != http.StatusOK || object(t, body)["content_sha256"] != digest {
+		t.Fatalf("anonymous quote projection %d %s", status, body)
+	}
+	status, _ = f.call(nil, "GET", api+"/pdf", "")
+	// This fixture has no print assets; 503 means the capability resolved and
+	// rendering was reached. The image smoke checks the actual PDF bytes.
+	if status != http.StatusServiceUnavailable {
+		t.Fatalf("anonymous PDF did not reach renderer: %d", status)
+	}
+	status, _ = f.call(nil, "GET", strings.Replace(api, strings.Split(strings.TrimPrefix(path, "/offers/"), "/")[0], "unmatched-selector-1234567890", 1), "")
+	if status != http.StatusNotFound {
+		t.Fatalf("unknown selector exposed quote: %d", status)
+	}
+	status, _ = f.call(&f.admin, "POST", "/api/quotes/"+quoteID+"/versions/1/public-link/revoke", "")
+	if status != http.StatusOK {
+		t.Fatalf("revoke %d", status)
+	}
+	status, _ = f.call(nil, "GET", api, "")
+	if status != http.StatusNotFound {
+		t.Fatalf("revoked link readable: %d", status)
+	}
+}
+
 func TestPublicCapabilityReplayPrivacyAndDecisionRace(t *testing.T) {
 	f := newFixture(t)
 	id, digest, path := f.issued()
