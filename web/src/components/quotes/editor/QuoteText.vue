@@ -7,6 +7,9 @@ const emit = defineEmits<{ 'update:modelValue': [value: string]; focus: [] }>()
 const root = ref<HTMLElement>()
 const composing = ref(false)
 let edge: LineEdge | null = null
+// The text is written by hand, never by the template: re-rendering a text node the
+// browser is typing into resets the caret to its start (P7: typing ran backwards).
+watch(root, el => { if (el) el.textContent = props.modelValue }, { flush: 'post' })
 watch(() => props.modelValue, value => { if (root.value && !composing.value && root.value.textContent !== value) root.value.textContent = value })
 function input() { if (!composing.value) emit('update:modelValue', root.value?.textContent ?? '') }
 function paste(event: ClipboardEvent) {
@@ -41,7 +44,7 @@ function keydown(event: KeyboardEvent) {
 }
 </script>
 <template>
-  <component :is="tag" ref="root" class="quote-text" :contenteditable="editable ? 'true' : undefined" :role="editable ? 'textbox' : undefined" :aria-label="editable ? label : undefined" :aria-multiline="editable ? multiline : undefined" :data-placeholder="label" spellcheck="true" @focus="emit('focus')" @input="input" @paste="paste" @keydown="keydown" @compositionstart="composing = true" @compositionend="composing = false; input()">{{ modelValue }}</component>
+  <component :is="tag" ref="root" class="quote-text" :contenteditable="editable ? 'true' : undefined" :role="editable ? 'textbox' : undefined" :aria-label="editable ? label : undefined" :aria-multiline="editable ? multiline : undefined" :data-placeholder="label" spellcheck="true" @focus="emit('focus')" @input="input" @paste="paste" @keydown="keydown" @compositionstart="composing = true" @compositionend="composing = false; input()" />
 </template>
 <style scoped>
 .quote-text { white-space: pre-wrap; overflow-wrap: anywhere; outline: none; min-width: 0; }

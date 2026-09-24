@@ -1815,7 +1815,7 @@ paths:
         - {name: limit, in: query, schema: {type: integer, minimum: 1, maximum: 200, default: 100}}
         - {name: cursor, in: query, schema: {type: string}}
       responses:
-        '200': {description: Quotes in created order; X-Next-Cursor is present when another page exists, headers: {X-Next-Cursor: {schema: {type: string}}}, content: {application/json: {schema: {type: array, items: {$ref: '#/components/schemas/BusinessQuote'}}}}}
+        '200': {description: Quotes in created order; X-Next-Cursor is present when another page exists, headers: {X-Next-Cursor: {schema: {type: string}}}, content: {application/json: {schema: {type: array, items: {$ref: '#/components/schemas/BusinessQuoteListItem'}}}}}
     post:
       operationId: createQuote
       summary: Create a quote node and projection
@@ -2833,6 +2833,24 @@ components:
         archived: {type: boolean}
         project_ref: {type: string}
         classic_status: {type: string, enum: [draft, sent, expired, accepted, void], description: Presentation mapping; expired is derived from the frozen validity day}
+    BusinessQuoteListItem:
+      description: A quote as the Quotes list shows it. Title, dates, currency and net total come from the draft while the quote is a draft and from the frozen current version otherwise; no document body is included.
+      allOf:
+        - {$ref: '#/components/schemas/BusinessQuote'}
+        - type: object
+          required: [key, title, customer_name, created_at, updated_at]
+          properties:
+            key: {type: string, description: The quote node key, such as QUO-12}
+            title: {type: string}
+            customer_name: {type: string, description: Current title of the customer organisation}
+            currency: {type: string, pattern: '^[A-Z]{3}$'}
+            net_total_cents: {type: integer, minimum: 0, description: Net total in cents; drafts round each position half up like a save does; absent when a draft has no document}
+            offer_date: {type: string, format: date}
+            valid_until: {type: string, format: date}
+            created_at: {type: string, format: date-time}
+            updated_at: {type: string, format: date-time, description: Latest of document, version, decision and archive changes}
+            issued_at: {type: string, format: date-time, description: When the current version was issued}
+            accepted_at: {type: string, format: date-time, description: When the current version was accepted}
     QuoteSettings:
       type: object
       required: [revision, numbering_time_zone, default_currency, sender, defaults, layout, smtp_confirmation_enabled, smtp_configured]

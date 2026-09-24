@@ -4,9 +4,9 @@ import type { BizIconName } from '../../business/BizIcon.vue'
 // Quote editor glyphs in the app's set: 16×16 grid, stroke 1.8, round caps and
 // joins, currentColor, centred. Any other name is drawn by BizIcon/AppIcon.
 export type QuoteGlyph = 'bold' | 'italic' | 'clear-format' | 'list-none' | 'list-bullet' | 'list-numbered' | 'indent' | 'outdent'
-  | 'undo' | 'redo' | 'sidebar' | 'section-add' | 'page-break' | 'fit-width' | 'fit-page' | 'list-continue' | 'list-restart' | 'reset' | 'arrow-up' | 'arrow-down' | 'save' | 'check-circle'
+  | 'undo' | 'redo' | 'sidebar' | 'section-add' | 'page-break' | 'fit-width' | 'fit-page' | 'list-continue' | 'list-restart' | 'list-follow' | 'reset' | 'arrow-up' | 'arrow-down' | 'save' | 'check-circle'
 export type QuoteIconName = QuoteGlyph | BizIconName
-const GLYPHS = new Set<string>(['bold', 'italic', 'clear-format', 'list-none', 'list-bullet', 'list-numbered', 'indent', 'outdent', 'undo', 'redo', 'sidebar', 'section-add', 'page-break', 'fit-width', 'fit-page', 'list-continue', 'list-restart', 'reset', 'arrow-up', 'arrow-down', 'save', 'check-circle'])
+const GLYPHS = new Set<string>(['bold', 'italic', 'clear-format', 'list-none', 'list-bullet', 'list-numbered', 'indent', 'outdent', 'undo', 'redo', 'sidebar', 'section-add', 'page-break', 'fit-width', 'fit-page', 'list-continue', 'list-restart', 'list-follow', 'reset', 'arrow-up', 'arrow-down', 'save', 'check-circle'])
 </script>
 <script setup lang="ts">
 import BizIcon from '../../business/BizIcon.vue'
@@ -31,6 +31,7 @@ withDefaults(defineProps<{ name: QuoteIconName; size?: number }>(), { size: 16 }
     <path v-else-if="name === 'fit-width'" d="M2.2 8h11.6M4.6 5.6 2.2 8l2.4 2.4M11.4 5.6 13.8 8l-2.4 2.4" />
     <path v-else-if="name === 'fit-page'" d="M4 2.2h8c.4 0 .8.4.8.8v10c0 .4-.4.8-.8.8H4c-.4 0-.8-.4-.8-.8V3c0-.4.4-.8.8-.8ZM6 6 8 4l2 2M6 10l2 2 2-2" />
     <path v-else-if="name === 'list-continue'" d="M2.8 3.4h7M2.8 6.8h4.4M9.6 6.2c1.9 0 3.4 1.3 3.4 3s-1.5 3.2-3.4 3.2H6.4M8.2 10.6l-1.8 1.8 1.8 1.8" />
+    <path v-else-if="name === 'list-follow'" d="M2.8 3.4h6M2.8 8h6M2.8 12.6h6M12.2 3v9.4M10.4 10.6l1.8 1.8 1.8-1.8" />
     <path v-else-if="name === 'list-restart'" d="M3.2 8a4.8 4.8 0 1 0 1.5-3.5M3 2.6v2.8h2.8M7.2 6.4h1v3.2" />
     <path v-else-if="name === 'reset'" d="M3.2 7.6a4.8 4.8 0 1 1 1.4 3.6M3 11.8V9h2.8" />
     <path v-else-if="name === 'arrow-up'" d="M8 13V3M4.2 6.8 8 3l3.8 3.8" />

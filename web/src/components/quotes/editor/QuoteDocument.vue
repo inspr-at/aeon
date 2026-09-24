@@ -1,4 +1,19 @@
 <!-- SPDX-License-Identifier: AGPL-3.0-only -->
+<script lang="ts">
+import type { QuoteEditor as Editor } from '../../../lib/quotes/editor'
+// A lent editor is wrapped again by each view that mounts it; every view wraps
+// the editor's own select, never the previous view's wrapper.
+const ownSelect = new WeakMap<Editor, Editor['select']>()
+// The document a lent editor last agreed with (as JSON), so a view that borrows it
+// later replaces its document only for a real change, never for the editor's own
+// normalisation, and so keeps its undo history.
+const synced = new WeakMap<Editor, string>()
+function unwrappedSelect(editor: Editor): Editor['select'] {
+  let base = ownSelect.get(editor)
+  if (!base) { base = editor.select.bind(editor); ownSelect.set(editor, base) }
+  return base
+}
+</script>
 <script setup lang="ts">
 import { computed, nextTick, onBeforeUnmount, onMounted, ref, shallowRef, toRaw, watch } from 'vue'
 import QuoteAcceptance from './QuoteAcceptance.vue'
@@ -13,23 +28,34 @@ import { collectTextNodes, pointInTextNodes } from '../../../lib/quotes/caret'
 import { sectionLabel } from '../../../lib/quotes/inspector'
 import { sectionActions } from '../../../lib/quotes/sectionActions'
 import { fitWholeBlocks, type PaginationResult, type PagePlan } from '../../../lib/quotes/layout'
+import { MARK_DEFAULT_MM } from '../../../lib/quotes/inspector'
+import { contentUrl } from '../../../lib/attachments'
 import type { QuoteDocumentData, DocumentSettings, ListMode, MarkName, NumberingOptions, OffsetPatch, QuoteMarker, QuoteSection, SectionSettingsPatch, TextSelection } from '../../../lib/quotes/types'
-const props = withDefaults(defineProps<{ document: QuoteDocumentData; offerNo?: string; editable?: boolean; accepted?: { name: string; company?: string; at: string; digest: string } | null }>(), { editable: false, offerNo: '' })
-const emit = defineEmits<{ 'update:document': [document: QuoteDocumentData]; change: [document: QuoteDocumentData]; 'render-state': [state: PaginationResult]; overflow: [message: string | null] }>()
-const editor = new QuoteEditor(props.document)
+const props = withDefaults(defineProps<{ document: QuoteDocumentData; offerNo?: string; editable?: boolean; accepted?: { name: string; company?: string; at: string; digest: string } | null; editor?: QuoteEditor | null }>(), { editable: false, offerNo: '', editor: null })
+const emit = defineEmits<{ 'update:document': [document: QuoteDocumentData]; change: [document: QuoteDocumentData]; 'render-state': [state: PaginationResult]; overflow: [message: string | null]; mark: [page: number] }>()
+// P7: a workspace may lend its editor (and so its undo history) to this view, so
+// moving the quote between the docked panel and the full page keeps both.
+const editor = props.editor ?? new QuoteEditor(props.document)
+if (props.editor) {
+  // The view that lent it before must not hear this one's changes.
+  editor.onChange = undefined
+  const incoming = JSON.stringify(props.document), known = synced.get(editor)
+  if (known === undefined) synced.set(editor, incoming)
+  else if (known !== incoming && incoming !== JSON.stringify(editor.document)) { editor.replaceDocument(props.document); synced.set(editor, incoming) }
+}
 const state = shallowRef(editor.document)
 // P4: the inspector and title bar follow every change and selection through this counter.
 const version = ref(0)
 const touch = () => { version.value++ }
 let lastEmitted: QuoteDocumentData | null = null
-editor.onChange = document => { state.value = document; lastEmitted = document; touch(); emit('update:document', document); emit('change', document); schedule() }
-const baseSelect = editor.select.bind(editor)
+editor.onChange = document => { state.value = document; lastEmitted = document; if (props.editor) synced.set(editor, JSON.stringify(document)); touch(); emit('update:document', document); emit('change', document); schedule() }
+const baseSelect = unwrappedSelect(editor)
 editor.select = (selection, preserveTyping) => { baseSelect(selection, preserveTyping); touch() }
 // The session hands every edit back as a copy; only a different document (a reload,
 // a restored draft, a merge) replaces the editor's, or each edit would echo forever.
 watch(() => props.document, document => {
   if (toRaw(document) === lastEmitted || JSON.stringify(document) === JSON.stringify(editor.document)) return
-  editor.replaceDocument(document); lastEmitted = editor.document; schedule()
+  editor.replaceDocument(document); lastEmitted = editor.document; if (props.editor) synced.set(editor, JSON.stringify(document)); schedule()
 })
 const pages = ref<PagePlan[]>([{ kind: 'cover', sectionIds: [], positionIds: [], acceptance: false }, { kind: 'positions', sectionIds: [], positionIds: [], acceptance: true }])
 const renderState = ref<PaginationResult>({ ready: false, overflow: null, pages: pages.value })
@@ -72,6 +98,17 @@ function schedule() {
 watch(state, schedule)
 onMounted(() => { resize = new ResizeObserver(schedule); if (measureRoot.value) resize.observe(measureRoot.value); window.addEventListener('resize', schedule); schedule() })
 onBeforeUnmount(() => { resize?.disconnect(); window.removeEventListener('resize', schedule) })
+// ---------- The footer mark (P4, F08.03): the company's mark on every page ----------
+// Sized 18..96 mm and moved -6..10 mm, in tenths, for the whole document; clicking
+// the mark on any page selects that page's mark and asks for its settings.
+const markFile = computed(() => state.value.layout.logo_file_id || state.value.sender.logo_file_id || '')
+const markWidth = computed(() => { const n = Number(state.value.layout.logo_width_mm); return Number.isFinite(n) && n >= 18 && n <= 96 ? n : MARK_DEFAULT_MM })
+const markOffset = computed(() => { const n = Number(state.value.layout.logo_offset_mm); return Number.isFinite(n) && n >= -6 && n <= 10 ? n : 0 })
+const markPage = ref<number | null>(null)
+const markMissing = ref(false)
+watch(markFile, () => { markMissing.value = false })
+function selectMark(pageIndex: number) { markPage.value = pageIndex; editor.select({}); touch(); emit('mark', pageIndex) }
+
 // ---------- Section chrome (P4): handle, context menu, drag to reorder, Alt+Up/Down ----------
 const actions = sectionActions(editor, touch)
 const currentSection = computed(() => { void version.value; return editor.selection.text?.sectionId ?? editor.selection.sectionId ?? null })
@@ -158,7 +195,7 @@ function whenReady(): Promise<PaginationResult> {
 }
 // Typed P4/P5 integration surface; this component owns all document mutation and history.
 defineExpose({
-  editor, renderState, whenReady, version, touch, actions, jump, select: editor.select.bind(editor), undo: editor.undo.bind(editor), redo: editor.redo.bind(editor),
+  editor, renderState, whenReady, version, touch, actions, jump, markPage, select: editor.select.bind(editor), undo: editor.undo.bind(editor), redo: editor.redo.bind(editor),
   setMarks: (mark: MarkName | 'normal', active?: boolean) => editor.setMarks(mark, active),
   setListMode: (mode: ListMode, bullet?: Exclude<QuoteMarker, 'decimal'>) => editor.setListMode(mode, bullet),
   indent: () => editor.indent(), outdent: () => editor.outdent(),
@@ -192,7 +229,17 @@ defineExpose({
         <QuotePositions v-if="page.kind === 'positions' && (page.positionIds.length || pageIndex === pages.findIndex(p => p.kind === 'positions'))" :positions="state.positions" :indices="page.positionIds" :editor="editor" :editable="editable" />
         <QuoteAcceptance v-if="page.acceptance" :document="state" :editor="editor" :editable="editable" :accepted="accepted" />
       </div>
-      <footer class="quote-page-footer"><span>{{ state.sender.company }}</span><span>{{ offerNo }} · {{ pageIndex + 1 }} / {{ pages.length }}</span></footer>
+      <footer class="quote-page-footer">
+        <span class="quote-footer-start">
+          <button
+            v-if="markFile && editable" type="button" class="quote-mark" :class="{ selected: markPage === pageIndex, missing: markMissing }" :style="{ width: `${markWidth}mm`, transform: `translateY(${markOffset}mm)` }"
+            :aria-label="`Company mark on page ${pageIndex + 1}`" :aria-pressed="markPage === pageIndex" data-tip="Size and position of the mark" @click="selectMark(pageIndex)"
+          ><img v-if="!markMissing" :src="contentUrl(markFile, 'original')" alt="" draggable="false" @error="markMissing = true" /><span v-else class="quote-mark-empty">Mark</span></button>
+          <span v-else-if="markFile && !markMissing" class="quote-mark" :style="{ width: `${markWidth}mm`, transform: `translateY(${markOffset}mm)` }"><img :src="contentUrl(markFile, 'original')" alt="" @error="markMissing = true" /></span>
+          <span>{{ state.sender.company }}</span>
+        </span>
+        <span>{{ offerNo }} · {{ pageIndex + 1 }} / {{ pages.length }}</span>
+      </footer>
     </article>
     <div ref="measureRoot" class="quote-measure" aria-hidden="true" inert>
       <div ref="heightProbe" class="quote-height-probe"></div>
@@ -219,7 +266,15 @@ defineExpose({
 }
 .quote-page { position: relative; box-sizing: border-box; width: 210mm; height: 297mm; padding: 20mm 21mm 20mm; margin: 0 auto 12mm; background: var(--quote-paper); box-shadow: var(--shadow); overflow: hidden; }
 .quote-page-content { height: 245mm; }
-.quote-page-footer { position: absolute; bottom: 12mm; left: 21mm; right: 21mm; border-top: 1px solid var(--line-2); padding-top: 3mm; display: flex; justify-content: space-between; gap: 10mm; font-size: 7pt; color: var(--ink-2); }
+.quote-page-footer { position: absolute; bottom: 12mm; left: 21mm; right: 21mm; border-top: 1px solid var(--line-2); padding-top: 3mm; display: flex; justify-content: space-between; align-items: center; gap: 10mm; font-size: 7pt; color: var(--ink-2); }
+.quote-footer-start { display: flex; align-items: center; gap: 4mm; min-width: 0; }
+.quote-mark { display: block; flex-shrink: 0; padding: 0; border: 0; border-radius: 2px; background: transparent; line-height: 0; }
+.quote-mark img { display: block; width: 100%; height: auto; max-height: 14mm; object-fit: contain; object-position: left center; }
+button.quote-mark { cursor: pointer; }
+button.quote-mark:hover { box-shadow: 0 0 0 1px var(--line-2); }
+button.quote-mark:focus-visible { box-shadow: var(--focus-ring); }
+button.quote-mark.selected { box-shadow: 0 0 0 1.5px var(--teal); }
+.quote-mark-empty { display: grid; place-items: center; height: 7mm; border-radius: 2px; background: var(--surface-2); box-shadow: inset 0 0 0 1px var(--line-2); color: var(--ink-3); font-size: 6.5pt; line-height: 1; }
 .quote-section { position: relative; margin-top: 6mm; break-inside: avoid; }.quote-section-heading { display: flex; gap: 2mm; align-items: baseline; margin-bottom: 3mm; font-size: 13pt; font-weight: 700; }.quote-section-heading h2 { font: inherit; margin: 0; flex: 1; }.quote-section-number { color: var(--ink-2); }
 .quote-section-handle { position: absolute; left: -9mm; top: 0; display: grid; place-items: center; width: 6.5mm; height: 7mm; padding: 0; border: 0; border-radius: 6px; background: transparent; color: var(--ink-3); cursor: grab; opacity: 0; transition: opacity .12s ease; }
 .quote-section:hover > .quote-section-handle, .quote-section.current > .quote-section-handle, .quote-section-handle:focus-visible, .quote-section-handle[aria-expanded="true"] { opacity: 1; }
@@ -233,5 +288,5 @@ defineExpose({
 .quote-section.drop-after::after { bottom: -3mm; }
 .quote-overflow { max-width: 210mm; margin: 0 auto 4mm; background: var(--danger-bg); border: 1px solid var(--danger-line); border-radius: 8px; padding: 3mm; }
 .quote-measure { position: absolute; left: -10000px; top: 0; width: 210mm; padding: 20mm 21mm; box-sizing: border-box; visibility: hidden; background: var(--quote-paper); }.quote-height-probe { height: 245mm; position: absolute; pointer-events: none; }
-@media print { .quote-page { margin: 0; box-shadow: none; break-after: page; background: white; color: #203c3d; } .quote-document { color: #203c3d; } .quote-section-handle,.quote-overflow,.quote-measure { display: none !important; } @page { size: A4; margin: 0; } }
+@media print { .quote-page { margin: 0; box-shadow: none; break-after: page; background: white; color: #203c3d; } .quote-document { color: #203c3d; } .quote-section-handle,.quote-overflow,.quote-measure,.quote-mark.missing { display: none !important; } button.quote-mark { box-shadow: none !important; } @page { size: A4; margin: 0; } }
 </style>

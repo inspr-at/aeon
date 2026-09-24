@@ -2,6 +2,7 @@
 // One quote-scoped stream per editor tab. The coordinator mounts this client
 // with the editor; presence never enters the document model or PDF renderer.
 import { api, APIError } from './api'
+import { avatarColor, type AvatarColor } from './avatar'
 import type { QuoteDocumentData, EditorSelection } from './quotes/types'
 
 export interface PresenceAnchor { section_id: string; node_id?: string; observed_revision: number; text_sha256?: string; anchor?: number; focus?: number; fidelity: 'section'|'precise' }
@@ -10,8 +11,11 @@ export interface PresenceSnapshot { sessions: CollaboratorSession[]; draft_revis
 export interface QuoteNotice { id: number; quote_node_id: string; type: string; actor_principal_id: string; draft_revision: number; quote_revision: number; state: string; client_session_id?: string; mutation_id?: string }
 type Listener = (snapshot: PresenceSnapshot) => void
 type NoticeListener = (notice: QuoteNotice) => void
-const colors = ['var(--teal)','var(--gold-ink)','var(--ok)','var(--danger)','var(--ink-2)']
-export const collaboratorColor = (principalId: string): string => { let hash=0; for (const c of principalId) hash=(hash*31+c.charCodeAt(0))>>>0; return colors[hash%colors.length] }
+// A collaborator's colour is their avatar's hue, saturated enough for a caret and
+// a name label (--presence-l/-c follow the theme; white or dark ink sits on it).
+const HUES: Record<AvatarColor, number> = { slate: 255, sage: 150, moss: 125, ocean: 222, steel: 238, denim: 258, iris: 290, plum: 330, rose: 12, clay: 45, sand: 82, teal: 188 }
+export const collaboratorHue = (principalId: string): number => HUES[avatarColor(principalId)]
+export const collaboratorColor = (principalId: string): string => `oklch(var(--presence-l) var(--presence-c) ${collaboratorHue(principalId)})`
 const path = (id:string) => `/quotes/${encodeURIComponent(id)}/presence`
 async function json<T>(response:Response):Promise<T> { const body=await response.json().catch(()=>({})); if(!response.ok) throw new APIError(response.status,'Quote presence unavailable',body); return body as T }
 async function textHash(text:string):Promise<string> { const bytes=await crypto.subtle.digest('SHA-256',new TextEncoder().encode(text)); return [...new Uint8Array(bytes)].map(b=>b.toString(16).padStart(2,'0')).join('') }

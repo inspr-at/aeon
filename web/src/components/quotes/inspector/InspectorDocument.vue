@@ -2,6 +2,8 @@
 <script setup lang="ts">
 import { computed } from 'vue'
 import { PAGE_MM } from '../../../lib/quotes/layout'
+import { MARK_DEFAULT_MM, MARK_RANGES, mmText } from '../../../lib/quotes/inspector'
+import MmField from './MmField.vue'
 import { settingsLink } from '../../../lib/settings'
 import type { QuoteEditor } from '../../../lib/quotes/editor'
 import type { DocumentSettings, QuoteDocumentData } from '../../../lib/quotes/types'
@@ -11,10 +13,15 @@ import QuoteIcon from './QuoteIcon.vue'
 // The Document scope: this quote's own settings (dates, reference, currency) and
 // what its page is (size, margins, language), with templates one link away in
 // Settings. Templates shape new quotes; this one keeps its text.
-const props = defineProps<{ editor: QuoteEditor; document: QuoteDocumentData; editable: boolean; admin: boolean }>()
+const props = defineProps<{ editor: QuoteEditor; document: QuoteDocumentData; editable: boolean; admin: boolean; markPage?: number | null }>()
 const emit = defineEmits<{ run: [command: () => void] }>()
 const set = (patch: DocumentSettings) => emit('run', () => props.editor.setDocumentSettings(patch))
 const hasPositions = computed(() => props.document.positions.length > 0)
+// The footer mark (F08.03): one size and one vertical offset for the mark on every page.
+const hasMark = computed(() => !!(props.document.layout.logo_file_id || props.document.sender.logo_file_id))
+const markWidth = computed(() => { const n = Number(props.document.layout.logo_width_mm); return Number.isFinite(n) && props.document.layout.logo_width_mm ? n : MARK_DEFAULT_MM })
+const markOffset = computed(() => { const n = Number(props.document.layout.logo_offset_mm); return Number.isFinite(n) ? n : 0 })
+const markMoved = computed(() => !!props.document.layout.logo_width_mm || !!props.document.layout.logo_offset_mm)
 const dateProblem = computed(() => props.document.valid_until && props.document.offer_date && props.document.valid_until < props.document.offer_date ? 'Valid until is before the quote date.' : '')
 function days(from: string, to: string) {
   if (!from || !to) return ''
@@ -55,6 +62,18 @@ function currency(event: Event) {
       <p class="note">Page size, margins and type come from the quote layout, the same for every quote and its PDF.</p>
     </section>
 
+    <section v-if="hasMark" id="quote-footer-mark" class="group" aria-labelledby="doc-mark">
+      <div class="group-head">
+        <h3 id="doc-mark" class="group-title">Footer mark</h3>
+        <button v-if="markMoved" type="button" class="reset" :disabled="!editable" data-tip="Back to the default size and position" @mousedown.prevent @click="set({ layout: { logo_width_mm: undefined, logo_offset_mm: undefined } })"><QuoteIcon name="reset" :size="13" />Reset</button>
+      </div>
+      <p class="note" aria-live="polite">{{ markPage != null ? `The mark on page ${markPage + 1} is selected. ` : '' }}Its size and position apply to the mark on every page.</p>
+      <div class="fields">
+        <MmField label="Mark width" :value="markWidth" :range="MARK_RANGES.width" :disabled="!editable" @commit="value => set({ layout: { logo_width_mm: mmText(value) ?? undefined } })" />
+        <MmField label="Mark up or down" :value="markOffset" :range="MARK_RANGES.offset" :disabled="!editable" hint="Negative moves it up" @commit="value => set({ layout: { logo_offset_mm: mmText(value) ?? undefined } })" />
+      </div>
+    </section>
+
     <section class="group" aria-labelledby="doc-templates">
       <h3 id="doc-templates" class="group-title">Templates</h3>
       <p class="note">The sender, introduction and closing texts of new quotes come from the templates. This quote keeps its own text.</p>
@@ -88,4 +107,10 @@ function currency(event: Event) {
 .link-row:hover { background: var(--row-hover); }
 .link-row:focus-visible { box-shadow: var(--focus-ring); }
 .go { margin-left: 2px; }
+.group-head { display: flex; align-items: center; justify-content: space-between; gap: 8px; min-height: 24px; }
+.fields { display: grid; gap: 6px; }
+.reset { display: inline-flex; align-items: center; gap: 5px; height: 24px; padding: 0 8px; border: 0; border-radius: 999px; background: transparent; color: var(--teal-ink); font-size: 12px; font-weight: 600; }
+.reset:hover:not(:disabled) { background: var(--row-selected); }
+.reset:focus-visible { box-shadow: var(--focus-ring); }
+.reset:disabled { color: var(--ink-3); }
 </style>

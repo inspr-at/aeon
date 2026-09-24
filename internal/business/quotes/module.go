@@ -204,6 +204,60 @@ type quote struct {
 	ProjectRef        string `json:"project_ref"`
 	ClassicStatus     string `json:"classic_status"`
 }
+
+// listRow is what the Quotes list shows for a quote beside its projection:
+// the node key, the current document's title, dates and net total, and the
+// customer's name. The title and dates come from the draft while it is a draft
+// and from the frozen version once issued; the list never reads a whole document.
+type listRow struct {
+	quote
+	Key           string     `json:"key"`
+	Title         string     `json:"title"`
+	CustomerName  string     `json:"customer_name"`
+	Currency      string     `json:"currency,omitempty"`
+	NetTotalCents *int64     `json:"net_total_cents,omitempty"`
+	OfferDate     string     `json:"offer_date,omitempty"`
+	ValidUntil    string     `json:"valid_until,omitempty"`
+	CreatedAt     time.Time  `json:"created_at"`
+	UpdatedAt     time.Time  `json:"updated_at"`
+	IssuedAt      *time.Time `json:"issued_at,omitempty"`
+	AcceptedAt    *time.Time `json:"accepted_at,omitempty"`
+}
+
+// draftTotal sums the positions as a saved draft does: each row's quantity in
+// hundredths times its cent price, rounded half up to cents.
+func draftTotal(raw []byte) (*int64, error) {
+	if len(raw) == 0 {
+		return nil, nil
+	}
+	var positions []struct {
+		Quantity       string `json:"quantity"`
+		UnitPriceCents int64  `json:"unit_price_cents"`
+	}
+	if err := json.Unmarshal(raw, &positions); err != nil {
+		return nil, err
+	}
+	var total int64
+	for _, p := range positions {
+		qty, err := parseQuantity(p.Quantity)
+		if err != nil || p.UnitPriceCents < 0 {
+			return nil, nil
+		}
+		total += (qty*p.UnitPriceCents + 50) / 100
+	}
+	return &total, nil
+}
+
+// versionCents turns a frozen numeric(18,4) total into whole cents, half up.
+func versionCents(text string) (*int64, error) {
+	d, err := parseDecimal(text, false)
+	if err != nil {
+		return nil, err
+	}
+	cents := (int64(d) + 50) / 100
+	return &cents, nil
+}
+
 type createWrite struct {
 	Title             string `json:"title"`
 	ProjectNodeID     string `json:"project_node_id"`
@@ -296,10 +350,27 @@ func (m *Module) list(w http.ResponseWriter, r *http.Request) {
 		respond(w, 0, nil, bad("invalid quote filter"))
 		return
 	}
-	out := []quote{}
+	out := []listRow{}
 	var next string
 	e = m.tx(r.Context(), p, fence.PermViewsProvide, false, func(tx pgx.Tx) error {
-		rows, err := tx.Query(r.Context(), `SELECT quote_node_id::text,coalesce(project_node_id::text,''),customer_org_node_id::text,current_version,state,revision,coalesce(offer_no,''),archived_at IS NOT NULL,project_ref,created_at FROM business_quotes WHERE ($1::text='' OR project_node_id=NULLIF($1,'')::uuid) AND ($2::text='' OR customer_org_node_id=NULLIF($2,'')::uuid) AND ($3::text='' OR state=$3) AND ($4::text='all' OR (archived_at IS NOT NULL)=($4::text='true')) AND ($5::timestamptz IS NULL OR created_at<$5::timestamptz OR (created_at=$5::timestamptz AND quote_node_id>$6::uuid)) ORDER BY created_at DESC,quote_node_id LIMIT $7`, project, org, state, archived, cursorTime, cursorID, limit+1)
+		rows, err := tx.Query(r.Context(), `SELECT q.quote_node_id::text,coalesce(q.project_node_id::text,''),q.customer_org_node_id::text,q.current_version,q.state,q.revision,coalesce(q.offer_no,''),q.archived_at IS NOT NULL,q.project_ref,q.created_at,
+			n.key,coalesce(CASE WHEN q.state='draft' THEN coalesce(NULLIF(d.document->>'title',''),NULLIF(v.title,'')) ELSE coalesce(NULLIF(s.document->>'title',''),NULLIF(v.title,''),NULLIF(d.document->>'title','')) END,n.title),coalesce(o.title,''),
+			coalesce(CASE WHEN q.state='draft' THEN d.document->>'currency' END,v.currency,d.document->>'currency',''),
+			CASE WHEN q.state<>'draft' AND v.quote_node_id IS NOT NULL THEN v.total::text END,
+			CASE WHEN q.state='draft' OR v.quote_node_id IS NULL THEN d.document->'positions' END,
+			coalesce(CASE WHEN q.state='draft' THEN d.document->>'offer_date' END,s.offer_date::text,d.document->>'offer_date',''),
+			coalesce(CASE WHEN q.state='draft' THEN d.document->>'valid_until' END,s.valid_until::text,d.document->>'valid_until',''),
+			GREATEST(n.updated_at,q.created_at,coalesce(d.updated_at,q.created_at),coalesce(v.created_at,q.created_at),coalesce(dec.decided_at,q.created_at),coalesce(q.archived_at,q.created_at)),
+			i.issued_at,dec.decided_at
+			FROM business_quotes q
+			JOIN nodes n ON n.tenant_id=q.tenant_id AND n.id=q.quote_node_id
+			LEFT JOIN nodes o ON o.tenant_id=q.tenant_id AND o.id=q.customer_org_node_id
+			LEFT JOIN quote_drafts d ON d.tenant_id=q.tenant_id AND d.quote_node_id=q.quote_node_id
+			LEFT JOIN quote_versions v ON v.tenant_id=q.tenant_id AND v.quote_node_id=q.quote_node_id AND v.version=q.current_version
+			LEFT JOIN quote_version_snapshots s ON s.tenant_id=q.tenant_id AND s.quote_node_id=q.quote_node_id AND s.version=q.current_version
+			LEFT JOIN quote_issues i ON i.tenant_id=q.tenant_id AND i.quote_node_id=q.quote_node_id AND i.version=q.current_version
+			LEFT JOIN quote_decisions dec ON dec.tenant_id=q.tenant_id AND dec.quote_node_id=q.quote_node_id AND dec.version=q.current_version
+			WHERE ($1::text='' OR q.project_node_id=NULLIF($1,'')::uuid) AND ($2::text='' OR q.customer_org_node_id=NULLIF($2,'')::uuid) AND ($3::text='' OR q.state=$3) AND ($4::text='all' OR (q.archived_at IS NOT NULL)=($4::text='true')) AND ($5::timestamptz IS NULL OR q.created_at<$5::timestamptz OR (q.created_at=$5::timestamptz AND q.quote_node_id>$6::uuid)) ORDER BY q.created_at DESC,q.quote_node_id LIMIT $7`, project, org, state, archived, cursorTime, cursorID, limit+1)
 		if err != nil {
 			return err
 		}
@@ -307,15 +378,26 @@ func (m *Module) list(w http.ResponseWriter, r *http.Request) {
 		var lastID string
 		var hasMore bool
 		for rows.Next() {
-			var q quote
-			var created time.Time
-			if err := rows.Scan(&q.QuoteNodeID, &q.ProjectNodeID, &q.CustomerOrgNodeID, &q.CurrentVersion, &q.State, &q.Revision, &q.OfferNo, &q.Archived, &q.ProjectRef, &created); err != nil {
+			var q listRow
+			var versionTotal *string
+			var positions []byte
+			if err := rows.Scan(&q.QuoteNodeID, &q.ProjectNodeID, &q.CustomerOrgNodeID, &q.CurrentVersion, &q.State, &q.Revision, &q.OfferNo, &q.Archived, &q.ProjectRef, &q.CreatedAt,
+				&q.Key, &q.Title, &q.CustomerName, &q.Currency, &versionTotal, &positions, &q.OfferDate, &q.ValidUntil, &q.UpdatedAt, &q.IssuedAt, &q.AcceptedAt); err != nil {
+				rows.Close()
+				return err
+			}
+			if versionTotal != nil {
+				q.NetTotalCents, err = versionCents(*versionTotal)
+			} else {
+				q.NetTotalCents, err = draftTotal(positions)
+			}
+			if err != nil {
 				rows.Close()
 				return err
 			}
 			if len(out) < limit {
 				out = append(out, q)
-				lastTime = created
+				lastTime = q.CreatedAt
 				lastID = q.QuoteNodeID
 			} else {
 				hasMore = true
@@ -331,7 +413,7 @@ func (m *Module) list(w http.ResponseWriter, r *http.Request) {
 		}
 		for i := range out {
 			var err error
-			out[i].ClassicStatus, err = classicStatus(r.Context(), tx, out[i])
+			out[i].ClassicStatus, err = classicStatus(r.Context(), tx, out[i].quote)
 			if err != nil {
 				return err
 			}

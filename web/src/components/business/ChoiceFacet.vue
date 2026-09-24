@@ -4,10 +4,10 @@ export interface FacetChoice { value: string; label: string; count?: number; sta
 </script>
 <script setup lang="ts">
 import { computed, ref } from 'vue'
-import type { QuoteState } from '../../lib/business'
+import type { QuoteStatus } from '../../lib/quotes/list'
 import AppIcon from './BizIcon.vue'
 import FloatingPanel from '../work/FloatingPanel.vue'
-import QuoteStatus from './QuoteStatus.vue'
+import QuoteStatusIcon from '../quotes/QuoteStatusIcon.vue'
 
 // A toolbar filter: the button shows its count once anything is chosen; the
 // popover lists checkboxes (with a find field for longer lists).
@@ -45,7 +45,7 @@ function keys(event: KeyboardEvent) {
       <div class="options" role="group" :aria-label="label">
         <label v-for="option in shown" :key="option.value" class="option" :class="{ muted: !option.count && !selected.includes(option.value) }">
           <input class="check-box" type="checkbox" :checked="selected.includes(option.value)" @change="emit('toggle', option.value)" />
-          <QuoteStatus v-if="option.state" :state="option.state as QuoteState" :label="false" />
+          <QuoteStatusIcon v-if="option.state" :status="option.state as QuoteStatus" :label="false" />
           <span class="option-label">{{ option.label }}</span>
           <span class="count mono">{{ option.count ?? '' }}</span>
         </label>

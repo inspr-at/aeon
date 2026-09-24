@@ -169,6 +169,7 @@ main:focus-visible { box-shadow: none; }
 .page-flow > :first-child { flex: 1 0 auto; }
 .page-flow.fill { height: 100%; }
 .page-flow.fill > :first-child { flex: 1 1 auto; min-height: 0; }
-.skip-link { position: fixed; z-index: 90; top: 8px; left: 16px; padding: 10px 16px; border-radius: 999px; background: var(--surface-raised); box-shadow: var(--shadow-pop); transform: translateY(-160%); }
-.skip-link:focus { transform: translateY(0); }
+/* Out of sight until focused; its shadow too, or it smudges the top of bare pages. */
+.skip-link { position: fixed; z-index: 90; top: 8px; left: 16px; padding: 10px 16px; border-radius: 999px; background: var(--surface-raised); box-shadow: none; transform: translateY(-160%); }
+.skip-link:focus { transform: translateY(0); box-shadow: var(--shadow-pop); }
 </style>

@@ -1,30 +1,121 @@
 <!-- SPDX-License-Identifier: AGPL-3.0-only -->
 <script setup lang="ts">
-import { computed, ref } from 'vue'
+import { computed, nextTick, ref, watch } from 'vue'
 import type { MergePreview, ConflictChoices } from '../../../lib/quoteMerge'
-const props=defineProps<{ open:boolean; preview:MergePreview|null; durableRecovery:boolean }>()
-const emit=defineEmits<{ resolve:[choices:ConflictChoices]; export:[]; discard:[]; close:[] }>()
-const choices=ref<ConflictChoices>({})
-const ready=computed(()=>!!props.preview?.document && props.preview.conflicts.every(c=>!!choices.value[c.path]))
+import { conflictPlace, conflictValue } from '../../../lib/quotes/conflicts'
+import type { QuoteDocumentData } from '../../../lib/quotes/types'
+import AppIcon from '../../AppIcon.vue'
+import QuoteIcon from '../inspector/QuoteIcon.vue'
+
+// Reviewing a save that met someone else's newer one. Both copies are kept
+// until you choose: changes in different places merge by themselves; where you
+// both changed the same thing, each overlap asks which version stays. Nothing is
+// saved until "Save the result". Your copy can also be downloaded first.
+const props = defineProps<{ open: boolean; preview: MergePreview | null; durableRecovery: boolean; document: QuoteDocumentData | null; actorName?: string }>()
+const emit = defineEmits<{ resolve: [choices: ConflictChoices]; export: []; discard: []; close: [] }>()
+const dialog = ref<HTMLDialogElement>()
+const choices = ref<ConflictChoices>({})
+const conflicts = computed(() => props.preview?.conflicts ?? [])
+const decided = computed(() => conflicts.value.filter(c => !!choices.value[c.path]).length)
+const ready = computed(() => !!props.preview?.document && conflicts.value.every(c => !!choices.value[c.path]))
+const other = computed(() => props.actorName || 'Someone else')
+let opener: HTMLElement | null = null
+watch(() => props.open, async open => {
+  if (open) {
+    choices.value = {}
+    opener = document.activeElement as HTMLElement
+    await nextTick()
+    if (!dialog.value?.open) dialog.value?.showModal()
+    dialog.value?.querySelector<HTMLElement>('[data-autofocus]')?.focus()
+  } else if (dialog.value?.open) { dialog.value.close(); opener?.focus({ preventScroll: true }) }
+}, { immediate: true })
+function all(side: 'mine' | 'theirs') { choices.value = Object.fromEntries(conflicts.value.map(c => [c.path, side])) }
 </script>
+
 <template>
-  <div v-if="open" class="scrim" role="presentation" @click.self="emit('close')">
-    <section role="dialog" aria-modal="true" aria-labelledby="quote-conflict-title" class="dialog" @keydown.esc="emit('close')">
-      <h2 id="quote-conflict-title">Review quote changes</h2>
-      <p>Your copy and the server copy are both preserved. Review each overlap before saving against the latest revision.</p>
-      <p v-if="!durableRecovery" class="warning">Local recovery storage is unavailable. Export your copy before closing this tab.</p>
-      <p v-if="preview?.conflicts.length===0">The changes are in separate fields. Preview the merged document before saving.</p>
-      <ol v-if="preview?.conflicts.length" class="conflicts">
-        <li v-for="conflict in preview.conflicts" :key="conflict.path">
-          <strong>{{ conflict.path }}</strong><span>{{ conflict.reason }}</span>
-          <fieldset><legend>Keep which change?</legend><label><input v-model="choices[conflict.path]" type="radio" :name="conflict.path" value="mine"> My copy</label><label><input v-model="choices[conflict.path]" type="radio" :name="conflict.path" value="theirs"> Server copy</label></fieldset>
+  <dialog ref="dialog" class="review" aria-labelledby="quote-conflict-title" aria-describedby="quote-conflict-lead" @cancel.prevent="emit('close')">
+    <div class="card">
+      <header class="head">
+        <span class="head-icon" aria-hidden="true"><QuoteIcon name="history" :size="17" /></span>
+        <div class="titles">
+          <h2 id="quote-conflict-title">{{ conflicts.length ? 'Choose which changes stay' : 'Merge the newer draft' }}</h2>
+          <p id="quote-conflict-lead" class="lead">
+            <template v-if="conflicts.length">{{ other }} saved changes while you were editing. Most merge by themselves; {{ conflicts.length === 1 ? 'one place was' : `${conflicts.length} places were` }} changed by both of you.</template>
+            <template v-else>{{ other }} saved changes while you were editing. They are in other places than yours, so both can be kept.</template>
+          </p>
+        </div>
+        <button type="button" class="icon-btn sm flat" aria-label="Keep editing" data-tip="Keep editing · Esc" @click="emit('close')"><AppIcon name="close" :size="15" /></button>
+      </header>
+
+      <p v-if="!durableRecovery" class="warn" role="alert"><AppIcon name="alert" :size="14" /><span>This browser cannot keep a copy of your work. Download it before you close this tab.</span></p>
+
+      <div v-if="conflicts.length" class="bulk" role="group" aria-label="Choose for every overlap">
+        <span class="progress">{{ decided }} of {{ conflicts.length }} chosen</span>
+        <button type="button" class="btn sm ghost" @click="all('mine')">Keep all of mine</button>
+        <button type="button" class="btn sm ghost" @click="all('theirs')">Take all of theirs</button>
+      </div>
+      <ol v-if="conflicts.length" class="conflicts">
+        <li v-for="(conflict, index) in conflicts" :key="conflict.path" class="conflict">
+          <fieldset>
+            <legend class="place">{{ conflictPlace(conflict.path, document) }}</legend>
+            <div class="sides">
+              <label class="side" :class="{ on: choices[conflict.path] === 'mine' }">
+                <input v-model="choices[conflict.path]" class="radio" type="radio" :name="`conflict-${index}`" value="mine" :data-autofocus="index === 0 ? '' : undefined" />
+                <span class="side-text"><span class="side-name">Mine</span><span class="value">{{ conflictValue(conflict.mine, conflict.path) }}</span></span>
+              </label>
+              <label class="side" :class="{ on: choices[conflict.path] === 'theirs' }">
+                <input v-model="choices[conflict.path]" class="radio" type="radio" :name="`conflict-${index}`" value="theirs" />
+                <span class="side-text"><span class="side-name">{{ actorName ? `${actorName}’s` : 'Theirs' }}</span><span class="value">{{ conflictValue(conflict.theirs, conflict.path) }}</span></span>
+              </label>
+            </div>
+          </fieldset>
         </li>
       </ol>
-      <div class="actions"><button type="button" @click="emit('export')">Download my copy</button><button type="button" @click="emit('close')">Keep editing</button><button type="button" class="danger" @click="emit('discard')">Discard my changes and reload</button><button type="button" class="primary" :disabled="!ready" @click="emit('resolve',choices)">Save reviewed result</button></div>
-    </section>
-  </div>
+      <p v-else-if="preview && !preview.document" class="warn" role="alert"><AppIcon name="alert" :size="14" /><span>These two copies cannot be merged automatically. Download yours, then reload the newer draft.</span></p>
+
+      <footer class="foot">
+        <button type="button" class="btn ghost" @click="emit('export')"><AppIcon name="download" :size="14" />Download my copy</button>
+        <span class="spacer" />
+        <button type="button" class="btn danger-ghost" @click="emit('discard')">Discard mine and reload</button>
+        <button type="button" class="btn primary" :disabled="!ready" :data-autofocus="conflicts.length ? undefined : ''" @click="emit('resolve', choices)">{{ conflicts.length ? 'Save the result' : 'Merge and save' }}</button>
+      </footer>
+    </div>
+  </dialog>
 </template>
+
 <style scoped>
-.scrim{position:fixed;inset:0;z-index:100;display:grid;place-items:center;padding:16px;background:var(--scrim)}.dialog{width:min(620px,100%);max-height:90vh;overflow:auto;padding:24px;border:1px solid var(--line-2);border-radius:14px;background:var(--surface-raised);color:var(--ink);box-shadow:var(--shadow-pop)}h2{margin:0 0 8px}p{color:var(--ink-2)}.warning{padding:10px;border-radius:8px;background:var(--danger-bg);color:var(--danger)}.conflicts{max-height:42vh;overflow:auto;padding-left:22px}.conflicts li{margin:12px 0;padding:10px;border:1px solid var(--line-2);border-radius:8px}.conflicts strong,.conflicts span{display:block}.conflicts span{font-size:12px;color:var(--ink-2)}fieldset{display:flex;gap:15px;border:0;padding:7px 0 0}legend{font-size:12px}.actions{display:flex;flex-wrap:wrap;justify-content:flex-end;gap:8px;margin-top:18px}button{padding:8px 12px;border:1px solid var(--line-2);border-radius:8px;background:var(--surface);color:var(--ink);cursor:pointer}button:focus-visible{outline:2px solid var(--teal);outline-offset:2px}button:disabled{opacity:.5;cursor:default}.primary{background:var(--teal);color:var(--surface)}.danger{color:var(--danger)}
-@media print{.scrim{display:none}}
+.review { width: min(640px, calc(100vw - 24px)); max-height: calc(100dvh - 24px); padding: 0; border: 0; background: transparent; color: var(--ink); overflow: visible; }
+.review::backdrop { background: var(--scrim); backdrop-filter: blur(2px); }
+.card { display: grid; gap: 14px; max-height: calc(100dvh - 24px); overflow: auto; padding: 20px 22px 18px; border-radius: var(--radius); border: 1px solid var(--glass-edge); background: linear-gradient(165deg, var(--surface-raised), var(--surface-raised-2)); box-shadow: var(--shadow-pop), var(--shadow); }
+.head { display: flex; align-items: flex-start; gap: 12px; }
+.head-icon { display: grid; place-items: center; flex-shrink: 0; width: 36px; height: 36px; border-radius: 50%; background: var(--gold-wash); box-shadow: inset 0 0 0 1px var(--line-2); color: var(--gold-ink); }
+.titles { flex: 1; min-width: 0; }
+h2 { font-size: 18px; }
+.lead { margin-top: 4px; font-size: 13.5px; line-height: 1.5; color: var(--ink-2); }
+.warn { display: flex; align-items: flex-start; gap: 8px; padding: 10px 12px; border-radius: 10px; background: var(--danger-bg); box-shadow: inset 0 0 0 1px var(--danger-line); font-size: 13px; color: var(--ink); }
+.warn svg { flex-shrink: 0; margin-top: 2px; color: var(--danger); }
+.bulk { display: flex; flex-wrap: wrap; align-items: center; gap: 6px; }
+.progress { flex: 1; font-size: 12.5px; color: var(--ink-2); font-variant-numeric: tabular-nums; }
+.conflicts { display: grid; gap: 10px; max-height: 46vh; overflow: auto; margin: 0; padding: 0; list-style: none; }
+fieldset { margin: 0; padding: 0; border: 0; min-width: 0; }
+.place { padding: 0 0 6px; font-size: 13px; font-weight: 650; color: var(--ink); }
+.sides { display: grid; grid-template-columns: 1fr 1fr; gap: 8px; }
+.side { display: flex; align-items: flex-start; gap: 10px; min-width: 0; padding: 10px 12px; border-radius: 10px; background: var(--surface-2); box-shadow: inset 0 0 0 1px var(--line); cursor: pointer; }
+@media (hover: hover) { .side:hover { box-shadow: inset 0 0 0 1px var(--line-2); } }
+.side.on { background: var(--row-selected); box-shadow: inset 0 0 0 1.5px var(--teal); }
+.side:focus-within { box-shadow: inset 0 0 0 1.5px var(--teal), var(--focus-ring); }
+.radio { flex-shrink: 0; width: 15px; height: 15px; margin: 2px 0 0; accent-color: var(--teal); }
+.side-text { display: grid; gap: 2px; min-width: 0; }
+.side-name { font-size: 12px; font-weight: 650; color: var(--ink-2); }
+.value { font-size: 13px; line-height: 1.45; color: var(--ink); overflow-wrap: anywhere; }
+.foot { display: flex; flex-wrap: wrap; align-items: center; gap: 8px; }
+.spacer { flex: 1; }
+.danger-ghost { color: var(--danger); }
+@media (max-width: 600px) {
+  .card { padding: 16px; }
+  .sides { grid-template-columns: 1fr; }
+  .foot .btn { flex: 1 1 100%; height: 44px; justify-content: center; }
+  .spacer { display: none; }
+}
+@media print { .review { display: none; } }
 </style>

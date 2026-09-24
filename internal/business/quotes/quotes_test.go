@@ -545,6 +545,32 @@ func TestQuoteFlowAndGates(t *testing.T) {
 	if marks := receipt["document"].(map[string]any)["sections"].([]any)[0].(map[string]any)["nodes"].([]any)[0].(map[string]any)["marks"].([]any); len(marks) != 1 || marks[0].(map[string]any)["end"] != json.Number("3") {
 		t.Fatalf("inline marks lost on save: %v", marks)
 	}
+	// The list carries what the Quotes tab shows without reading documents one by one.
+	summaryReq := httptest.NewRequest("GET", "/api/quotes?limit=200", nil)
+	summaryReq = summaryReq.WithContext(tenant.WithPrincipal(summaryReq.Context(), as("admin")))
+	summaryRec := httptest.NewRecorder()
+	mux.ServeHTTP(summaryRec, summaryReq)
+	if summaryRec.Code != 200 {
+		t.Fatalf("summary list %d", summaryRec.Code)
+	}
+	var summaries []map[string]any
+	summaryDecoder := json.NewDecoder(strings.NewReader(summaryRec.Body.String()))
+	summaryDecoder.UseNumber()
+	if err := summaryDecoder.Decode(&summaries); err != nil {
+		t.Fatal(err)
+	}
+	found := map[string]map[string]any{}
+	for _, row := range summaries {
+		found[row["quote_node_id"].(string)] = row
+	}
+	saved := found[newID]
+	if saved == nil || saved["net_total_cents"] != json.Number("14999") || saved["currency"] != "EUR" || saved["title"] != "Example 0" || saved["customer_name"] != "org" || !strings.HasPrefix(saved["key"].(string), "QUO-") || saved["offer_date"] == "" || saved["valid_until"] == "" || saved["created_at"] == "" || saved["updated_at"] == "" {
+		t.Fatalf("draft summary %v", saved)
+	}
+	frozen := found[quoteID]
+	if frozen == nil || frozen["net_total_cents"] != json.Number("7196") || frozen["title"] != "Offer" || frozen["state"] != "accepted" || frozen["issued_at"] == nil || frozen["accepted_at"] == nil {
+		t.Fatalf("frozen summary %v", frozen)
+	}
 	status, replay := patch(patchBody, `"qd-1"`)
 	if status != 200 || replay["replayed"] != true {
 		t.Fatalf("receipt replay %d %v", status, replay)

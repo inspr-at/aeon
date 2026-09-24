@@ -22,6 +22,7 @@ import CustomerForm from '../../components/crm/CustomerForm.vue'
 import IntegrationCard from '../../components/crm/IntegrationCard.vue'
 import NotesSection from '../../components/crm/NotesSection.vue'
 import RelatedSection from '../../components/crm/RelatedSection.vue'
+import QuoteCreateDialog from '../../components/business/QuoteCreateDialog.vue'
 
 // One customer: who they are and who to talk to, their projects, quotes and
 // hours, the team's notes. Admins change it in an explicit edit mode (one form,
@@ -40,6 +41,15 @@ const contactsError = ref('')
 const relatedError = ref('')
 const contactList = ref<InstanceType<typeof ContactList>>()
 const admin = computed(() => business.admin)
+// A quote for this customer, written on its own page once created.
+const quoteDialog = ref<InstanceType<typeof QuoteCreateDialog>>()
+const canQuote = computed(() => business.staff && business.open.quotes)
+function newQuote() { if (customer.value) quoteDialog.value?.open({ customerId: customer.value.id, customerName: customer.value.name }) }
+function quoteCreated(quote: { quote_node_id: string; offer_no?: string }) {
+  toast(`Created ${quote.offer_no ?? 'a new quote'}. Write it on the page.`)
+  void loadRelated()
+  void router.push(`/business/quotes/${encodeURIComponent(quote.quote_node_id)}`)
+}
 const mac = /Mac|iPhone|iPad/.test(navigator.platform || navigator.userAgent)
 
 async function loadCustomer() {
@@ -216,6 +226,7 @@ watch(id, value => { if (!value || !route.path.startsWith('/business/customers/'
         <button type="button" class="btn sm primary" :disabled="saving" :aria-keyshortcuts="mac ? 'Meta+Enter' : 'Control+Enter'" :data-tip="`Save · ${mac ? '⌘' : 'Ctrl'}↵`" @click="save"><AppIcon name="check" :size="13" />{{ saving ? 'Saving…' : conflict ? 'Save anyway' : 'Save' }}</button>
       </template>
       <template v-else>
+        <button v-if="canQuote" type="button" class="btn sm" data-tip="A quote for this customer" @click="newQuote"><AppIcon name="plus" :size="13" />New quote</button>
         <button v-if="admin" ref="editButton" type="button" class="btn sm" aria-keyshortcuts="e" data-tip="Edit every field · e" @click="startEdit"><AppIcon name="edit" :size="13" />Edit</button>
         <button ref="moreButton" type="button" class="icon-btn sm" aria-label="More actions" aria-haspopup="menu" :aria-expanded="!!moreAnchor" data-tip="More" @click="toggleMore"><AppIcon name="more" :size="15" /></button>
       </template>
@@ -297,7 +308,7 @@ watch(id, value => { if (!value || !route.path.startsWith('/business/customers/'
       <div class="layout">
         <div class="main-col">
           <ContactList ref="contactList" :customer="customer" :contacts="contacts" :admin="admin" :error="contactsError" @changed="contactsChanged" />
-          <RelatedSection :related="related" :customer-id="id" :admin="admin" :error="relatedError" @retry="loadRelated" @changed="loadRelated" />
+          <RelatedSection :related="related" :customer-id="id" :admin="admin" :error="relatedError" :can-quote="canQuote" @retry="loadRelated" @changed="loadRelated" @new-quote="newQuote" />
           <NotesSection :customer="customer" :admin="admin" @updated="updated" @reload="loadCustomer" />
         </div>
         <aside class="side-col" aria-label="Details">
@@ -342,6 +353,7 @@ watch(id, value => { if (!value || !route.path.startsWith('/business/customers/'
         </aside>
       </div>
     </template>
+    <QuoteCreateDialog ref="quoteDialog" @created="quoteCreated" />
   </BusinessPage>
 </template>
 

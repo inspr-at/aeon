@@ -35,7 +35,10 @@ test('Quotes list opens a live draft in the session and presence editor', async 
     return route.fallback()
   })
   await page.goto('/business/quotes')
-  await page.getByRole('link', { name: 'A260924-1' }).click()
+  // A row opens the quote beside the list (U18); from there it opens on its own page.
+  await page.getByRole('row', { name: /A260924-1/ }).click()
+  await expect(page).toHaveURL(new RegExp(`/business/quotes\\?quote=${quoteId}$`))
+  await page.locator('.quote-dock').getByRole('button', { name: 'Open on its own page' }).click()
   await expect(page).toHaveURL(new RegExp(`/business/quotes/${quoteId}$`))
   await expect(page.getByRole('region', { name: 'Quote editor' })).toBeVisible()
   await expect(page.getByRole('textbox', { name: 'Angebotstitel' })).toHaveText('A real draft')

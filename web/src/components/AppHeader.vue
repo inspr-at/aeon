@@ -9,6 +9,7 @@ import { useProjects } from '../stores/projects'
 import { useAgents } from '../stores/agents'
 import { useBusiness } from '../stores/business'
 import { useCustomers } from '../stores/customers'
+import { useQuotes } from '../stores/quotes'
 import { useProfile } from '../stores/profile'
 import Avatar from './Avatar.vue'
 import { dark, setTheme, themeChoice, toggleTheme, type ThemeChoice } from '../lib/theme'
@@ -28,6 +29,7 @@ const projects = useProjects()
 const agents = useAgents()
 const business = useBusiness()
 const customers = useCustomers()
+const quotes = useQuotes()
 const profile = useProfile()
 const route = useRoute()
 const router = useRouter()
@@ -63,6 +65,7 @@ const businessPage = computed(() => activePlace.value === 'business')
 const businessCrumbs = computed(() => {
   if (!businessPage.value || route.path === '/business') return []
   if (/^\/business\/customers\/[^/]+$/.test(route.path)) return [{ label: 'Customers', to: '/business/customers' }, { label: pageName.value || 'Customer', to: '' }]
+  if (/^\/business\/quotes\/[^/]+$/.test(route.path)) return [{ label: 'Quotes', to: '/business/quotes' }, { label: pageName.value || 'Quote', to: '' }]
   return [{ label: String(route.meta.title ?? ''), to: '' }]
 })
 const settingsSection = computed(() => route.path.startsWith('/settings') ? SETTINGS_SECTIONS.find(section => section.id === sectionOf(route.params.section)) ?? null : null)
@@ -118,7 +121,7 @@ function typing(target: EventTarget | null) {
   return target instanceof HTMLElement && (target.isContentEditable || ['INPUT', 'TEXTAREA', 'SELECT'].includes(target.tagName))
 }
 // Pages with their own list search keep '/'; everywhere else it opens the palette.
-const pageOwnsSlash = computed(() => route.path === '/' || route.path === '/business/customers' || (!!projectKey.value && route.query.view !== 'full'))
+const pageOwnsSlash = computed(() => route.path === '/' || route.path === '/business/customers' || route.path === '/business/quotes' || (!!projectKey.value && route.query.view !== 'full'))
 function shortcut(event: KeyboardEvent) {
   if (!globalSearch.value) return
   if ((event.metaKey || event.ctrlKey) && !event.altKey && event.key.toLowerCase() === 'k') { event.preventDefault(); palette.value?.open(); return }
@@ -139,7 +142,7 @@ function placeKeys(event: KeyboardEvent) {
 // The Agents badge: permission requests and held action requests, checked each minute.
 let needsPoll: ReturnType<typeof setInterval> | undefined
 watch(() => session.identity?.principal.id, id => {
-  if (!id) { business.reset(); customers.reset(); profile.reset(); return }
+  if (!id) { business.reset(); customers.reset(); quotes.reset(); profile.reset(); return }
   void profile.load(true)
   void agents.loadNeeds(true)
   void business.loadPlugins(true)

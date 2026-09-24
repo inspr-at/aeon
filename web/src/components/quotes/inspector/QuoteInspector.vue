@@ -1,6 +1,6 @@
 <!-- SPDX-License-Identifier: AGPL-3.0-only -->
 <script setup lang="ts">
-import { computed, ref, watch } from 'vue'
+import { computed, nextTick, ref, watch } from 'vue'
 import { scopeFor, textState, type InspectorTab } from '../../../lib/quotes/inspector'
 import type { QuoteEditor } from '../../../lib/quotes/editor'
 import type { SectionActions } from '../../../lib/quotes/sectionActions'
@@ -17,7 +17,10 @@ import QuoteIcon from './QuoteIcon.vue'
 //
 // CSP parity: the real policy is "default-src 'self'; img-src 'self' blob: data:".
 // Nothing here needs inline scripts, eval or another origin.
-const props = defineProps<{ editor: QuoteEditor; version: number; offerNo: string; editable: boolean; admin: boolean; actions: SectionActions; mode: 'dock' | 'overlay' | 'sheet' }>()
+const props = defineProps<{
+  editor: QuoteEditor; version: number; offerNo: string; editable: boolean; admin: boolean; actions: SectionActions; mode: 'dock' | 'overlay' | 'sheet'
+  markPage?: number | null; reveal?: { tab: InspectorTab; target: string; n: number } | null
+}>()
 const emit = defineEmits<{ close: []; jump: [sectionId: string] }>()
 // Opening on what is selected: text, a heading's section, or the document.
 const tab = ref<InspectorTab>(props.editor.selection.text ? 'text' : props.editor.selection.sectionId ? 'section' : 'document')
@@ -38,6 +41,16 @@ watch(() => [!!selection.value.text, selection.value.sectionId ?? null] as const
   if (hasText && (!picked || tab.value === 'text')) tab.value = 'text'
   else if (!hasText && section && (!picked || tab.value === 'text')) tab.value = 'section'
 })
+// Something on the paper asked for its settings (the footer mark): show them.
+watch(() => props.reveal?.n, async () => {
+  const reveal = props.reveal
+  if (!reveal) return
+  tab.value = reveal.tab; picked = true
+  await nextTick()
+  const target = document.getElementById(reveal.target)
+  target?.scrollIntoView({ block: 'nearest', behavior: 'auto' })
+  target?.querySelector<HTMLElement>('input')?.focus({ preventScroll: true })
+}, { immediate: true })
 const TABS: { id: InspectorTab; label: string }[] = [{ id: 'text', label: 'Text' }, { id: 'section', label: 'Section' }, { id: 'document', label: 'Document' }]
 function choose(id: InspectorTab) { tab.value = id; picked = true }
 function tabKeys(event: KeyboardEvent, index: number) {
@@ -86,7 +99,7 @@ function keys(event: KeyboardEvent) {
         </div>
       </template>
       <InspectorSection v-else-if="tab === 'section'" :editor="editor" :document="doc" :section-id="sectionId" :editable="editable" :actions="actions" @run="run" @jump="id => emit('jump', id)" />
-      <InspectorDocument v-else :editor="editor" :document="doc" :editable="editable" :admin="admin" @run="run" />
+      <InspectorDocument v-else :editor="editor" :document="doc" :editable="editable" :admin="admin" :mark-page="markPage" @run="run" />
     </div>
   </aside>
 </template>
