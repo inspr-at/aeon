@@ -32,6 +32,7 @@ import (
 	"github.com/inspr-at/aeon/internal/modelregistry"
 	"github.com/inspr-at/aeon/internal/nodes"
 	"github.com/inspr-at/aeon/internal/plugins"
+	"github.com/inspr-at/aeon/internal/profile"
 	"github.com/inspr-at/aeon/internal/relations"
 	"github.com/inspr-at/aeon/internal/releases"
 	"github.com/inspr-at/aeon/internal/requirements"
@@ -102,7 +103,7 @@ func serveListener(ctx context.Context, cfg config.Config, ln net.Listener) erro
 		return err
 	}
 	// R1: embeddings are optional; without AEON_EMBEDDING_URL search is lexical only.
-	extraPlugins := []func() (plugins.Plugin, error){costunits.Plugin, crm.Plugin, quotes.ManifestPlugin, hours.Plugin, greetings.ManifestPlugin}
+	extraPlugins := []func() (plugins.Plugin, error){costunits.Plugin, crm.Plugin, quotes.ManifestPlugin, hours.Plugin, greetings.ManifestPlugin, profile.Plugin}
 	var messagingMod httpapi.Module
 	if cfg.MessagingKey != nil {
 		m, err := inbox.NewMessaging(pool, cfg.MessagingKey)
@@ -146,12 +147,13 @@ func serveListener(ctx context.Context, cfg config.Config, ln net.Listener) erro
 			authMod,
 			nodes.New(pool, nodes.SQLWriter{}),
 			relations.New(pool),
-			events.New(pool, events.WithUndoHandlers(attachments.UndoHandlers()), events.WithUndoHandlers(hours.UndoHandlers(pluginRegistry))),
+			events.New(pool, events.WithUndoHandlers(attachments.UndoHandlers()), events.WithUndoHandlers(hours.UndoHandlers(pluginRegistry)), events.WithUndoHandlers(profile.UndoHandlers())),
 			search.New(pool, embedProvider),
 			views.New(pool),
 			activity.New(pool),
 			attachments.New(pool, attachments.Store{FilesDir: cfg.FilesDir}),
 			greetingsMod,
+			profile.New(pool, attachments.Store{FilesDir: cfg.FilesDir}),
 			imports.New(pool),
 			// R2: agents
 			inbox.New(pool),
