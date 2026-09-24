@@ -27,11 +27,11 @@ export const router = createRouter({
         return project ? { path: `/p/${encodeURIComponent(project.routeKey)}`, query: { view: 'journey', ...stage }, replace: true } : true
       },
     },
-    // Business: Overview · Customers · Quotes · Hours · Rates. Customers and Quotes show
-    // what arrives until the CRM port and the quote editor land (the earlier views stay
-    // in views/business, unrouted, for that port).
+    // Business: Overview · Customers · Quotes · Hours · Rates. Quotes shows what arrives
+    // until the quote editor lands (the earlier views stay in views/business, unrouted).
     { path: '/business', component: () => import('./views/business/BusinessHome.vue'), meta: { title: 'Business' } },
-    { path: '/business/customers', component: () => import('./views/business/BusinessArriving.vue'), props: { part: 'customers' }, meta: { title: 'Customers' } },
+    { path: '/business/customers', component: () => import('./views/business/CustomersView.vue'), meta: { title: 'Customers' } },
+    { path: '/business/customers/:id', component: () => import('./views/business/CustomerView.vue'), meta: { title: 'Customer' } },
     { path: '/business/quotes', component: () => import('./views/business/BusinessArriving.vue'), props: { part: 'quotes' }, meta: { title: 'Quotes' } },
     { path: '/business/hours', component: () => import('./views/business/HoursView.vue'), meta: { title: 'Hours' } },
     { path: '/business/rates', component: () => import('./views/business/CostUnitsView.vue'), meta: { title: 'Rates' } },

@@ -1,6 +1,6 @@
 <!-- SPDX-License-Identifier: AGPL-3.0-only -->
 <script setup lang="ts">
-import { brand } from '../lib/brand'
+import { brand, pageName } from '../lib/brand'
 import { computed, nextTick, onBeforeUnmount, onMounted, ref, watch } from 'vue'
 import { useRoute, useRouter } from 'vue-router'
 import mark from '../assets/brand/aeon-mark.svg'
@@ -8,6 +8,7 @@ import { useSession } from '../stores/session'
 import { useProjects } from '../stores/projects'
 import { useAgents } from '../stores/agents'
 import { useBusiness } from '../stores/business'
+import { useCustomers } from '../stores/customers'
 import { useProfile } from '../stores/profile'
 import Avatar from './Avatar.vue'
 import { dark, setTheme, themeChoice, toggleTheme, type ThemeChoice } from '../lib/theme'
@@ -26,6 +27,7 @@ const session = useSession()
 const projects = useProjects()
 const agents = useAgents()
 const business = useBusiness()
+const customers = useCustomers()
 const profile = useProfile()
 const route = useRoute()
 const router = useRouter()
@@ -57,7 +59,12 @@ const PLACE_ROOT: Record<PlaceId, string> = { projects: '/', agents: '/agents', 
 const atPlaceRoot = computed(() => !!activePlace.value && (route.path === PLACE_ROOT[activePlace.value] || (activePlace.value === 'agents' && route.path.startsWith('/agents/'))))
 const agentsPage = computed(() => activePlace.value === 'agents')
 const businessPage = computed(() => activePlace.value === 'business')
-const businessCrumbs = computed(() => businessPage.value && route.path !== '/business' ? [{ label: String(route.meta.title ?? ''), to: '' }] : [])
+// A customer's page reads Customers / its name; the other Business pages their title.
+const businessCrumbs = computed(() => {
+  if (!businessPage.value || route.path === '/business') return []
+  if (/^\/business\/customers\/[^/]+$/.test(route.path)) return [{ label: 'Customers', to: '/business/customers' }, { label: pageName.value || 'Customer', to: '' }]
+  return [{ label: String(route.meta.title ?? ''), to: '' }]
+})
 const settingsSection = computed(() => route.path.startsWith('/settings') ? SETTINGS_SECTIONS.find(section => section.id === sectionOf(route.params.section)) ?? null : null)
 const placeLabel = (id: PlaceId) => id === 'agents' && agents.needsCount ? `Agents, ${agents.needsCount} ${agents.needsCount === 1 ? 'needs' : 'need'} you` : undefined
 
@@ -111,7 +118,7 @@ function typing(target: EventTarget | null) {
   return target instanceof HTMLElement && (target.isContentEditable || ['INPUT', 'TEXTAREA', 'SELECT'].includes(target.tagName))
 }
 // Pages with their own list search keep '/'; everywhere else it opens the palette.
-const pageOwnsSlash = computed(() => route.path === '/' || (!!projectKey.value && route.query.view !== 'full'))
+const pageOwnsSlash = computed(() => route.path === '/' || route.path === '/business/customers' || (!!projectKey.value && route.query.view !== 'full'))
 function shortcut(event: KeyboardEvent) {
   if (!globalSearch.value) return
   if ((event.metaKey || event.ctrlKey) && !event.altKey && event.key.toLowerCase() === 'k') { event.preventDefault(); palette.value?.open(); return }
@@ -132,7 +139,7 @@ function placeKeys(event: KeyboardEvent) {
 // The Agents badge: permission requests and held action requests, checked each minute.
 let needsPoll: ReturnType<typeof setInterval> | undefined
 watch(() => session.identity?.principal.id, id => {
-  if (!id) { business.reset(); profile.reset(); return }
+  if (!id) { business.reset(); customers.reset(); profile.reset(); return }
   void profile.load(true)
   void agents.loadNeeds(true)
   void business.loadPlugins(true)
@@ -177,7 +184,8 @@ onBeforeUnmount(() => { document.removeEventListener('pointerdown', outside); wi
       <template v-else-if="businessCrumbs.length">
         <template v-for="crumb in businessCrumbs" :key="crumb.label">
           <span class="sep" aria-hidden="true">/</span>
-          <span class="crumb current" aria-current="page">{{ crumb.label }}</span>
+          <RouterLink v-if="crumb.to" class="crumb" :to="crumb.to">{{ crumb.label }}</RouterLink>
+          <span v-else class="crumb current" aria-current="page">{{ crumb.label }}</span>
         </template>
       </template>
       <template v-else-if="settingsSection">

@@ -1,0 +1,59 @@
+/* SPDX-License-Identifier: AGPL-3.0-only */
+/* Forms and read-only facts for customers and the quote sender: labelled fields
+   in a two-column grid (one on phones), groups with a small heading, and the
+   dl facts the customer page reads out. */
+.f-grid { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 14px 18px; align-content: start; }
+.f-grid.three { grid-template-columns: repeat(3, minmax(0, 1fr)); }
+.f-row { display: grid; gap: 5px; min-width: 0; align-content: start; }
+.f-row.wide { grid-column: 1 / -1; }
+.f-label { display: flex; align-items: center; gap: 6px; font-size: 12.5px; font-weight: 600; color: var(--ink); }
+.f-label .opt { font-weight: 500; color: var(--ink-3); }
+.f-row .field { height: 38px; font-size: 13.5px; }
+.f-row textarea.field { height: auto; min-height: 76px; padding-block: 9px; line-height: 1.5; resize: vertical; }
+.f-row .field.mono { font-family: var(--mono); font-size: 13px; font-variant-ligatures: none; }
+.f-row .field[aria-invalid="true"] { box-shadow: var(--field-inset), 0 0 0 1px var(--danger-line); }
+.f-affix { position: relative; }
+.f-affix .field { padding-right: 52px; }
+.f-affix .affix { position: absolute; right: 12px; top: 50%; transform: translateY(-50%); font: 500 11.5px/1 var(--mono); color: var(--ink-3); pointer-events: none; }
+.f-note { display: flex; align-items: flex-start; gap: 5px; min-height: 16px; font-size: 12px; line-height: 1.45; color: var(--ink-2); }
+.f-note svg { margin-top: 2px; flex-shrink: 0; color: var(--ink-3); }
+.f-note.bad { color: var(--danger); }
+.f-note.bad svg { color: var(--danger); }
+.f-group { display: grid; gap: 12px; margin: 0; padding: 0; border: 0; min-width: 0; }
+.f-group + .f-group { padding-top: 18px; border-top: 1px solid var(--line); }
+.f-group > legend, .f-group > .f-legend { float: left; width: 100%; margin-bottom: 12px; padding: 0; font: 500 10.5px/1.4 var(--mono); letter-spacing: .14em; text-transform: uppercase; color: var(--ink-3); font-variant-ligatures: none; }
+.f-group > legend + * { clear: both; }
+.f-error { display: flex; align-items: flex-start; gap: 8px; padding: 9px 12px; border-radius: 10px; background: var(--danger-bg); color: var(--ink); font-size: 13px; line-height: 1.5; }
+.f-error svg { margin-top: 2px; flex-shrink: 0; color: var(--danger); }
+.f-hint { display: flex; flex-wrap: wrap; align-items: center; gap: 4px; font-size: 12px; color: var(--ink-3); }
+
+/* Read-only facts: a label over its value, in a grid that fills the card. */
+.facts { display: grid; grid-template-columns: repeat(auto-fill, minmax(170px, 1fr)); gap: 14px 20px; margin: 0; }
+.facts > div { display: grid; gap: 3px; min-width: 0; }
+.facts dt { font: 500 10px/1.4 var(--mono); letter-spacing: .14em; text-transform: uppercase; color: var(--ink-3); font-variant-ligatures: none; }
+.facts dd { margin: 0; font-size: 13.5px; line-height: 1.45; color: var(--ink); overflow-wrap: anywhere; }
+.facts dd.mono { font-family: var(--mono); font-size: 13px; font-variant-numeric: tabular-nums; font-variant-ligatures: none; }
+.facts dd.unset { color: var(--ink-3); }
+.facts a { color: var(--teal-ink); text-decoration: none; }
+.facts a:hover { text-decoration: underline; }
+
+@media (max-width: 600px) {
+  .f-grid, .f-grid.three { grid-template-columns: minmax(0, 1fr); }
+  .f-row .field { height: 44px; font-size: 16px; }
+  .f-row textarea.field { font-size: 16px; }
+}
+
+/* The customer page's cards: an icon with the title and a line, then the body. */
+.crm-card { padding: 18px 20px 20px; min-width: 0; }
+.crm-card > .card-head { display: flex; align-items: center; gap: 12px; margin-bottom: 14px; }
+.crm-card .card-icon { display: grid; place-items: center; flex-shrink: 0; align-self: flex-start; width: 30px; height: 30px; border-radius: 9px; background: var(--chip-teal-bg); box-shadow: inset 0 0 0 1px var(--chip-teal-line); color: var(--teal-ink); }
+.crm-card .card-titles { flex: 1; min-width: 0; }
+.crm-card .card-titles h2 { font: 600 15px/1.35 var(--font); letter-spacing: 0; color: var(--ink); }
+.crm-card .card-lead { margin-top: 1px; font-size: 12.5px; line-height: 1.45; color: var(--ink-2); }
+.crm-card .card-count { font: 500 11.5px/1 var(--mono); color: var(--ink-3); font-variant-numeric: tabular-nums; }
+@media (max-width: 600px) {
+  .crm-card { padding: 16px; }
+  .crm-card > .card-head { flex-wrap: wrap; row-gap: 10px; }
+  .crm-card > .card-head > .card-titles { flex: 1 1 calc(100% - 42px); }
+  .crm-card > .card-head > .btn { margin-left: 42px; }
+}

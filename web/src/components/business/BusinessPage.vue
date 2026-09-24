@@ -13,7 +13,7 @@ const business = useBusiness()
 const session = useSession()
 const route = useRoute()
 // Overview · Customers · Quotes · Hours · Rates. Customers and Quotes always show:
-// until the CRM port and the quote editor land they say what arrives.
+// a closed part says so on its page, and Quotes says what arrives with the editor.
 const tabs: { to: string; label: string; icon: IconName; area?: AreaId }[] = [
   { to: '/business', label: 'Overview', icon: 'briefcase' },
   { to: '/business/customers', label: 'Customers', icon: 'building' },
@@ -32,7 +32,7 @@ onMounted(() => { void business.loadPlugins() })
   <section class="biz-page" :class="{ 'panel-open': panelOpen, wide }" :aria-labelledby="`${area ?? 'business'}-title`">
     <header class="page-head">
       <div class="head-main">
-        <p class="eyebrow">{{ session.identity?.tenant.name ?? 'Workspace' }}</p>
+        <p class="eyebrow"><slot name="eyebrow">{{ session.identity?.tenant.name ?? 'Workspace' }}</slot></p>
         <h1 :id="`${area ?? 'business'}-title`">{{ title }}</h1>
         <p class="summary"><slot name="summary" /></p>
       </div>

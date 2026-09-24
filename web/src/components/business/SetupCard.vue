@@ -5,7 +5,7 @@ import { computed, ref } from 'vue'
 import { useBusiness, type AreaId } from '../../stores/business'
 import { confirmAction } from '../../lib/confirm'
 import { toast } from '../../lib/toast'
-import { availability, statusLabel } from './catalog'
+import { availability, statusLabel, type AreaAvailability } from './catalog'
 import { businessSections } from './areas'
 import AppIcon, { type BizIconName as IconName } from './BizIcon.vue'
 
@@ -17,28 +17,42 @@ const emit = defineEmits<{ done: [] }>()
 const business = useBusiness()
 const busy = ref<string | null>(null)
 const error = ref('')
-// Quotes and organisations come later (ported from classic Paimos); this card
-// offers the parts Aeon ships today.
+// In the order of the Business tabs. Quotes price from rates and go to a
+// customer, so enabling it enables Rates and Customers too.
 const AREAS: { id: AreaId; label: string; icon: IconName; needs: AreaId[] }[] = [
-  { id: 'costs', label: 'Rates', icon: 'tag', needs: [] },
+  { id: 'crm', label: 'Customers', icon: 'building', needs: [] },
+  { id: 'quotes', label: 'Quotes', icon: 'document', needs: ['costs', 'crm'] },
   { id: 'hours', label: 'Hours', icon: 'clock', needs: ['costs'] },
+  { id: 'costs', label: 'Rates', icon: 'tag', needs: [] },
 ]
-const LABEL: Record<AreaId, string> = { costs: 'Rates', crm: 'Organisations', quotes: 'Quotes', hours: 'Hours' }
+const LABEL: Record<AreaId, string> = { costs: 'Rates', crm: 'Customers', quotes: 'Quotes', hours: 'Hours' }
+// Why a part that was set up before is closed now, and what switching it on does.
+const GRANT: Record<string, string> = { 'integrations.call': 'connecting other services', 'nodes.contribute': 'writing its records', 'views.provide': 'showing its pages', 'steps.apply': 'its workflow steps' }
+const grants = (missing: string[]) => missing.map(p => GRANT[p] ?? p).join(' and ')
+function gateNote(state: AreaAvailability | null) {
+  switch (state?.gate.state) {
+    case 'digest_mismatch': return 'Pinned to a different build. Enabling pins it to this one.'
+    case 'under_granted': return `Not allowed ${grants(state.gate.missing)} yet. Enabling grants what it needs.`
+    case 'absent': return `Not part of this build of ${brand.value.short_name}.`
+    default: return ''
+  }
+}
 const rows = computed(() => AREAS.map(area => {
   const section = businessSections.find(s => s.id === area.id)!
   const state = business.plugins ? availability(section, business.plugins) : null
   const missing = area.needs.filter(need => !business.open[need])
-  return { ...area, summary: section.summary, on: business.open[area.id], state, status: state ? statusLabel(state) : '', missing }
+  return { ...area, summary: section.summary, on: business.open[area.id], state, status: state ? statusLabel(state) : '', missing, note: business.open[area.id] ? '' : gateNote(state), absent: state?.gate.state === 'absent' }
 }))
-const closedIds = computed(() => rows.value.filter(row => !row.on).map(row => row.id))
-const allOn = computed(() => rows.value.every(row => row.on))
+const closedIds = computed(() => rows.value.filter(row => !row.on && !row.absent).map(row => row.id))
+const allOn = computed(() => rows.value.every(row => row.on || row.absent))
 
 async function enable(ids: AreaId[]) {
   const withNeeds = [...new Set(ids.flatMap(id => [...AREAS.find(a => a.id === id)!.needs, id]))]
+  const alongside = withNeeds.filter(id => !ids.includes(id) && !business.open[id]).map(id => LABEL[id])
   busy.value = ids.length > 1 ? 'all' : ids[0]; error.value = ''
   try {
     await business.enable(withNeeds)
-    toast(ids.length > 1 ? 'Business is enabled for this workspace.' : `${LABEL[ids[0]]} is enabled.`)
+    toast(ids.length > 1 ? 'Business is enabled for this workspace.' : `${LABEL[ids[0]]} is enabled${alongside.length ? `, with ${alongside.join(' and ')}` : ''}.`)
     if (allOn.value) emit('done')
   } catch (e) { error.value = e instanceof Error ? e.message : 'Business could not be enabled. Please try again.' }
   finally { busy.value = null }
@@ -67,7 +81,7 @@ void props
       <div>
         <h2 id="setup-title">{{ variant === 'intro' ? 'Set up Business' : 'Business parts' }}</h2>
         <p>{{ variant === 'intro'
-          ? `Hours on tickets, priced by cost unit rates, with an admin’s approval per period. Each part is a first-party plugin: enabling it pins it to this version of ${brand.short_name}. Your projects and tickets stay as they are.`
+          ? `Customers, quotes priced from your rates, and hours on tickets with an admin’s approval per period. Each part is a first-party plugin: enabling it pins it to this version of ${brand.short_name}. Your projects and tickets stay as they are.`
           : 'Enable or disable each part for everyone in this workspace. Disabling closes a part; nothing is deleted.' }}</p>
       </div>
     </header>
@@ -77,10 +91,11 @@ void props
         <span class="area-text">
           <span class="area-name">{{ row.label }}<span v-if="row.on" class="state-chip on">Enabled</span><span v-else-if="row.status && row.status !== 'Not enabled'" class="state-chip">{{ row.status }}</span></span>
           <span class="area-summary">{{ row.summary }}</span>
-          <span v-if="!row.on && row.missing.length" class="area-needs">Also enables {{ row.missing.map(id => LABEL[id]).join(' and ') }}.</span>
+          <span v-if="row.note" class="area-needs">{{ row.note }}</span>
+          <span v-if="!row.on && !row.absent && row.missing.length" class="area-needs">Also enables {{ row.missing.map(id => LABEL[id]).join(' and ') }}.</span>
         </span>
         <label class="switch" :data-tip="row.on ? `Disable ${row.label}` : `Enable ${row.label}`">
-          <input type="checkbox" :checked="row.on" :disabled="!!busy || !business.admin" :aria-label="`${row.label} enabled`" @click.prevent="toggle(row.id, row.on)" />
+          <input type="checkbox" :checked="row.on" :disabled="!!busy || !business.admin || row.absent" :aria-label="`${row.label} enabled`" @click.prevent="toggle(row.id, row.on)" />
         </label>
       </li>
     </ul>

@@ -7,17 +7,11 @@ import AppIcon from '../../components/AppIcon.vue'
 import { settingsLink } from '../../lib/settings'
 import { useBusiness } from '../../stores/business'
 
-// Customers and Quotes, honestly: what each page will hold, and that it arrives
-// with the CRM port and the quote editor. No sample rows, no fake data.
-const props = defineProps<{ part: 'customers' | 'quotes' }>()
+// Quotes, honestly: what the page will hold, and that it arrives with the quote
+// editor. No sample rows, no fake data.
+const props = defineProps<{ part: 'quotes' }>()
 const business = useBusiness()
 const COPY = {
-  customers: {
-    title: 'Customers', icon: 'building' as const, heading: 'Customers arrive with the CRM port',
-    body: 'Organisations and the people you work with there, in one place with the projects and quotes that belong to them.',
-    items: ['Organisations with their address and website', 'Contacts with email, phone and role', 'Each customer’s projects, quotes and hours at a glance'],
-    link: { label: 'Business settings', to: settingsLink('business', 'customers') },
-  },
   quotes: {
     title: 'Quotes', icon: 'document' as const, heading: 'Quotes arrive with the quote editor',
     body: 'Offers with exact totals from your rates. Each version is kept as it was sent, and the customer’s acceptance is recorded on its own.',

@@ -61,7 +61,8 @@ export const useBusiness = defineStore('business', () => {
     return out
   })
   const anyOpen = computed(() => Object.values(open.value).some(Boolean))
-  // The parts offered today; quotes and organisations are parked until they are ported.
+  // The overview's first-run card stays until hours and rates are on; Customers
+  // and Quotes are added from Manage parts when a workspace wants them.
   const allOpen = computed(() => open.value.costs && open.value.hours)
   let pluginRequest: Promise<void> | null = null
   function loadPlugins(force = false): Promise<void> {
@@ -96,7 +97,10 @@ export const useBusiness = defineStore('business', () => {
     await loadKinds(true)
     for (const slug of new Set(areas.flatMap(area => AREA_KINDS[area]))) {
       if (kindBySlug(slug)) continue
-      const setup = KIND_SETUP[slug]
+      // A plugin's own field schema wins, so its records fit the kind (CRM fields,
+      // addresses, rates); the setup here is the fallback for older catalogs.
+      const declared = catalog.flatMap(item => item.node_kinds).find(kind => kind.slug === slug)?.field_schema
+      const setup = { ...KIND_SETUP[slug], ...(declared ? { field_schema: declared } : {}) }
       const response = await api('/kinds', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ slug, allowed_child_kinds: [], ...setup }) })
       if (!response.ok && response.status !== 409) throw new Error(`The ${setup.label.toLowerCase()} type could not be added.`)
     }

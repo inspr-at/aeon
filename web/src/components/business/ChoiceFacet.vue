@@ -1,5 +1,4 @@
 <!-- SPDX-License-Identifier: AGPL-3.0-only -->
-<!-- Parked (AEON-70, 2026-09-24): quotes and organisations will be ported from Markus's current classic Paimos quote builder; this file is not routed or linked. -->
 <script lang="ts">
 export interface FacetChoice { value: string; label: string; count?: number; state?: string }
 </script>
