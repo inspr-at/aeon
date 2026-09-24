@@ -8,7 +8,7 @@ import QuoteProse from './QuoteProse.vue'
 import QuoteText from './QuoteText.vue'
 import { QuoteEditor } from '../../../lib/quotes/editor'
 import { fitWholeBlocks, type PaginationResult, type PagePlan } from '../../../lib/quotes/layout'
-import type { QuoteDocumentData, DocumentSettings, ListMode, MarkName, NumberingOptions, OffsetPatch, QuoteMarker } from '../../../lib/quotes/types'
+import type { QuoteDocumentData, DocumentSettings, ListMode, MarkName, NumberingOptions, OffsetPatch, QuoteMarker, SectionSettingsPatch } from '../../../lib/quotes/types'
 const props = withDefaults(defineProps<{ document: QuoteDocumentData; offerNo?: string; editable?: boolean; accepted?: { name: string; company?: string; at: string; digest: string } | null }>(), { editable: false, offerNo: '' })
 const emit = defineEmits<{ 'update:document': [document: QuoteDocumentData]; change: [document: QuoteDocumentData]; 'render-state': [state: PaginationResult]; overflow: [message: string | null] }>()
 const editor = new QuoteEditor(props.document)
@@ -77,7 +77,7 @@ defineExpose({
   insertSection: (afterId?: string) => editor.insertSection(afterId),
   moveSection: (id: string, targetIndex: number) => editor.moveSection(id, targetIndex),
   deleteSection: (id: string) => editor.deleteSection(id),
-  setSectionSettings: (id: string, patch: { pageBreakBefore?: boolean; keepTogether?: boolean; spacingMm?: string; numberingStyle?: string }) => editor.setSectionSettings(id, patch),
+  setSectionSettings: (id: string, patch: SectionSettingsPatch) => editor.setSectionSettings(id, patch),
   setDocumentSettings: (patch: DocumentSettings) => editor.setDocumentSettings(patch),
 })
 </script>

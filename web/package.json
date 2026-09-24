@@ -11,6 +11,7 @@
     "prebuild": "node ../scripts/verify-release.mjs",
     "test": "playwright test -c playwright.ui.config.ts",
     "test:unit": "node --experimental-strip-types --test tests/api.test.ts",
+    "test:editor-unit": "vitest run tests/quote-editor.unit.test.ts",
     "e2e": "playwright test"
   },
   "dependencies": {
@@ -28,6 +29,7 @@
     "@vue/tsconfig": "^0.9.1",
     "typescript": "~6.0.2",
     "vite": "^8.3.0",
+    "vitest": "^5.0.1",
     "vue-tsc": "^3.3.11"
   }
 }

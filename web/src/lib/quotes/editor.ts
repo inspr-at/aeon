@@ -1,8 +1,9 @@
 // SPDX-License-Identifier: AGPL-3.0-only
 import { DocumentHistory, type EditorSnapshot } from './history'
+import { cloneQuoteValue } from './clone'
 import { documentTotal, exactMM, positionTotal } from './layout'
 import { assertProse, changeLevel, markerLabels, nodesFor, project, selectionMarks, setListMode, setMarks, setNumbering, setOffsets } from './prose'
-import { newId, type DocumentSettings, type EditorSelection, type ListMode, type MarkName, type NumberingOptions, type OffsetPatch, type QuoteDocumentData, type QuotePosition, type QuoteSection, type TextNode, type TextSelection } from './types'
+import { newId, type DocumentSettings, type EditorSelection, type ListMode, type MarkName, type NumberingOptions, type OffsetPatch, type QuoteDocumentData, type QuotePosition, type QuoteSection, type SectionSettingsPatch, type TextNode, type TextSelection } from './types'
 
 export class QuoteEditor {
   document: QuoteDocumentData
@@ -12,18 +13,18 @@ export class QuoteEditor {
   onChange?: (document: QuoteDocumentData) => void
   constructor(document: QuoteDocumentData) { this.document = this.hydrate(document) }
   private hydrate(document: QuoteDocumentData): QuoteDocumentData {
-    const next = structuredClone(document)
+    const next = cloneQuoteValue(document)
     for (const section of next.sections) if (!section.nodes.length) section.nodes = [{ id: newId(), kind: 'paragraph', text: section.body }]
     return next
   }
   private snapshot(): EditorSnapshot { return { document: this.document, selection: this.selection } }
   private restore(snapshot: EditorSnapshot) {
-    this.document = structuredClone(snapshot.document)
-    this.selection = structuredClone(snapshot.selection)
+    this.document = cloneQuoteValue(snapshot.document)
+    this.selection = cloneQuoteValue(snapshot.selection)
     this.onChange?.(this.document)
   }
   private mutate(action: (doc: QuoteDocumentData) => void) {
-    const next = structuredClone(this.document)
+    const next = cloneQuoteValue(this.document)
     action(next)
     if (JSON.stringify(next) === JSON.stringify(this.document)) return
     this.history.record(this.snapshot())
@@ -36,7 +37,7 @@ export class QuoteEditor {
     const previous = this.selection.text?.focus
     const next = selection.text?.focus
     if (!preserveTyping && previous && next && (previous.nodeId !== next.nodeId || previous.offset !== next.offset)) this.typingBits = null
-    this.selection = structuredClone(selection)
+    this.selection = cloneQuoteValue(selection)
   }
   replaceDocument(document: QuoteDocumentData) { this.document = this.hydrate(document); this.selection = {}; this.history.clear(); this.onChange?.(this.document) }
   private section(doc: QuoteDocumentData, id: string): QuoteSection {
@@ -55,7 +56,7 @@ export class QuoteEditor {
   editSection(id: string, patch: Partial<Pick<QuoteSection, 'heading' | 'body' | 'nodes'>>) {
     this.mutate(doc => {
       const section = this.section(doc, id)
-      if (patch.nodes) { assertProse(patch.nodes); section.nodes = structuredClone(patch.nodes); section.body = project(patch.nodes) }
+      if (patch.nodes) { assertProse(patch.nodes); section.nodes = cloneQuoteValue(patch.nodes); section.body = project(patch.nodes) }
       else if (patch.body !== undefined) { section.body = patch.body; section.nodes = [] }
       if (patch.heading !== undefined) section.heading = patch.heading
     })
@@ -170,8 +171,21 @@ export class QuoteEditor {
       }
     })
   }
-  // P1 has no persisted section formatting fields. The inspector must not imply a save succeeded.
-  setSectionSettings(_id: string, _patch: { pageBreakBefore?: boolean; keepTogether?: boolean; spacingMm?: string; numberingStyle?: string }): never {
-    throw new Error('Section formatting requires a P1 quote contract addition')
+  setSectionSettings(id: string, patch: SectionSettingsPatch) {
+    this.mutate(doc => {
+      const section = this.section(doc, id)
+      if (patch.numberingStyle !== undefined) {
+        if (!['decimal', 'upper-roman', 'lower-roman', 'upper-alpha', 'lower-alpha', 'none'].includes(patch.numberingStyle)) throw new Error('Invalid section numbering style')
+        section.numbering_style = patch.numberingStyle
+      }
+      if (patch.pageBreakBefore !== undefined) section.page_break_before = patch.pageBreakBefore
+      if (patch.keepTogether !== undefined) section.keep_together = patch.keepTogether
+      if (patch.spacingMm !== undefined) {
+        section.spacing_before_mm = exactMM(patch.spacingMm, 0, 40)
+        section.spacing_after_mm = exactMM(patch.spacingMm, 0, 40)
+      }
+      if (patch.spacingBeforeMm !== undefined) section.spacing_before_mm = exactMM(patch.spacingBeforeMm, 0, 40)
+      if (patch.spacingAfterMm !== undefined) section.spacing_after_mm = exactMM(patch.spacingAfterMm, 0, 40)
+    })
   }
 }

@@ -10,7 +10,17 @@ export interface TextNode {
   numbering?: 'outline'; list_start?: number; list_continue?: boolean; section_bound?: boolean
   glyph?: string; marker_x_mm?: string; marker_y_mm?: string; text_start_mm?: string; marks?: InlineMark[]
 }
-export interface QuoteSection { id: string; heading: string; body: string; nodes: TextNode[] }
+export type SectionNumberingStyle = 'decimal' | 'upper-roman' | 'lower-roman' | 'upper-alpha' | 'lower-alpha' | 'none'
+export interface QuoteSection {
+  id: string; heading: string; body: string; nodes: TextNode[]
+  numbering_style?: SectionNumberingStyle; page_break_before?: boolean; keep_together?: boolean
+  spacing_before_mm?: string; spacing_after_mm?: string
+}
+export interface SectionSettingsPatch {
+  numberingStyle?: SectionNumberingStyle; pageBreakBefore?: boolean; keepTogether?: boolean
+  spacingBeforeMm?: string | null; spacingAfterMm?: string | null
+  spacingMm?: string | null
+}
 export interface QuotePosition {
   id: string; pricing_source: 'manual' | 'cost_unit'; short_text: string; long_text: string
   quantity: string; unit_label: string; unit_price_cents: number; total_cents: number; currency: string

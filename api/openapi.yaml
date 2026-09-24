@@ -2366,12 +2366,18 @@ components:
         net_total_cents: {type: integer, minimum: 0, description: Server-computed; input is ignored}
     QuoteDocumentSection:
       type: object
+      additionalProperties: false
       required: [id, heading, body, nodes]
       properties:
         id: {type: string, format: uuid}
         heading: {type: string}
         body: {type: string}
         nodes: {type: array, maxItems: 100, items: {$ref: '#/components/schemas/QuoteTextNode'}}
+        numbering_style: {type: string, enum: [decimal, upper-roman, lower-roman, upper-alpha, lower-alpha, none], description: Omitted means decimal}
+        page_break_before: {type: boolean, description: Omitted means false}
+        keep_together: {type: boolean, description: Omitted means true}
+        spacing_before_mm: {type: string, pattern: '^(?:0|[1-9][0-9]?)(?:\.[0-9])?$', description: Exact millimetres from 0 to 40}
+        spacing_after_mm: {type: string, pattern: '^(?:0|[1-9][0-9]?)(?:\.[0-9])?$', description: Exact millimetres from 0 to 40}
     QuoteTextNode:
       type: object
       required: [id, kind, text]

@@ -1,5 +1,6 @@
 // SPDX-License-Identifier: AGPL-3.0-only
 import type { EditorSelection, QuoteDocumentData } from './types'
+import { cloneQuoteValue } from './clone'
 export interface EditorSnapshot { document: QuoteDocumentData; selection: EditorSelection }
 export class DocumentHistory {
   private past: EditorSnapshot[] = []
@@ -9,21 +10,21 @@ export class DocumentHistory {
   get canUndo() { return this.past.length > 0 }
   get canRedo() { return this.future.length > 0 }
   record(before: EditorSnapshot): void {
-    this.past.push(structuredClone(before))
+    this.past.push(cloneQuoteValue(before))
     if (this.past.length > this.limit) this.past.shift()
     this.future = []
   }
   undo(current: EditorSnapshot): EditorSnapshot | null {
     const prior = this.past.pop()
     if (!prior) return null
-    this.future.push(structuredClone(current))
-    return structuredClone(prior)
+    this.future.push(cloneQuoteValue(current))
+    return cloneQuoteValue(prior)
   }
   redo(current: EditorSnapshot): EditorSnapshot | null {
     const next = this.future.pop()
     if (!next) return null
-    this.past.push(structuredClone(current))
-    return structuredClone(next)
+    this.past.push(cloneQuoteValue(current))
+    return cloneQuoteValue(next)
   }
   clear() { this.past = []; this.future = [] }
 }

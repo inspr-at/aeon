@@ -24,7 +24,7 @@ async function blank(page: Page) {
 
 test('structured prose, all six levels, numbering, section and row changes survive JSON and history', async ({ page }) => {
   await blank(page)
-  const result = await page.evaluate(async (document) => {
+  const result = await page.evaluate(async ({ document, positionId }) => {
     const modulePath = '/src/lib/quotes/editor.ts'
     const prosePath = '/src/lib/quotes/prose.ts'
     const { QuoteEditor } = await import(/* @vite-ignore */ modulePath)
@@ -63,7 +63,7 @@ test('structured prose, all six levels, numbering, section and row changes survi
       offsets: editor.document.sections[1].nodes[0],
       total: editor.document.net_total_cents,
       sectionOrder: editor.document.sections.map((s: { id: string }) => s.id), positionOrder: editor.document.positions.map((p: { id: string }) => p.id) }
-  }, fixture())
+  }, { document: fixture(), positionId })
   expect(result.roundTrip).toBe(true)
   expect(new Set(result.ids).size).toBe(result.ids.length)
   expect(result.labels).toHaveLength(6)
