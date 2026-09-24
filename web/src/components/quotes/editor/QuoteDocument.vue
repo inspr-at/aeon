@@ -6,16 +6,31 @@ import QuoteCover from './QuoteCover.vue'
 import QuotePositions from './QuotePositions.vue'
 import QuoteProse from './QuoteProse.vue'
 import QuoteText from './QuoteText.vue'
+import SectionMenu from '../inspector/SectionMenu.vue'
+import QuoteIcon from '../inspector/QuoteIcon.vue'
 import { QuoteEditor } from '../../../lib/quotes/editor'
+import { collectTextNodes, pointInTextNodes } from '../../../lib/quotes/caret'
+import { sectionLabel } from '../../../lib/quotes/inspector'
+import { sectionActions } from '../../../lib/quotes/sectionActions'
 import { fitWholeBlocks, type PaginationResult, type PagePlan } from '../../../lib/quotes/layout'
-import type { QuoteDocumentData, DocumentSettings, ListMode, MarkName, NumberingOptions, OffsetPatch, QuoteMarker, SectionSettingsPatch } from '../../../lib/quotes/types'
+import type { QuoteDocumentData, DocumentSettings, ListMode, MarkName, NumberingOptions, OffsetPatch, QuoteMarker, QuoteSection, SectionSettingsPatch, TextSelection } from '../../../lib/quotes/types'
 const props = withDefaults(defineProps<{ document: QuoteDocumentData; offerNo?: string; editable?: boolean; accepted?: { name: string; company?: string; at: string; digest: string } | null }>(), { editable: false, offerNo: '' })
 const emit = defineEmits<{ 'update:document': [document: QuoteDocumentData]; change: [document: QuoteDocumentData]; 'render-state': [state: PaginationResult]; overflow: [message: string | null] }>()
 const editor = new QuoteEditor(props.document)
 const state = shallowRef(editor.document)
+// P4: the inspector and title bar follow every change and selection through this counter.
+const version = ref(0)
+const touch = () => { version.value++ }
 let lastEmitted: QuoteDocumentData | null = null
-editor.onChange = document => { state.value = document; lastEmitted = document; emit('update:document', document); emit('change', document); schedule() }
-watch(() => props.document, document => { if (toRaw(document) !== lastEmitted) { editor.replaceDocument(document); lastEmitted = editor.document; schedule() } })
+editor.onChange = document => { state.value = document; lastEmitted = document; touch(); emit('update:document', document); emit('change', document); schedule() }
+const baseSelect = editor.select.bind(editor)
+editor.select = (selection, preserveTyping) => { baseSelect(selection, preserveTyping); touch() }
+// The session hands every edit back as a copy; only a different document (a reload,
+// a restored draft, a merge) replaces the editor's, or each edit would echo forever.
+watch(() => props.document, document => {
+  if (toRaw(document) === lastEmitted || JSON.stringify(document) === JSON.stringify(editor.document)) return
+  editor.replaceDocument(document); lastEmitted = editor.document; schedule()
+})
 const pages = ref<PagePlan[]>([{ kind: 'cover', sectionIds: [], positionIds: [], acceptance: false }, { kind: 'positions', sectionIds: [], positionIds: [], acceptance: true }])
 const renderState = ref<PaginationResult>({ ready: false, overflow: null, pages: pages.value })
 const measureRoot = ref<HTMLElement>()
@@ -25,6 +40,8 @@ let scheduled = false
 let generation = 0
 const sections = computed(() => state.value.sections)
 const byId = (id: string) => sections.value.find(s => s.id === id)!
+// Pages are planned after measuring; until then a deleted section may still be listed.
+const exists = (id: string) => sections.value.some(s => s.id === id)
 function sectionIndex(id: string) { return sections.value.findIndex(s => s.id === id) }
 async function measure() {
   const current = ++generation
@@ -39,7 +56,8 @@ async function measure() {
   const cover = rect('[data-measure-cover]')
   const sectionHeights = state.value.sections.map(section => ({ id: section.id, px: rect(`[data-measure-section="${section.id}"]`) }))
   const positionHeights = state.value.positions.map(position => ({ id: position.id, px: rect(`[data-measure-position="${position.id}"] tbody`) }))
-  const next = fitWholeBlocks(cover, sectionHeights, positionHeights, rect('[data-measure-acceptance]'), available)
+  const breaks = new Set(state.value.sections.filter(section => section.page_break_before).map(section => section.id))
+  const next = fitWholeBlocks(cover, sectionHeights, positionHeights, rect('[data-measure-acceptance]'), available, undefined, breaks)
   pages.value = next.pages
   renderState.value = next
   emit('render-state', next)
@@ -54,12 +72,84 @@ function schedule() {
 watch(state, schedule)
 onMounted(() => { resize = new ResizeObserver(schedule); if (measureRoot.value) resize.observe(measureRoot.value); window.addEventListener('resize', schedule); schedule() })
 onBeforeUnmount(() => { resize?.disconnect(); window.removeEventListener('resize', schedule) })
-function moveSection(id: string, direction: number) { const index = sectionIndex(id); editor.moveSection(id, index + direction) }
-const menu = ref<string | null>(null)
-const announcement = ref('')
+// ---------- Section chrome (P4): handle, context menu, drag to reorder, Alt+Up/Down ----------
+const actions = sectionActions(editor, touch)
+const currentSection = computed(() => { void version.value; return editor.selection.text?.sectionId ?? editor.selection.sectionId ?? null })
+const labelOf = (section: QuoteSection) => sectionLabel(sectionIndex(section.id) + 1, section.numbering_style)
+const spacing = (section: QuoteSection) => ({ paddingTop: section.spacing_before_mm ? `${section.spacing_before_mm}mm` : undefined, paddingBottom: section.spacing_after_mm ? `${section.spacing_after_mm}mm` : undefined })
+const menu = ref<{ id: string; anchor: HTMLElement } | null>(null)
 const dragId = ref<string | null>(null)
-function removeSection(id: string) { editor.deleteSection(id); menu.value = null; announcement.value = 'Section deleted. Undo is available.' }
-function dropSection(id: string) { if (dragId.value && dragId.value !== id) editor.moveSection(dragId.value, sectionIndex(id)); dragId.value = null }
+const dropTarget = ref<{ id: string; before: boolean } | null>(null)
+function openMenu(id: string, anchor: HTMLElement) { if (props.editable) menu.value = { id, anchor } }
+// A right click on a heading opens the actions where the pointer is.
+function headingMenu(event: MouseEvent, id: string) {
+  if (!props.editable) return
+  event.preventDefault()
+  const at = new DOMRect(event.clientX, event.clientY, 0, 0)
+  menu.value = { id, anchor: { getBoundingClientRect: () => at, contains: () => false, focus: () => {} } as unknown as HTMLElement }
+}
+function closeMenu(restore: boolean) {
+  const m = menu.value
+  menu.value = null
+  if (restore && m && m.anchor instanceof HTMLElement) m.anchor.focus()
+}
+function moveSection(id: string, direction: number) {
+  const active = document.activeElement as HTMLElement | null
+  const inProse = !!active?.closest('.quote-prose')
+  if (actions.move(id, direction > 0 ? 1 : -1)) void nextTick(() => refocus(id, inProse))
+}
+// A moved section is rendered anew; focus and the text selection come back to it.
+function refocus(id: string, prose: boolean) {
+  const root = document.querySelector<HTMLElement>(`.quote-page [data-section-id="${id}"]`)
+  if (!root) return
+  const target = root.querySelector<HTMLElement>(prose ? '.quote-prose' : '.quote-section-heading [contenteditable]') ?? root.querySelector<HTMLElement>('.quote-section-handle')
+  target?.focus({ preventScroll: true })
+  target?.scrollIntoView({ block: 'nearest' })
+  if (prose && editor.selection.text?.sectionId === id) placeSelection(editor.selection.text)
+}
+function placeSelection(selection: TextSelection) {
+  const root = document.querySelector<HTMLElement>(`.quote-page [data-section-id="${selection.sectionId}"] .quote-prose`)
+  const point = (nodeId: string, offset: number) => {
+    const el = root?.querySelector<HTMLElement>(`[data-text-id="${nodeId}"]`)
+    return el ? pointInTextNodes(collectTextNodes(el), offset) ?? { node: el, offset: 0 } : null
+  }
+  const a = point(selection.anchor.nodeId, selection.anchor.offset), f = point(selection.focus.nodeId, selection.focus.offset)
+  if (a && f) window.getSelection()?.setBaseAndExtent(a.node, a.offset, f.node, f.offset)
+}
+function sectionKeys(event: KeyboardEvent, id: string) {
+  // Prose moves its section itself; headings and the handle do it here.
+  if (event.defaultPrevented || !props.editable || !event.altKey || (event.key !== 'ArrowUp' && event.key !== 'ArrowDown')) return
+  event.preventDefault()
+  moveSection(id, event.key === 'ArrowUp' ? -1 : 1)
+}
+function dragStart(event: DragEvent, id: string) {
+  dragId.value = id; menu.value = null
+  event.dataTransfer?.setData('text/plain', id)
+  if (event.dataTransfer) event.dataTransfer.effectAllowed = 'move'
+}
+function dragOver(event: DragEvent, id: string) {
+  if (!dragId.value) return
+  event.preventDefault()
+  const rect = (event.currentTarget as HTMLElement).getBoundingClientRect()
+  dropTarget.value = { id, before: event.clientY < rect.top + rect.height / 2 }
+}
+function dropSection() {
+  const from = dragId.value, target = dropTarget.value
+  dragId.value = null; dropTarget.value = null
+  if (!from || !target || target.id === from) return
+  const origin = sectionIndex(from)
+  let to = sectionIndex(target.id) + (target.before ? 0 : 1)
+  if (origin < to) to--
+  actions.moveTo(from, to)
+}
+function jump(id: string) {
+  editor.select({ sectionId: id })
+  void nextTick(() => {
+    const root = document.querySelector<HTMLElement>(`.quote-page [data-section-id="${id}"]`)
+    root?.scrollIntoView({ block: 'start', behavior: window.matchMedia('(prefers-reduced-motion: reduce)').matches ? 'auto' : 'smooth' })
+    root?.querySelector<HTMLElement>('.quote-section-heading [contenteditable]')?.focus({ preventScroll: true })
+  })
+}
 function whenReady(): Promise<PaginationResult> {
   return new Promise(resolve => {
     const poll = () => { if (renderState.value.ready || renderState.value.overflow) resolve(renderState.value); else requestAnimationFrame(poll) }
@@ -68,7 +158,7 @@ function whenReady(): Promise<PaginationResult> {
 }
 // Typed P4/P5 integration surface; this component owns all document mutation and history.
 defineExpose({
-  editor, renderState, whenReady, select: editor.select.bind(editor), undo: editor.undo.bind(editor), redo: editor.redo.bind(editor),
+  editor, renderState, whenReady, version, touch, actions, jump, select: editor.select.bind(editor), undo: editor.undo.bind(editor), redo: editor.redo.bind(editor),
   setMarks: (mark: MarkName | 'normal', active?: boolean) => editor.setMarks(mark, active),
   setListMode: (mode: ListMode, bullet?: Exclude<QuoteMarker, 'decimal'>) => editor.setListMode(mode, bullet),
   indent: () => editor.indent(), outdent: () => editor.outdent(),
@@ -84,15 +174,19 @@ defineExpose({
 <template>
   <div class="quote-document" :data-quote-ready="renderState.ready" :data-quote-overflow="renderState.overflow ?? undefined" :data-page-count="pages.length">
     <div v-if="renderState.overflow" class="quote-overflow" role="alert">{{ renderState.overflow }}</div>
-    <div v-if="announcement" class="quote-announcement" role="status">{{ announcement }} <button v-if="editable" type="button" @click="editor.undo(); announcement = ''">Undo</button></div>
     <article v-for="(page, pageIndex) in pages" :key="pageIndex" class="quote-page" :data-page="pageIndex + 1">
       <div class="quote-page-content">
         <QuoteCover v-if="page.kind === 'cover'" :document="state" :editor="editor" :offer-no="offerNo" :editable="editable" />
-        <div v-for="id in page.sectionIds" :key="id" class="quote-section" :data-section-id="id" @dragover.prevent @drop.prevent="dropSection(id)">
-          <div class="quote-section-heading"><span class="quote-section-number">{{ sectionIndex(id) + 1 }}.</span><QuoteText tag="h2" :model-value="byId(id).heading" :label="`Heading section ${sectionIndex(id) + 1}`" :editable="editable" @focus="editor.select({ sectionId: id })" @update:model-value="editor.editSection(id, { heading: $event })" />
-            <button v-if="editable" type="button" class="quote-section-menu-button" draggable="true" :aria-label="`Section ${sectionIndex(id) + 1} actions and drag handle`" :aria-expanded="menu === id" @dragstart="dragId = id" @click="menu = menu === id ? null : id"><svg viewBox="0 0 24 24" aria-hidden="true"><circle cx="5" cy="12" r="1.5"/><circle cx="12" cy="12" r="1.5"/><circle cx="19" cy="12" r="1.5"/></svg></button>
-          </div>
-          <div v-if="menu === id" class="quote-section-menu"><button type="button" @click="editor.insertSection(id); menu = null">Add section below</button><button type="button" :disabled="sectionIndex(id) === 0" @click="moveSection(id, -1); menu = null">Move up</button><button type="button" :disabled="sectionIndex(id) === sections.length - 1" @click="moveSection(id, 1); menu = null">Move down</button><button type="button" @click="removeSection(id)">Delete section</button></div>
+        <div
+          v-for="id in page.sectionIds.filter(exists)" :key="id" class="quote-section" :data-section-id="id" :style="spacing(byId(id))"
+          :class="{ current: editable && currentSection === id, lifted: dragId === id, 'drop-before': dropTarget?.id === id && dropTarget.before, 'drop-after': dropTarget?.id === id && !dropTarget.before }"
+          @dragover="dragOver($event, id)" @drop.prevent="dropSection" @keydown="sectionKeys($event, id)"
+        >
+          <button
+            v-if="editable" type="button" class="quote-section-handle" draggable="true" :aria-label="`Section ${sectionIndex(id) + 1} actions`" aria-haspopup="menu" :aria-expanded="menu?.id === id"
+            aria-keyshortcuts="Alt+ArrowUp Alt+ArrowDown" data-tip="Drag to move · click for actions" @dragstart="dragStart($event, id)" @dragend="dragId = null; dropTarget = null" @click="openMenu(id, $event.currentTarget as HTMLElement)"
+          ><QuoteIcon name="grip" :size="14" /></button>
+          <div class="quote-section-heading" @contextmenu="headingMenu($event, id)"><span v-if="labelOf(byId(id))" class="quote-section-number">{{ labelOf(byId(id)) }}</span><QuoteText tag="h2" :model-value="byId(id).heading" :label="`Heading section ${sectionIndex(id) + 1}`" :editable="editable" @focus="editor.select({ sectionId: id })" @update:model-value="editor.editSection(id, { heading: $event })" /></div>
           <QuoteProse :editor="editor" :section-id="id" :body="byId(id).body" :nodes="byId(id).nodes" :section-number="sectionIndex(id) + 1" :editable="editable" @move-section="moveSection(id, $event)" />
         </div>
         <QuotePositions v-if="page.kind === 'positions' && (page.positionIds.length || pageIndex === pages.findIndex(p => p.kind === 'positions'))" :positions="state.positions" :indices="page.positionIds" :editor="editor" :editable="editable" />
@@ -103,20 +197,41 @@ defineExpose({
     <div ref="measureRoot" class="quote-measure" aria-hidden="true" inert>
       <div ref="heightProbe" class="quote-height-probe"></div>
       <div data-measure-cover><QuoteCover :document="state" :editor="editor" :offer-no="offerNo" /></div>
-      <div v-for="(section, index) in sections" :key="section.id" :data-measure-section="section.id" class="quote-section"><div class="quote-section-heading"><span class="quote-section-number">{{ index + 1 }}.</span><h2>{{ section.heading }}</h2></div><QuoteProse :editor="editor" :section-id="section.id" :body="section.body" :nodes="section.nodes" :section-number="index + 1" /></div>
+      <div v-for="(section, index) in sections" :key="section.id" :data-measure-section="section.id" class="quote-section" :style="spacing(section)"><div class="quote-section-heading"><span v-if="labelOf(section)" class="quote-section-number">{{ labelOf(section) }}</span><h2>{{ section.heading }}</h2></div><QuoteProse :editor="editor" :section-id="section.id" :body="section.body" :nodes="section.nodes" :section-number="index + 1" /></div>
       <div v-for="position in state.positions" :key="position.id" :data-measure-position="position.id"><QuotePositions :positions="state.positions" :indices="[position.id]" :editor="editor" /></div>
       <div data-measure-acceptance><QuoteAcceptance :document="state" :editor="editor" :accepted="accepted" /></div>
     </div>
+    <SectionMenu
+      v-if="menu" :anchor="menu.anchor" :index="sectionIndex(menu.id)" :count="sections.length" :label="`Actions for section ${sectionIndex(menu.id) + 1}`"
+      @close="closeMenu" @add="actions.addBelow(menu!.id)" @up="moveSection(menu!.id, -1)" @down="moveSection(menu!.id, 1)" @remove="actions.remove(menu!.id)"
+    />
   </div>
 </template>
 <style>
-.quote-document { --quote-paper: var(--surface-raised); --quote-ink: var(--ink); color: var(--quote-ink); font-family: var(--font); font-size: 9pt; }
+/* Paper is a light print surface in either app theme: the document scope pins the
+   light tokens its parts use, so dark mode never turns the page dark. */
+.quote-document {
+  --ink: #203c3d; --ink-2: #4c6163; --ink-3: #5f7274; --teal: #0e6f6c; --teal-ink: #0b5c59;
+  --line: rgba(32, 60, 61, .1); --line-2: rgba(32, 60, 61, .18); --surface: #fffefa; --surface-2: rgba(32, 60, 61, .045); --surface-raised: #fffefa;
+  --field-bg: rgba(255, 255, 255, .66); --row-hover: rgba(14, 111, 108, .055); --row-selected: rgba(164, 229, 223, .3);
+  --danger: #b24a44; --danger-bg: rgba(178, 74, 68, .08); --danger-line: rgba(178, 74, 68, .3); --aqua: #a4e5df; --focus-ring: 0 0 0 2px #a4e5df, 0 0 18px rgba(164, 229, 223, .8);
+  --quote-paper: #fffefa; --quote-ink: var(--ink); color-scheme: light; color: var(--quote-ink); font-family: var(--font); font-size: 9pt;
+}
 .quote-page { position: relative; box-sizing: border-box; width: 210mm; height: 297mm; padding: 20mm 21mm 20mm; margin: 0 auto 12mm; background: var(--quote-paper); box-shadow: var(--shadow); overflow: hidden; }
 .quote-page-content { height: 245mm; }
 .quote-page-footer { position: absolute; bottom: 12mm; left: 21mm; right: 21mm; border-top: 1px solid var(--line-2); padding-top: 3mm; display: flex; justify-content: space-between; gap: 10mm; font-size: 7pt; color: var(--ink-2); }
 .quote-section { position: relative; margin-top: 6mm; break-inside: avoid; }.quote-section-heading { display: flex; gap: 2mm; align-items: baseline; margin-bottom: 3mm; font-size: 13pt; font-weight: 700; }.quote-section-heading h2 { font: inherit; margin: 0; flex: 1; }.quote-section-number { color: var(--ink-2); }
-.quote-section-menu-button { opacity: 0; background: transparent; border: 1px solid var(--line-2); border-radius: 6px; color: var(--ink); width: 7mm; height: 7mm; padding: 1mm; cursor: pointer; }.quote-section:hover .quote-section-menu-button,.quote-section-menu-button:focus-visible { opacity: 1; }.quote-section-menu-button svg { width: 100%; fill: currentColor; }.quote-section-menu { position: absolute; z-index: 3; right: 0; top: 8mm; display: grid; min-width: 42mm; padding: 2mm; background: var(--surface-raised); border: 1px solid var(--line-2); border-radius: 7px; box-shadow: var(--shadow-pop); }.quote-section-menu button { border: 0; background: transparent; color: var(--ink); text-align: left; padding: 2mm; cursor: pointer; }.quote-section-menu button:hover { background: var(--row-hover); }.quote-section-menu button:disabled { opacity: .4; cursor: default; }
-.quote-overflow,.quote-announcement { max-width: 210mm; margin: 0 auto 4mm; background: var(--danger-bg); border: 1px solid var(--danger-line); border-radius: 8px; padding: 3mm; }.quote-announcement { background: var(--surface-raised); border-color: var(--line-2); }
+.quote-section-handle { position: absolute; left: -9mm; top: 0; display: grid; place-items: center; width: 6.5mm; height: 7mm; padding: 0; border: 0; border-radius: 6px; background: transparent; color: var(--ink-3); cursor: grab; opacity: 0; transition: opacity .12s ease; }
+.quote-section:hover > .quote-section-handle, .quote-section.current > .quote-section-handle, .quote-section-handle:focus-visible, .quote-section-handle[aria-expanded="true"] { opacity: 1; }
+@media (hover: none) { .quote-section-handle { opacity: 1; } }
+.quote-section-handle:hover { color: var(--ink); background: var(--row-hover); }
+.quote-section-handle:focus-visible { box-shadow: var(--focus-ring); }
+.quote-section.lifted { opacity: .4; }
+/* Where a dragged section lands: a line between sections, its own element, not a border. */
+.quote-section.drop-before::before, .quote-section.drop-after::after { content: ''; position: absolute; left: 0; right: 0; height: 2px; border-radius: 2px; background: var(--teal); pointer-events: none; }
+.quote-section.drop-before::before { top: -3mm; }
+.quote-section.drop-after::after { bottom: -3mm; }
+.quote-overflow { max-width: 210mm; margin: 0 auto 4mm; background: var(--danger-bg); border: 1px solid var(--danger-line); border-radius: 8px; padding: 3mm; }
 .quote-measure { position: absolute; left: -10000px; top: 0; width: 210mm; padding: 20mm 21mm; box-sizing: border-box; visibility: hidden; background: var(--quote-paper); }.quote-height-probe { height: 245mm; position: absolute; pointer-events: none; }
-@media print { .quote-page { margin: 0; box-shadow: none; break-after: page; background: white; color: #203c3d; } .quote-document { color: #203c3d; } .quote-section-menu-button,.quote-overflow,.quote-announcement,.quote-measure { display: none !important; } @page { size: A4; margin: 0; } }
+@media print { .quote-page { margin: 0; box-shadow: none; break-after: page; background: white; color: #203c3d; } .quote-document { color: #203c3d; } .quote-section-handle,.quote-overflow,.quote-measure { display: none !important; } @page { size: A4; margin: 0; } }
 </style>

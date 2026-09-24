@@ -39,13 +39,15 @@ export function exactMM(input: string | null | undefined, min: number, max: numb
   if (value < min || value > max) throw new Error('Millimetres out of range')
   return value === 0 ? undefined : value.toFixed(1)
 }
-export function fitWholeBlocks(coverPx: number, sections: { id: string; px: number }[], positions: { id: string; px: number }[], acceptancePx: number, usablePx: number, headings = { sections: 32, positions: 45, table: 32 }): PaginationResult {
+// `breaks`: sections that start on a new page (the Section tab's "Start on a new page").
+export function fitWholeBlocks(coverPx: number, sections: { id: string; px: number }[], positions: { id: string; px: number }[], acceptancePx: number, usablePx: number, headings = { sections: 32, positions: 45, table: 32 }, breaks: ReadonlySet<string> = new Set()): PaginationResult {
   const pages: PagePlan[] = [{ kind: 'cover', sectionIds: [], positionIds: [], acceptance: false }]
   let overflow: string | null = coverPx > usablePx ? 'Cover exceeds one page' : null
   let remaining = usablePx - coverPx
   for (const section of sections) {
     if (section.px + headings.sections > usablePx) overflow ??= `Section ${section.id} exceeds one page`
-    if (section.px + headings.sections > remaining) {
+    const fresh = pages.at(-1)!.kind === 'sections' && !pages.at(-1)!.sectionIds.length
+    if (section.px + headings.sections > remaining || (breaks.has(section.id) && !fresh)) {
       pages.push({ kind: 'sections', sectionIds: [], positionIds: [], acceptance: false })
       remaining = usablePx
     }
