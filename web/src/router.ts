@@ -27,17 +27,17 @@ export const router = createRouter({
         return project ? { path: `/p/${encodeURIComponent(project.routeKey)}`, query: { view: 'journey', ...stage }, replace: true } : true
       },
     },
-    // Business: Overview · Customers · Quotes · Hours · Rates. Customers and Quotes show
-    // what arrives until the CRM port and the quote editor land (the earlier views stay
-    // in views/business, unrouted, for that port).
+    // Business: Overview · Customers · Quotes · Hours · Rates.
     { path: '/business', component: () => import('./views/business/BusinessHome.vue'), meta: { title: 'Business' } },
     { path: '/business/customers', component: () => import('./views/business/BusinessArriving.vue'), props: { part: 'customers' }, meta: { title: 'Customers' } },
     { path: '/business/quotes', component: () => import('./views/business/BusinessArriving.vue'), props: { part: 'quotes' }, meta: { title: 'Quotes' } },
+    { path: '/business/quotes/:quoteId', component: () => import('./views/business/QuoteEditorView.vue'), props: true, meta: { title: 'Quote editor' },
+      beforeEnter: to => /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i.test(String(to.params.quoteId)) ? true : '/business/quotes' },
     { path: '/business/hours', component: () => import('./views/business/HoursView.vue'), meta: { title: 'Hours' } },
     { path: '/business/rates', component: () => import('./views/business/CostUnitsView.vue'), meta: { title: 'Rates' } },
     { path: '/business/costs', redirect: '/business/rates' },
     { path: '/business/cost-units', redirect: '/business/rates' },
-    { path: '/business/quotes/:rest(.*)+', redirect: '/business/quotes' },
+    { path: '/business/quotes/:quoteId/:rest(.*)+', redirect: '/business/quotes' },
     { path: '/business/:parked(organisations|crm)/:rest(.*)*', redirect: '/business/customers' },
     { path: '/crm', redirect: '/business/customers' },
     // One record for the overview and its open session, so opening the panel never remounts the page.
@@ -52,11 +52,14 @@ export const router = createRouter({
     { path: '/settings', redirect: '/settings/personal' },
     { path: '/settings/:section(personal|workspace|business|projects)', component: () => import('./views/SettingsView.vue'), meta: { title: 'Settings' } },
     { path: '/signin', component: SignInView, meta: { title: 'Sign in', bare: true } },
+    { path: '/offers/:publicTenant/:token', component: () => import('./public/PublicQuoteView.vue'), props: true, meta: { title: 'Customer quote', bare: true, public: true } },
+    // quote-print.html is the separate Vite entry, served directly from webFS.
     { path: '/:pathMatch(.*)*', component: NotFoundView, meta: { title: 'Page not found' } },
   ],
 })
 
 router.beforeEach(async (to) => {
+  if (to.meta.public) return true
   const session = useSession()
   const wasSignedIn = !!session.identity
   await session.refresh()
