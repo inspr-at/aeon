@@ -5,7 +5,7 @@ import { fixtures, mockWork, watchErrors } from './work-fixtures'
 
 const person = { principal: { id: 'person-1', name: 'mba', roles: ['member'] }, tenant: { id: 'tenant-1', name: 'INSPR Studio' }, identity: { email: 'markus@barta.com', display_name: 'Markus Barta' } }
 
-interface SignInOptions { devMode?: boolean | null; probeStatus?: number; loginStatus?: number; meStatus?: number }
+interface SignInOptions { devMode?: boolean | null; loginStatus?: number; meStatus?: number }
 async function mockSignIn(page: Page, options: SignInOptions = {}) {
   const state = { signedIn: false, meStatus: options.meStatus ?? 0 }
   const calls: { path: string; body: string | null }[] = []
@@ -20,7 +20,6 @@ async function mockSignIn(page: Page, options: SignInOptions = {}) {
       return route.fulfill({ status: 401, json: { error: 'unauthorized', ...(devMode === null ? {} : { dev_mode: devMode }) } })
     }
     if (path === '/api/auth/dev-login') {
-      if (request.postData() === '{}') return route.fulfill({ status: options.probeStatus ?? 404, json: { error: 'invalid' } })
       if (options.loginStatus === -1) return route.abort('failed')
       if (options.loginStatus) return route.fulfill({ status: options.loginStatus, json: { error: 'no' } })
       state.signedIn = true
@@ -50,20 +49,21 @@ test.describe('sign-in', () => {
     expect(errors).toEqual([])
   })
 
-  test('a server that does not report dev_mode is asked once, with an empty request', async ({ page }) => {
-    const { calls } = await mockSignIn(page, { devMode: null, probeStatus: 400 })
+  test('the email form follows dev_mode and never probes the development route', async ({ page }) => {
+    const { calls } = await mockSignIn(page, { devMode: true })
     await page.goto('/signin')
     await expect(page.getByLabel('Email address')).toBeVisible()
     await page.getByRole('button', { name: 'Switch to dark theme' }).click()
     await expect(page.locator('html')).toHaveAttribute('data-theme', 'dark')
-    expect(calls.filter(call => call.path === '/api/auth/dev-login')).toEqual([{ path: '/api/auth/dev-login', body: '{}' }])
+    expect(calls.filter(call => call.path === '/api/auth/dev-login')).toEqual([])
   })
 
-  test('production answers the probe with 404 and shows no email form', async ({ page }) => {
-    await mockSignIn(page, { devMode: null, probeStatus: 404 })
+  test('a server that does not report dev_mode shows no email form', async ({ page }) => {
+    const { calls } = await mockSignIn(page, { devMode: null })
     await page.goto('/signin')
     await expect(page.getByRole('link', { name: 'Sign in with INSPR ID' })).toBeVisible()
     await expect(page.getByLabel('Email address')).toHaveCount(0)
+    expect(calls.filter(call => call.path === '/api/auth/dev-login')).toEqual([])
   })
 
   const flows: [string, string, string][] = [

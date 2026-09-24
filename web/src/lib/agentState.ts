@@ -1,0 +1,176 @@
+// SPDX-License-Identifier: AGPL-3.0-only
+// Pure rules for the agents workspace: what state a session is in, which group it
+// belongs to, what an approval asks for and how risky it is, and how an account's
+// allowance window is pacing. Free of Vue so it can be unit tested.
+import { paceFraction, type AgentRun, type AllowanceWindow, type Approval, type HarnessSession, type ProjectMessage } from './agents.ts'
+
+export const HEARTBEAT_STALE_MS = 2 * 60_000
+export const HARNESS_LABEL: Record<string, string> = { codex: 'Codex', claude: 'Claude', pi: 'Pi', cursor: 'Cursor', grok: 'Grok' }
+export const harnessLabel = (harness: string) => HARNESS_LABEL[harness] ?? harness.charAt(0).toUpperCase() + harness.slice(1)
+
+export type SessionGroup = 'needs' | 'working' | 'idle' | 'stopped'
+export type LiveTone = 'busy' | 'idle' | 'attention' | 'quiet' | 'stopped'
+export interface SessionStatus { group: SessionGroup; tone: LiveTone; label: string }
+export const GROUPS: { id: SessionGroup; label: string }[] = [
+  { id: 'needs', label: 'Needs you' }, { id: 'working', label: 'Working' }, { id: 'idle', label: 'Idle' }, { id: 'stopped', label: 'Stopped' },
+]
+
+export function heartbeatStale(session: HarnessSession, now: number) {
+  return !session.heartbeat_at || now - Date.parse(session.heartbeat_at) > HEARTBEAT_STALE_MS
+}
+
+// A stopped generation is history; anything waiting on Markus leads (keeping what it
+// is doing as its label); a missing heartbeat is not work. Starting and stopping count as working.
+export function sessionStatus(session: HarnessSession, now: number, needsYou = false): SessionStatus {
+  if (session.phase === 'stopped' || session.stopped_at) return { group: 'stopped', tone: 'stopped', label: 'Stopped' }
+  const status = activityStatus(session, now)
+  return needsYou ? { group: 'needs', tone: 'attention', label: status.label } : status
+}
+function activityStatus(session: HarnessSession, now: number): SessionStatus {
+  if (session.phase === 'stopping') return { group: 'working', tone: 'busy', label: 'Stopping' }
+  if (session.phase === 'starting') return { group: 'working', tone: 'busy', label: 'Starting' }
+  if (heartbeatStale(session, now)) return { group: 'idle', tone: 'quiet', label: 'No heartbeat' }
+  if (session.phase === 'yielded') return { group: 'idle', tone: 'idle', label: 'Waiting' }
+  if (session.activity === 'idle') return { group: 'idle', tone: 'idle', label: 'Idle' }
+  return { group: 'working', tone: 'busy', label: 'Working' }
+}
+
+export function stopReasonLabel(reason: string | null | undefined) {
+  if (!reason) return ''
+  return reason.replace(/[_-]+/g, ' ').replace(/^./, c => c.toUpperCase())
+}
+
+// The agent's name is the name part of its message address ("claude:camy" is camy);
+// without one, the machine it runs on.
+export function agentName(session: Pick<HarnessSession, 'agent_principal_id' | 'host'>, addresses: Record<string, string>) {
+  const address = addresses[session.agent_principal_id]
+  const name = address?.split(':')[1]
+  return name || session.host
+}
+
+export function needsYou(session: HarnessSession, pending: Approval[], held: ProjectMessage[]) {
+  if (session.phase === 'stopped') return false
+  return pending.some(a => a.agent_principal_id === session.agent_principal_id && (!a.run_id || !session.run_id || a.run_id === session.run_id))
+    || held.some(m => m.sender_principal_id === session.agent_principal_id)
+}
+
+export function groupSessions(sessions: HarnessSession[], now: number, needs: (session: HarnessSession) => boolean) {
+  const buckets: Record<SessionGroup, { session: HarnessSession; status: SessionStatus }[]> = { needs: [], working: [], idle: [], stopped: [] }
+  for (const session of sessions) {
+    const status = sessionStatus(session, now, needs(session))
+    buckets[status.group].push({ session, status })
+  }
+  const beat = (s: HarnessSession) => Date.parse(s.heartbeat_at ?? s.created_at)
+  for (const group of ['needs', 'working', 'idle'] as const) buckets[group].sort((a, b) => beat(b.session) - beat(a.session))
+  buckets.stopped.sort((a, b) => Date.parse(b.session.stopped_at ?? b.session.created_at) - Date.parse(a.session.stopped_at ?? a.session.created_at))
+  return buckets
+}
+
+export function duration(ms: number) {
+  const s = Math.max(0, Math.round(ms / 1000))
+  if (s < 60) return `${s}s`
+  const m = Math.floor(s / 60)
+  if (m < 60) return `${m}m`
+  const h = Math.floor(m / 60)
+  if (h < 24) return m % 60 ? `${h}h ${m % 60}m` : `${h}h`
+  const d = Math.floor(h / 24)
+  return h % 24 ? `${d}d ${h % 24}h` : `${d}d`
+}
+export function elapsed(session: HarnessSession, now: number) {
+  return duration(Date.parse(session.stopped_at ?? new Date(now).toISOString()) - Date.parse(session.created_at))
+}
+export function runDuration(run: AgentRun, now: number) {
+  if (typeof run.duration_ms === 'number') return duration(run.duration_ms)
+  if (!run.started_at) return ''
+  return duration(Date.parse(run.ended_at ?? new Date(now).toISOString()) - Date.parse(run.started_at))
+}
+
+// ---------- Runs ----------
+export const RUN_OUTCOME: Record<AgentRun['status'], { label: string; tone: 'ok' | 'busy' | 'bad' | 'muted' }> = {
+  queued: { label: 'Queued', tone: 'muted' }, starting: { label: 'Starting', tone: 'busy' }, running: { label: 'Running', tone: 'busy' },
+  waiting: { label: 'Waiting', tone: 'busy' }, completed: { label: 'Completed', tone: 'ok' }, failed: { label: 'Failed', tone: 'bad' },
+  cancelled: { label: 'Cancelled', tone: 'muted' }, ownership_lost: { label: 'Lost', tone: 'bad' },
+}
+export const runModel = (run: AgentRun | undefined) => run?.effective_model ?? run?.requested_model ?? ''
+export function tokens(n: number) {
+  if (n < 1000) return String(n)
+  if (n < 1_000_000) return `${(n / 1000).toFixed(n < 10_000 ? 1 : 0).replace(/\.0$/, '')}k`
+  return `${(n / 1_000_000).toFixed(1).replace(/\.0$/, '')}M`
+}
+export const cost = (micros: number) => `$${(micros / 1_000_000).toFixed(micros < 10_000_000 ? 2 : 0)}`
+
+// ---------- Approvals ----------
+export interface Asker { name: string; harness: string; sessionId: string }
+export interface Resource { label: string; key?: string; title?: string; href?: string }
+export function pendingApprovals(approvals: Approval[], now: number) {
+  return approvals.filter(a => a.decision === null && Date.parse(a.expires_at) > now)
+    .sort((a, b) => Date.parse(a.expires_at) - Date.parse(b.expires_at))
+}
+export function decidedApprovals(approvals: Approval[], now: number) {
+  return approvals.filter(a => a.decision !== null || Date.parse(a.expires_at) <= now)
+    .sort((a, b) => Date.parse(b.proposed_at) - Date.parse(a.proposed_at))
+}
+
+const SCOPES: Record<string, string> = {
+  'run.claim': 'Claim a run and start work', 'run.create': 'Start new runs', 'run.read': 'Read runs',
+  'harness.control': 'Interrupt or stop agent sessions', 'harness.write': 'Register and bind sessions', 'harness.read': 'See agent sessions',
+  'harness.worker': 'Act as a session worker', 'inbox.send': 'Send messages to people and agents', 'nodes.read': 'Read tickets',
+  'nodes.write': 'Change tickets', 'work_orders.write': 'Change work orders', 'work_orders.read': 'Read work orders', 'stage.deploy': 'Deploy a stage',
+}
+export function scopeLabel(scope: string) {
+  if (SCOPES[scope]) return SCOPES[scope]
+  const [resource, ...rest] = scope.split('.')
+  const verb = rest.join(' ').replace(/_/g, ' ')
+  return `${verb.charAt(0).toUpperCase()}${verb.slice(1)} ${resource.replace(/_/g, ' ')}`
+}
+
+// Risk is read from what the permission allows: reading is low, changing work is
+// medium, and control, deployment, deletion, spending or anything tenant-wide is high.
+export type Risk = 'low' | 'medium' | 'high'
+export function riskOf(approval: Pick<Approval, 'scope' | 'resource_kind'>): Risk {
+  const verbs = approval.scope.split('.').slice(1).join('.')
+  if (approval.resource_kind === 'tenant' || /control|deploy|delete|admin|release|spend|merge|push|secret|credential|budget|stop/.test(verbs)) return 'high'
+  if (/^read$|\.read$|^read/.test(verbs)) return 'low'
+  return 'medium'
+}
+// The server computes risk (B7); the local rule only covers older servers.
+export const riskFor = (approval: Pick<Approval, 'scope' | 'resource_kind' | 'risk'>): Risk => approval.risk ?? riskOf(approval)
+export const RISK_LABEL: Record<Risk, string> = { low: 'Low risk', medium: 'Medium risk', high: 'High risk' }
+
+export function expiresIn(approval: Approval, now: number) {
+  const left = Date.parse(approval.expires_at) - now
+  return left <= 0 ? 'Expired' : `Expires in ${duration(left)}`
+}
+export const expiresSoon = (approval: Approval, now: number) => Date.parse(approval.expires_at) - now < 10 * 60_000
+
+// ---------- Held action requests ----------
+export const heldRequests = (messages: ProjectMessage[]) => messages.filter(m => m.is_action_request && !m.human_resolution_outcome)
+
+// ---------- Allowance windows ----------
+export type Pace = 'ahead' | 'on' | 'under'
+export interface WindowSummary { window: AllowanceWindow; left: number; pace: Pace; expected: number; used: number; resetsIn: number }
+export function windowSummary(window: AllowanceWindow, now: number): WindowSummary | null {
+  const start = Date.parse(window.starts_at), end = Date.parse(window.ends_at)
+  if (!(now >= start && now < end) || window.allowance <= 0) return null
+  const used = Math.min(1, (window.used + window.reserved) / window.allowance)
+  const expected = paceFraction(window.pace_model, (now - start) / (end - start), window.burst_ratio)
+  const pace: Pace = used > expected + 0.02 ? 'ahead' : used < expected - 0.15 ? 'under' : 'on'
+  return { window, left: Math.max(0, 1 - used), pace, expected, used, resetsIn: end - now }
+}
+// The window that binds first: the active one with the least left.
+export function bindingWindow(windows: AllowanceWindow[] | undefined, now: number) {
+  return (windows ?? []).map(w => windowSummary(w, now)).filter((w): w is WindowSummary => !!w).sort((a, b) => a.left - b.left)[0] ?? null
+}
+export const PACE_LABEL: Record<Pace, string> = { ahead: 'Ahead of pace', on: 'On pace', under: 'Room to spare' }
+export const UNIT_LABEL: Record<AllowanceWindow['unit'], string> = { requests: 'requests', tokens: 'tokens', cost_micros: 'spend' }
+
+// Why a typed control cannot be sent right now, or '' when it can. Controls exist
+// only for sessions Aeon owns that advertise them, one at a time.
+export function controlBlocked(session: HarnessSession, kind: 'interrupt' | 'stop', name: string, canControl: boolean, current?: { kind: string; state: string } | null) {
+  if (!canControl) return 'Only people who may write can control sessions'
+  if (session.phase === 'stopped') return 'This session has stopped'
+  if (session.management_mode !== 'managed') return 'This session runs outside Aeon, so it cannot be controlled from here'
+  if (!session.advertised_capabilities.includes(kind)) return `${name} does not accept ${kind === 'stop' ? 'a stop' : 'interrupts'}`
+  if (current && current.state !== 'completed') return `${current.kind === 'stop' ? 'A stop' : 'An interrupt'} is on its way`
+  return ''
+}

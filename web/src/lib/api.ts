@@ -27,8 +27,7 @@ export async function api(path: string, init: RequestInit = {}) {
 }
 
 // Keep the P0.3 auth wire contract here, separate from view components.
-// devModeReported: whether the server said anything about development sign-in.
-export async function getSession(): Promise<{ identity: Identity | null; devMode: boolean; devModeReported: boolean }> {
+export async function getSession(): Promise<{ identity: Identity | null; devMode: boolean }> {
   const response = await api('/me')
   if (!response.ok && response.status !== 401) throw new Error('Session unavailable')
   // A 401 may have no JSON body; it still means sign-in is required.
@@ -37,22 +36,12 @@ export async function getSession(): Promise<{ identity: Identity | null; devMode
     throw new Error('Invalid session response')
   })
   const devMode = body.dev_mode === true
-  const devModeReported = typeof body.dev_mode === 'boolean'
-  if (response.status === 401) return { identity: null, devMode, devModeReported }
+  if (response.status === 401) return { identity: null, devMode }
   if (typeof body.principal?.id !== 'string' || typeof body.principal?.name !== 'string'
     || typeof body.tenant?.id !== 'string' || typeof body.tenant?.name !== 'string') {
     throw new Error('Invalid session response')
   }
-  return { identity: body as Identity, devMode, devModeReported }
-}
-
-// Servers that do not report dev_mode: the dev-login route is mounted only in development,
-// and an empty request there is refused as invalid (400) without signing anyone in.
-export async function probeDevLogin(): Promise<boolean> {
-  try {
-    const response = await api('/auth/dev-login', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: '{}' })
-    return response.status === 400
-  } catch { return false }
+  return { identity: body as Identity, devMode }
 }
 
 // R1 wire types mirror api/openapi.yaml. All workspace HTTP calls stay here.

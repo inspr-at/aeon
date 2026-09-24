@@ -21,10 +21,12 @@ export const router = createRouter({
     { path: '/business/costs', alias: '/business/cost-units', component: () => import('./views/business/CostUnitsView.vue'), meta: { title: 'Cost units', fill: true } },
     { path: '/business/hours', component: () => import('./views/business/HoursView.vue'), meta: { title: 'Hours', fill: true } },
     { path: '/crm', redirect: '/business/crm' },
-    { path: '/agents', component: () => import('./views/AgentsView.vue'), meta: { title: 'Agents' } },
-    { path: '/runs/:runId?', component: () => import('./views/RunsView.vue'), meta: { title: 'Sessions & runs' } },
-    { path: '/approvals', component: () => import('./views/ApprovalsView.vue'), meta: { title: 'Approvals' } },
-    { path: '/pacing', component: () => import('./views/PacingView.vue'), meta: { title: 'Pacing' } },
+    // One record for the overview and its open session, so opening the panel never remounts the page.
+    { path: '/agents/:sessionId?', component: () => import('./views/AgentsView.vue'), meta: { title: 'Agents', fill: false } },
+    // Earlier separate pages now live inside Agents.
+    { path: '/runs/:runId?', redirect: '/agents' },
+    { path: '/approvals', redirect: '/agents' },
+    { path: '/pacing', redirect: '/agents' },
     { path: '/signin', component: SignInView, meta: { title: 'Sign in', bare: true } },
     { path: '/:pathMatch(.*)*', component: NotFoundView, meta: { title: 'Page not found' } },
   ],

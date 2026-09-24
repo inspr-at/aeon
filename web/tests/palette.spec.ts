@@ -26,7 +26,7 @@ test('an empty palette shows recents and actions for the project it opened in', 
   await expect(palette(page).getByRole('combobox', { name: 'Search in PHAROS' })).toBeFocused()
   await expect(palette(page).locator('.scope-chip')).toContainText('PHAROS')
   await expect(group(page, 'Recent')).toHaveText([/PHAROS-12\s*Add an Oracle Cloud connector/, /PHAROS\s*Pharos/])
-  await expect(group(page, 'Actions')).toHaveText([/New ticket in PHAROS/, /Go to Outline/, /Go to Projects/, /Switch to (dark|light) theme/, /Keyboard shortcuts/])
+  await expect(group(page, 'Actions')).toHaveText([/New ticket in PHAROS/, /Go to Outline/, /Go to Projects/, /Go to Agents/, /Switch to (dark|light) theme/, /Keyboard shortcuts/])
   await expect(group(page, 'Recent').first()).toHaveAttribute('aria-selected', 'true')
   // Tab jumps between groups, arrows move one row, Shift+Tab goes back.
   await page.keyboard.press('Tab')

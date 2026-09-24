@@ -15,12 +15,12 @@ function respond(body: unknown, status = 200) {
 test('accepts the authenticated principal and tenant', async () => {
   const identity = { principal: { id: 'p1', name: 'Markus Barta' }, tenant: { id: 't1', name: 'INSPR' } }
   respond(identity)
-  assert.deepEqual(await getSession(), { identity, devMode: false, devModeReported: false })
+  assert.deepEqual(await getSession(), { identity, devMode: false })
 })
 
 test('a bare 401 still redirects to sign-in with development disabled', async () => {
   globalThis.fetch = async () => new Response(null, { status: 401 })
-  assert.deepEqual(await getSession(), { identity: null, devMode: false, devModeReported: false })
+  assert.deepEqual(await getSession(), { identity: null, devMode: false })
 })
 
 test('only a literal server true enables development sign-in', async () => {
@@ -29,7 +29,7 @@ test('only a literal server true enables development sign-in', async () => {
     assert.equal((await getSession()).devMode, false)
   }
   respond({ dev_mode: true }, 401)
-  assert.deepEqual(await getSession(), { identity: null, devMode: true, devModeReported: true })
+  assert.deepEqual(await getSession(), { identity: null, devMode: true })
 })
 
 test('rejects malformed identities and server errors', async () => {
@@ -166,52 +166,4 @@ test('pacing curves preserve steady/frontload policy and hard allowance bounds',
       previous = value
     }
   }
-})
-
-test('R2 live reads fence stale responses, retain failed snapshots, refresh on hints and close', async () => {
-  const { createRenderer, h } = await import('vue')
-  const { useAgentLive } = await import('../src/lib/agentLive.ts')
-  const original = globalThis.EventSource
-  let stream: MockStream | undefined
-  let closed = false
-  class MockStream extends EventTarget {
-    onopen?: () => void; onerror?: () => void; onmessage?: () => void
-    constructor(url: string) { super(); assert.equal(url, '/api/events/stream'); stream = this }
-    close() { closed = true }
-  }
-  globalThis.EventSource = MockStream as unknown as typeof EventSource
-  const renderer = createRenderer({
-    insert() {}, remove() {}, createElement: () => ({}), createText: () => ({}), createComment: () => ({}),
-    setText() {}, setElementText() {}, parentNode: () => null, nextSibling: () => null, patchProp() {},
-  })
-  const requests: { resolve: (value: number) => void; reject: (cause: Error) => void }[] = []
-  let resource: ReturnType<typeof useAgentLive<number>>
-  const app = renderer.createApp({ setup() {
-    resource = useAgentLive(() => new Promise<number>((resolve, reject) => requests.push({ resolve, reject })))
-    return () => h('div')
-  } })
-  try {
-    app.mount({})
-    const fresh = resource!.refresh()
-    requests[1]!.resolve(2); await fresh
-    requests[0]!.resolve(1); await Promise.resolve()
-    assert.equal(resource!.data.value, 2)
-    const failure = resource!.refresh()
-    requests[2]!.reject(new Error('Offline')); await failure
-    assert.equal(resource!.data.value, 2)
-    assert.equal(resource!.error.value, 'Offline')
-    stream!.onerror!(); assert.equal(resource!.live.value, false)
-    stream!.onopen!(); assert.equal(resource!.live.value, true)
-    stream!.dispatchEvent(new Event('run.telemetry'))
-    stream!.dispatchEvent(new Event('approval.approved'))
-    await new Promise(resolve => setTimeout(resolve, 200))
-    assert.equal(requests.length, 4) // Reconnect and a hint burst coalesce.
-    requests[3]!.resolve(3); await Promise.resolve()
-    assert.equal(resource!.data.value, 3)
-    assert.equal(resource!.error.value, '')
-    const pending = resource!.refresh()
-    app.unmount(); assert.equal(closed, true)
-    requests[4]!.resolve(4); await pending
-    assert.equal(resource!.data.value, 3)
-  } finally { if (!closed) app.unmount(); globalThis.EventSource = original }
 })

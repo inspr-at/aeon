@@ -1,0 +1,126 @@
+// SPDX-License-Identifier: AGPL-3.0-only
+import { test } from 'node:test'
+import assert from 'node:assert/strict'
+import {
+  agentName, bindingWindow, controlBlocked, cost, decidedApprovals, duration, expiresIn, groupSessions, heldRequests, needsYou,
+  pendingApprovals, riskFor, riskOf, runDuration, scopeLabel, sessionStatus, tokens, windowSummary,
+} from '../src/lib/agentState.ts'
+import type { AllowanceWindow, Approval, HarnessSession, ProjectMessage } from '../src/lib/agents.ts'
+
+const now = Date.parse('2026-09-24T12:00:00Z')
+const ago = (minutes: number) => new Date(now - minutes * 60_000).toISOString()
+function session(fields: Partial<HarnessSession> = {}): HarnessSession {
+  return {
+    id: 's1', project_id: 'p1', agent_principal_id: 'a1', run_id: 'r1', ticket_node_id: 'n1', work_order_id: null, parent_harness_session_id: null,
+    harness: 'claude', host: 'imac0', management_mode: 'managed', role: 'worker', work_shape: 'ship', advertised_capabilities: ['interrupt', 'stop'],
+    phase: 'working', activity: 'busy', activity_sequence: 1, revision: 1, heartbeat_at: ago(0.5), stopped_at: null, stop_reason: null, created_at: ago(90), ...fields,
+  }
+}
+function approval(fields: Partial<Approval> = {}): Approval {
+  return { id: 'ap1', agent_principal_id: 'a1', scope: 'run.claim', resource_kind: 'run', resource_id: 'r1', run_id: 'r1', rationale: '', expires_at: ago(-30), proposed_at: ago(5), decision: null, ...fields }
+}
+function message(fields: Partial<ProjectMessage> = {}): ProjectMessage {
+  return { id: 'm1', sender_principal_id: 'a2', recipient_principal_id: 'a1', to: 'claude:camy', body: 'x', sent_event_id: 1, is_action_request: false, expects_reply: false, delivery_level: 'simple', status: 'accepted', reply_obligation: 'none', ...fields }
+}
+
+test('session states: working, starting, stopping, waiting, idle, no heartbeat, stopped', () => {
+  assert.deepEqual(sessionStatus(session(), now), { group: 'working', tone: 'busy', label: 'Working' })
+  assert.equal(sessionStatus(session({ phase: 'starting', heartbeat_at: null }), now).label, 'Starting')
+  assert.equal(sessionStatus(session({ phase: 'stopping' }), now).label, 'Stopping')
+  assert.deepEqual(sessionStatus(session({ phase: 'yielded', activity: 'idle' }), now), { group: 'idle', tone: 'idle', label: 'Waiting' })
+  assert.deepEqual(sessionStatus(session({ activity: 'idle' }), now), { group: 'idle', tone: 'idle', label: 'Idle' })
+  assert.deepEqual(sessionStatus(session({ heartbeat_at: ago(3) }), now), { group: 'idle', tone: 'quiet', label: 'No heartbeat' })
+  assert.deepEqual(sessionStatus(session({ phase: 'stopped', stopped_at: ago(1) }), now, true), { group: 'stopped', tone: 'stopped', label: 'Stopped' })
+  // Waiting on Markus leads, and keeps what the session is doing as its label.
+  assert.deepEqual(sessionStatus(session(), now, true), { group: 'needs', tone: 'attention', label: 'Working' })
+})
+
+test('a session needs Markus for its agent’s pending approval or held request', () => {
+  const s = session()
+  assert.equal(needsYou(s, [approval()], []), true)
+  assert.equal(needsYou(s, [approval({ run_id: 'other' })], []), false)
+  assert.equal(needsYou(s, [approval({ run_id: null })], []), true)
+  assert.equal(needsYou(s, [], [message({ sender_principal_id: 'a1', is_action_request: true })]), true)
+  assert.equal(needsYou(session({ phase: 'stopped', stopped_at: ago(1) }), [approval()], []), false)
+})
+
+test('groups sort live sessions by heartbeat and stopped ones by when they stopped', () => {
+  const groups = groupSessions([
+    session({ id: 'old', heartbeat_at: ago(1.5) }), session({ id: 'new', heartbeat_at: ago(0.1) }),
+    session({ id: 'stopA', phase: 'stopped', stopped_at: ago(60) }), session({ id: 'stopB', phase: 'stopped', stopped_at: ago(5) }),
+    session({ id: 'asks', agent_principal_id: 'a9' }),
+  ], now, s => s.agent_principal_id === 'a9')
+  assert.deepEqual(groups.working.map(e => e.session.id), ['new', 'old'])
+  assert.deepEqual(groups.stopped.map(e => e.session.id), ['stopB', 'stopA'])
+  assert.deepEqual(groups.needs.map(e => e.session.id), ['asks'])
+})
+
+test('agent names come from the message address, else the host', () => {
+  assert.equal(agentName(session(), { a1: 'claude:camy' }), 'camy')
+  assert.equal(agentName(session(), {}), 'imac0')
+})
+
+test('controls are blocked with a reason people can act on', () => {
+  assert.equal(controlBlocked(session(), 'stop', 'camy', true), '')
+  assert.match(controlBlocked(session(), 'stop', 'camy', false), /may write/)
+  assert.match(controlBlocked(session({ management_mode: 'unmanaged' }), 'interrupt', 'amy', true), /outside Aeon/)
+  assert.match(controlBlocked(session({ advertised_capabilities: ['stop'] }), 'interrupt', 'camy', true), /does not accept interrupts/)
+  assert.match(controlBlocked(session(), 'interrupt', 'camy', true, { kind: 'stop', state: 'pending' }), /stop is on its way/)
+  assert.equal(controlBlocked(session(), 'interrupt', 'camy', true, { kind: 'stop', state: 'completed' }), '')
+  assert.match(controlBlocked(session({ phase: 'stopped', stopped_at: ago(1) }), 'stop', 'camy', true), /stopped/)
+})
+
+test('approvals: pending by urgency, history by recency, risk from what is allowed', () => {
+  const list = [
+    approval({ id: 'later', expires_at: ago(-90) }), approval({ id: 'soon', expires_at: ago(-5) }),
+    approval({ id: 'expired', expires_at: ago(1) }), approval({ id: 'done', decision: 'approved', proposed_at: ago(1) }),
+  ]
+  assert.deepEqual(pendingApprovals(list, now).map(a => a.id), ['soon', 'later'])
+  assert.deepEqual(decidedApprovals(list, now).map(a => a.id), ['done', 'expired'])
+  assert.equal(riskOf({ scope: 'nodes.read', resource_kind: 'node' }), 'low')
+  assert.equal(riskOf({ scope: 'run.claim', resource_kind: 'run' }), 'medium')
+  assert.equal(riskOf({ scope: 'harness.control', resource_kind: 'node' }), 'high')
+  assert.equal(riskOf({ scope: 'stage.deploy', resource_kind: 'node' }), 'high')
+  assert.equal(riskOf({ scope: 'inbox.send', resource_kind: 'tenant' }), 'high')
+  assert.equal(scopeLabel('run.claim'), 'Claim a run and start work')
+  assert.equal(scopeLabel('journey.build'), 'Build journey')
+  assert.equal(expiresIn(approval({ expires_at: ago(-42) }), now), 'Expires in 42m')
+  assert.equal(expiresIn(approval({ expires_at: ago(1) }), now), 'Expired')
+})
+
+test('held action requests stay until a person resolves or dismisses them', () => {
+  const list = [
+    message({ id: 'a', is_action_request: true, reply_obligation: 'open' }), message({ id: 'b', is_action_request: true, human_resolution_outcome: 'resolved' }),
+    message({ id: 'c', is_action_request: true, human_resolution_outcome: 'dismissed' }), message({ id: 'd' }),
+  ]
+  assert.deepEqual(heldRequests(list).map(m => m.id), ['a'])
+})
+
+test('the server’s risk wins over the local rule; runs use the server duration', () => {
+  assert.equal(riskFor({ scope: 'nodes.read', resource_kind: 'node', risk: 'medium' }), 'medium')
+  assert.equal(riskFor({ scope: 'nodes.read', resource_kind: 'node' }), 'low')
+  const run = { id: 'r', work_order_id: 'w', agent_principal_id: 'a', status: 'completed' as const, model_evidence: 'unverified' as const, input_tokens: 0, output_tokens: 0, cost_micros: 0, created_at: ago(10), started_at: ago(10), ended_at: ago(1) }
+  assert.equal(runDuration({ ...run, duration_ms: 125_000 }, now), '2m')
+  assert.equal(runDuration(run, now), '9m')
+  assert.equal(runDuration({ ...run, started_at: null }, now), '')
+})
+
+test('allowance windows: what is left, the pace and which window binds', () => {
+  const window = (fields: Partial<AllowanceWindow>): AllowanceWindow => ({ id: 'w', account_id: 'x', starts_at: ago(60), ends_at: ago(-60), unit: 'tokens', allowance: 1000, used: 0, reserved: 0, pace_model: 'steady', burst_ratio: 0, ...fields })
+  const ahead = windowSummary(window({ used: 700 }), now)!
+  assert.equal(ahead.pace, 'ahead')
+  assert.equal(Math.round(ahead.left * 100), 30)
+  assert.equal(windowSummary(window({ used: 480, reserved: 20 }), now)!.pace, 'on')
+  assert.equal(windowSummary(window({ used: 100 }), now)!.pace, 'under')
+  assert.equal(windowSummary(window({ starts_at: ago(-10), ends_at: ago(-70) }), now), null)
+  assert.equal(windowSummary(window({ allowance: 0 }), now), null)
+  const binding = bindingWindow([window({ id: 'roomy', used: 100 }), window({ id: 'tight', used: 900 })], now)!
+  assert.equal(binding.window.id, 'tight')
+  assert.equal(bindingWindow(undefined, now), null)
+})
+
+test('numbers read short: durations, tokens and cost', () => {
+  assert.deepEqual([duration(45_000), duration(12 * 60_000), duration(134 * 60_000), duration(60 * 60_000), duration(28 * 3_600_000)], ['45s', '12m', '2h 14m', '1h', '1d 4h'])
+  assert.deepEqual([tokens(950), tokens(4200), tokens(184_300), tokens(2_500_000)], ['950', '4.2k', '184k', '2.5M'])
+  assert.deepEqual([cost(3_840_000), cost(0), cost(123_000_000)], ['$3.84', '$0.00', '$123'])
+})

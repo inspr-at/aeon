@@ -1,34 +1,261 @@
 <!-- SPDX-License-Identifier: AGPL-3.0-only -->
 <script setup lang="ts">
-import { computed, ref } from 'vue'
-import AgentWorkspace from '../components/AgentWorkspace.vue'
-import { listAccounts, message, setAccountState, timestamp, type AgentAccount } from '../lib/agents'
-import { useAgentLive } from '../lib/agentLive'
+import { computed, nextTick, onBeforeUnmount, onMounted, ref, watch } from 'vue'
+import { useRoute, useRouter } from 'vue-router'
+import { canWrite } from '../lib/activity'
+import { message, subscribeAgents, type AgentAccount, type Approval, type SessionControl } from '../lib/agents'
+import { controlBlocked, decidedApprovals, type Resource } from '../lib/agentState'
+import { confirmAction } from '../lib/confirm'
+import { toast } from '../lib/toast'
+import { useAgents, type HeldRequest, type SessionView } from '../stores/agents'
+import { useProjects } from '../stores/projects'
 import { useSession } from '../stores/session'
-const { data: accounts, error, busy, live, refresh } = useAgentLive(listAccounts)
+import AppIcon from '../components/AppIcon.vue'
+import AccountsCard from '../components/agents/AccountsCard.vue'
+import ApprovalQueue from '../components/agents/ApprovalQueue.vue'
+import SessionList from '../components/agents/SessionList.vue'
+import SessionPanel from '../components/agents/SessionPanel.vue'
+
+// Markus's desk for agents: what waits on him first, then every live session grouped
+// by state, with accounts and pacing beside them. A session opens in the docked panel.
+const agents = useAgents()
+const projects = useProjects()
 const session = useSession()
-const admin = computed(() => session.identity?.principal.kind === 'person' && session.identity.principal.roles?.includes('admin') === true)
-const pending = ref('')
-const actionError = ref('')
-async function change(account: AgentAccount, state: AgentAccount['state']) {
-  if (pending.value) return
-  pending.value = account.id; actionError.value = ''
-  try { await setAccountState(account.id, state); await refresh() }
-  catch (cause) { actionError.value = message(cause) }
-  finally { pending.value = '' }
+const route = useRoute()
+const router = useRouter()
+const cursor = ref('')
+const live = ref(false)
+const queue = ref<InstanceType<typeof ApprovalQueue>>()
+
+const sessionId = computed(() => typeof route.params.sessionId === 'string' ? route.params.sessionId : '')
+const selected = computed(() => agents.views.find(v => v.session.id === sessionId.value))
+const roles = computed(() => session.identity?.principal.roles ?? [])
+const writable = computed(() => canWrite(roles.value))
+const history = computed(() => decidedApprovals(agents.approvals, agents.now))
+const counts = computed(() => ({ working: agents.grouped.working.length, idle: agents.grouped.idle.length }))
+const summary = computed(() => {
+  const parts: string[] = []
+  if (agents.needsCount) parts.push(`${agents.needsCount} ${agents.needsCount === 1 ? 'needs' : 'need'} you`)
+  if (agents.sessionsState === 'ready' && agents.loaded) parts.push(...(agents.sessions.length ? [`${counts.value.working} working`, `${counts.value.idle} idle`] : ['No agent connected yet']))
+  return parts.join(' · ') || (agents.loaded ? 'Nothing waits on you' : '')
+})
+
+// ---------- Resources and people ----------
+function resource(approval: Approval): Resource {
+  if (approval.resource_kind === 'tenant') return { label: 'the whole workspace' }
+  if (approval.resource_kind === 'run') {
+    // A run is shown by the ticket its session works on.
+    const run = approval.run_id ?? approval.resource_id
+    const ticket = agents.views.find(v => v.session.run_id === run && v.ticket)?.ticket
+    return ticket ? { label: ticket.title, key: ticket.key, title: ticket.title, href: ticket.href } : { label: 'its current run' }
+  }
+  const id = approval.resource_id ?? ''
+  const project = projects.byId(id)
+  if (project) return { label: project.title, key: project.routeKey, title: project.title, href: `/p/${encodeURIComponent(project.routeKey)}` }
+  const node = agents.nodes[id]
+  if (!node) return { label: 'a ticket' }
+  const owner = projects.byRouteKey(node.key.split('-')[0] ?? '')
+  return { label: node.title, key: node.key, title: node.title, href: owner ? `/p/${encodeURIComponent(owner.routeKey)}/${encodeURIComponent(node.key)}` : undefined }
 }
+function openAgent(principalId: string) {
+  const views = agents.byAgent(principalId)
+  const target = views.find(v => v.status.group !== 'stopped') ?? views[0]
+  if (target) void router.push(`/agents/${target.session.id}`)
+  else toast('This agent has no session listed right now.')
+}
+
+// ---------- Actions ----------
+async function decide(approval: Approval, decision: 'approved' | 'denied', reason: string) {
+  await agents.decide(approval, decision, reason)
+  toast(`${decision === 'approved' ? 'Approved' : 'Denied'}: ${agents.askerName(approval.agent_principal_id).name} was told.`)
+  await nextTick()
+  const next = agents.pending[0]
+  cursor.value = next ? `a:${next.id}` : ''
+  if (next) focusRow(cursor.value)
+}
+async function resolveHeld(request: HeldRequest, decision: 'resolved' | 'dismissed', note: string) {
+  await agents.resolve(request, decision, note)
+  toast(`${decision === 'resolved' ? 'Resolved' : 'Dismissed'}: the request from ${agents.askerName(request.sender_principal_id).name} is answered.`)
+  await nextTick()
+  const next = agents.pending[0] ?? null
+  const nextHeld = agents.held[0] ?? null
+  cursor.value = next ? `a:${next.id}` : nextHeld ? `m:${nextHeld.id}` : ''
+  if (cursor.value) focusRow(cursor.value)
+}
+const controlBlock = (view: SessionView, kind: SessionControl['kind']) => controlBlocked(view.session, kind, view.name, writable.value, agents.controls[view.session.id])
+async function control(view: SessionView, kind: SessionControl['kind']) {
+  if (kind === 'stop') {
+    const ok = await confirmAction({
+      title: `Stop ${view.name}?`, danger: true, confirmLabel: 'Stop session',
+      body: `${view.harness} ends this session after its current step. It cannot be resumed; the next session starts fresh.`,
+    })
+    if (!ok) return
+  }
+  try {
+    await agents.control(view, kind)
+    toast(kind === 'stop' ? `Stop sent to ${view.name}.` : `Interrupt sent to ${view.name}.`)
+  } catch (e) { toast(message(e), { tone: 'error' }) }
+}
+async function setAccount(account: AgentAccount, state: AgentAccount['state']) {
+  if (state === 'draining') {
+    const ok = await confirmAction({ title: `Drain ${account.label}?`, body: 'Running work finishes; no new runs start on this account until you resume it.', confirmLabel: 'Drain account' })
+    if (!ok) return
+  }
+  await agents.setAccount(account, state)
+}
+function review(approval: Approval) {
+  if (window.innerWidth < 1100) void closePanel()
+  cursor.value = `a:${approval.id}`
+  void nextTick(() => focusRow(cursor.value))
+}
+
+// ---------- Panel ----------
+function openSession(id: string) {
+  cursor.value = `s:${id}`
+  void router.push({ path: `/agents/${id}`, query: route.query })
+}
+// Focus returns to the session's row once the panel is gone.
+async function closePanel() {
+  const id = sessionId.value
+  if (id) cursor.value = `s:${id}`
+  await router.push({ path: '/agents', query: route.query })
+  await nextTick()
+  if (id) focusRow(cursor.value)
+}
+
+// ---------- Keyboard: j/k move, a approve, d deny, Enter opens, Esc closes ----------
+function rows() { return [...document.querySelectorAll<HTMLElement>('.agents-page [data-row]')] }
+function focusRow(id: string) {
+  const el = document.querySelector<HTMLElement>(`.agents-page [data-row="${CSS.escape(id)}"]`)
+  el?.focus({ preventScroll: true })
+  el?.scrollIntoView({ block: 'nearest' })
+}
+function move(step: number) {
+  const list = rows()
+  if (!list.length) return
+  const index = list.findIndex(el => el.dataset.row === cursor.value)
+  const next = list[index === -1 ? (step > 0 ? 0 : list.length - 1) : Math.max(0, Math.min(list.length - 1, index + step))]
+  cursor.value = next.dataset.row ?? ''
+  focusRow(cursor.value)
+  // With the panel open, the panel follows the cursor through sessions.
+  if (sessionId.value && cursor.value.startsWith('s:')) void router.replace({ path: `/agents/${cursor.value.slice(2)}`, query: route.query })
+}
+function typing(target: EventTarget | null) {
+  return target instanceof HTMLElement && (target.isContentEditable || ['INPUT', 'TEXTAREA', 'SELECT'].includes(target.tagName))
+}
+function keydown(event: KeyboardEvent) {
+  if (event.defaultPrevented || event.metaKey || event.ctrlKey || event.altKey) return
+  if (document.querySelector('dialog[open], .floating') || typing(event.target)) return
+  const [kind, id] = [cursor.value.slice(0, 1), cursor.value.slice(2)]
+  switch (event.key) {
+    case 'j': case 'ArrowDown': event.preventDefault(); move(1); break
+    case 'k': case 'ArrowUp': event.preventDefault(); move(-1); break
+    case 'a': case 'd':
+      if (kind === 'a') { event.preventDefault(); void queue.value?.begin(id, event.key === 'a' ? 'approve' : 'deny') }
+      else if (kind === 'm') { event.preventDefault(); void queue.value?.begin(id, event.key === 'a' ? 'resolve' : 'dismiss') }
+      break
+    case 'Enter': case 'o':
+      if ((event.target as HTMLElement).closest('a, button')) return
+      if (kind === 's') { event.preventDefault(); openSession(id) }
+      else if (kind === 'm') { event.preventDefault(); const held = agents.held.find(m => m.id === id); if (held) openAgent(held.sender_principal_id) }
+      break
+    case 'Escape':
+      if (sessionId.value) { event.preventDefault(); void closePanel() }
+      break
+  }
+}
+
+// ---------- Live ----------
+let stop: (() => void) | undefined
+let poll: ReturnType<typeof setInterval> | undefined
+let clock: ReturnType<typeof setInterval> | undefined
+let debounce: ReturnType<typeof setTimeout> | undefined
+function changed() {
+  clearTimeout(debounce)
+  debounce = setTimeout(() => void agents.loadAll(), 400)
+}
+onMounted(() => {
+  void agents.loadAll()
+  stop = subscribeAgents(changed, value => { live.value = value })
+  poll = setInterval(() => void agents.loadAll(), 20_000)
+  clock = setInterval(() => agents.tick(), 15_000)
+  window.addEventListener('keydown', keydown)
+})
+onBeforeUnmount(() => {
+  stop?.(); clearInterval(poll); clearInterval(clock); clearTimeout(debounce)
+  window.removeEventListener('keydown', keydown)
+})
+watch(sessionId, id => { if (id) cursor.value = `s:${id}` }, { immediate: true })
 </script>
+
 <template>
-  <AgentWorkspace title="Agents" :live="live" :busy="busy" :error="error" @refresh="refresh">
-    <p>Registered daemon accounts and their agent identities. A successful probe reports availability; it does not prove ownership of a running session.</p>
-    <p v-if="actionError" class="error" role="alert">{{ actionError }}</p>
-    <p v-if="accounts?.length === 0" class="glass-card agent-empty">No daemon accounts registered yet.</p>
-    <div class="agent-grid">
-      <article v-for="account in accounts" :key="account.id" class="glass-card agent-card" :aria-label="account.label">
-        <div class="agent-card-heading"><h2>{{ account.label }}</h2><span class="agent-badge">{{ account.state }}</span></div>
-        <dl><div><dt>Agent principal</dt><dd>{{ account.registered_by_principal_id }}</dd></div><div><dt>Harness</dt><dd>{{ account.harness }}</dd></div><div><dt>Daemon</dt><dd>{{ account.daemon_id }}</dd></div><div><dt>Parallel run limit</dt><dd>{{ account.max_parallel_runs ?? 'Not reported' }}</dd></div><div><dt>Last probe</dt><dd>{{ timestamp(account.last_probe_at) }}</dd></div><div><dt>Probe result</dt><dd>{{ account.last_probe_ok == null ? 'Unknown' : account.last_probe_ok ? 'Successful' : 'Unavailable' }}</dd></div></dl>
-        <div v-if="admin" class="agent-actions"><button v-for="state in (['available', 'draining', 'unavailable'] as const)" :key="state" class="button secondary" :disabled="!!pending || state === account.state || !!error" @click="change(account, state)">{{ state === 'available' ? 'Activate' : state === 'draining' ? 'Drain' : 'Disable' }}</button></div>
-      </article>
+  <section class="agents-page" :class="{ 'panel-open': !!sessionId }" aria-labelledby="agents-title">
+    <header class="page-head">
+      <div class="head-main">
+        <p class="eyebrow">{{ session.identity?.tenant.name ?? 'Workspace' }}</p>
+        <h1 id="agents-title">Agents</h1>
+        <p class="summary"><span v-if="summary">{{ summary }}</span><span v-else class="skeleton summary-skeleton" /></p>
+      </div>
+      <p class="live" :class="{ on: live }" :data-tip="live ? 'Updates arrive as they happen' : 'Refreshing every 20 seconds'">
+        <span class="live-mark" aria-hidden="true" />{{ live ? 'Live' : 'Polling' }}
+      </p>
+    </header>
+
+    <div class="layout">
+      <div class="main-col">
+        <ApprovalQueue
+          ref="queue" :pending="agents.pending" :held="agents.held" :history="history" :now="agents.now"
+          :cursor="cursor" :can-decide="writable" :asker="agents.askerName" :resource="resource" :decide="decide" :revoke="agents.revoke" :resolve="resolveHeld"
+          @focus-row="id => cursor = id" @open-agent="openAgent"
+        />
+        <p v-if="agents.approvalsState === 'error'" class="inline-error" role="alert"><AppIcon name="alert" :size="14" />Permission requests could not be loaded: {{ agents.approvalsError }} <button type="button" class="btn sm" @click="agents.refreshApprovals()">Try again</button></p>
+        <SessionList
+          :groups="agents.grouped" :now="agents.now" :cursor="cursor" :selected="sessionId" :state="agents.sessionsState" :error="agents.sessionsError"
+          :loaded="agents.loaded" :controls="agents.controls" :can-control="writable"
+          @open="openSession" @control="control" @focus-row="id => cursor = id" @retry="agents.loadAll()"
+        />
+        <p v-if="agents.sessions.length || agents.pending.length" class="hint" aria-hidden="true">
+          <kbd class="keycap">j</kbd><kbd class="keycap">k</kbd> move · <kbd class="keycap"><AppIcon name="enter" /></kbd> open · <kbd class="keycap">a</kbd> approve · <kbd class="keycap">d</kbd> deny
+        </p>
+      </div>
+      <aside class="side-col" aria-label="Accounts">
+        <AccountsCard :accounts="agents.accounts" :state="agents.accountsState" :now="agents.now" :admin="agents.accountsState === 'ready'" :set="setAccount" />
+      </aside>
     </div>
-  </AgentWorkspace>
+
+    <SessionPanel
+      v-if="sessionId" :view="selected" :loading="!agents.loaded" :now="agents.now" :can-write="writable" :control-block="controlBlock"
+      @close="closePanel" @control="control" @review="review"
+    />
+  </section>
 </template>
+
+<style scoped>
+.agents-page { width: 100%; max-width: 1600px; margin: 0 auto; padding: 22px 28px 24px; }
+.page-head { display: flex; align-items: flex-end; justify-content: space-between; gap: 24px; margin-bottom: 20px; }
+.page-head h1 { margin-top: 6px; }
+.summary { margin-top: 6px; min-height: 20px; font-size: 13.5px; color: var(--ink-2); }
+.summary-skeleton { display: inline-block; width: 220px; }
+.live { display: inline-flex; align-items: center; gap: 8px; height: 28px; padding: 0 12px; border-radius: 999px; background: var(--chip-bg); box-shadow: inset 0 0 0 1px var(--chip-line); font-size: 12px; color: var(--ink-2); }
+.live-mark { width: 7px; height: 7px; border-radius: 50%; background: var(--st-backlog); }
+.live.on .live-mark { background: var(--ok); box-shadow: 0 0 0 3px rgba(47, 122, 90, .16); }
+.layout { display: grid; grid-template-columns: minmax(0, 1fr) 320px; gap: 20px; align-items: start; container: agents-layout / inline-size; }
+.main-col { display: grid; grid-template-columns: minmax(0, 1fr); gap: 16px; min-width: 0; }
+.side-col { position: sticky; top: 16px; display: grid; grid-template-columns: minmax(0, 1fr); gap: 16px; min-width: 0; }
+.inline-error { display: flex; align-items: center; gap: 8px; flex-wrap: wrap; padding: 10px 14px; border-radius: 12px; background: var(--danger-bg); box-shadow: inset 0 0 0 1px var(--danger-line); font-size: 13px; color: var(--danger); }
+.hint { display: flex; align-items: center; justify-content: center; flex-wrap: wrap; gap: 5px; padding: 4px 0; font-size: 12px; color: var(--ink-3); }
+.hint .keycap + .keycap { margin-left: 2px; }
+/* Wide screens dock the session panel: the page reflows beside it. */
+@media (min-width: 1100px) {
+  .agents-page.panel-open { margin: 0; padding-right: calc(var(--panel-w) + 22px); }
+}
+/* Beside the panel the page is narrow: accounts move below the sessions. */
+.agents-page.panel-open .layout { grid-template-columns: minmax(0, 1fr); }
+.agents-page.panel-open .side-col { position: static; }
+@media (max-width: 1080px) { .layout { grid-template-columns: minmax(0, 1fr); } .side-col { position: static; } }
+@media (max-width: 720px) {
+  .agents-page { padding: 16px 12px 20px; }
+  .page-head { align-items: flex-start; }
+  .hint { display: none; }
+}
+</style>
