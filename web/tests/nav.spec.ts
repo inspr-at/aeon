@@ -80,13 +80,14 @@ test('the palette offers the places with their keys and every settings section b
   await expect(page).toHaveURL('/settings/workspace')
 })
 
-test('Business tabs: Customers stays parked and Quotes shows its empty state', async ({ page }) => {
+test('Business tabs: a closed Customers says how to open it, Quotes shows its empty state; earlier links lead there', async ({ page }) => {
   const errors = watchErrors(page)
   await setup(page)
   await page.goto('/business/customers')
   await expect(page.getByRole('navigation', { name: 'Business' }).getByRole('link')).toHaveText(['Overview', 'Customers', 'Quotes', 'Hours', 'Rates'])
   await expect(page.getByRole('navigation', { name: 'Business' }).getByRole('link', { name: 'Customers' })).toHaveAttribute('aria-current', 'page')
-  await expect(page.getByRole('heading', { name: 'Customers arrive with the CRM port' })).toBeVisible()
+  await expect(page.getByRole('heading', { name: 'Customers is not enabled for this workspace' })).toBeVisible()
+  await expect(page.getByRole('link', { name: 'Open Business setup' })).toBeVisible()
   await page.getByRole('link', { name: 'Quotes', exact: true }).click()
   await expect(page.getByRole('heading', { name: 'No quotes yet' })).toBeVisible()
   await page.getByRole('link', { name: 'Quote settings' }).click()

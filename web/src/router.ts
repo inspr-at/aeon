@@ -29,7 +29,8 @@ export const router = createRouter({
     },
     // Business: Overview · Customers · Quotes · Hours · Rates.
     { path: '/business', component: () => import('./views/business/BusinessHome.vue'), meta: { title: 'Business' } },
-    { path: '/business/customers', component: () => import('./views/business/BusinessArriving.vue'), props: { part: 'customers' }, meta: { title: 'Customers' } },
+    { path: '/business/customers', component: () => import('./views/business/CustomersView.vue'), meta: { title: 'Customers' } },
+    { path: '/business/customers/:id', component: () => import('./views/business/CustomerView.vue'), meta: { title: 'Customer' } },
     { path: '/business/quotes', component: () => import('./views/business/BusinessArriving.vue'), props: { part: 'quotes' }, meta: { title: 'Quotes' } },
     { path: '/business/quotes/:quoteId', component: () => import('./views/business/QuoteEditorView.vue'), props: true, meta: { title: 'Quote editor' },
       beforeEnter: to => /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i.test(String(to.params.quoteId)) ? true : '/business/quotes' },

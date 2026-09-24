@@ -15,7 +15,8 @@ export interface BusinessPlugin {
   digest_sha256: string
   owner: string
   permissions: string[]
-  node_kinds: { slug: string }[]
+  // The kinds the plugin declares, with the field schema its records use.
+  node_kinds: { slug: string; field_schema?: Record<string, unknown> }[]
   views: { id: string }[]
   installation: {
     manifest_digest_sha256: string
@@ -236,12 +237,13 @@ function parseInstallation(value: unknown, pluginId: string): BusinessPlugin['in
   }
 }
 
-function parseKinds(value: unknown): { slug: string }[] {
+function parseKinds(value: unknown): BusinessPlugin['node_kinds'] {
   if (!Array.isArray(value)) return []
   return value.flatMap(entry => {
     if (!entry || typeof entry !== 'object') return []
-    const slug = (entry as { slug?: unknown }).slug
-    return typeof slug === 'string' && slug ? [{ slug }] : []
+    const { slug, field_schema: schema } = entry as { slug?: unknown; field_schema?: unknown }
+    if (typeof slug !== 'string' || !slug) return []
+    return schema && typeof schema === 'object' && !Array.isArray(schema) ? [{ slug, field_schema: schema as Record<string, unknown> }] : [{ slug }]
   })
 }
 

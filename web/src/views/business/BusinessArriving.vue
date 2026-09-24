@@ -8,8 +8,9 @@ import { settingsLink } from '../../lib/settings'
 import { useBusiness } from '../../stores/business'
 import { api } from '../../lib/api'
 
-// Customers remain parked; Quotes shows the live list or an empty state.
-const props = defineProps<{ part: 'customers' | 'quotes' }>()
+// Quotes: the live list of existing quotes, each opening in the editor; the
+// honest empty state only when there are none. (Customers has its own pages.)
+const props = defineProps<{ part: 'quotes' }>()
 const business = useBusiness()
 interface QuoteRow { quote_node_id: string; offer_no?: string; state: string }
 const quotes = ref<QuoteRow[]>([])
@@ -35,12 +36,6 @@ watch(() => [props.part, business.open.quotes], () => {
   if (props.part === 'quotes' && business.open.quotes) void loadQuotes(true)
 }, { immediate: true })
 const COPY = {
-  customers: {
-    title: 'Customers', icon: 'building' as const, heading: 'Customers arrive with the CRM port',
-    body: 'Organisations and the people you work with there, in one place with the projects and quotes that belong to them.',
-    items: ['Organisations with their address and website', 'Contacts with email, phone and role', 'Each customer’s projects, quotes and hours at a glance'],
-    link: { label: 'Business settings', to: settingsLink('business', 'customers') },
-  },
   quotes: {
     title: 'Quotes', icon: 'document' as const, heading: 'No quotes yet',
     body: 'Draft and issued quotes will appear here.',

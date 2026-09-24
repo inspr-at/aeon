@@ -85,7 +85,7 @@ test('plugin gates fail closed and quotes wait on both dependencies', () => {
   const hourArea = businessAreas.find(area => area.id === 'hours')!
   const quoteState = availability(quoteArea, catalog)
   assert.equal(quoteState.open, false)
-  assert.equal(quoteState.reason, 'Waiting on Organisations.')
+  assert.equal(quoteState.reason, 'Waiting on Customers.')
   assert.equal(statusLabel(quoteState), 'Waiting')
   assert.equal(pinAction(quoteState), 'disable')
   const hourState = availability(hourArea, [plugin('business_costs', {}, { enabled: false }), plugin('business_hours')])

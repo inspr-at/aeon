@@ -36,9 +36,9 @@ export const businessAreas: readonly BusinessArea[] = [
   {
     id: 'crm',
     pluginId: 'business_crm',
-    label: 'Organisations',
-    to: '/business/organisations',
-    summary: 'Customers and their contacts, linked to projects and quotes. A contact accepts offers only once bound to a person.',
+    label: 'Customers',
+    to: '/business/customers',
+    summary: 'Customers with their contacts and addresses, linked to their projects, quotes and hours.',
     icon: 'crm',
     requires: [],
   },
@@ -64,9 +64,10 @@ export const businessAreas: readonly BusinessArea[] = [
 
 export const businessSections = businessAreas.filter((area): area is BusinessArea & { pluginId: string } => area.pluginId !== null)
 
-// Routed business pages. Quotes and organisations are parked until they are ported.
+// Routed business pages. Quotes are parked until the quote editor is ported.
 export const businessViews = {
   overview: { path: '/business', title: 'Business', view: 'web/src/views/business/BusinessHome.vue' },
+  crm: { path: '/business/customers', title: 'Customers', view: 'web/src/views/business/CustomersView.vue' },
   costs: { path: '/business/rates', title: 'Rates', view: 'web/src/views/business/CostUnitsView.vue' },
   hours: { path: '/business/hours', title: 'Hours', view: 'web/src/views/business/HoursView.vue' },
 } as const

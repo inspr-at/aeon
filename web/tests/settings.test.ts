@@ -26,3 +26,11 @@ test('the quote sender reads as one line of what is set', () => {
   assert.equal(senderLine({ company: ' ', city: 'Graz' }), 'Graz')
   assert.equal(senderLine(null), '')
 })
+
+test('the sender saves what is filled in and keeps the logo it does not edit', async () => {
+  const { senderWrite, senderError } = await import('../src/lib/settings.ts')
+  assert.deepEqual(senderWrite({ company: 'Old', logo_file_id: 'f1', logo_sha256: 'ab' }, { company: ' INSPR Studio ', city: 'Graz', iban: 'at00 1234', bic: '' }),
+    { logo_file_id: 'f1', logo_sha256: 'ab', company: 'INSPR Studio', city: 'Graz', iban: 'AT00 1234' })
+  assert.match(senderError(409, 'settings revision is stale'), /changed elsewhere/)
+  assert.match(senderError(400, 'invalid numbering time zone'), /Europe\/Vienna/)
+})

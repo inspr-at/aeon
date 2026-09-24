@@ -25,7 +25,7 @@ test('the header offers Business once a business plugin is enabled', async ({ pa
   await expect(page).toHaveURL(/\/business$/)
   await expect(page.getByRole('heading', { name: 'Business', level: 1 })).toBeVisible()
   await expect(link).toHaveAttribute('aria-current', 'page')
-  // Customers and Quotes have tabs; an unknown quote link returns to the list.
+  // Customers and Quotes always have tabs; an unknown quote link returns to the list.
   await expect(page.getByRole('navigation', { name: 'Business' }).getByRole('link')).toHaveText(['Overview', 'Customers', 'Quotes', 'Hours', 'Rates'])
   await page.goto('/business/quotes/QUO-3')
   await expect(page).toHaveURL(/\/business\/quotes$/)
@@ -45,7 +45,7 @@ test('without an enabled plugin the header stays quiet and members see why', asy
   await expect(page.getByRole('button', { name: 'Enable Business' })).toHaveCount(0)
 })
 
-test('an admin enables hours and rates with the compiled digests', async ({ page }) => {
+test('an admin enables Business: every part with the compiled digests', async ({ page }) => {
   const { calls } = await setup(page, { enabled: [] })
   await page.goto('/business')
   await expect(page.getByRole('heading', { name: 'Set up Business' })).toBeVisible()
@@ -54,7 +54,7 @@ test('an admin enables hours and rates with the compiled digests', async ({ page
   await page.getByRole('button', { name: 'Enable Business' }).click()
   await expect(page.getByRole('heading', { name: 'Your week' })).toBeVisible()
   const writes = calls.filter(c => c.method === 'PUT')
-  expect(writes.map(c => c.path)).toEqual(['/api/plugins/business_costs/installation', '/api/plugins/business_hours/installation'])
+  expect(writes.map(c => c.path)).toEqual(['/api/plugins/business_costs/installation', '/api/plugins/business_crm/installation', '/api/plugins/business_quotes/installation', '/api/plugins/business_hours/installation'])
   expect(writes[0].body).toEqual({ manifest_digest_sha256: 'ab'.repeat(32), enabled: true, permissions: ['nodes.contribute', 'steps.apply', 'views.provide'] })
   await expect(header(page).getByRole('link', { name: 'Business' })).toBeVisible()
 })

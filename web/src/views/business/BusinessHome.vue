@@ -9,6 +9,7 @@ import { addDays, dayKey, isoWeek, periodLabel, startOfWeek, weekDays, weekLabel
 import { formatClock, formatSpan } from '../../components/business/duration'
 import { formatAmount } from '../../components/business/money'
 import { useBusiness } from '../../stores/business'
+import { useCustomers } from '../../stores/customers'
 import { useProjects } from '../../stores/projects'
 import { useSession } from '../../stores/session'
 import AppIcon from '../../components/business/BizIcon.vue'
@@ -19,6 +20,7 @@ import SetupCard from '../../components/business/SetupCard.vue'
 // A calm desk for the business side: your week of hours and where it went, the
 // periods waiting for an admin's approval, and the rates in force.
 const business = useBusiness()
+const customers = useCustomers()
 const projects = useProjects()
 const session = useSession()
 const router = useRouter()
@@ -87,19 +89,21 @@ const summary = computed(() => {
   if (business.open.hours && hoursLoaded.value) parts.push(weekTotal.value ? `${formatSpan(weekTotal.value)} logged this week` : 'Nothing logged this week')
   if (business.open.hours && business.admin && hoursLoaded.value) parts.push(waiting.value.length ? `${plural(waiting.value.length, 'period')} to approve` : 'nothing to approve')
   if (business.open.costs && business.costUnitsLoaded) parts.push(`${plural(ratesInForce.value, 'rate')} in force`)
+  if (business.open.crm && customers.items) parts.push(plural(customers.items.length, 'customer'))
   return parts.join(' · ')
 })
 async function load() {
   await business.loadPlugins()
   if (business.open.costs) void business.loadCostUnits(true)
   if (business.open.hours) { void loadHours(); void projects.load() }
+  if (business.open.crm) void customers.load()
   if (business.anyOpen && business.staff) void business.loadPrincipals()
 }
-watch(() => [business.open.costs, business.open.hours], (value, before) => { if (before && value.join() !== before.join()) void load() })
+watch(() => [business.open.costs, business.open.hours, business.open.crm], (value, before) => { if (before && value.join() !== before.join()) void load() })
 let clock: ReturnType<typeof setInterval> | undefined
 onMounted(() => { void load(); clock = setInterval(() => { now.value = Date.now() }, 60_000) })
 onBeforeUnmount(() => clearInterval(clock))
-const offered = computed(() => business.open.costs || business.open.hours)
+const offered = computed(() => business.anyOpen)
 </script>
 
 <template>
@@ -119,7 +123,7 @@ const offered = computed(() => business.open.costs || business.open.hours)
       <div v-else class="closed glass-card">
         <span class="state-icon"><AppIcon name="briefcase" :size="18" /></span>
         <h2>Business is not set up for this workspace</h2>
-        <p>Hours and rates appear here once a workspace admin enables them.</p>
+        <p>Customers, quotes, hours and rates appear here once a workspace admin enables them.</p>
       </div>
     </div>
 

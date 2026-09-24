@@ -3,9 +3,9 @@
 import type { IconName } from '../AppIcon.vue'
 // Business glyphs in the same set as AppIcon: 16×16 grid, stroke 1.8, round caps
 // and joins, currentColor. Any other name is drawn by AppIcon itself.
-export type BizGlyph = 'briefcase' | 'document' | 'building' | 'tag' | 'grip' | 'print' | 'download' | 'calendar' | 'lock' | 'seal' | 'history' | 'mail' | 'globe' | 'phone'
+export type BizGlyph = 'briefcase' | 'document' | 'building' | 'tag' | 'grip' | 'print' | 'download' | 'calendar' | 'lock' | 'seal' | 'history' | 'mail' | 'globe' | 'phone' | 'star' | 'pin' | 'plug' | 'note'
 export type BizIconName = IconName | BizGlyph
-const GLYPHS = new Set<string>(['briefcase', 'document', 'building', 'tag', 'grip', 'print', 'download', 'calendar', 'lock', 'seal', 'history', 'mail', 'globe', 'phone'])
+const GLYPHS = new Set<string>(['briefcase', 'document', 'building', 'tag', 'grip', 'print', 'download', 'calendar', 'lock', 'seal', 'history', 'mail', 'globe', 'phone', 'star', 'pin', 'plug', 'note'])
 </script>
 <script setup lang="ts">
 import AppIcon from '../AppIcon.vue'
@@ -27,6 +27,10 @@ withDefaults(defineProps<{ name: BizIconName; size?: number }>(), { size: 16 })
     <template v-else-if="name === 'history'"><path d="M2.6 8a5.4 5.4 0 1 0 1.6-3.8M2.4 2.4v2.8h2.8" /><path d="M8 5.2V8l2 1.3" /></template>
     <template v-else-if="name === 'mail'"><rect x="1.8" y="3.4" width="12.4" height="9.2" rx="1.6" /><path d="m2.4 4.4 5.6 4.4 5.6-4.4" /></template>
     <template v-else-if="name === 'globe'"><circle cx="8" cy="8" r="6.2" /><path d="M1.8 8h12.4M8 1.8c1.7 1.8 2.5 3.8 2.5 6.2s-.8 4.4-2.5 6.2C6.3 12.4 5.5 10.4 5.5 8S6.3 3.6 8 1.8Z" /></template>
+    <path v-else-if="name === 'star'" d="m8 1.9 1.8 3.8 4.1.5-3 2.9.8 4.1L8 11.2l-3.7 2 .8-4.1-3-2.9 4.1-.5Z" />
+    <template v-else-if="name === 'pin'"><path d="M8 14.2s4.6-4.1 4.6-7.8a4.6 4.6 0 0 0-9.2 0c0 3.7 4.6 7.8 4.6 7.8Z" /><circle cx="8" cy="6.4" r="1.7" /></template>
+    <template v-else-if="name === 'plug'"><path d="M5.6 1.8v3M10.4 1.8v3M3.6 4.8h8.8v2.6a4.4 4.4 0 0 1-8.8 0ZM8 11.8v2.4" /></template>
+    <template v-else-if="name === 'note'"><path d="M3.4 1.8h9.2c.6 0 1 .4 1 1v6.6l-4.2 4.8H3.4c-.6 0-1-.4-1-1V2.8c0-.6.4-1 1-1Z" /><path d="M9.4 14.2V10.4c0-.6.4-1 1-1h3.2M5.2 5.4h5.6M5.2 8h3.2" /></template>
     <path v-else d="M3.4 2.2h2.4l1.2 3-1.6 1a7.4 7.4 0 0 0 4.4 4.4l1-1.6 3 1.2v2.4c0 .7-.6 1.2-1.3 1.2A11.4 11.4 0 0 1 2.2 3.5c0-.7.5-1.3 1.2-1.3Z" />
   </svg>
   <AppIcon v-else :name="name as IconName" :size="size" />
