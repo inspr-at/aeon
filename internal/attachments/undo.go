@@ -6,6 +6,7 @@ import (
 	"encoding/json"
 	"errors"
 	"reflect"
+	"time"
 
 	"github.com/inspr-at/aeon/internal/events"
 	"github.com/inspr-at/aeon/internal/tenant"
@@ -31,7 +32,7 @@ func undo(ctx context.Context, tx pgx.Tx, p tenant.Principal, e events.Event) (e
 	if err != nil {
 		return events.Change{}, err
 	}
-	if !reflect.DeepEqual(current, expected) {
+	if !reflect.DeepEqual(comparable(current), comparable(expected)) {
 		return events.Change{}, events.ErrConflict
 	}
 	var restored Attachment
@@ -44,4 +45,17 @@ func undo(ctx context.Context, tx pgx.Tx, p tenant.Principal, e events.Event) (e
 		return events.Change{}, err
 	}
 	return events.Change{NodeID: &current.NodeID, Type: e.Type, Before: current, After: restored}, nil
+}
+
+// comparable normalises the timestamps of an attachment snapshot so a row
+// scanned from Postgres and one decoded from event JSON compare equal whatever
+// the host time zone: same instant, UTC location, microsecond precision.
+func comparable(a Attachment) Attachment {
+	a.CreatedAt = a.CreatedAt.UTC().Truncate(time.Microsecond)
+	a.UpdatedAt = a.UpdatedAt.UTC().Truncate(time.Microsecond)
+	if a.DeletedAt != nil {
+		t := a.DeletedAt.UTC().Truncate(time.Microsecond)
+		a.DeletedAt = &t
+	}
+	return a
 }
