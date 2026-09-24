@@ -29,8 +29,10 @@ FROM alpine:3.24
 # Pin the Chromium runtime used for quote receipt evidence. Update it with a
 # render parity check and a renderer-version bump, not through floating apk.
 RUN apk add --no-cache ca-certificates chromium=152.0.7977.82-r0 \
-    && addgroup -S aeon && adduser -S -G aeon aeon
+    && addgroup -S -g 65532 aeon && adduser -S -D -u 65532 -G aeon aeon
 COPY --from=build /aeon /aeon
-USER aeon
+# The runtime UID/GID is a contract with the host: csb1's aeon-files directory
+# is owned by 65532 (the former distroless nonroot user). Never let it float.
+USER 65532:65532
 EXPOSE 8080
 ENTRYPOINT ["/aeon", "serve"]
