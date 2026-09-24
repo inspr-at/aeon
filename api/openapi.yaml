@@ -135,6 +135,19 @@ paths:
             application/json:
               schema:
                 $ref: "#/components/schemas/MeUnauthorized"
+  /me/greeting:
+    get:
+      operationId: getMeGreeting
+      summary: Draw a personal greeting for this page load
+      description: Uses the timezone preference, then X-Timezone, then UTC. Draws uniformly from context-matching lines outside the last 300 shown. History is private ephemeral state and creates no tenant event.
+      security: [{session: []}, {agentKey: []}]
+      parameters:
+        - {name: X-Timezone, in: header, description: IANA timezone used when no valid timezone preference exists, schema: {type: string}}
+      responses:
+        '200':
+          description: Greeting
+          content: {application/json: {schema: {$ref: '#/components/schemas/Greeting'}}}
+        '401': {description: Authentication required}
   /agent-keys:
     get:
       operationId: listAgentKeys
@@ -1713,6 +1726,15 @@ components:
     session: {type: apiKey, in: cookie, name: aeon_session}
     agentKey: {type: http, scheme: bearer, description: Bearer token aeon_<prefix>_<secret>}
   schemas:
+    Greeting:
+      type: object
+      additionalProperties: false
+      required: [salutation, name, message, id]
+      properties:
+        salutation: {type: string, enum: [Good morning, Morning, Good afternoon, Good evening, Hello, Welcome back]}
+        name: {type: string, description: Preferred first name or first word of the principal name}
+        message: {type: string, maxLength: 80}
+        id: {type: string, description: Stable short hash of normalized message text}
     Journey:
       type: object
       required: [project_node_id, profile, revision, stage, stage_source, stages, next_action, requirements_revision, requirements_digest_sha256, requirements_approval_scope, launch_readiness]
