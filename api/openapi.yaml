@@ -135,6 +135,62 @@ paths:
             application/json:
               schema:
                 $ref: "#/components/schemas/MeUnauthorized"
+  /me/profile:
+    get:
+      operationId: getMyProfile
+      summary: Current person's tenant profile and read-only identity email
+      security: *auth
+      responses:
+        '200': {description: Profile, content: {application/json: {schema: {$ref: '#/components/schemas/PersonalProfile'}}}}
+        '401': {$ref: '#/components/responses/Error'}
+    patch:
+      operationId: updateMyProfile
+      summary: Update the current person's profile; every change is undoable
+      security: *auth
+      requestBody:
+        required: true
+        content: {application/json: {schema: {$ref: '#/components/schemas/PersonalProfilePatch'}}}
+      responses:
+        '200': {description: Profile, content: {application/json: {schema: {$ref: '#/components/schemas/PersonalProfile'}}}}
+        '400': {description: Validation errors keyed by field, content: {application/json: {schema: {$ref: '#/components/schemas/ProfileValidationError'}}}}
+        '409': {description: Short name already used in this tenant}
+  /me/avatar:
+    post:
+      operationId: uploadMyAvatar
+      summary: Upload an image and a square crop (x, y, size)
+      security: *auth
+      requestBody:
+        required: true
+        content:
+          multipart/form-data:
+            schema:
+              type: object
+              required: [file, crop]
+              properties:
+                file: {type: string, format: binary, description: PNG, JPEG or WebP up to 8 MiB}
+                crop: {$ref: '#/components/schemas/AvatarCrop'}
+      responses:
+        '200': {description: Updated profile, content: {application/json: {schema: {$ref: '#/components/schemas/PersonalProfile'}}}}
+        '400': {description: Invalid crop or image}
+        '413': {description: Upload too large}
+    delete:
+      operationId: deleteMyAvatar
+      summary: Remove avatar and use initials fallback
+      security: *auth
+      responses:
+        '200': {description: Updated profile, content: {application/json: {schema: {$ref: '#/components/schemas/PersonalProfile'}}}}
+  /people/{principalId}/avatar/{size}:
+    parameters:
+      - {name: principalId, in: path, required: true, schema: {type: string, format: uuid}}
+      - {name: size, in: path, required: true, schema: {type: integer, enum: [32, 64, 128, 256]}}
+    get:
+      operationId: getPersonAvatar
+      summary: Content-addressed PNG avatar; use profile initials and avatar_color if absent
+      security: *auth
+      responses:
+        '200': {description: PNG with strong ETag; immutable cache only with matching v hash query}
+        '304': {description: ETag matched}
+        '404': {description: Person or avatar missing}
   /agent-keys:
     get:
       operationId: listAgentKeys
@@ -1713,6 +1769,50 @@ components:
     session: {type: apiKey, in: cookie, name: aeon_session}
     agentKey: {type: http, scheme: bearer, description: Bearer token aeon_<prefix>_<secret>}
   schemas:
+    AvatarCrop:
+      type: object
+      additionalProperties: false
+      required: [x, y, size]
+      properties:
+        x: {type: integer, minimum: 0}
+        y: {type: integer, minimum: 0}
+        size: {type: integer, minimum: 1}
+    PersonalProfilePatch:
+      type: object
+      additionalProperties: false
+      properties:
+        first_name: {type: string, maxLength: 100}
+        last_name: {type: string, maxLength: 100}
+        preferred_name: {type: string, maxLength: 100}
+        short_name: {type: string, pattern: '^(?:[a-z0-9._-]{2,24})?$', description: Empty clears the handle}
+        initials: {type: string, maxLength: 3, description: Optional override; empty derives initials}
+        timezone: {type: string, description: IANA time zone}
+        locale: {type: string, description: BCP 47 language tag}
+        greeting_enabled: {type: boolean}
+    PersonalProfile:
+      type: object
+      additionalProperties: false
+      required: [principal_id, email, first_name, last_name, preferred_name, short_name, initials, timezone, locale, greeting_enabled, avatar_color, avatar_hashes, week_start, revision]
+      properties:
+        principal_id: {type: string, format: uuid}
+        email: {type: [string, 'null'], format: email, readOnly: true}
+        first_name: {type: string}
+        last_name: {type: string}
+        preferred_name: {type: string}
+        short_name: {type: string}
+        initials: {type: string}
+        timezone: {type: string}
+        locale: {type: string}
+        greeting_enabled: {type: boolean}
+        avatar_color: {type: string, description: One of twelve muted palette tokens}
+        avatar_hashes: {type: object, additionalProperties: {type: string, pattern: '^[a-f0-9]{64}$'}}
+        week_start: {type: integer, minimum: 0, maximum: 6, description: 0=Sunday, 1=Monday}
+        revision: {type: integer, minimum: 0}
+    ProfileValidationError:
+      type: object
+      required: [errors]
+      properties:
+        errors: {type: object, additionalProperties: {type: string}}
     Journey:
       type: object
       required: [project_node_id, profile, revision, stage, stage_source, stages, next_action, requirements_revision, requirements_digest_sha256, requirements_approval_scope, launch_readiness]
