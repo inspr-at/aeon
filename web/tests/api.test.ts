@@ -15,12 +15,12 @@ function respond(body: unknown, status = 200) {
 test('accepts the authenticated principal and tenant', async () => {
   const identity = { principal: { id: 'p1', name: 'Markus Barta' }, tenant: { id: 't1', name: 'INSPR' } }
   respond(identity)
-  assert.deepEqual(await getSession(), { identity, devMode: false })
+  assert.deepEqual(await getSession(), { identity, devMode: false, devModeReported: false })
 })
 
 test('a bare 401 still redirects to sign-in with development disabled', async () => {
   globalThis.fetch = async () => new Response(null, { status: 401 })
-  assert.deepEqual(await getSession(), { identity: null, devMode: false })
+  assert.deepEqual(await getSession(), { identity: null, devMode: false, devModeReported: false })
 })
 
 test('only a literal server true enables development sign-in', async () => {
@@ -29,7 +29,7 @@ test('only a literal server true enables development sign-in', async () => {
     assert.equal((await getSession()).devMode, false)
   }
   respond({ dev_mode: true }, 401)
-  assert.deepEqual(await getSession(), { identity: null, devMode: true })
+  assert.deepEqual(await getSession(), { identity: null, devMode: true, devModeReported: true })
 })
 
 test('rejects malformed identities and server errors', async () => {

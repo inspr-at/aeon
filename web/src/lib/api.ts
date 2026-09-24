@@ -2,6 +2,16 @@
 export interface Identity {
   principal: { id: string; name: string; email?: string; kind?: 'person' | 'agent'; roles?: string[] }
   tenant: { id: string; name: string }
+  // The signed-in person's external identity; absent for agent keys.
+  identity?: { email?: string; display_name?: string } | null
+}
+
+export function accountName(identity: Identity) {
+  return identity.identity?.display_name?.trim() || identity.principal.name
+}
+
+export function accountEmail(identity: Identity) {
+  return identity.identity?.email?.trim() || identity.principal.email || ''
 }
 
 export interface Version { version: string; scheme: string }
@@ -17,7 +27,8 @@ export async function api(path: string, init: RequestInit = {}) {
 }
 
 // Keep the P0.3 auth wire contract here, separate from view components.
-export async function getSession(): Promise<{ identity: Identity | null; devMode: boolean }> {
+// devModeReported: whether the server said anything about development sign-in.
+export async function getSession(): Promise<{ identity: Identity | null; devMode: boolean; devModeReported: boolean }> {
   const response = await api('/me')
   if (!response.ok && response.status !== 401) throw new Error('Session unavailable')
   // A 401 may have no JSON body; it still means sign-in is required.
@@ -26,12 +37,22 @@ export async function getSession(): Promise<{ identity: Identity | null; devMode
     throw new Error('Invalid session response')
   })
   const devMode = body.dev_mode === true
-  if (response.status === 401) return { identity: null, devMode }
+  const devModeReported = typeof body.dev_mode === 'boolean'
+  if (response.status === 401) return { identity: null, devMode, devModeReported }
   if (typeof body.principal?.id !== 'string' || typeof body.principal?.name !== 'string'
     || typeof body.tenant?.id !== 'string' || typeof body.tenant?.name !== 'string') {
     throw new Error('Invalid session response')
   }
-  return { identity: body as Identity, devMode }
+  return { identity: body as Identity, devMode, devModeReported }
+}
+
+// Servers that do not report dev_mode: the dev-login route is mounted only in development,
+// and an empty request there is refused as invalid (400) without signing anyone in.
+export async function probeDevLogin(): Promise<boolean> {
+  try {
+    const response = await api('/auth/dev-login', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: '{}' })
+    return response.status === 400
+  } catch { return false }
 }
 
 // R1 wire types mirror api/openapi.yaml. All workspace HTTP calls stay here.
@@ -73,9 +94,11 @@ export class APIError extends Error {
   readonly body: Record<string, unknown>
   constructor(status: number, message: string, body: Record<string, unknown> = {}) { super(message); this.status = status; this.body = body }
 }
-async function json<T>(path: string, method = 'GET', body?: unknown, headers: Record<string, string> = {}): Promise<T> {
+async function json<T>(path: string, method = 'GET', body?: unknown, headers: Record<string, string> = {}, signal?: AbortSignal): Promise<T> {
   const response = await api(path, {
     method,
+    // A caller's signal (stale palette requests) combines with the usual timeout.
+    ...(signal ? { signal: AbortSignal.any([signal, AbortSignal.timeout(10_000)]) } : {}),
     ...(body === undefined ? { headers } : { headers: { 'Content-Type': 'application/json', ...headers }, body: JSON.stringify(body) }),
   })
   if (!response.ok) {
@@ -105,7 +128,8 @@ export const updateNode = (id: string, body: NodePatch, options: { ifUnmodifiedS
 export const moveNode = (id: string, parent_id: string | null, before_id?: string | null, options: { ifUnmodifiedSince?: string } = {}) =>
   json<WorkNode>(`/nodes/${idPath(id)}/move`, 'POST', { parent_id, before_id }, options.ifUnmodifiedSince ? { 'If-Unmodified-Since': options.ifUnmodifiedSince } : {})
 export const deleteNode = (id: string) => json<void>(`/nodes/${idPath(id)}`, 'DELETE')
-export const searchNodes = (q: string, params: { kind_id?: string; state?: string; cursor?: string; limit?: number } = {}) => json<Page<SearchHit>>(`/search${query({ q, ...params })}`)
+export const searchNodes = (q: string, params: { kind_id?: string; state?: string; cursor?: string; limit?: number } = {}, options: { signal?: AbortSignal } = {}) =>
+  json<Page<SearchHit>>(`/search${query({ q, ...params })}`, 'GET', undefined, {}, options.signal)
 // B1 list and project-summary wire types (api/openapi.yaml NodeListItem, listProjects).
 export interface ListPerson { id: string; name: string }
 export interface ListParent { id: string; key: string; title: string; kind_slug: string }
@@ -134,7 +158,7 @@ function listQuery(params: ListQuery): string {
   }
   return query(values)
 }
-export const listNodes = (params: ListQuery) => json<ListPage>(`/nodes${listQuery(params)}`)
+export const listNodes = (params: ListQuery, options: { signal?: AbortSignal } = {}) => json<ListPage>(`/nodes${listQuery(params)}`, 'GET', undefined, {}, options.signal)
 export const getProjects = (includeArchived = false) => json<{ items: ProjectSummary[] }>(`/projects${includeArchived ? '?include_archived=true' : ''}`)
 // B2 ticket activity and comments.
 export type ChangeField = 'status' | 'priority' | 'assignee' | 'title' | 'parent'

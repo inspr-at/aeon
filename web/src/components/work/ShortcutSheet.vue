@@ -6,14 +6,23 @@ import AppIcon, { type IconName } from '../AppIcon.vue'
 type Key = string | { icon: IconName; label: string }
 const mac = /Mac|iPhone|iPad/.test(navigator.platform || navigator.userAgent)
 const sections: { title: string; rows: { keys: Key[][]; label: string; joiner?: string }[] }[] = [
+  { title: 'Anywhere', rows: [
+    { keys: [[mac ? '⌘' : 'Ctrl', 'K']], label: 'Search tickets, projects and actions' },
+    { keys: [['/']], label: 'Search, on pages without a list' },
+    { keys: [['?']], label: 'This sheet' },
+  ] },
+  { title: 'Search', rows: [
+    { keys: [[{ icon: 'arrow-down', label: 'Down arrow' }], [{ icon: 'arrow-up', label: 'Up arrow' }]], label: 'Move through results' },
+    { keys: [['Tab']], label: 'Next group of results' },
+    { keys: [[mac ? '⌘' : 'Ctrl', { icon: 'enter', label: 'Enter' }]], label: 'Open in a new tab' },
+    { keys: [['⌫']], label: 'Search all projects, not only this one' },
+  ] },
   { title: 'Ticket list', rows: [
     { keys: [['j'], [{ icon: 'arrow-down', label: 'Down arrow' }]], label: 'Next ticket' },
     { keys: [['k'], [{ icon: 'arrow-up', label: 'Up arrow' }]], label: 'Previous ticket' },
     { keys: [[{ icon: 'enter', label: 'Enter' }], ['o']], label: 'Open the ticket in the side panel' },
     { keys: [['Esc']], label: 'Close the side panel' },
     { keys: [['/']], label: 'Search this list' },
-    { keys: [[mac ? '⌘' : 'Ctrl', 'K']], label: 'Search everything' },
-    { keys: [['?']], label: 'This sheet' },
   ] },
   { title: 'Outline', rows: [
     { keys: [[{ icon: 'arrow', label: 'Right arrow' }]], label: 'Expand, or step into the first child' },

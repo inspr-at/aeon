@@ -25,16 +25,18 @@ export const router = createRouter({
     { path: '/runs/:runId?', component: () => import('./views/RunsView.vue'), meta: { title: 'Sessions & runs' } },
     { path: '/approvals', component: () => import('./views/ApprovalsView.vue'), meta: { title: 'Approvals' } },
     { path: '/pacing', component: () => import('./views/PacingView.vue'), meta: { title: 'Pacing' } },
-    { path: '/signin', component: SignInView, meta: { title: 'Sign in' } },
+    { path: '/signin', component: SignInView, meta: { title: 'Sign in', bare: true } },
     { path: '/:pathMatch(.*)*', component: NotFoundView, meta: { title: 'Page not found' } },
   ],
 })
 
 router.beforeEach(async (to) => {
   const session = useSession()
+  const wasSignedIn = !!session.identity
   await session.refresh()
   if (session.error) return true // The shell shows a retry screen, never protected content.
-  if (!session.identity && to.path !== '/signin') return '/signin'
+  // Losing a session without signing out means it expired; say so on the sign-in page.
+  if (!session.identity && to.path !== '/signin') return wasSignedIn ? { path: '/signin', query: { error: 'expired' } } : '/signin'
   if (session.identity && to.path === '/signin') return '/'
 })
 router.afterEach((to) => { document.title = `${to.meta.title} · PAIMOS AEON` })
