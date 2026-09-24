@@ -3,8 +3,8 @@
 import { computed, nextTick, onBeforeUnmount, onMounted, ref, watch } from 'vue'
 import QuoteDocument from '../components/quotes/editor/QuoteDocument.vue'
 import { brand, setPageTitle } from '../lib/brand'
-import { dayText } from '../lib/quotes/list'
-import { documentTotal, money } from '../lib/quotes/layout'
+import { documentTotal } from '../lib/quotes/layout'
+import { COPY, documentLanguage, formatDay, formatMoment, formatMoney } from '../lib/quotes/publicCopy'
 import type { QuoteDocumentData } from '../lib/quotes/types'
 import { useVersion } from '../stores/version'
 
@@ -39,17 +39,23 @@ const apiPath = computed(() => `/api/public/quotes/${encodeURIComponent(props.pu
 const pdfPath = computed(() => `${apiPath.value}/pdf`)
 const sender = computed(() => quote.value?.document.sender.company?.trim() || '')
 const recipient = computed(() => quote.value?.document.recipient.name?.trim() || '')
-const total = computed(() => { const d = quote.value?.document; if (!d) return ''; try { return money(documentTotal(d.positions), d.currency) } catch { return '' } })
+// Every word, date and amount in the document's language; the signed-in app stays English.
+const lang = computed(() => documentLanguage(quote.value?.document))
+const t = computed(() => COPY[lang.value])
+const total = computed(() => { const d = quote.value?.document; if (!d) return ''; try { return formatMoney(documentTotal(d.positions), d.currency, lang.value) } catch { return '' } })
 const linkEnded = computed(() => !!quote.value && Date.parse(quote.value.expires_at) <= Date.now())
 const accepted = computed(() => !!quote.value && (quote.value.state === 'accepted' || !!quote.value.accepted_at))
-const when = (iso: string | undefined) => iso ? new Intl.DateTimeFormat('en-GB', { day: 'numeric', month: 'long', year: 'numeric', hour: '2-digit', minute: '2-digit' }).format(new Date(iso)) : ''
+const when = (iso: string | undefined) => formatMoment(iso, lang.value)
+const day = (iso: string | undefined) => formatDay(iso, lang.value)
+// The evidence sentence around the fingerprint, which is shown in the mono face.
+const evidence = computed(() => t.value.evidence('\u0000').split('\u0000') as [string, string])
 const shortDigest = (sha: string) => `${sha.slice(0, 8)}…${sha.slice(-6)}`
 const closedReason = computed(() => {
   const q = quote.value
   if (!q || q.acceptable || accepted.value) return ''
-  if (linkEnded.value) return `This link ended on ${when(q.expires_at)}.`
-  if (q.state === 'issued' && q.document.valid_until) return `The offer was valid until ${dayText(q.document.valid_until)}.`
-  return 'A newer version may replace it.'
+  if (linkEnded.value) return t.value.linkEnded(when(q.expires_at))
+  if (q.state === 'issued' && q.document.valid_until) return t.value.validityEnded(day(q.document.valid_until))
+  return t.value.replaced
 })
 
 // Receipts follow an acceptance within a minute or so; the page checks a few times.
@@ -59,13 +65,13 @@ async function load(quiet = false) {
   try {
     const response = await fetch(apiPath.value, { credentials: 'omit', cache: 'no-store', referrerPolicy: 'no-referrer' })
     if (response.status === 404 || response.status === 410) { missing.value = true; quote.value = null; return }
-    if (!response.ok) throw new Error('This quote could not be loaded. Please try again in a moment.')
+    if (!response.ok) throw new Error(t.value.failedBody)
     quote.value = await response.json() as PublicQuote
-    setPageTitle(`Quote ${quote.value.offer_no}${sender.value ? ` from ${sender.value}` : ''}`)
+    setPageTitle(t.value.pageTitle(quote.value.offer_no, sender.value))
     window.clearTimeout(poll)
     if (accepted.value && !quote.value.receipt_ready && polls < 24) { polls++; poll = window.setTimeout(() => { void load(true) }, 5000) }
   } catch (cause) {
-    if (!quiet) error.value = cause instanceof Error ? cause.message : 'This quote could not be loaded.'
+    if (!quiet) error.value = cause instanceof Error && cause.message === t.value.failedBody ? cause.message : t.value.failedBody
   } finally { if (!quiet) loading.value = false }
 }
 watch(() => [props.publicTenant, props.token], () => { mutationID = crypto.randomUUID(); acceptedNow.value = null; polls = 0; void load() }, { immediate: true })
@@ -83,15 +89,15 @@ async function accept() {
       body: JSON.stringify({ version: quote.value.version, expected_content_sha256: quote.value.content_sha256,
         client_mutation_id: mutationID, name: name.value.trim(), company: company.value.trim(), note: note.value.trim(), confirm: true }),
     })
-    if (response.status === 429) throw new Error('Too many attempts in a short time. Please wait a minute and try again.')
-    if (!response.ok) throw new Error(response.status === 409 ? 'This quote can no longer be accepted. It changed, ended or was already decided; reload the page to see where it stands.' : 'Your acceptance could not be saved. Nothing was recorded; please try again.')
+    if (response.status === 429) throw new Error(t.value.tooMany)
+    if (!response.ok) throw new Error(response.status === 409 ? t.value.noLongerAcceptable : t.value.notSaved)
     const body = await response.json().catch(() => ({})) as { accepted_at?: string }
     acceptedNow.value = { name: name.value.trim(), at: body.accepted_at ?? new Date().toISOString() }
     await load(true)
     await nextTick()
     decision.value?.focus()
   } catch (cause) {
-    error.value = cause instanceof Error ? cause.message : 'Your acceptance could not be saved.'
+    error.value = cause instanceof Error && Object.values(t.value).includes(cause.message) ? cause.message : t.value.notSaved
   } finally { busy.value = false }
 }
 function toDecision() { decision.value?.scrollIntoView({ behavior: 'smooth', block: 'start' }); void nextTick(() => nameInput.value?.focus({ preventScroll: true })) }
@@ -110,60 +116,63 @@ watch(desk, el => {
 })
 // Private by construction: no referrer leaves this page and search engines are asked to stay away.
 const metas: HTMLMetaElement[] = []
+// Screen readers read the page in its language.
+const pageLang = document.documentElement.lang
+watch(lang, value => { document.documentElement.lang = value }, { immediate: true })
 onMounted(() => {
   for (const [key, content] of [['robots', 'noindex, nofollow, noarchive'], ['referrer', 'no-referrer']] as const) {
     const meta = document.createElement('meta'); meta.name = key; meta.content = content; document.head.append(meta); metas.push(meta)
   }
 })
-onBeforeUnmount(() => { sizer?.disconnect(); cancelAnimationFrame(frame); window.clearTimeout(poll); for (const meta of metas) meta.remove() })
+onBeforeUnmount(() => { sizer?.disconnect(); cancelAnimationFrame(frame); window.clearTimeout(poll); for (const meta of metas) meta.remove(); document.documentElement.lang = pageLang })
 </script>
 
 <template>
   <main class="public-quote">
     <header class="pq-bar">
       <div class="pq-bar-inner">
-        <p class="pq-sender">{{ sender || 'Quote' }}</p>
-        <p v-if="quote" class="pq-ref"><span>Quote {{ quote.offer_no }}</span><span>Version {{ quote.version }}</span></p>
+        <p class="pq-sender">{{ sender || t.quote }}</p>
+        <p v-if="quote" class="pq-ref"><span>{{ t.quoteNo(quote.offer_no) }}</span><span>{{ t.version(quote.version) }}</span></p>
       </div>
     </header>
 
-    <div v-if="loading" class="pq-wrap" role="status" aria-label="Loading the quote"><div class="pq-card pq-skeleton"><span class="skeleton" /><span class="skeleton short" /></div></div>
+    <div v-if="loading" class="pq-wrap" role="status" :aria-label="t.loading"><div class="pq-card pq-skeleton"><span class="skeleton" /><span class="skeleton short" /></div></div>
     <div v-else-if="missing" class="pq-wrap">
       <section class="pq-card pq-message" role="alert">
-        <h1>This link does not open a quote</h1>
-        <p>It may have ended or been revoked, or it was copied only in part. The sender can share a new link with you.</p>
+        <h1>{{ t.missingTitle }}</h1>
+        <p>{{ t.missingBody }}</p>
       </section>
     </div>
     <div v-else-if="!quote" class="pq-wrap">
       <section class="pq-card pq-message" role="alert">
-        <h1>The quote could not be loaded</h1>
-        <p>{{ error }}</p>
-        <button type="button" class="pq-btn" @click="load()">Try again</button>
+        <h1>{{ t.failedTitle }}</h1>
+        <p>{{ error || t.failedBody }}</p>
+        <button type="button" class="pq-btn" @click="load()">{{ t.retry }}</button>
       </section>
     </div>
     <template v-else>
       <div class="pq-wrap">
         <section class="pq-card pq-intro" aria-labelledby="pq-title">
-          <p class="pq-eyebrow">{{ recipient ? `For ${recipient}` : 'Quote' }}</p>
+          <p class="pq-eyebrow">{{ recipient ? t.forRecipient(recipient) : t.quote }}</p>
           <h1 id="pq-title">{{ quote.document.title }}</h1>
           <p v-if="quote.document.subtitle" class="pq-sub">{{ quote.document.subtitle }}</p>
           <dl class="pq-facts">
-            <div><dt>Net total</dt><dd class="pq-mono">{{ total }}</dd></div>
-            <div><dt>Dated</dt><dd>{{ dayText(quote.document.offer_date) }}</dd></div>
-            <div><dt>Valid until</dt><dd>{{ dayText(quote.document.valid_until) }}</dd></div>
+            <div><dt>{{ t.netTotal }}</dt><dd class="pq-mono">{{ total }}</dd></div>
+            <div><dt>{{ t.dated }}</dt><dd class="pq-mono">{{ day(quote.document.offer_date) }}</dd></div>
+            <div><dt>{{ t.validUntil }}</dt><dd class="pq-mono">{{ day(quote.document.valid_until) }}</dd></div>
           </dl>
-          <p v-if="accepted" class="pq-status ok" role="status"><svg width="16" height="16" viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><circle cx="8" cy="8" r="6.2" /><path d="m5.3 8.2 1.9 1.9 3.6-3.9" /></svg><span>This quote has been accepted.<template v-if="quote.accepted_at"> Accepted on {{ when(quote.accepted_at) }}.</template></span></p>
-          <p v-else-if="quote.acceptable" class="pq-status">Please read the quote below. If it suits you, you can accept it at the end of this page; no account is needed.</p>
-          <p v-else class="pq-status muted">This quote remains available to read. Acceptance is closed. {{ closedReason }}</p>
+          <p v-if="accepted" class="pq-status ok" role="status"><svg width="16" height="16" viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><circle cx="8" cy="8" r="6.2" /><path d="m5.3 8.2 1.9 1.9 3.6-3.9" /></svg><span>{{ t.accepted }}{{ quote.accepted_at ? t.acceptedOn(when(quote.accepted_at)) : '' }}</span></p>
+          <p v-else-if="quote.acceptable" class="pq-status">{{ t.invite }}</p>
+          <p v-else class="pq-status muted">{{ t.closed }} {{ closedReason }}</p>
           <div class="pq-actions">
-            <button v-if="quote.acceptable" type="button" class="pq-btn primary" @click="toDecision">Review and accept</button>
-            <a class="pq-btn" :href="pdfPath" target="_blank" rel="noopener noreferrer"><svg width="15" height="15" viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M8 2.6v7.6M4.8 7.2 8 10.4l3.2-3.2M3 13.2h10" /></svg>{{ accepted && quote.receipt_ready ? 'Receipt (PDF)' : 'PDF' }}<span class="sr-only"> (opens in a new tab)</span></a>
+            <button v-if="quote.acceptable" type="button" class="pq-btn primary" @click="toDecision">{{ t.reviewAndAccept }}</button>
+            <a class="pq-btn" :href="pdfPath" target="_blank" rel="noopener noreferrer"><svg width="15" height="15" viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M8 2.6v7.6M4.8 7.2 8 10.4l3.2-3.2M3 13.2h10" /></svg>{{ accepted && quote.receipt_ready ? t.receiptPdf : t.pdf }}<span class="sr-only">{{ t.newTab }}</span></a>
           </div>
         </section>
       </div>
 
-      <p v-if="overflow" role="alert" class="pq-wrap pq-note">Part of the document did not fit on its page: {{ overflow }}</p>
-      <section ref="desk" class="pq-desk" aria-label="Quote document">
+      <p v-if="overflow" role="alert" class="pq-wrap pq-note">{{ t.overflow(overflow) }}</p>
+      <section ref="desk" class="pq-desk" :aria-label="t.documentRegion">
         <div class="pq-paper" :style="{ zoom: scale }">
           <QuoteDocument :document="quote.document" :offer-no="quote.offer_no" :editable="false" @overflow="overflow = $event ?? ''" />
         </div>
@@ -171,36 +180,36 @@ onBeforeUnmount(() => { sizer?.disconnect(); cancelAnimationFrame(frame); window
 
       <div class="pq-wrap">
         <section v-if="acceptedNow" ref="decision" class="pq-card pq-done" tabindex="-1" aria-labelledby="pq-done-title">
-          <h2 id="pq-done-title">Thank you{{ acceptedNow ? `, ${acceptedNow.name}` : '' }}</h2>
-          <p role="status">Your acceptance of version {{ quote.version }} was recorded{{ acceptedNow ? ` on ${when(acceptedNow.at)}` : '' }}. {{ quote.receipt_ready ? 'Your receipt is ready.' : 'Your receipt (a PDF of this quote with the acceptance) is being prepared and will appear here.' }}</p>
-          <a v-if="quote.receipt_ready" class="pq-btn" :href="pdfPath" target="_blank" rel="noopener noreferrer">Open the receipt<span class="sr-only"> (opens in a new tab)</span></a>
+          <h2 id="pq-done-title">{{ t.thanks(acceptedNow.name) }}</h2>
+          <p role="status">{{ t.recorded(quote.version, when(acceptedNow.at)) }} {{ quote.receipt_ready ? t.receiptReady : t.receiptPending }}</p>
+          <a v-if="quote.receipt_ready" class="pq-btn" :href="pdfPath" target="_blank" rel="noopener noreferrer">{{ t.openReceipt }}<span class="sr-only">{{ t.newTab }}</span></a>
         </section>
         <section v-else-if="quote.acceptable" ref="decision" class="pq-card pq-decision" tabindex="-1" aria-labelledby="decision-title">
-          <h2 id="decision-title">Accept this quote</h2>
-          <p class="pq-lead">You accept version {{ quote.version }} of quote {{ quote.offer_no }}{{ total ? `, net ${total}` : '' }}, exactly as shown above.</p>
+          <h2 id="decision-title">{{ t.acceptTitle }}</h2>
+          <p class="pq-lead">{{ t.acceptLead(quote.version, quote.offer_no, total) }}</p>
           <form novalidate @submit.prevent="accept">
             <div class="pq-field">
-              <label for="public-name">Your name</label>
+              <label for="public-name">{{ t.yourName }}</label>
               <input id="public-name" ref="nameInput" v-model="name" name="name" autocomplete="name" required maxlength="500" :aria-invalid="tried && !name.trim()" aria-describedby="public-name-note" />
-              <p v-if="tried && !name.trim()" id="public-name-note" class="pq-bad" role="alert">Please enter your name.</p>
+              <p v-if="tried && !name.trim()" id="public-name-note" class="pq-bad" role="alert">{{ t.nameMissing }}</p>
             </div>
             <div class="pq-field">
-              <label for="public-company">Company <span class="pq-opt">optional</span></label>
+              <label for="public-company">{{ t.company }} <span class="pq-opt">{{ t.optional }}</span></label>
               <input id="public-company" v-model="company" name="organization" autocomplete="organization" maxlength="500" />
             </div>
             <div class="pq-field">
-              <label for="public-note">Note to {{ sender || 'the sender' }} <span class="pq-opt">optional</span></label>
+              <label for="public-note">{{ t.noteTo(sender || t.theSender) }} <span class="pq-opt">{{ t.optional }}</span></label>
               <textarea id="public-note" v-model="note" name="note" maxlength="4000" rows="3" />
             </div>
-            <label class="pq-check" for="public-confirm"><input id="public-confirm" v-model="confirm" type="checkbox" required />I have reviewed this quote and agree to accept it.</label>
-            <button class="pq-btn primary pq-submit" type="submit" :disabled="busy || !confirm">{{ busy ? 'Recording…' : 'Accept quote' }}</button>
+            <label class="pq-check" for="public-confirm"><input id="public-confirm" v-model="confirm" type="checkbox" required />{{ t.confirm }}</label>
+            <button class="pq-btn primary pq-submit" type="submit" :disabled="busy || !confirm">{{ busy ? t.submitting : t.submit }}</button>
           </form>
-          <p class="pq-fine">Your name, company, note and the time are recorded with the quote’s fingerprint <span class="pq-mono">{{ shortDigest(quote.content_sha256) }}</span>, so everyone can later see what exactly was accepted.</p>
+          <p class="pq-fine">{{ evidence[0] }}<span class="pq-mono">{{ shortDigest(quote.content_sha256) }}</span>{{ evidence[1] }}</p>
         </section>
         <p v-if="error && quote" role="alert" class="pq-card pq-error">{{ error }}</p>
       </div>
     </template>
-    <footer class="pq-foot"><p>This page shows only this quote{{ sender ? `, shared with you by ${sender}` : '' }}. Made with {{ brand.wordmark }}.</p></footer>
+    <footer class="pq-foot"><p>{{ t.footer(sender, brand.wordmark) }}</p></footer>
   </main>
 </template>
 
@@ -273,4 +282,10 @@ onBeforeUnmount(() => { sizer?.disconnect(); cancelAnimationFrame(frame); window
   .pq-desk { padding: 0; }
   .pq-paper { zoom: 1 !important; }
 }
+</style>
+
+<style>
+/* The customer's page surface reaches under the shell's reserved scrollbar gutter,
+   so no strip of the app background shows at the right edge. */
+main:has(> .page-flow > .public-quote) { background: var(--surface); }
 </style>

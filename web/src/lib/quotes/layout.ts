@@ -14,7 +14,10 @@ export const decimalCents = (cents: number): string => {
 export const money = (cents: number, currency: string): string => {
   const decimal = decimalCents(cents)
   const [whole, fraction] = decimal.split('.')
-  return `${new Intl.NumberFormat('de-AT').format(BigInt(whole!))},${fraction} ${currency}`
+  // German grouping with a dot, as the classic quote printed it (never a space).
+  const sign = whole!.startsWith('-') ? '-' : ''
+  const digits = whole!.replace('-', '').replace(/\B(?=(\d{3})+(?!\d))/g, '.')
+  return `${sign}${digits},${fraction} ${currency}`
 }
 export const quantityHundredths = (quantity: string): bigint => {
   if (!/^(0|[1-9]\d*)(?:\.(\d{1,2}))?$/.test(quantity)) throw new Error('Invalid exact quantity')

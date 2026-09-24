@@ -10,6 +10,8 @@ import { conflictPlace, conflictValue } from '../src/lib/quotes/conflicts'
 import { lifecycleError, shortDigest } from '../src/lib/quotes/lifecycle'
 import { APIError } from '../src/lib/api'
 import type { QuoteDocumentData } from '../src/lib/quotes/types'
+import { COPY, documentLanguage, formatDay, formatMoment, formatMoney } from '../src/lib/quotes/publicCopy'
+import { money } from '../src/lib/quotes/layout'
 
 const row = (patch: Partial<QuoteRow>): QuoteRow => ({
   quote_node_id: 'q', project_node_id: '', customer_org_node_id: 'org-a', current_version: 0, state: 'draft', revision: 1, archived: false,
@@ -92,6 +94,29 @@ describe('lifecycle words', () => {
   })
 })
 
+describe('the customer page speaks the document’s language', () => {
+  const doc = (texts: Partial<QuoteDocumentData>) => ({ title: '', subtitle: '', legal: {}, layout: {}, sections: [], positions: [], ...texts }) as unknown as QuoteDocumentData
+  it('reads the language from the document, German when in doubt, a declared one first', () => {
+    expect(documentLanguage(doc({ title: 'Relaunch des Kundenportals', legal: { intro: 'Vielen Dank für Ihre Anfrage.' } }))).toBe('de')
+    expect(documentLanguage(doc({ title: 'Synthetic service proposal', legal: { intro: 'A synthetic offer for layout checks.', accept_text: 'I accept this offer.' } }))).toBe('en')
+    expect(documentLanguage(doc({ title: 'Website' }))).toBe('de')
+    expect(documentLanguage(doc({ title: 'Relaunch des Portals', layout: { language: 'en' } as never }))).toBe('en')
+  })
+  it('formats dates and amounts in one locale', () => {
+    expect(formatDay('2026-09-21', 'de')).toBe('21.09.2026')
+    expect(formatDay('2026-09-21', 'en')).toBe('21/09/2026')
+    expect(formatMoney(556000, 'EUR', 'de')).toBe('5.560,00 EUR')
+    expect(formatMoney(123456789, 'EUR', 'en')).toBe('1,234,567.89 EUR')
+    expect(formatMoment('2026-09-21T08:12:00Z', 'de')).toMatch(/^21\.09\.2026, \d{2}:12 Uhr$/)
+    // The paper groups German amounts the same way.
+    expect(money(556000, 'EUR')).toBe(formatMoney(556000, 'EUR', 'de'))
+  })
+  it('has every string in both catalogs', () => {
+    expect(Object.keys(COPY.de).sort()).toEqual(Object.keys(COPY.en).sort())
+    expect(COPY.de.acceptLead(1, 'A260922-12', '5.560,00 EUR')).toBe('Sie nehmen Version 1 des Angebots A260922-12 über netto 5.560,00 EUR an, genau so wie oben dargestellt.')
+  })
+})
+
 // CSP parity: default-src 'self'; img-src 'self' blob: data: on the app, stricter on
 // the public page. The new surfaces need no eval, inline handlers or other origins.
 describe('CSP parity of the quote surfaces', () => {
@@ -99,7 +124,7 @@ describe('CSP parity of the quote surfaces', () => {
     const dirs = ['../src/components/quotes/details/', '../src/components/quotes/list/', '../src/components/quotes/collaboration/'].map(d => new URL(d, import.meta.url).pathname)
     const files = [
       ...dirs.flatMap(d => readdirSync(d).map(f => join(d, f))),
-      ...['../src/public/PublicQuoteView.vue', '../src/views/business/QuotesView.vue', '../src/components/business/QuoteWorkspace.vue', '../src/components/business/QuoteCreateDialog.vue', '../src/lib/quoteWorkspace.ts', '../src/lib/quotes/list.ts', '../src/lib/quotes/lifecycle.ts', '../src/lib/quotes/conflicts.ts'].map(f => new URL(f, import.meta.url).pathname),
+      ...['../src/public/PublicQuoteView.vue', '../src/views/business/QuotesView.vue', '../src/components/business/QuoteWorkspace.vue', '../src/components/business/QuoteCreateDialog.vue', '../src/lib/quoteWorkspace.ts', '../src/lib/quotes/list.ts', '../src/lib/quotes/lifecycle.ts', '../src/lib/quotes/conflicts.ts', '../src/lib/quotes/publicCopy.ts'].map(f => new URL(f, import.meta.url).pathname),
     ]
     for (const file of files) {
       const text = readFileSync(file, 'utf8')
