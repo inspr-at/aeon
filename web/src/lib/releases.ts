@@ -31,6 +31,14 @@ export async function getReleases(): Promise<ReleaseHistory> {
   return body
 }
 
+// One release from the server's history; null when it has none for that version.
+export async function getRelease(version: string): Promise<Release | null> {
+  try {
+    const response = await api(`/releases/${encodeURIComponent(version)}`)
+    return response.ok ? await response.json() as Release : null
+  } catch { return null }
+}
+
 // When a release happened: published, else tagged, else reserved.
 export function releasedAt(r: Pick<Release, 'published_at' | 'tagged_at' | 'reserved_at'>): string | null {
   return r.published_at ?? r.tagged_at ?? r.reserved_at
@@ -73,11 +81,33 @@ export function groupChanges(changes: ReleaseChange[]): Record<ChangeGroup, Rele
   for (const c of changes) { const g = GROUP_OF[c.type]; if (g) out[g].push(c) }
   return out
 }
-// A subject without its conventional prefix ("feat(AEON-74): wide lists" reads "wide lists").
-export function plainSubject(subject: string) {
+// ---------- Display ----------
+// Headlines and subjects as people read them, next to their ticket chips: the keys
+// the chips already show are left out and the text starts with a capital. Display
+// only; the history keeps the text as tagged.
+const ONLY_KEY = /^[A-Z][A-Z0-9]{1,9}-[1-9]\d{0,6}$/
+export const sentence = (text: string) => text.charAt(0).toUpperCase() + text.slice(1)
+export function displayText(text: string, keys: Iterable<string>) {
+  const shown = new Set(keys)
+  const drop = (part: string) => ONLY_KEY.test(part) && shown.has(part)
+  let out = text
+    // "(AEON-67, AEON-75)" goes; "(WIP, AEON-13)" keeps "(WIP)".
+    .replace(/\s*\(([^()]*)\)/g, (whole, inner: string) => {
+      const parts = inner.split(/\s*[,;&+/]\s*|\s+and\s+/).map(p => p.trim()).filter(Boolean)
+      const kept = parts.filter(p => !drop(p))
+      if (kept.length === parts.length) return whole
+      return kept.length ? ` (${kept.join(', ')})` : ''
+    })
+    // "AEON-75: edit and delete" reads "edit and delete".
+    .replace(/^\s*([A-Z][A-Z0-9]{1,9}-[1-9]\d{0,6})\s*[:\-–]\s*/, (whole, key: string) => drop(key) ? '' : whole)
+  out = out.replace(/\s+([,.;:])/g, '$1').replace(/[,;:\s]+$/, '').replace(/\s{2,}/g, ' ').trim()
+  return sentence(out || text)
+}
+export const displayHeadline = (r: Pick<Release, 'headline' | 'tickets' | 'changes'>) => displayText(r.headline, ticketsOf(r as Release))
+// A subject without its conventional prefix ("feat(AEON-74): wide lists" reads "Wide lists").
+export function plainSubject(subject: string, tickets: string[] = []) {
   const m = /^[a-z]+(?:\([^)]*\))?!?:\s*(.+)$/.exec(subject)
-  const text = m ? m[1] : subject
-  return text.charAt(0).toUpperCase() + text.slice(1)
+  return displayText(m ? m[1] : subject, tickets)
 }
 
 // ---------- Stats ----------

@@ -82,11 +82,16 @@ func TestHandlersAndMiddleware(t *testing.T) {
 		if rec.Code != http.StatusOK {
 			t.Fatalf("status %d body %s", rec.Code, rec.Body.String())
 		}
-		if !strings.Contains(rec.Body.String(), "<title>PAIMOS AEON</title>") {
+		if !strings.Contains(rec.Body.String(), "<title>"+brand.Default().Wordmark+"</title>") {
 			t.Fatalf("body %s", rec.Body.String())
 		}
 		if rec.Header().Get("Content-Security-Policy") != "default-src 'self'" {
 			t.Fatal("csp missing on placeholder")
+		}
+		// The deployment's brand names the placeholder too.
+		custom := brand.Brand{Schema: brand.Schema, Product: "NOVA", Generation: "1", ReleaseName: "DAWN", Wordmark: "NOVA DAWN", ShortName: "DAWN"}
+		if body := get(t, (&Server{Brand: &custom}).Handler(), "/", "").Body.String(); !strings.Contains(body, "<title>NOVA DAWN</title>") || strings.Contains(body, "AEON") {
+			t.Fatalf("branded placeholder %s", body)
 		}
 	})
 

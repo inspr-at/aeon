@@ -3,7 +3,7 @@
 import { computed, nextTick, onBeforeUnmount, onMounted, reactive, ref, watch } from 'vue'
 import mark from '../../assets/brand/aeon-mark.svg'
 import { brand, generationLabel, setOverlayTitle } from '../../lib/brand'
-import { groupByDay, groupChanges, matches, releasedAt, stats as statsOf, ticketsOf, type Release } from '../../lib/releases'
+import { displayHeadline, groupByDay, groupChanges, matches, releasedAt, stats as statsOf, ticketsOf, type Release } from '../../lib/releases'
 import { relativeTime } from '../../lib/work'
 import { isCalendar, useReleases } from '../../stores/releases'
 import { useVersion } from '../../stores/version'
@@ -183,7 +183,7 @@ onMounted(async () => {
   if (store.history) { initialSelection(); await nextTick(); listbox.value?.focus({ preventScroll: true }) }
   // Always refetch: the server may run a newer build than when the page loaded.
   await store.load(true)
-  store.markSeen()
+  await store.markSeen()
   initialSelection()
   await nextTick()
   if (document.activeElement === dialog.value) listbox.value?.focus({ preventScroll: true })
@@ -206,6 +206,13 @@ const summaries = computed(() => new Map(releases.value.map(r => {
 })))
 const countsOf = (r: Release) => summaries.value.get(r.version) ?? { features: 0, fixes: 0, other: 0, tickets: [] as string[] }
 function reload() { window.location.reload() }
+// Change counts in a row: one glyph per kind, named in full for tooltips and screen readers.
+const plural = (n: number, one: string, many: string) => `${n} ${n === 1 ? one : many}`
+const KINDS = [
+  { key: 'features', icon: 'sparkle', label: (n: number) => plural(n, 'feature', 'features') },
+  { key: 'fixes', icon: 'bug', label: (n: number) => plural(n, 'fix', 'fixes') },
+  { key: 'other', icon: 'gear', label: (n: number) => plural(n, 'other change', 'other changes') },
+] as const
 </script>
 
 <template>
@@ -240,20 +247,22 @@ function reload() { window.location.reload() }
           <span>{{ missing }} is not in this build’s release history.</span>
           <button type="button" class="icon-btn flat sm" aria-label="Dismiss" @click="missing = ''"><AppIcon name="close" :size="12" /></button>
         </p>
-        <ReleaseStats v-if="releases.length" class="stats" :stats="stats" :current="current" :live-since="history?.live_since ?? null" :now="now" />
+        <ReleaseStats v-if="releases.length && !phone" class="stats" :stats="stats" :current="current" :live-since="history?.live_since ?? null" :now="now" />
       </header>
 
       <div class="body">
         <section class="list-pane" aria-label="Releases">
+          <!-- Phones: the stats scroll away with the list, inside the gutter. -->
+          <ReleaseStats v-if="releases.length && phone" compact class="stats" :stats="stats" :current="current" :live-since="history?.live_since ?? null" :now="now" />
           <div class="filters">
             <div class="toggles" role="group" aria-label="Show only releases with">
-              <button type="button" class="toggle" :aria-pressed="filter.features" @click="filter.features = !filter.features"><AppIcon name="sparkle" :size="12" />Features</button>
-              <button type="button" class="toggle" :aria-pressed="filter.fixes" @click="filter.fixes = !filter.fixes"><AppIcon name="wrench" :size="12" />Fixes</button>
+              <button type="button" class="toggle" :aria-pressed="filter.features" @click="filter.features = !filter.features"><AppIcon name="sparkle" :size="13" />Features</button>
+              <button type="button" class="toggle" :aria-pressed="filter.fixes" @click="filter.fixes = !filter.fixes"><AppIcon name="bug" :size="13" />Fixes</button>
               <button type="button" class="toggle" :aria-pressed="filter.tickets" @click="filter.tickets = !filter.tickets"><AppIcon name="ticket" :size="12" />Tickets</button>
             </div>
             <p class="result-count" aria-live="polite">
               <template v-if="filtering">{{ visible.length }} of {{ releases.length }}</template>
-              <template v-else-if="releases.length">{{ releases.length - reservedCount }} published<template v-if="reservedCount"> · {{ reservedCount }} reserved</template></template>
+              <template v-else-if="releases.length">{{ releases.length - reservedCount }}<template v-if="!phone"> published</template><template v-if="reservedCount"> · {{ reservedCount }} reserved</template></template>
             </p>
           </div>
 
@@ -309,11 +318,11 @@ function reload() { window.location.reload() }
                     <span v-if="r.version === compareTo" class="tag end-tag">To</span>
                   </span>
                   <span v-if="r.state === 'reserved'" class="headline">Reserved, never published</span>
-                  <span v-else class="headline"><template v-for="(p, i) in marked(r.headline || 'No headline recorded')" :key="i"><mark v-if="p.hit">{{ p.text }}</mark><template v-else>{{ p.text }}</template></template></span>
+                  <span v-else class="headline"><template v-for="(p, i) in marked(r.headline ? displayHeadline(r) : 'No headline recorded')" :key="i"><mark v-if="p.hit">{{ p.text }}</mark><template v-else>{{ p.text }}</template></template></span>
                   <span v-if="r.state === 'published'" class="counts">
-                    <span v-if="countsOf(r).features" class="count"><AppIcon name="sparkle" :size="11" />{{ countsOf(r).features }}<span class="sr"> features</span></span>
-                    <span v-if="countsOf(r).fixes" class="count"><AppIcon name="wrench" :size="11" />{{ countsOf(r).fixes }}<span class="sr"> fixes</span></span>
-                    <span v-if="countsOf(r).other" class="count"><AppIcon name="commit" :size="11" />{{ countsOf(r).other }}<span class="sr"> other changes</span></span>
+                    <template v-for="k in KINDS" :key="k.key">
+                      <span v-if="countsOf(r)[k.key]" class="count" role="img" :aria-label="k.label(countsOf(r)[k.key])" :data-tip="k.label(countsOf(r)[k.key])"><AppIcon :name="k.icon" :size="13" />{{ countsOf(r)[k.key] }}</span>
+                    </template>
                     <span v-if="countsOf(r).tickets.length" class="count keys mono">{{ countsOf(r).tickets.slice(0, 2).join(' ') }}<template v-if="countsOf(r).tickets.length > 2"> +{{ countsOf(r).tickets.length - 2 }}</template></span>
                   </span>
                 </span>
@@ -400,7 +409,7 @@ function reload() { window.location.reload() }
 .toggle[aria-pressed="true"] { background: var(--seg-on); color: var(--teal-ink); box-shadow: 0 0 0 1px var(--chip-teal-line); }
 .toggle:focus-visible { box-shadow: var(--focus-ring); }
 .result-count { font: 500 11px/1.4 var(--mono); color: var(--ink-3); white-space: nowrap; }
-.compare-hint { display: flex; flex-wrap: wrap; align-items: center; gap: 4px 6px; padding: 8px 12px; border-radius: 10px; background: var(--row-selected); color: var(--ink); font-size: 12.5px; }
+.compare-hint { display: flex; flex-wrap: wrap; align-items: center; gap: 4px 6px; padding: 8px 12px; border-radius: 10px; background: var(--surface-2); color: var(--ink); font-size: 12.5px; }
 .hint-version { font-size: 12px; }
 
 .listbox { display: grid; gap: 14px; border-radius: 14px; outline: none; }
@@ -410,17 +419,22 @@ function reload() { window.location.reload() }
 .day-count { letter-spacing: 0; color: var(--ink-3); font-weight: 500; }
 .row {
   position: relative; display: grid; grid-template-columns: 58px minmax(0, 1fr) 16px; align-items: start; gap: 12px; padding: 10px 10px 11px; border-radius: 12px; cursor: pointer;
+  outline-offset: -1px;
   transition: background .12s ease, box-shadow .12s ease;
 }
+/* One look per state. Hover only where a pointer hovers, so it never sticks on touch. */
 @media (hover: hover) { .row:hover { background: var(--row-hover); } }
-.row[aria-selected="true"] { background: var(--surface-raised); box-shadow: 0 0 0 1px var(--glass-rim), 0 8px 22px -14px rgba(32, 60, 61, .45); }
-.listbox:focus-visible .row[aria-selected="true"] { box-shadow: 0 0 0 2px var(--aqua), 0 0 16px rgba(164, 229, 223, .6); }
-.row.fresh:not([aria-selected="true"]) { background: var(--gold-wash); }
-/* Reserved, never published: subdued by a dashed hairline in the row's shape, not by fading the text. */
-.row.reserved { outline: 1px dashed var(--line-2); outline-offset: -1px; }
+/* New since the last visit: a warm tint. */
+.row.fresh { background: var(--gold-wash); }
+/* Current: a raised card (it wins over the tint; its New tag still says so). */
+.row.current { background: var(--surface-raised); box-shadow: 0 0 0 1px var(--line), 0 8px 22px -14px rgba(32, 60, 61, .45); }
+/* Reserved, never published: a dashed hairline in the row's shape, not faded text. */
+.row.reserved { outline: 1px dashed var(--line-2); }
 .row.reserved .clock { color: var(--ink-2); font-weight: 500; }
 .row.reserved .row-version { color: var(--ink-2); }
-.row.from, .compare .row.to { box-shadow: 0 0 0 1px var(--chip-teal-line); background: var(--row-selected); }
+/* Selected (and both ends of a comparison): an outline ring in the row's shape; focus makes it the focus ring. */
+.row[aria-selected="true"], .row.from { outline: 2px solid var(--chip-teal-line); }
+.listbox:focus-visible .row[aria-selected="true"] { outline-color: var(--teal); }
 .time { display: grid; gap: 1px; padding-top: 1px; }
 .clock { font-size: 13px; font-weight: 600; color: var(--ink); }
 .age { font-size: 11px; color: var(--ink-3); white-space: nowrap; }
@@ -437,7 +451,6 @@ function reload() { window.location.reload() }
 .counts { display: flex; flex-wrap: wrap; align-items: center; gap: 4px 12px; font-size: 11.5px; color: var(--ink-3); }
 .count { display: inline-flex; align-items: center; gap: 4px; font-variant-numeric: tabular-nums; }
 .keys { font-size: 10.5px; letter-spacing: .02em; }
-.sr { position: absolute; width: 1px; height: 1px; overflow: hidden; clip: rect(0 0 0 0); white-space: nowrap; }
 .row-chev { align-self: center; color: var(--ink-3); opacity: 0; transition: opacity .12s ease; }
 .row[aria-selected="true"] .row-chev { opacity: 1; color: var(--teal-ink); }
 .back { justify-self: start; margin: 0 0 10px -6px; }
@@ -469,6 +482,7 @@ function reload() { window.location.reload() }
   .detail-pane > .detail, .detail-pane > .compare { animation: swap-in .2s cubic-bezier(.2, .75, .25, 1) both; }
 }
 @keyframes swap-in { from { opacity: 0; transform: translateY(6px); } to { opacity: 1; transform: none; } }
+@media (prefers-reduced-motion: reduce) { .row, .row-chev { transition: none; } }
 @keyframes sheet-rise { from { opacity: 0; transform: translateY(18px); } to { opacity: 1; transform: none; } }
 @keyframes row-rise { from { opacity: 0; transform: translateY(8px); } to { opacity: 1; transform: none; } }
 @keyframes scrim-in { from { opacity: 0; } to { opacity: 1; } }
@@ -500,7 +514,13 @@ function reload() { window.location.reload() }
   .show-detail .list-pane, .show-detail .stats, .show-detail .search { display: none; }
   .list-pane { padding: 2px 0 32px; margin: 0; }
   .row { grid-template-columns: 50px minmax(0, 1fr) 14px; gap: 10px; padding: 10px 8px; }
+  /* Nothing is clipped at phone width: the count takes its own line, headlines wrap in full. */
+  .filters { flex-wrap: wrap; row-gap: 4px; }
+  .toggles { flex: 1 1 100%; }
+  .result-count { flex: 1 1 100%; padding-left: 2px; }
+  .headline { display: block; overflow: visible; -webkit-line-clamp: unset; }
+
   .row-chev { opacity: 1; }
-  .day-h { top: 36px; padding: 4px 8px 6px; }
+  .day-h { top: 74px; padding: 4px 8px 6px; }
 }
 </style>

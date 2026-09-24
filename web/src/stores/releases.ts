@@ -37,7 +37,9 @@ export const useReleases = defineStore('releases', () => {
   const seen = shallowRef<ReturnType<typeof usePreference<{ last_seen?: string }>> | null>(null)
   const lastSeen = computed(() => { const v = seen.value?.value.value?.last_seen; return isCalendar(v) ? v : null })
   // A first visit remembers the running version quietly: nothing is "new" to someone who just arrived.
-  async function start() {
+  let starting: Promise<void> | null = null
+  function start() { return starting ??= begin() }
+  async function begin() {
     const pref = seen.value ??= usePreference<{ last_seen?: string }>('releases')
     await Promise.all([pref.ready, version.load()])
     if (!lastSeen.value && isCalendar(version.value?.version)) pref.save({ last_seen: version.value.version }, 0)
@@ -53,7 +55,9 @@ export const useReleases = defineStore('releases', () => {
   })
   // Opening the history keeps what was new highlighted while it is open, then marks it seen.
   const highlight = ref(new Set<string>())
-  function markSeen() {
+  // Waits for the stored last visit, so a deep link straight into the history highlights correctly.
+  async function markSeen() {
+    if (starting) await starting
     highlight.value = history.value ? newSince(history.value.releases.filter(r => r.version <= current.value), lastSeen.value) : new Set()
     if (seen.value && isCalendar(current.value) && current.value !== lastSeen.value) seen.value.save({ last_seen: current.value }, 0)
   }

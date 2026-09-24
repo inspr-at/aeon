@@ -65,6 +65,6 @@ func (s *Server) build() {
 	root := http.NewServeMux()
 	root.Handle("/api/", api)
 	root.Handle("/api", api)
-	root.Handle("/", commonMiddleware(spaHandler(s.Web)))
+	root.Handle("/", commonMiddleware(spaHandler(s.Web, s.brand())))
 	s.handler = root
 }

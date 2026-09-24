@@ -1,7 +1,7 @@
 // SPDX-License-Identifier: AGPL-3.0-only
 import { test } from 'node:test'
 import assert from 'node:assert/strict'
-import { compare, groupByDay, groupChanges, matches, newSince, plainSubject, span, stats, ticketsOf, type Release } from '../src/lib/releases.ts'
+import { compare, displayHeadline, displayText, groupByDay, groupChanges, matches, newSince, plainSubject, span, stats, ticketsOf, type Release } from '../src/lib/releases.ts'
 
 const rel = (version: string, at: string, extra: Partial<Release> = {}): Release => ({
   version, tag: `v${version}`, release_channel: 'stable', release_sequence: 1, state: 'published', reserved_at: at, tagged_at: at, published_at: at,
@@ -78,4 +78,20 @@ test('new since the last visit: newer published releases, nothing on a first vis
   const releases = [rel('3', ''), rel('2', ''), rel('2.5', '', { state: 'reserved' }), rel('1', '')]
   assert.deepEqual([...newSince(releases, '1')].sort(), ['2', '3'])
   assert.equal(newSince(releases, null).size, 0)
+})
+
+test('headlines read without the ticket keys their chips show, in sentence case', () => {
+  const keys = ['AEON-67', 'AEON-75', 'AEON-72', 'AEON-79', 'AEON-13', 'AEON-77', 'AEON-78']
+  assert.equal(displayText('time entry editing (AEON-75)', keys), 'Time entry editing')
+  assert.equal(displayText('agent registration (AEON-67), time entry corrections (AEON-75)', keys), 'Agent registration, time entry corrections')
+  assert.equal(displayText('Journey (AEON-77, AEON-78)', keys), 'Journey')
+  assert.equal(displayText('attachment route fix (AEON-72), journey stage source + plan tickets (AEON-79)', keys), 'Attachment route fix, journey stage source + plan tickets')
+  assert.equal(displayText('migration tests count files (WIP, AEON-13)', keys), 'Migration tests count files (WIP)')
+  assert.equal(displayText('AEON-75: edit and delete time entries', keys), 'Edit and delete time entries')
+  // Only keys the chips show go; the rest of the text stays as written.
+  assert.equal(displayText('retry a busy BEGIN (PAI-1057)', keys), 'Retry a busy BEGIN (PAI-1057)')
+  assert.equal(displayText('B11: add journey stage provenance (AEON-79)', keys), 'B11: add journey stage provenance')
+  assert.equal(displayText('(AEON-75)', keys), '(AEON-75)')
+  assert.equal(plainSubject('fix(AEON-72): keep unknown binaries as downloads (AEON-72)', ['AEON-72']), 'Keep unknown binaries as downloads')
+  assert.equal(displayHeadline({ headline: 'wide lists (AEON-74)', tickets: ['AEON-74'], changes: [] }), 'Wide lists')
 })

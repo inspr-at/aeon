@@ -1,7 +1,7 @@
 <!-- SPDX-License-Identifier: AGPL-3.0-only -->
 <script setup lang="ts">
 import { computed, ref } from 'vue'
-import { groupChanges, releasedAt, shortCommit, span, ticketsOf, type Release } from '../../lib/releases'
+import { displayHeadline, groupChanges, releasedAt, shortCommit, span, ticketsOf, type Release } from '../../lib/releases'
 import { absoluteTime, relativeTime } from '../../lib/work'
 import AppIcon from '../AppIcon.vue'
 import CalendarVersion from '../CalendarVersion.vue'
@@ -71,7 +71,7 @@ defineExpose({ focus: () => heading.value?.focus({ preventScroll: false }) })
       <template v-if="reserved">Reserved {{ absoluteTime(at) }} · {{ relativeTime(at, { now, long: true }) }}. The version was taken{{ release.tag ? ' and tagged' : '' }}, but no release was published under it.</template>
       <template v-else>{{ release.published_at ? 'Published' : 'Tagged' }} {{ absoluteTime(at) }} · {{ relativeTime(at, { now, long: true }) }}</template>
     </p>
-    <p v-if="release.headline" class="headline">{{ release.headline }}</p>
+    <p v-if="release.headline" class="headline">{{ displayHeadline(release) }}</p>
 
     <TicketChips v-if="tickets.length" :tickets="tickets" class="tickets" />
 
@@ -171,7 +171,7 @@ dt { font: 500 10.5px/1.4 var(--mono); letter-spacing: .12em; text-transform: up
 dd { display: flex; align-items: center; flex-wrap: wrap; gap: 6px 10px; margin: 0; font-size: 13px; color: var(--ink); min-width: 0; }
 .wrap { overflow-wrap: anywhere; font-size: 12px; }
 .ext { display: inline-flex; align-items: center; gap: 6px; color: var(--teal-ink); border-radius: 6px; }
-.ext:hover { text-decoration: underline; text-underline-offset: 3px; }
+@media (hover: hover) { .ext:hover { text-decoration: underline; text-underline-offset: 3px; } }
 .run { display: inline-flex; align-items: center; height: 20px; padding: 0 8px; border-radius: 999px; background: var(--surface-2); color: var(--ink-2); font-size: 11.5px; font-weight: 600; }
 .run.success { background: rgba(47, 122, 90, .12); color: color-mix(in oklab, var(--ok), var(--ink) 35%); }
 .run.failure, .run.timed_out { background: var(--danger-bg); color: var(--danger); }
@@ -187,6 +187,8 @@ dd { display: flex; align-items: center; flex-wrap: wrap; gap: 6px 10px; margin:
 @media (max-width: 760px) {
   dl > div { grid-template-columns: minmax(0, 1fr); gap: 2px; padding: 8px 0; }
   .copy { height: 44px; padding: 0 14px; }
+  .ev-toggle { flex-wrap: wrap; row-gap: 2px; }
+  .ev-summary { flex-basis: 100%; order: 3; padding-left: 36px; white-space: normal; overflow: visible; }
   .ext { min-height: 44px; }
   .headline { font-size: 17px; }
 }

@@ -8,8 +8,8 @@ import AppIcon, { type IconName } from '../AppIcon.vue'
 const props = defineProps<{ groups: Record<ChangeGroup, ReleaseChange[]>; repository: string; query?: string }>()
 const GROUPS: { key: ChangeGroup; label: string; icon: IconName }[] = [
   { key: 'features', label: 'Features', icon: 'sparkle' },
-  { key: 'fixes', label: 'Fixes', icon: 'wrench' },
-  { key: 'other', label: 'Other changes', icon: 'commit' },
+  { key: 'fixes', label: 'Fixes', icon: 'bug' },
+  { key: 'other', label: 'Other changes', icon: 'gear' },
 ]
 const TYPE_LABEL: Record<ReleaseChange['type'], string> = { feat: 'feature', fix: 'fix', test: 'tests', docs: 'docs', refactor: 'refactor', chore: 'chore', release: 'release', other: '' }
 const shown = computed(() => GROUPS.filter(g => props.groups[g.key].length))
@@ -37,7 +37,7 @@ function parts(text: string) {
       <h3 class="group-h"><span class="g-icon"><AppIcon :name="g.icon" :size="13" /></span>{{ g.label }}<span class="count mono">{{ groups[g.key].length }}</span></h3>
       <ul>
         <li v-for="c in groups[g.key]" :key="c.commit">
-          <p class="subject"><template v-for="(p, i) in parts(plainSubject(c.subject))" :key="i"><mark v-if="p.hit">{{ p.text }}</mark><template v-else>{{ p.text }}</template></template></p>
+          <p class="subject"><template v-for="(p, i) in parts(plainSubject(c.subject, c.tickets))" :key="i"><mark v-if="p.hit">{{ p.text }}</mark><template v-else>{{ p.text }}</template></template></p>
           <p class="meta">
             <span v-if="g.key === 'other' && TYPE_LABEL[c.type]" class="type">{{ TYPE_LABEL[c.type] }}</span>
             <span v-for="t in c.tickets" :key="t" class="mono ticket">{{ t }}</span>
@@ -65,6 +65,6 @@ li { padding: 6px 10px 7px; margin-left: -10px; border-radius: 9px; }
 .type { font-size: 11px; text-transform: lowercase; }
 .ticket { font-size: 11px; color: var(--teal-ink); }
 .commit { font-size: 11px; color: var(--ink-3); border-radius: 4px; }
-a.commit:hover { color: var(--teal-ink); text-decoration: underline; text-underline-offset: 2px; }
+@media (hover: hover) { a.commit:hover { color: var(--teal-ink); text-decoration: underline; text-underline-offset: 2px; } }
 @media (max-width: 760px) { ul { padding-left: 0; } li { margin-left: 0; padding: 6px 4px 7px; } }
 </style>

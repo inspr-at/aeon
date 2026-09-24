@@ -17,6 +17,7 @@ import { useSession } from './stores/session'
 import { useReleases } from './stores/releases'
 import { brand } from './lib/brand'
 import { toast } from './lib/toast'
+import { displayHeadline, getRelease } from './lib/releases'
 
 const ReleasesSheet = defineAsyncComponent(() => import('./components/releases/ReleasesSheet.vue'))
 
@@ -75,9 +76,13 @@ onMounted(() => {
   window.addEventListener('focus', checkUpdate)
 })
 onBeforeUnmount(() => { clearInterval(updateTimer); document.removeEventListener('visibilitychange', checkUpdate); window.removeEventListener('focus', checkUpdate) })
-watch(() => releases.available, version => {
+watch(() => releases.available, async version => {
   if (!version) return
-  toast(`${brand.value.wordmark} was updated to ${version}`, {
+  // The new server knows what the release was about; say it in its reading form.
+  const release = await getRelease(version)
+  if (version !== releases.available) return
+  const about = release?.headline ? `: ${displayHeadline(release)}` : ''
+  toast(`${brand.value.wordmark} was updated to ${version}${about}`, {
     sticky: true, key: 'update',
     actions: [{ label: 'What’s new', run: () => openReleases(version) }, { label: 'Reload', run: () => window.location.reload() }],
   })

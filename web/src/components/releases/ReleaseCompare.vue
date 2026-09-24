@@ -1,7 +1,7 @@
 <!-- SPDX-License-Identifier: AGPL-3.0-only -->
 <script setup lang="ts">
 import { computed } from 'vue'
-import { compare, releasedAt, span, type Release } from '../../lib/releases'
+import { compare, displayHeadline, releasedAt, span, type Release } from '../../lib/releases'
 import AppIcon from '../AppIcon.vue'
 import CalendarVersion from '../CalendarVersion.vue'
 import ReleaseChanges from './ReleaseChanges.vue'
@@ -42,6 +42,12 @@ const between = computed(() => {
         <span v-if="between">over <b>{{ between }}</b></span>
       </p>
       <TicketChips v-if="result.tickets.length" :tickets="result.tickets" />
+      <section class="included" aria-labelledby="compare-included">
+        <h3 id="compare-included" class="included-h">Releases in this range</h3>
+        <ul>
+          <li v-for="r in result.releases" :key="r.version"><CalendarVersion :value="r.version" class="inc-version" /><span class="inc-headline">{{ r.headline ? displayHeadline(r) : 'No headline recorded' }}</span></li>
+        </ul>
+      </section>
       <ReleaseChanges v-if="count" :groups="result.groups" :repository="repository" :query="query" class="changes" />
       <p v-else class="none">No changes are recorded between these releases.</p>
     </template>
@@ -64,6 +70,13 @@ const between = computed(() => {
 .facts { display: flex; flex-wrap: wrap; gap: 6px 18px; font-size: 13px; color: var(--ink-2); }
 .facts b { color: var(--ink); font-weight: 650; font-variant-numeric: tabular-nums; }
 .changes { margin-top: 6px; }
+.included { display: grid; gap: 6px; margin-top: 4px; }
+.included-h { font: 500 10.5px/1.5 var(--mono); letter-spacing: .16em; text-transform: uppercase; color: var(--ink-3); }
+.included ul { display: grid; gap: 2px; margin: 0; padding: 0; list-style: none; }
+.included li { display: grid; grid-template-columns: 170px minmax(0, 1fr); align-items: baseline; gap: 12px; padding: 5px 0; border-bottom: 1px solid var(--line); font-size: 13.5px; color: var(--ink); }
+.included li:last-child { border-bottom: 0; }
+.inc-version { font-size: 12px; }
+.inc-headline { overflow-wrap: anywhere; }
 .none, .hint { font-size: 13.5px; color: var(--ink-2); line-height: 1.7; }
-@media (max-width: 760px) { .pair { font-size: 15px; } }
+@media (max-width: 760px) { .pair { font-size: 15px; } .included li { grid-template-columns: minmax(0, 1fr); gap: 2px; } }
 </style>

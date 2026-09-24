@@ -36,9 +36,13 @@ func (s *Server) handleHealth(w http.ResponseWriter, r *http.Request) {
 // handleVersion answers the build's calendar version and the product's names
 // (brand.json, or the deployment's AEON_BRAND_FILE when the server was given one).
 func (s *Server) handleVersion(w http.ResponseWriter, _ *http.Request) {
-	b := brand.Default()
+	WriteJSON(w, http.StatusOK, versionBody{Version: version.Version, Scheme: version.Scheme, Brand: s.brand()})
+}
+
+// brand is the deployment's brand, else the embedded brand.json.
+func (s *Server) brand() brand.Brand {
 	if s.Brand != nil {
-		b = *s.Brand
+		return *s.Brand
 	}
-	WriteJSON(w, http.StatusOK, versionBody{Version: version.Version, Scheme: version.Scheme, Brand: b})
+	return brand.Default()
 }

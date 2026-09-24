@@ -1,12 +1,15 @@
 <!-- SPDX-License-Identifier: AGPL-3.0-only -->
 <script setup lang="ts">
-import { computed } from 'vue'
+import { computed, ref } from 'vue'
 import { span, type ReleaseStats } from '../../lib/releases'
 import { absoluteTime } from '../../lib/work'
+import AppIcon from '../AppIcon.vue'
 import CalendarVersion from '../CalendarVersion.vue'
 
 // The header of the release history: what runs here, and the cadence at a glance.
-const props = defineProps<{ stats: ReleaseStats; current: string; liveSince: string | null; now: number }>()
+// Compact (phones): what runs here, today and this week; the rest behind More stats.
+const props = defineProps<{ stats: ReleaseStats; current: string; liveSince: string | null; now: number; compact?: boolean }>()
+const more = ref(false)
 const since = computed(() => props.stats.last === null ? '—' : span(props.now - props.stats.last))
 const median = computed(() => props.stats.median === null ? '—' : span(props.stats.median))
 const live = computed(() => {
@@ -23,7 +26,7 @@ const cadenceLabel = computed(() => {
 </script>
 
 <template>
-  <div class="stats" role="group" aria-label="Release cadence">
+  <div class="stats" :class="{ compact }" role="group" aria-label="Release cadence">
     <div class="tile running">
       <p class="label">Running here</p>
       <p class="value"><CalendarVersion v-if="current" :value="current" /></p>
@@ -39,6 +42,10 @@ const cadenceLabel = computed(() => {
       <p class="value num">{{ stats.week }}</p>
       <p class="sub">since Monday</p>
     </div>
+    <button v-if="compact" type="button" class="more" :aria-expanded="more" aria-controls="release-more-stats" @click="more = !more">
+      {{ more ? 'Fewer stats' : 'More stats' }}<AppIcon name="chevron" :size="13" class="more-chev" />
+    </button>
+    <div v-if="!compact || more" id="release-more-stats" class="rest">
     <div class="tile">
       <p class="label">Since the last</p>
       <p class="value">{{ since }}</p>
@@ -56,6 +63,7 @@ const cadenceLabel = computed(() => {
           :y="n ? 30 - Math.max(4, (n / peak) * 28) : 28" :height="n ? Math.max(4, (n / peak) * 28) : 2" :class="{ zero: !n, today: i === stats.cadence.length - 1 }" />
       </svg>
       <p class="sub"><span>{{ stats.cadence.length - 1 }} days ago</span><span>today</span></p>
+    </div>
     </div>
   </div>
 </template>
@@ -77,11 +85,18 @@ const cadenceLabel = computed(() => {
 .spark rect.zero { fill: var(--line-2); opacity: 1; }
 @media (max-width: 1280px) { .stats { grid-template-columns: minmax(200px, 1.5fr) repeat(4, minmax(90px, 1fr)) minmax(140px, 1.1fr); } .tile { padding: 10px 12px 9px; } }
 @media (max-width: 1100px) { .stats { grid-template-columns: repeat(3, minmax(0, 1fr)); } .running { grid-column: span 2; } }
-@media (max-width: 760px) {
-  .stats { display: flex; gap: 8px; margin: 0 -16px; padding: 0 16px 2px; overflow-x: auto; scroll-snap-type: x proximity; scrollbar-width: none; }
-  .tile { flex: 0 0 auto; min-width: 108px; scroll-snap-align: start; padding: 9px 12px 8px; }
-  .running { min-width: 210px; }
-  .cadence { min-width: 150px; }
-  .value.num { font-size: 18px; }
-}
+/* The rest sit in the same grid as the first three. */
+.rest { display: contents; }
+/* Phones: a two-column grid inside the gutter; nothing scrolls sideways. */
+.stats.compact { grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 8px; }
+.compact .running, .compact .cadence, .compact .more { grid-column: 1 / -1; }
+.compact .tile { padding: 9px 12px 8px; }
+.compact .value.num { font-size: 18px; }
+.compact .rest { display: grid; grid-column: 1 / -1; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 8px; }
+.more { display: inline-flex; align-items: center; justify-content: center; gap: 6px; height: 44px; border: 0; border-radius: 12px; background: transparent; color: var(--teal-ink); font-size: 13px; font-weight: 600; }
+.more:active { background: var(--row-selected); }
+.more:focus-visible { box-shadow: var(--focus-ring); }
+.more-chev { transition: transform .18s ease; }
+.more[aria-expanded="true"] .more-chev { transform: rotate(180deg); }
+@media (prefers-reduced-motion: reduce) { .more-chev { transition: none; } }
 </style>

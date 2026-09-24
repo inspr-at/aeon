@@ -87,7 +87,15 @@ export type History = ReturnType<typeof releaseHistory>
 // mocks so these routes win. `server` can later move to a newer version.
 export async function mockReleases(page: Page, history: History | Record<string, unknown>, options: { running?: string; brand?: Record<string, string> } = {}) {
   const state = { server: options.running ?? (history as History).current, requests: 0 }
-  await page.route('**/api/releases**', route => { state.requests++; return route.fulfill({ json: history }) })
+  await page.route('**/api/releases**', route => {
+    const one = /\/api\/releases\/v?([^/?]+)$/.exec(new URL(route.request().url()).pathname)
+    if (one) {
+      const release = (history as History).releases.find(r => r.version === one[1])
+      return release ? route.fulfill({ json: release }) : route.fulfill({ status: 404, json: { error: 'no such release in this build\'s history' } })
+    }
+    state.requests++
+    return route.fulfill({ json: history })
+  })
   await page.route('**/api/version', route => route.fulfill({ json: { version: state.server, scheme: 'inspr-calendar-v2', ...(options.brand ? { brand: options.brand } : {}) } }))
   return state
 }

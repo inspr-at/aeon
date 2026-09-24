@@ -63,6 +63,11 @@ test('the version pill opens the history over the page, and Esc brings the page 
   await expect(options(page)).toHaveCount(history.releases.length)
   await expect(options(page).first()).toHaveAttribute('aria-selected', 'true')
   await expect(options(page).first()).toContainText('Current')
+  // Change counts: one glyph per kind, named for tooltips and screen readers.
+  await expect(options(page).first().getByRole('img', { name: '1 feature', exact: true })).toHaveAttribute('data-tip', '1 feature')
+  await expect(options(page).first().getByRole('img', { name: '1 fix', exact: true })).toBeVisible()
+  await expect(options(page).first().getByRole('img', { name: '1 other change', exact: true })).toBeVisible()
+  await expect(options(page).nth(1).getByRole('img', { name: '2 features', exact: true })).toBeVisible()
   await expect(sheet(page).getByRole('heading', { level: 2, name: history.current })).toBeVisible()
   await expect(sheet(page)).toContainText('PAIMOS 7 · Release history')
   await expect(sheet(page).getByText(/^Live on this server since /)).toBeVisible()
@@ -79,7 +84,10 @@ test('deep links open one release, and the address follows the selection', async
   await page.goto(`/releases/${target.version}`)
   await expect(sheet(page)).toBeVisible()
   await expect(options(page).nth(3)).toHaveAttribute('aria-selected', 'true')
-  await expect(sheet(page).locator('.detail .headline')).toHaveText(target.headline)
+  // Headlines read without the keys their chips show, in sentence case.
+  await expect(sheet(page).locator('.detail .headline')).toHaveText('Retry a busy BEGIN in release acceptance')
+  await expect(sheet(page).locator('.detail .tickets')).toContainText('PAI-1057')
+  await expect(options(page).nth(3).locator('.headline')).toHaveText('Retry a busy BEGIN in release acceptance')
   await page.keyboard.press('k')
   await expect(page).toHaveURL(`/releases/${history.releases[2].version}`)
   // Opened from a link, closing leads to Projects.
@@ -127,6 +135,7 @@ test('keys: j and k move, Enter opens, e shows evidence, ? lists keys, / searche
   await expect(compare.locator('.facts')).toContainText('2 releases')
   await expect(compare.locator('.facts')).toContainText('3 tickets')
   await expect(compare.locator('.changes')).toContainText('Features')
+  await expect(compare.getByRole('region', { name: 'Releases in this range' }).getByRole('listitem')).toHaveText([/Wide lists and columns$/, /Retry a busy BEGIN in release acceptance$/])
   await compare.getByRole('button', { name: 'Swap' }).click()
   await expect(compare.locator('.facts')).toContainText('2 releases')
   await page.keyboard.press('Escape')
@@ -235,7 +244,7 @@ test('a newer version on the server: a toast offers what is new and a reload', a
   await expect(pill(page)).toHaveAccessibleName(new RegExp(`version ${escaped(history.releases[1].version)}`))
   state.server = history.current
   await page.evaluate(() => window.dispatchEvent(new Event('focus')))
-  const toast = page.locator('.toast').filter({ hasText: `PAIMOS AEON was updated to ${history.current}` })
+  const toast = page.locator('.toast').filter({ hasText: `PAIMOS AEON was updated to ${history.current}: Time entry editing` })
   await expect(toast).toBeVisible()
   await expect(toast.getByRole('button', { name: 'Reload' })).toBeVisible()
   await toast.getByRole('button', { name: 'What’s new' }).click()
@@ -258,6 +267,58 @@ test('the palette and the account menu open the history too', async ({ page }) =
   await page.getByRole('button', { name: /^Account for / }).click()
   await page.getByRole('button', { name: 'Release history', exact: true }).click()
   await expect(sheet(page)).toBeVisible()
+})
+
+test('rows keep one look per state: current raised, new warm, selected ringed, the rest plain', async ({ page }) => {
+  const history = releaseHistory()
+  await setup(page, { lastSeen: history.releases[4].version })
+  await page.goto(`/releases/${history.releases[5].version}`)
+  const look = (i: number) => options(page).nth(i).evaluate(el => { const c = getComputedStyle(el); return { bg: c.backgroundColor, outline: c.outlineStyle } })
+  await expect(options(page).nth(5)).toHaveAttribute('aria-selected', 'true')
+  await expect(options(page).nth(1)).toHaveClass(/fresh/)
+  const current = await look(0), fresh = await look(1), selected = await look(5), plain = await look(6)
+  expect(selected).toEqual({ bg: 'rgba(0, 0, 0, 0)', outline: 'solid' })
+  expect(plain).toEqual({ bg: 'rgba(0, 0, 0, 0)', outline: 'none' })
+  expect(fresh.bg).not.toBe('rgba(0, 0, 0, 0)')
+  expect(current.bg).not.toBe(fresh.bg)
+  expect(current.outline).toBe('none')
+})
+
+test('nothing is clipped at 390: stats in a grid, the count on its own line, full headlines', async ({ page }) => {
+  await page.setViewportSize({ width: 390, height: 844 })
+  const { history } = await setup(page)
+  await page.goto('/releases')
+  await expect(options(page).first()).toBeVisible()
+  const stats = sheet(page).getByRole('group', { name: 'Release cadence' })
+  await expect(stats.getByText('Running here')).toBeVisible()
+  await expect(stats.getByText('This week')).toBeVisible()
+  await expect(stats.getByText('Median gap')).toHaveCount(0)
+  await stats.getByRole('button', { name: 'More stats' }).click()
+  await expect(stats.getByText('Median gap')).toBeVisible()
+  await expect(sheet(page).locator('.result-count')).toHaveText('6 · 1 reserved')
+  const clipped = () => page.evaluate(() => {
+    const out: string[] = []
+    for (const el of document.querySelectorAll<HTMLElement>('dialog[open] *')) {
+      const r = el.getBoundingClientRect()
+      if (!r.width || !r.height || getComputedStyle(el).visibility === 'hidden') continue
+      if (el.closest('.list-pane, .detail-pane') && (r.bottom < 0 || r.top > innerHeight)) continue
+      if (r.left < -0.5 || r.right > innerWidth + 0.5) out.push(`${el.className || el.tagName} outside ${Math.round(r.left)}..${Math.round(r.right)}`)
+      const c = getComputedStyle(el)
+      if ((c.overflowX !== 'visible' || c.textOverflow === 'ellipsis') && el.scrollWidth > el.clientWidth + 1 && !el.matches('.list-pane, .detail-pane, .listbox')) out.push(`${el.className || el.tagName} cut ${el.scrollWidth}>${el.clientWidth}`)
+    }
+    return out
+  })
+  expect(await clipped()).toEqual([])
+  await options(page).nth(1).click()
+  await expect(sheet(page).locator('.detail')).toBeVisible()
+  await sheet(page).getByRole('button', { name: /^Evidence/ }).click()
+  expect(await clipped()).toEqual([])
+  await sheet(page).getByRole('button', { name: 'All releases' }).click()
+  await sheet(page).getByRole('button', { name: 'Compare' }).click()
+  await options(page).nth(3).click()
+  await expect(sheet(page).locator('.detail-pane > .compare')).toBeVisible()
+  expect(await clipped()).toEqual([])
+  void history
 })
 
 for (const colorScheme of ['light', 'dark'] as const) {
