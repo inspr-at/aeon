@@ -46,6 +46,7 @@ type Entry struct {
 	DurationSeconds int64       `json:"duration_seconds"`
 	RateAmount      json.Number `json:"rate_amount"`
 	Amount          json.Number `json:"amount"`
+	UpdatedAt       time.Time   `json:"updated_at"`
 }
 type Amount struct {
 	Currency string      `json:"currency"`
@@ -58,7 +59,20 @@ type Totals struct {
 }
 
 func entryDigest(entries []Entry) (string, int64, error) {
-	raw, err := json.Marshal(entries)
+	// Preserve digest v1 for existing approved periods: concurrency metadata is
+	// not part of the billable entry snapshot.
+	type digestEntry struct {
+		EntryWrite
+		ID              string      `json:"id"`
+		DurationSeconds int64       `json:"duration_seconds"`
+		RateAmount      json.Number `json:"rate_amount"`
+		Amount          json.Number `json:"amount"`
+	}
+	values := make([]digestEntry, 0, len(entries))
+	for _, e := range entries {
+		values = append(values, digestEntry{e.EntryWrite, e.ID, e.DurationSeconds, e.RateAmount, e.Amount})
+	}
+	raw, err := json.Marshal(values)
 	if err != nil {
 		return "", 0, err
 	}

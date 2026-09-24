@@ -16,14 +16,15 @@ import (
 	"github.com/jackc/pgx/v5"
 )
 
-const entryColumns = `id::text,period_id::text,principal_id::text,node_id::text,cost_unit_node_id::text,source,agent_run_id::text,started_at,ended_at,duration_seconds,rate_amount::text,currency,amount::text,note`
+const entryColumns = `id::text,period_id::text,principal_id::text,node_id::text,cost_unit_node_id::text,source,agent_run_id::text,started_at,ended_at,duration_seconds,rate_amount::text,currency,amount::text,note,updated_at`
 
 func scanEntry(row pgx.Row) (Entry, error) {
 	var v Entry
 	var rate, amount string
-	err := row.Scan(&v.ID, &v.PeriodID, &v.PrincipalID, &v.NodeID, &v.CostUnitID, &v.Source, &v.AgentRunID, &v.StartedAt, &v.EndedAt, &v.DurationSeconds, &rate, &v.Currency, &amount, &v.Note)
+	err := row.Scan(&v.ID, &v.PeriodID, &v.PrincipalID, &v.NodeID, &v.CostUnitID, &v.Source, &v.AgentRunID, &v.StartedAt, &v.EndedAt, &v.DurationSeconds, &rate, &v.Currency, &amount, &v.Note, &v.UpdatedAt)
 	v.StartedAt = utc(v.StartedAt)
 	v.EndedAt = utc(v.EndedAt)
+	v.UpdatedAt = utc(v.UpdatedAt)
 	v.RateAmount = number(rate)
 	v.Amount = number(amount)
 	return v, err
