@@ -1329,6 +1329,23 @@ paths:
       responses:
         '200': {description: Walker projection, content: {application/json: {schema: {$ref: '#/components/schemas/ReleaseWalker'}}}}
         '409': {$ref: '#/components/responses/Error'}
+  /projects/{projectId}/releases/{releaseId}/tickets:
+    post:
+      operationId: createReleaseTicket
+      summary: Create a manual ticket in the release plan or backlog
+      description: A person creates a ticket under the project or the selected feature epic. Only the current planning release accepts new tickets. Creation, plan revision, scope invalidation and events are atomic. Idempotency keys share the project's journey action namespace; exact retries return the current walker without another write, even if the release has since left planning. Reusing a key with a different request or actor conflicts.
+      security: [{session: []}]
+      parameters:
+        - {name: projectId, in: path, required: true, schema: {type: string, format: uuid}}
+        - {name: releaseId, in: path, required: true, schema: {type: string, format: uuid}}
+      requestBody: {required: true, content: {application/json: {schema: {$ref: '#/components/schemas/ReleaseTicketCreate'}}}}
+      responses:
+        '200': {description: Updated walker projection, content: {application/json: {schema: {$ref: '#/components/schemas/ReleaseWalker'}}}}
+        '400': {$ref: '#/components/responses/Error'}
+        '401': {$ref: '#/components/responses/Error'}
+        '403': {$ref: '#/components/responses/Error'}
+        '404': {$ref: '#/components/responses/Error'}
+        '409': {$ref: '#/components/responses/Error'}
   /projects/{projectId}/intake/sources:
     post:
       operationId: addIntakeSource
@@ -1662,12 +1679,13 @@ components:
   schemas:
     Journey:
       type: object
-      required: [project_node_id, profile, revision, stage, stages, next_action, requirements_revision, requirements_digest_sha256, requirements_approval_scope, launch_readiness]
+      required: [project_node_id, profile, revision, stage, stage_source, stages, next_action, requirements_revision, requirements_digest_sha256, requirements_approval_scope, launch_readiness]
       properties:
         project_node_id: {type: string, format: uuid}
         profile: {type: string, enum: [personal, professional, enterprise]}
         revision: {type: integer, minimum: 1}
         stage: {type: string, enum: [inspire, shape, requirements, plan, build, deploy, access, live]}
+        stage_source: {type: string, enum: [journey, derived], description: Whether stage selection uses recorded journey history or the imported-project data derivation}
         stages: {type: array, items: {$ref: '#/components/schemas/JourneyStage'}}
         next_action: {$ref: '#/components/schemas/JourneyNextAction'}
         requirements_revision: {type: integer, minimum: 0}
@@ -1779,6 +1797,16 @@ components:
         position: {type: integer, minimum: 0}
         estimated_hours: {type: [number, 'null'], minimum: 0}
         screen_node_ids: {type: array, items: {type: string, format: uuid}}
+    ReleaseTicketCreate:
+      type: object
+      additionalProperties: false
+      required: [title, expected_revision, idempotency_key]
+      properties:
+        title: {type: string, minLength: 1, maxLength: 512}
+        feature_node_id: {type: string, format: uuid}
+        included: {type: boolean, default: true}
+        expected_revision: {type: integer, minimum: 1}
+        idempotency_key: {type: string, minLength: 1, maxLength: 128}
     ReleasePlanWrite:
       type: object
       additionalProperties: false

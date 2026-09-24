@@ -37,7 +37,7 @@ func TestJourneyActions(t *testing.T) {
 	}
 
 	view := f.journey(t, f.person, http.MethodGet, "/api/projects/"+project+"/journey", "")
-	if view.Stage != "inspire" || view.NextAction.Key != "continue_intake" || !view.NextAction.Available || view.Revision != 1 {
+	if view.StageSource != "journey" || view.Stage != "inspire" || view.NextAction.Key != "continue_intake" || !view.NextAction.Available || view.Revision != 1 {
 		t.Fatalf("init %+v", view.NextAction)
 	}
 	if n := f.events(t, "journey.initialized"); n != 0 {

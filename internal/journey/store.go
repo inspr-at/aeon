@@ -197,6 +197,7 @@ func loadFacts(ctx context.Context, tx pgx.Tx, projectID string, lockRelease boo
 		return facts{}, err
 	}
 	f.BriefConfirmed = confirmed
+	f.CurrentReleaseRecorded = releaseID != nil
 	if err := loadImported(ctx, tx, &f, &releaseID); err != nil {
 		return facts{}, err
 	}
