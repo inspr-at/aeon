@@ -238,7 +238,21 @@ issued = call('POST', f'/api/quotes/{quote_id}/finalize', {'expected_quote_revis
     'expected_draft_revision': receipt['acknowledged_revision'],
     'expected_document_sha256': receipt['document_sha256']})
 assert issued['state'] == 'issued'
-call('GET', f'/api/quotes/{quote_id}/versions/1')
+version = call('GET', f'/api/quotes/{quote_id}/versions/1')
+link = call('POST', f'/api/quotes/{quote_id}/versions/1/public-link', {})
+public_api = '/api/public/quotes/' + link['path'].removeprefix('/offers/')
+# A fresh opener carries no dev-login session. The image connects as aeon,
+# the non-superuser role used by the production service.
+with urllib.request.urlopen(base + public_api, timeout=50) as response:
+    assert response.status == 200
+    projection = json.load(response)
+    assert projection['version'] == 1
+    assert projection['content_sha256'] == version['content_sha256']
+with urllib.request.urlopen(base + public_api + '/pdf', timeout=50) as response:
+    assert response.status == 200
+    assert response.headers.get_content_type() == 'application/pdf'
+    assert response.read(5) == b'%PDF-'
+print('dev: anonymous public quote projection and PDF OK')
 with open(os.environ['SMOKE_QUOTE_HTML'], 'w', encoding='utf-8') as output:
     output.write('<!doctype html><meta charset="utf-8"><title>Quote smoke</title>'
         '<h1>' + html.escape(document['title']) + '</h1>'

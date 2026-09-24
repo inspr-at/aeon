@@ -343,6 +343,9 @@ func (m *Module) resolve(ctx context.Context, selector, token string, lock bool,
 	}
 	var tenantID string
 	err = db.InTenant(ctx, m.pool, zeroTenant, func(tx pgx.Tx) error {
+		if _, err := tx.Exec(ctx, `SELECT set_config('aeon.public_quote_selector', $1, true)`, selector); err != nil {
+			return err
+		}
 		return tx.QueryRow(ctx, `SELECT aeon_resolve_quote_public_tenant($1)::text`, selector).Scan(&tenantID)
 	})
 	if err != nil || !uuidPattern.MatchString(tenantID) {
