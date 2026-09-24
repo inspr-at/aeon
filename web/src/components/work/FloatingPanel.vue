@@ -5,7 +5,7 @@ import { nextTick, onBeforeUnmount, onMounted, ref } from 'vue'
 // and sticky toolbars never clip it; it flips above the trigger near the
 // bottom edge, closes on Escape, outside clicks and page scroll, and hands
 // focus back to the trigger when it closes by keyboard.
-const props = withDefaults(defineProps<{ anchor: HTMLElement | null; align?: 'start' | 'end'; width?: number; label: string }>(), { align: 'start', width: 240 })
+const props = withDefaults(defineProps<{ anchor: HTMLElement | null; align?: 'start' | 'end'; width?: number; label: string; tallest?: number }>(), { align: 'start', width: 240, tallest: 420 })
 const emit = defineEmits<{ close: [restoreFocus: boolean] }>()
 const panel = ref<HTMLElement>()
 const x = ref(-9999)
@@ -19,8 +19,8 @@ function place() {
   const height = panel.value.scrollHeight
   const room = innerHeight - rect.bottom - 12
   // Open above when the menu would not fit below and there is more room above.
-  above.value = room < Math.min(height, 420) && rect.top > room
-  maxHeight.value = Math.max(160, Math.min(420, above.value ? rect.top - 12 : room))
+  above.value = room < Math.min(height, props.tallest) && rect.top > room
+  maxHeight.value = Math.max(160, Math.min(props.tallest, above.value ? rect.top - 12 : room))
   const width = Math.min(props.width, innerWidth - 16)
   const left = props.align === 'end' ? rect.right - width : rect.left
   x.value = Math.round(Math.min(Math.max(8, left), innerWidth - width - 8))

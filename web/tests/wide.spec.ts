@@ -179,6 +179,7 @@ test.describe('edit mode', () => {
 
 test.describe('back trail', () => {
   test('following links inside the panel builds a trail with Back and Alt+Left; list moves clear it', async ({ page, context }) => {
+    await page.setViewportSize({ width: 1920, height: 1080 })
     await mockWork(page, fixtures())
     await page.goto('/p/PHAROS/PHAROS-12')
     const ws = panel(page)
@@ -190,6 +191,11 @@ test.describe('back trail', () => {
     await ws.getByRole('button', { name: /PHAROS-11/ }).first().click()
     await expect(page).toHaveURL('/p/PHAROS/PHAROS-11')
     await expect(trail.getByRole('button')).toHaveText(['PHAROS-12', 'PHAROS-10'])
+    // A narrow panel keeps the last step and shows that there is more.
+    await page.setViewportSize({ width: 1280, height: 800 })
+    await expect(trail.getByRole('button')).toHaveText(['PHAROS-10'])
+    await expect(trail.locator('.trail-more')).toBeVisible()
+    await page.setViewportSize({ width: 1920, height: 1080 })
     await ws.focus()
     await page.keyboard.press('Alt+ArrowLeft')
     await expect(page).toHaveURL('/p/PHAROS/PHAROS-10')

@@ -41,16 +41,16 @@ void props
 </script>
 
 <template>
-  <header class="panel-bar" :class="mode">
+  <header class="panel-bar" :class="[mode, { 'has-trail': !!trail?.length }]">
     <button v-if="mode === 'full'" type="button" class="icon-btn sm flat" aria-label="Back to the list" data-tip="Back to the list · Esc" @click="emit('close')"><AppIcon name="chevron-left" :size="16" /></button>
     <template v-if="trail?.length">
       <button type="button" class="icon-btn sm flat back-btn" :aria-label="`Back to ${trail[trail.length - 1]}`" aria-keyshortcuts="Alt+ArrowLeft" :data-tip="`Back to ${trail[trail.length - 1]} · ${mac ? '⌥' : 'Alt'}←`" @click="emit('back', 1)"><AppIcon name="arrow-left" :size="15" /></button>
       <nav class="trail" aria-label="Followed tickets">
-        <span v-if="trail.length > 2" class="trail-more" aria-hidden="true">…</span>
-        <template v-for="crumb in crumbs()" :key="crumb.key + crumb.steps">
+        <span v-if="trail.length > 1" class="trail-more" :class="{ always: trail.length > 2 }" aria-hidden="true">…</span>
+        <span v-for="crumb in crumbs()" :key="crumb.key + crumb.steps" class="crumb-item">
           <button type="button" class="crumb mono" :data-tip="`Back to ${crumb.key}`" @click="emit('back', crumb.steps)">{{ crumb.key }}</button>
           <AppIcon name="chevron-right" :size="12" class="crumb-sep" />
-        </template>
+        </span>
       </nav>
     </template>
     <button type="button" class="key-chip" :aria-label="`Copy ${ticketKey}`" :data-tip="`Copy ${ticketKey}`" @click="emit('copyKey')">
@@ -90,7 +90,7 @@ void props
 </template>
 
 <style scoped>
-.panel-bar { display: flex; align-items: center; gap: 6px; height: 52px; padding: 0 10px 0 14px; border-bottom: 1px solid var(--line); flex-shrink: 0; }
+.panel-bar { container: panel-bar / inline-size; display: flex; align-items: center; gap: 6px; height: 52px; padding: 0 10px 0 14px; border-bottom: 1px solid var(--line); flex-shrink: 0; }
 .panel-bar.full { padding-left: 8px; }
 .key-chip { display: inline-flex; flex-shrink: 0; align-items: center; gap: 6px; height: 26px; white-space: nowrap; padding: 0 9px 0 10px; border: 0; border-radius: 7px; background: var(--chip-teal-bg); box-shadow: inset 0 0 0 1px var(--chip-teal-line); color: var(--teal-ink); font: 600 12px/1 var(--mono); letter-spacing: .03em; font-variant-ligatures: none; }
 .key-chip:hover { box-shadow: inset 0 0 0 1px var(--teal); }
@@ -99,7 +99,7 @@ void props
 .key-chip .epic { color: var(--gold); }
 .copy-glyph { opacity: .45; }
 .key-chip:hover .copy-glyph { opacity: .9; }
-.position { margin-left: 6px; font-size: 11.5px; color: var(--ink-3); }
+.position { flex-shrink: 0; margin-left: 6px; font-size: 11.5px; color: var(--ink-3); white-space: nowrap; }
 .nav { display: inline-flex; gap: 2px; margin-left: 2px; }
 .nav .icon-btn:disabled { opacity: .35; }
 .spacer { flex: 1; }
@@ -109,7 +109,9 @@ void props
 .crumb:hover { color: var(--teal-ink); background: var(--row-hover); }
 .crumb:focus-visible { box-shadow: var(--focus-ring); }
 .crumb-sep { flex-shrink: 0; color: var(--ink-3); }
-.trail-more { padding: 0 2px; color: var(--ink-3); }
+.crumb-item { display: inline-flex; align-items: center; gap: 2px; }
+.trail-more { display: none; padding: 0 2px; color: var(--ink-3); }
+.trail-more.always { display: inline; }
 .edit-btn { gap: 6px; margin-right: 4px; }
 .unsaved { font-size: 12px; color: var(--gold-ink); font-weight: 600; margin-right: 4px; }
 .more-menu { display: grid; gap: 1px; }
@@ -120,6 +122,11 @@ void props
 .menu-item.danger, .menu-item.danger svg { color: var(--danger); }
 .menu-item.danger:hover:not(:disabled) { background: var(--danger-bg); }
 .menu-sep { height: 1px; margin: 4px 6px; background: var(--line); }
+/* A narrow panel with a trail keeps the last crumb (after an ellipsis) and drops the list position. */
+@container panel-bar (max-width: 640px) {
+  .has-trail .position, .crumb-item:not(:last-child) { display: none; }
+  .trail-more { display: inline; }
+}
 @media (max-width: 720px) {
   .panel-bar { height: 56px; padding: 0 6px 0 12px; }
   .panel-bar .icon-btn { width: 44px; height: 44px; }

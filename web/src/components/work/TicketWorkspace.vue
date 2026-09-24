@@ -91,7 +91,8 @@ async function startEdit(focus: 'title' | 'body' = 'title') {
   base = snapshot(); Object.assign(draft, base)
   editing.value = true
   await nextTick()
-  if (focus === 'title') { titleField.value?.focus(); titleField.value?.select(); growTitle() }
+  // The caret goes to the end of the title: typing adds to it rather than replacing it.
+  if (focus === 'title') { const el = titleField.value; el?.focus(); el?.setSelectionRange(el.value.length, el.value.length); growTitle() }
   else root.value?.querySelector<HTMLTextAreaElement>('.edit-form .md-area')?.focus()
 }
 function growTitle() { const el = titleField.value; if (el) { el.style.height = 'auto'; el.style.height = `${el.scrollHeight}px` } }
@@ -448,7 +449,7 @@ defineExpose({
 .edit-form { display: grid; gap: 16px; }
 .panel .edit-form { padding-bottom: 12px; }
 .edit-title {
-  width: 100%; min-height: 40px; padding: 6px 10px; margin-left: -10px; border: 1px solid var(--glass-edge); border-radius: 10px; resize: none; overflow: hidden;
+  width: 100%; min-height: 40px; padding: 6px 10px; border: 1px solid var(--glass-edge); border-radius: 10px; resize: none; overflow: hidden;
   background: var(--field-bg); box-shadow: var(--field-inset), 0 0 0 1px var(--line); color: var(--ink); font: 650 20px/1.3 var(--font); letter-spacing: -.01em;
 }
 .edit-title.large { font-size: 28px; }
@@ -476,8 +477,11 @@ defineExpose({
 .ticket-ws.full { width: 100%; max-width: 1160px; min-height: 100%; margin: 0 auto; }
 .full .ws-scroll { overflow: visible; }
 .full .ws-grid { display: grid; grid-template-columns: minmax(0, 1fr) 320px; gap: 40px; align-items: start; padding: 26px 0 40px; }
-.ticket-ws.full.has-context { max-width: 1720px; }
-.full.has-context .ws-grid { grid-template-columns: minmax(0, 72ch) minmax(320px, 1fr) 300px; gap: 44px; }
+/* Three columns: a ~72ch reading column, the context (attachments, relations,
+   activity) and the properties; the set stays together in the middle. */
+.ticket-ws.full.has-context { max-width: 1480px; }
+.full.has-context .ws-grid { grid-template-columns: minmax(0, 1fr) clamp(340px, 24vw, 440px) 300px; gap: 44px; }
+.full.has-context .ws-main { max-width: none; }
 .full.has-context .ws-context { position: sticky; top: 16px; max-height: calc(100dvh - var(--header-h) - 32px); overflow: auto; padding-right: 4px; }
 .full .ws-main { min-width: 0; max-width: 820px; }
 .full .sections :deep(.markdown-body), .full .inline-composer, .full .activity, .full .children { max-width: 72ch; }

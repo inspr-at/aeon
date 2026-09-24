@@ -8,6 +8,7 @@ import PersonAvatar from './PersonAvatar.vue'
 import PriorityIcon from './PriorityIcon.vue'
 import StatusIcon from './StatusIcon.vue'
 import LiveDot from '../agents/LiveDot.vue'
+import TicketHours from '../business/TicketHours.vue'
 import { useAgents } from '../../stores/agents'
 
 // Status, priority, assignee (editable popovers), type (read-only), the parent
@@ -91,6 +92,7 @@ function onScroll(event: Event) {
         <span v-else class="prop-static faint">No epic</span>
       </dd>
     </div>
+    <TicketHours :node-id="item.id" :kind="item.kind_slug" :layout="layout" />
     <div v-if="estimate" class="prop"><dt>Estimate</dt><dd><span class="prop-static"><span v-if="layout === 'row'" class="inline-label">Estimate</span><span class="mono">{{ estimate }}</span></span></dd></div>
     <div v-if="start" class="prop"><dt>Start</dt><dd><span class="prop-static"><span v-if="layout === 'row'" class="inline-label">Start</span>{{ start }}</span></dd></div>
     <div v-if="due" class="prop"><dt>Due</dt><dd><span class="prop-static"><span v-if="layout === 'row'" class="inline-label">Due</span>{{ due }}</span></dd></div>

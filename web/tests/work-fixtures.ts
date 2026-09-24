@@ -126,6 +126,47 @@ export async function mockWork(page: Page, data: Fixtures, options: MockOptions 
     let body: unknown = null
     try { body = request.postDataJSON() } catch { body = request.postData() }
     calls.push({ path, method, query, body, headers: request.headers() })
+    // ---------- Preferences ----------
+    const prefPath = /^\/api\/preferences\/([^/]+)$/.exec(path)
+    if (prefPath) {
+      const key = prefPath[1]
+      if (method === 'PUT') { data.preferences[key] = (body as { value: Record<string, unknown> }).value; return route.fulfill({ json: { key, value: data.preferences[key], updated_at: new Date(now).toISOString() } }) }
+      return route.fulfill({ json: { key, value: data.preferences[key] ?? null, updated_at: null } })
+    }
+    // ---------- Attachments ----------
+    const listPath = /^\/api\/nodes\/([^/]+)\/attachments$/.exec(path)
+    if (listPath) {
+      const list = (data.attachments[listPath[1]] ??= [])
+      if (method === 'GET') return route.fulfill({ json: [...list].sort((a, b) => Number(a.position) - Number(b.position)) })
+      if (options.failUpload) return route.fulfill({ status: 413, json: { error: 'The file is too large' } })
+      const raw = request.postDataBuffer()?.toString('latin1') ?? ''
+      const files = [...raw.matchAll(/name="file"; filename="([^"]*)"\r\nContent-Type: ([^\r]+)/g)]
+      const created = files.map(([, name, type], i) => {
+        const id = `att-new-${calls.length}-${i}`
+        const last = Math.max(0, ...list.map(a => Number(a.position)))
+        const item = { id, node_id: listPath[1], sha256: id.padEnd(64, '0'), name, content_type: type, size: 1024, width: type.startsWith('image/') ? 800 : null, height: type.startsWith('image/') ? 500 : null, caption: '', position: String(last + 1024), created_by: me.id, created_at: new Date(now).toISOString(), updated_at: new Date(now).toISOString(), deleted_at: null }
+        list.push(item)
+        return item
+      })
+      return route.fulfill({ status: 201, json: created })
+    }
+    const attPath = /^\/api\/attachments\/([^/]+)(\/content)?$/.exec(path)
+    if (attPath) {
+      const [, id, content] = attPath
+      if (content) return route.fulfill({ contentType: 'image/png', body: PNG })
+      for (const list of Object.values(data.attachments)) {
+        const index = list.findIndex(a => a.id === id)
+        if (index === -1) continue
+        if (method === 'DELETE') { list.splice(index, 1); return route.fulfill({ status: 204 }) }
+        if (method === 'PATCH') {
+          const expected = request.headers()['if-unmodified-since']
+          if (expected && expected !== list[index].updated_at) return route.fulfill({ status: 412, json: { error: 'stale attachment' } })
+          Object.assign(list[index], body as object, { updated_at: new Date(now + 1000 * calls.length).toISOString() })
+          return route.fulfill({ json: list[index] })
+        }
+      }
+      return route.fulfill({ status: 404, json: { error: 'attachment not found' } })
+    }
     if (path === '/api/me') return route.fulfill({ json: { principal: { id: me.id, name: me.name, roles: options.readOnly ? ['viewer'] : ['member'] }, tenant: { id: 't1', name: 'INSPR Studio' } } })
     if (path === '/api/kinds') return route.fulfill({ json: { items: ['epic', 'ticket', 'task', 'project'].map(slug => ({ id: `k-${slug}`, slug, label: slug[0].toUpperCase() + slug.slice(1), short_prefix: slug.slice(0, 3).toUpperCase(), icon: slug, allowed_child_kinds: null, field_schema: {} })) } })
     if (path === '/api/relations') return route.fulfill({ json: { items: data.relations.filter(r => r.source_node_id === query.get('node_id') || r.target_node_id === query.get('node_id')), next_cursor: null } })
@@ -250,47 +291,6 @@ export async function mockWork(page: Page, data: Fixtures, options: MockOptions 
       const q = (query.get('q') ?? '').toLowerCase()
       const hits = data.nodes.filter(n => n.title.toLowerCase().includes(q)).map(n => ({ node: { ...item(n, data) }, score: 0.9 }))
       return route.fulfill({ json: { items: hits, next_cursor: null } })
-    }
-    // ---------- Preferences ----------
-    const prefPath = /^\/api\/preferences\/([^/]+)$/.exec(path)
-    if (prefPath) {
-      const key = prefPath[1]
-      if (method === 'PUT') { data.preferences[key] = (body as { value: Record<string, unknown> }).value; return route.fulfill({ json: { key, value: data.preferences[key], updated_at: new Date(now).toISOString() } }) }
-      return route.fulfill({ json: { key, value: data.preferences[key] ?? null, updated_at: null } })
-    }
-    // ---------- Attachments ----------
-    const listPath = /^\/api\/nodes\/([^/]+)\/attachments$/.exec(path)
-    if (listPath) {
-      const list = (data.attachments[listPath[1]] ??= [])
-      if (method === 'GET') return route.fulfill({ json: [...list].sort((a, b) => Number(a.position) - Number(b.position)) })
-      if (options.failUpload) return route.fulfill({ status: 413, json: { error: 'The file is too large' } })
-      const raw = request.postDataBuffer()?.toString('latin1') ?? ''
-      const files = [...raw.matchAll(/name="file"; filename="([^"]*)"\r\nContent-Type: ([^\r]+)/g)]
-      const created = files.map(([, name, type], i) => {
-        const id = `att-new-${calls.length}-${i}`
-        const last = Math.max(0, ...list.map(a => Number(a.position)))
-        const item = { id, node_id: listPath[1], sha256: id.padEnd(64, '0'), name, content_type: type, size: 1024, width: type.startsWith('image/') ? 800 : null, height: type.startsWith('image/') ? 500 : null, caption: '', position: String(last + 1024), created_by: me.id, created_at: new Date(now).toISOString(), updated_at: new Date(now).toISOString(), deleted_at: null }
-        list.push(item)
-        return item
-      })
-      return route.fulfill({ status: 201, json: created })
-    }
-    const attPath = /^\/api\/attachments\/([^/]+)(\/content)?$/.exec(path)
-    if (attPath) {
-      const [, id, content] = attPath
-      if (content) return route.fulfill({ contentType: 'image/png', body: PNG })
-      for (const list of Object.values(data.attachments)) {
-        const index = list.findIndex(a => a.id === id)
-        if (index === -1) continue
-        if (method === 'DELETE') { list.splice(index, 1); return route.fulfill({ status: 204 }) }
-        if (method === 'PATCH') {
-          const expected = request.headers()['if-unmodified-since']
-          if (expected && expected !== list[index].updated_at) return route.fulfill({ status: 412, json: { error: 'stale attachment' } })
-          Object.assign(list[index], body as object, { updated_at: new Date(now + 1000 * calls.length).toISOString() })
-          return route.fulfill({ json: list[index] })
-        }
-      }
-      return route.fulfill({ status: 404, json: { error: 'attachment not found' } })
     }
     return route.fulfill({ status: 404, json: { error: 'Unmocked route' } })
   })

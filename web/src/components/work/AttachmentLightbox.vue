@@ -61,7 +61,8 @@ function fit() {
   if (!item || !box) return
   const w = item.width ?? 1600, h = item.height ?? 1000
   const pad = compare.value?.view === 'side' ? 2 : 1
-  fitScale.value = Math.min(1, (box.width / pad - 64) / w, (box.height - 48) / h)
+  const margin = box.width < 600 ? 24 : 64
+  fitScale.value = Math.min(1, (box.width / pad - margin) / w, (box.height - 48) / h)
   if (mode.value === 'fit') { scale.value = fitScale.value; offset.value = { x: 0, y: 0 } }
 }
 function setScale(next: number, around?: { x: number; y: number }) {
@@ -111,7 +112,14 @@ function moveTo(event: PointerEvent) {
     offset.value = { x: pan.ox + event.clientX - pan.x, y: pan.oy + event.clientY - pan.y }
   }
 }
-function up(event: PointerEvent) { pointers.delete(event.pointerId); if (pointers.size < 2) pinch = null; if (!pointers.size) pan = null }
+function up(event: PointerEvent) {
+  // A horizontal swipe on a fitted image goes to the next or previous attachment.
+  if (event.type === 'pointerup' && pan && !pinch && !compare.value && mode.value === 'fit' && pointers.size === 1 && props.items.length > 1) {
+    const dx = event.clientX - pan.x, dy = event.clientY - pan.y
+    if (Math.abs(dx) > 60 && Math.abs(dx) > Math.abs(dy) * 1.5) go(dx < 0 ? 1 : -1)
+  }
+  pointers.delete(event.pointerId); if (pointers.size < 2) pinch = null; if (!pointers.size) pan = null
+}
 function doubleClick(event: MouseEvent) { if (mode.value === 'fit') setScale(1, { x: event.clientX, y: event.clientY }); else toFit() }
 
 // Compare: the slider handle drags the divide.
@@ -171,7 +179,7 @@ const transform = computed(() => `translate(${offset.value.x}px, ${offset.value.
 <template>
   <dialog ref="dialog" class="lightbox" :aria-label="current ? `${current.caption || current.name}, attachment ${index + 1} of ${items.length}` : 'Attachment viewer'" @cancel.prevent="close" @keydown="keydown">
     <template v-if="current">
-      <header class="bar">
+      <header class="lb-bar">
         <div class="title-block">
           <p class="eyebrow">{{ ticketKey }} · Attachment {{ index + 1 }} of {{ items.length }}</p>
           <h2 class="name">{{ current.caption || current.name }}</h2>
@@ -186,9 +194,9 @@ const transform = computed(() => `translate(${offset.value.x}px, ${offset.value.
           <span class="percent mono" aria-live="polite">{{ percent }}%</span>
         </div>
         <button v-if="items.length > 1 && isImage(current)" type="button" class="pill-btn solo" :aria-pressed="!!compare" aria-keyshortcuts="c" data-tip="Compare two screens · c" @click="toggleCompare"><AppIcon name="compare" :size="14" />Compare</button>
-        <button type="button" class="pill-btn solo" :aria-pressed="details" aria-keyshortcuts="d" data-tip="Details · d" @click="details = !details; $nextTick(fit)">Details</button>
+        <button type="button" class="pill-btn solo details-btn" :aria-pressed="details" aria-label="Details" aria-keyshortcuts="d" data-tip="Details · d" @click="details = !details; $nextTick(fit)"><AppIcon name="info" :size="15" /><span class="label">Details</span></button>
         <a class="pill-btn round" :href="contentUrl(current.id, 'original')" :download="current.name" :aria-label="`Download ${current.name}`" data-tip="Download the original"><AppIcon name="download" :size="15" /></a>
-        <button type="button" class="pill-btn round" aria-label="Copy link" data-tip="Copy link to the original" @click="copyLink"><AppIcon name="link" :size="15" /></button>
+        <button type="button" class="pill-btn round copy-link" aria-label="Copy link" data-tip="Copy link to the original" @click="copyLink"><AppIcon name="link" :size="15" /></button>
         <button type="button" class="pill-btn round" aria-label="Close viewer" aria-keyshortcuts="Escape" data-tip="Close · Esc" @click="close"><AppIcon name="close" :size="15" /></button>
       </header>
 
@@ -282,12 +290,12 @@ const transform = computed(() => `translate(${offset.value.x}px, ${offset.value.
 .lightbox[open] { display: grid; }
 .lightbox::backdrop { background: rgba(4, 12, 14, .7); }
 @media (prefers-reduced-motion: no-preference) { .lightbox[open] { animation: lb-in .2s ease; } @keyframes lb-in { from { opacity: 0; } to { opacity: 1; } } }
-.bar { display: flex; align-items: center; gap: 10px; min-height: 72px; padding: 10px 18px 10px 22px; background: var(--lb-glass); border-bottom: 1px solid var(--lb-edge); backdrop-filter: blur(18px); -webkit-backdrop-filter: blur(18px); }
-.title-block { display: grid; gap: 2px; min-width: 0; }
-.eyebrow { color: #8fb0ad; }
+.lb-bar { position: relative; z-index: 2; display: flex; align-items: center; gap: 10px; min-height: 72px; padding: 10px 18px 10px 22px; background: var(--lb-glass); border-bottom: 1px solid var(--lb-edge); backdrop-filter: blur(18px); -webkit-backdrop-filter: blur(18px); }
+.title-block { display: grid; gap: 2px; min-width: 0; flex: 0 1 auto; }
+.eyebrow { color: #8fb0ad; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 .name { font-size: 17px; font-weight: 600; letter-spacing: -.01em; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; color: var(--lb-ink); }
-.meta { display: flex; gap: 10px; font-size: 12px; color: var(--lb-ink-2); font-variant-numeric: tabular-nums; }
-.meta .file { max-width: 28ch; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.meta { display: flex; gap: 10px; min-width: 0; font-size: 12px; color: var(--lb-ink-2); font-variant-numeric: tabular-nums; white-space: nowrap; }
+.meta .file { flex: 0 1 auto; min-width: 0; max-width: 28ch; overflow: hidden; text-overflow: ellipsis; }
 .spacer { flex: 1; }
 .pill { display: inline-flex; align-items: center; gap: 2px; padding: 3px; border-radius: 999px; background: rgba(237, 244, 240, .08); box-shadow: inset 0 0 0 1px var(--lb-edge); }
 .pill-btn {
@@ -303,7 +311,12 @@ const transform = computed(() => `translate(${offset.value.x}px, ${offset.value.
 .percent { min-width: 46px; padding: 0 8px 0 4px; font-size: 12px; color: var(--lb-ink-2); text-align: right; }
 .body { position: relative; display: grid; grid-template-columns: minmax(0, 1fr); min-height: 0; }
 .body.with-details { grid-template-columns: minmax(0, 1fr) 320px; }
-.stage { position: relative; display: grid; place-items: center; overflow: hidden; touch-action: none; user-select: none; outline: none; }
+.stage { position: relative; display: grid; grid-template: minmax(0, 1fr) / minmax(0, 1fr); place-items: center; overflow: hidden; touch-action: none; user-select: none; outline: none; }
+/* The image and the compare frame keep their own size and sit on the stage centre;
+   the transform (pan, then scale around the centre) does the rest. */
+.photo, .compare-frame { position: absolute; left: 50%; top: 50%; translate: -50% -50%; }
+/* The stage is where focus starts so the keys work at once; no ring around the whole picture. */
+.stage:focus-visible { box-shadow: none; }
 .stage.grab { cursor: grab; }
 .stage.grab:active { cursor: grabbing; }
 .photo, .side img { max-width: none; transform-origin: center; box-shadow: 0 30px 80px -30px rgba(0, 0, 0, .8), 0 0 0 1px rgba(237, 244, 240, .08); border-radius: 6px; background: #fff; }
@@ -314,7 +327,7 @@ const transform = computed(() => `translate(${offset.value.x}px, ${offset.value.
 .side img { max-width: 100%; max-height: 100%; object-fit: contain; }
 figcaption { display: flex; align-items: center; gap: 8px; font-size: 12.5px; color: var(--lb-ink-2); }
 .tag, .b-tag { display: inline-grid; place-items: center; width: 20px; height: 20px; border-radius: 6px; background: #d69b31; color: #102327; font: 700 11px/1 var(--mono); }
-.compare-frame { position: relative; max-width: none; transform-origin: center; border-radius: 6px; overflow: hidden; box-shadow: 0 30px 80px -30px rgba(0, 0, 0, .8); background: #fff; }
+.compare-frame { max-width: none; transform-origin: center; border-radius: 6px; overflow: hidden; box-shadow: 0 30px 80px -30px rgba(0, 0, 0, .8); background: #fff; }
 .compare-frame img { position: absolute; inset: 0; width: 100%; height: 100%; object-fit: contain; }
 .compare-frame .base { position: relative; display: block; }
 .divide { position: absolute; top: 0; bottom: 0; width: 2px; margin-left: -1px; background: #d69b31; pointer-events: none; }
@@ -357,11 +370,17 @@ figcaption { display: flex; align-items: center; gap: 8px; font-size: 12.5px; co
 .thumb-file { font: 700 11px/1 var(--mono); color: #a4e5df; }
 .b-tag { position: absolute; top: 4px; right: 4px; width: 16px; height: 16px; font-size: 10px; }
 @media (max-width: 720px) {
-  .bar { min-height: 60px; padding: 8px 10px 8px 14px; flex-wrap: wrap; }
-  .zoom, .pill-btn.solo:not([aria-pressed="true"]) { display: none; }
+  .lb-bar { gap: 6px; min-height: 60px; padding: 8px 10px 8px 14px; }
+  .title-block { flex: 1 1 auto; }
+  .name { font-size: 15.5px; }
+  .zoom, .copy-link, .pill-btn.solo:not(.details-btn):not([aria-pressed="true"]) { display: none; }
+  .details-btn { width: 36px; height: 36px; padding: 0; }
+  .details-btn .label { display: none; }
+  .pill-btn.round, .details-btn { flex: none; }
   .body.with-details { grid-template-columns: minmax(0, 1fr); grid-template-rows: minmax(0, 1fr) auto; }
   .details { border-left: 0; border-top: 1px solid var(--lb-edge); max-height: 40dvh; }
-  .nav { width: 40px; height: 40px; }
+  /* Swipe to move on a phone; the arrows sit low so they do not cover the image. */
+  .nav { top: auto; bottom: 12px; width: 40px; height: 40px; margin-top: 0; }
   .nav.prev { left: 8px; } .nav.next { right: 8px; }
   .side-by-side { grid-template-columns: 1fr; grid-template-rows: 1fr 1fr; }
 }

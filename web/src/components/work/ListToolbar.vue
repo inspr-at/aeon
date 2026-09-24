@@ -155,7 +155,7 @@ defineExpose({ focusSearch, input })
       v-if="open" :anchor="open.anchor" :dimension="open.dimension" :title="title(open.dimension)" :options="options(open.dimension)" :selected="filters[open.dimension]"
       @toggle="value => emit('toggle', open!.dimension, value)" @clear="emit('clear', open!.dimension)" @close="closeMenu"
     />
-    <FloatingPanel v-if="displayAnchor" :anchor="displayAnchor" :width="300" align="end" label="Display options" @close="closeDisplay">
+    <FloatingPanel v-if="displayAnchor" :anchor="displayAnchor" :width="300" :tallest="720" align="end" label="Display options" @close="closeDisplay">
       <div class="display-panel">
         <template v-if="view === 'list'">
           <p class="eyebrow">Group by</p>
