@@ -30,7 +30,9 @@ func commonMiddleware(next http.Handler) http.Handler {
 
 func securityMiddleware(next http.Handler) http.Handler {
 	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		w.Header().Set("Content-Security-Policy", "default-src 'self'")
+		// blob: and data: images let the avatar crop dialog preview a local file
+		// before upload; everything else stays same-origin.
+		w.Header().Set("Content-Security-Policy", "default-src 'self'; img-src 'self' blob: data:")
 		w.Header().Set("X-Content-Type-Options", "nosniff")
 		w.Header().Set("Referrer-Policy", "no-referrer")
 		next.ServeHTTP(w, r)
