@@ -450,6 +450,61 @@ paths:
           $ref: '#/components/responses/Error'
         '409':
           $ref: '#/components/responses/Error'
+  /nodes/{nodeId}/attachments:
+    parameters: [{$ref: '#/components/parameters/NodeId'}]
+    get:
+      operationId: listNodeAttachments
+      security: *auth
+      responses:
+        '200': {description: Live attachments ordered by position and ID, content: {application/json: {schema: {type: array, items: {$ref: '#/components/schemas/Attachment'}}}}}
+        '404': {$ref: '#/components/responses/Error'}
+    post:
+      operationId: addNodeAttachments
+      description: Multipart files (repeat the file field) with optional caption, or a raw image body with X-Filename. Each file is limited by the server's configured maximum (50 MiB by default).
+      security: *auth
+      requestBody:
+        required: true
+        content:
+          multipart/form-data: {schema: {type: object, required: [file], properties: {file: {type: array, items: {type: string, format: binary}}, caption: {type: string}}}}
+          image/png: {schema: {type: string, format: binary}}
+          image/jpeg: {schema: {type: string, format: binary}}
+          image/gif: {schema: {type: string, format: binary}}
+          image/webp: {schema: {type: string, format: binary}}
+      responses:
+        '201': {description: Created attachments, content: {application/json: {schema: {type: array, items: {$ref: '#/components/schemas/Attachment'}}}}}
+        '400': {$ref: '#/components/responses/Error'}
+        '404': {$ref: '#/components/responses/Error'}
+        '413': {$ref: '#/components/responses/Error'}
+        '415': {$ref: '#/components/responses/Error'}
+  /attachments/{id}:
+    parameters: [{name: id, in: path, required: true, schema: {type: string, format: uuid}}]
+    patch:
+      operationId: updateAttachment
+      description: Optional If-Unmodified-Since compares the exact updated_at timestamp under row lock; stale writes return 412.
+      security: *auth
+      parameters: [{name: If-Unmodified-Since, in: header, schema: {type: string}}]
+      requestBody: {required: true, content: {application/json: {schema: {type: object, minProperties: 1, additionalProperties: false, properties: {caption: {type: string}, position: {type: string, description: Decimal rank}}}}}}
+      responses:
+        '200': {description: Updated attachment, content: {application/json: {schema: {$ref: '#/components/schemas/Attachment'}}}}
+        '400': {$ref: '#/components/responses/Error'}
+        '404': {$ref: '#/components/responses/Error'}
+        '412': {$ref: '#/components/responses/Error'}
+    delete:
+      operationId: removeAttachment
+      security: *auth
+      responses:
+        '204': {description: Soft deleted}
+        '404': {$ref: '#/components/responses/Error'}
+  /attachments/{id}/content:
+    parameters: [{name: id, in: path, required: true, schema: {type: string, format: uuid}}]
+    get:
+      operationId: getAttachmentContent
+      security: *auth
+      parameters: [{name: variant, in: query, schema: {type: string, enum: [original, preview, thumb], default: original}}]
+      responses:
+        '200': {description: Tenant-scoped bytes, content: {application/octet-stream: {schema: {type: string, format: binary}}}}
+        '304': {description: ETag matched}
+        '404': {$ref: '#/components/responses/Error'}
   /nodes/{nodeId}/activity:
     parameters: [{$ref: '#/components/parameters/NodeId'}]
     get:
@@ -2608,6 +2663,24 @@ components:
               field: {type: string, enum: [status, priority, assignee, title, parent]}
               from: {type: [string, 'null']}
               to: {type: [string, 'null']}
+    Attachment:
+      type: object
+      required: [id, node_id, sha256, name, content_type, size, caption, position, created_by, created_at, updated_at]
+      properties:
+        id: {type: string, format: uuid}
+        node_id: {type: string, format: uuid}
+        sha256: {type: string, pattern: '^[0-9a-f]{64}$'}
+        name: {type: string}
+        content_type: {type: string}
+        size: {type: integer, format: int64}
+        width: {type: [integer, 'null']}
+        height: {type: [integer, 'null']}
+        caption: {type: string}
+        position: {type: string}
+        created_by: {type: string, format: uuid}
+        created_at: {type: string, format: date-time}
+        updated_at: {type: string, format: date-time}
+        deleted_at: {type: [string, 'null'], format: date-time}
     Node:
       type: object
       required: [id, key, kind_id, title, body, fields, state, parent_id, position, created_at, updated_at]
