@@ -25,7 +25,7 @@ const expired = computed(() => !!props.approval && (!Number.isFinite(Date.parse(
       <p v-else-if="!canDecide" class="j-note">A person must decide this gate.</p>
     </template>
     <p v-else>{{ requested ? 'The referenced approval is unavailable. Refresh or inspect Approvals.' : 'No human gate has been proposed for this stage yet.' }}</p>
-    <RouterLink class="j-link" to="/approvals">View approvals</RouterLink>
+    <RouterLink class="j-link" to="/agents">View approvals</RouterLink>
   </section>
 </template>
 <style scoped>

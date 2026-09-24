@@ -1,0 +1,303 @@
+<!-- SPDX-License-Identifier: AGPL-3.0-only -->
+<script setup lang="ts">
+import { computed, onMounted, ref, watch } from 'vue'
+import type { Approval, ProjectMessage, SessionControl } from '../../lib/agents'
+import { RUN_OUTCOME, cost, elapsed, runDuration, runModel, scopeLabel, stopReasonLabel, tokens } from '../../lib/agentState'
+import { absoluteTime, relativeTime } from '../../lib/work'
+import { useAgents, type SessionView } from '../../stores/agents'
+import { useSession } from '../../stores/session'
+import AppIcon from '../AppIcon.vue'
+import LiveDot from './LiveDot.vue'
+
+// One session in the docked panel: who and where, the bound ticket, recent runs with
+// outcome and duration, telemetry, and the message thread with a composer.
+const props = defineProps<{ view: SessionView | undefined; loading: boolean; now: number; canWrite: boolean; controlBlock: (view: SessionView, kind: SessionControl['kind']) => string }>()
+const emit = defineEmits<{ close: []; control: [view: SessionView, kind: SessionControl['kind']]; review: [approval: Approval] }>()
+const agents = useAgents()
+const session = useSession()
+const root = ref<HTMLElement>()
+const draft = ref('')
+const level = ref<'simple' | 'steer'>('simple')
+const replyTo = ref<ProjectMessage | null>(null)
+const sending = ref(false)
+const sendError = ref('')
+const thread = ref<HTMLElement>()
+
+const s = computed(() => props.view?.session)
+const me = computed(() => session.identity?.principal.id ?? '')
+const pending = computed(() => s.value ? agents.pending.filter(a => a.agent_principal_id === s.value!.agent_principal_id) : [])
+const siblings = computed(() => s.value ? agents.byAgent(s.value.agent_principal_id) : [])
+const recentRuns = computed(() => {
+  const ids = [...new Set(siblings.value.map(v => v.session.run_id).filter((id): id is string => !!id))]
+  return ids.map(id => agents.runs[id]).filter(Boolean).sort((a, b) => Date.parse(b.created_at) - Date.parse(a.created_at)).slice(0, 8)
+})
+const run = computed(() => props.view?.run)
+const messages = computed(() => s.value ? agents.thread(s.value).slice(-40) : [])
+const address = computed(() => s.value ? agents.addressOf(s.value.agent_principal_id) : '')
+const composeBlock = computed(() => {
+  if (!s.value) return ''
+  if (agents.messagingState === 'unavailable') return 'This server does not carry project messages yet.'
+  if (agents.messagingState === 'forbidden') return 'Messages are open to workspace admins.'
+  if (!address.value) return `${props.view!.name} has no message address yet. It gets one when it registers a message target.`
+  if (s.value.phase === 'stopped') return 'This session has stopped. Messages reach the agent’s next session.'
+  return ''
+})
+const authorOf = (m: ProjectMessage) => m.sender_principal_id === me.value ? 'You' : m.sender_principal_id === s.value?.agent_principal_id ? props.view!.name : agents.askerName(m.sender_principal_id).name
+const fromAgent = (m: ProjectMessage) => m.sender_principal_id === s.value?.agent_principal_id
+
+watch(() => s.value?.id, async id => {
+  if (!id || !s.value) return
+  draft.value = ''; replyTo.value = null; sendError.value = ''
+  const ids = siblings.value.map(v => v.session.run_id).filter((x): x is string => !!x)
+  thread.value?.scrollTo({ top: 0 })
+  await Promise.all([agents.runsFor(ids), agents.refreshThread(s.value.project_id)])
+}, { immediate: true })
+onMounted(() => root.value?.focus({ preventScroll: true }))
+
+async function send() {
+  if (!s.value || !draft.value.trim() || sending.value || composeBlock.value) return
+  sending.value = true; sendError.value = ''
+  try {
+    await agents.send(s.value, address.value, draft.value.trim(), level.value, replyTo.value?.id)
+    draft.value = ''; replyTo.value = null
+  } catch (e) { sendError.value = e instanceof Error ? e.message : 'The message was not sent. Please try again.' }
+  finally { sending.value = false }
+}
+function composerKeys(event: KeyboardEvent) {
+  if (event.key === 'Enter' && (event.metaKey || event.ctrlKey)) { event.preventDefault(); void send() }
+}
+function control(kind: SessionControl['kind']) { if (props.view && !props.controlBlock(props.view, kind)) emit('control', props.view, kind) }
+const workShape: Record<string, string> = { ship: 'Ship: building a change', scout: 'Scout: investigating', unknown: '' }
+defineExpose({ focus: () => root.value?.focus({ preventScroll: true }) })
+</script>
+
+<template>
+  <aside ref="root" class="session-panel" aria-label="Session details" tabindex="-1">
+    <header class="panel-bar">
+      <template v-if="view">
+        <LiveDot :tone="view.status.tone" />
+        <span class="bar-state">{{ view.status.label }}</span>
+      </template>
+      <span class="spacer" />
+      <template v-if="view && view.status.group !== 'stopped'">
+        <button type="button" class="icon-btn sm flat" :aria-label="`Interrupt ${view.name}`" :aria-disabled="!!controlBlock(view, 'interrupt')" :data-tip="controlBlock(view, 'interrupt') || 'Interrupt the current turn'" @click="control('interrupt')"><AppIcon name="pause" :size="14" /></button>
+        <button type="button" class="icon-btn sm flat stop" :aria-label="`Stop ${view.name}`" :aria-disabled="!!controlBlock(view, 'stop')" :data-tip="controlBlock(view, 'stop') || 'Stop this session'" @click="control('stop')"><AppIcon name="stop" :size="13" /></button>
+        <span class="bar-sep" aria-hidden="true" />
+      </template>
+      <button type="button" class="icon-btn sm flat" aria-label="Close session details" aria-keyshortcuts="Escape" data-tip="Close · Esc" @click="emit('close')"><AppIcon name="close" :size="15" /></button>
+    </header>
+
+    <div v-if="!view && loading" class="scroll" role="status" aria-label="Loading session">
+      <div class="sk"><span class="skeleton w40" /><span class="skeleton w70" /><span class="skeleton w90" /><span class="skeleton w60" /></div>
+    </div>
+    <div v-else-if="!view" class="scroll">
+      <div class="gone">
+        <span class="gone-icon"><AppIcon name="agent" :size="20" /></span>
+        <h2>This session is not here</h2>
+        <p>It may belong to a project you cannot see, or the server no longer lists it.</p>
+        <button type="button" class="btn" @click="emit('close')">Back to agents</button>
+      </div>
+    </div>
+
+    <div v-else ref="thread" class="scroll">
+      <div class="who">
+        <h2 class="name"><span class="harness">{{ view.harness }}</span>{{ view.name }}</h2>
+        <p class="sub">
+          {{ view.session.role === 'coordinator' ? 'Lead session' : 'Worker' }} on <span class="mono">{{ view.session.host }}</span>
+          · {{ view.session.management_mode === 'managed' ? 'owned by Aeon' : 'runs on its own' }}
+        </p>
+      </div>
+
+      <div v-if="pending.length" class="callout" role="note">
+        <AppIcon name="shield" :size="15" />
+        <div class="callout-text">
+          <strong>{{ pending.length === 1 ? 'Waiting for your permission' : `${pending.length} requests wait for you` }}</strong>
+          <span>{{ scopeLabel(pending[0].scope) }}</span>
+        </div>
+        <button type="button" class="btn sm primary" @click="emit('review', pending[0])">Review</button>
+      </div>
+
+      <dl class="facts">
+        <div class="fact wide"><dt>Ticket</dt><dd>
+          <RouterLink v-if="view.ticket" class="ticket-link" :to="view.ticket.href"><span class="ticket-chip">{{ view.ticket.key }}</span><span class="ticket-title">{{ view.ticket.title }}</span></RouterLink>
+          <span v-else class="muted">Not bound to a ticket</span>
+        </dd></div>
+        <div class="fact"><dt>Project</dt><dd>
+          <RouterLink v-if="view.projectKey" class="project-link" :to="`/p/${encodeURIComponent(view.projectKey)}`"><span class="key-badge">{{ view.projectKey }}</span>{{ view.projectTitle }}</RouterLink>
+          <span v-else class="muted">—</span>
+        </dd></div>
+        <div class="fact"><dt>Account</dt><dd :class="{ muted: !view.account }">{{ view.account || 'Not reported' }}</dd></div>
+        <div class="fact"><dt>Model</dt><dd class="mono" :class="{ muted: !view.model }">{{ view.model || 'Not reported' }}<span v-if="run && run.model_evidence === 'vendor_reported'" class="evidence" data-tip="Reported by the vendor, not only requested"><AppIcon name="check" :size="11" /></span></dd></div>
+        <div class="fact"><dt>Heartbeat</dt><dd>
+          <time v-if="view.session.heartbeat_at" :datetime="view.session.heartbeat_at" :data-tip="absoluteTime(view.session.heartbeat_at)">{{ relativeTime(view.session.heartbeat_at, { now, long: true }) }}</time>
+          <span v-else class="muted">Never</span>
+        </dd></div>
+        <div class="fact"><dt>{{ view.session.stopped_at ? 'Ran for' : 'Running' }}</dt><dd><span :data-tip="`Since ${absoluteTime(view.session.created_at)}`">{{ elapsed(view.session, now) }}</span></dd></div>
+        <div v-if="workShape[view.session.work_shape]" class="fact"><dt>Work</dt><dd>{{ workShape[view.session.work_shape] }}</dd></div>
+        <div v-if="view.session.stopped_at" class="fact"><dt>Stopped</dt><dd>{{ stopReasonLabel(view.session.stop_reason) || 'Stopped' }} <span class="muted">{{ relativeTime(view.session.stopped_at, { now }) }}</span></dd></div>
+      </dl>
+
+      <section v-if="run" class="block" aria-labelledby="telemetry-title">
+        <h3 id="telemetry-title" class="eyebrow">Current run</h3>
+        <div class="telemetry">
+          <div class="metric"><span class="metric-label">Status</span><span class="run-chip" :class="RUN_OUTCOME[run.status].tone">{{ RUN_OUTCOME[run.status].label }}</span></div>
+          <div class="metric"><span class="metric-label">Tokens in</span><b>{{ tokens(run.input_tokens) }}</b></div>
+          <div class="metric"><span class="metric-label">Tokens out</span><b>{{ tokens(run.output_tokens) }}</b></div>
+          <div class="metric"><span class="metric-label">Cost</span><b>{{ cost(run.cost_micros) }}</b></div>
+        </div>
+      </section>
+
+      <section class="block" aria-labelledby="runs-title">
+        <h3 id="runs-title" class="eyebrow">Recent runs</h3>
+        <p v-if="!recentRuns.length" class="empty-line">No runs reported for this agent yet.</p>
+        <ul v-else class="runs">
+          <li v-for="item in recentRuns" :key="item.id" class="run-row">
+            <span class="run-chip" :class="RUN_OUTCOME[item.status].tone">{{ RUN_OUTCOME[item.status].label }}</span>
+            <span class="run-model mono">{{ runModel(item) || 'model not reported' }}</span>
+            <span class="run-tokens mono">{{ tokens(item.input_tokens + item.output_tokens) }} tok</span>
+            <span class="run-duration mono">{{ runDuration(item, now) || '—' }}</span>
+            <time class="run-when" :datetime="item.created_at">{{ relativeTime(item.started_at ?? item.created_at, { now }) }}</time>
+          </li>
+        </ul>
+      </section>
+
+      <section class="block" aria-labelledby="messages-title">
+        <h3 id="messages-title" class="eyebrow">Messages</h3>
+        <p v-if="!messages.length" class="empty-line">{{ agents.messagingState === 'unavailable' ? 'Messages are not available on this server yet.' : `No messages with ${view.name} yet.` }}</p>
+        <ol v-else class="thread" aria-label="Messages">
+          <li v-for="m in messages" :key="m.id" class="msg" :class="{ theirs: fromAgent(m), mine: m.sender_principal_id === me }">
+            <p class="msg-meta">
+              <span class="msg-author">{{ authorOf(m) }}</span>
+              <span v-if="!fromAgent(m) && m.sender_principal_id !== me" class="muted">to {{ m.to }}</span>
+              <span v-if="m.delivery_level === 'steer'" class="msg-chip steer"><AppIcon name="bolt" :size="10" />Steer</span>
+              <span v-if="m.is_action_request" class="msg-chip held">Action request</span>
+              <span v-if="m.reply_obligation === 'open'" class="msg-chip open">Awaiting reply</span>
+            </p>
+            <p class="msg-body">{{ m.body }}</p>
+            <button v-if="fromAgent(m) && canWrite && !composeBlock" type="button" class="reply" @click="replyTo = m">Reply</button>
+          </li>
+        </ol>
+      </section>
+    </div>
+
+    <footer v-if="view" class="composer">
+      <p v-if="composeBlock" class="compose-block"><AppIcon name="inbox" :size="13" />{{ composeBlock }}</p>
+      <form v-else class="compose" @submit.prevent="send">
+        <p v-if="replyTo" class="replying"><span>Replying to “{{ replyTo.body.slice(0, 80) }}{{ replyTo.body.length > 80 ? '…' : '' }}”</span><button type="button" class="icon-btn sm flat" aria-label="Cancel the reply" @click="replyTo = null"><AppIcon name="close" :size="12" /></button></p>
+        <label class="sr-only" :for="`compose-${view.session.id}`">Message to {{ view.name }}</label>
+        <textarea :id="`compose-${view.session.id}`" v-model="draft" class="field" rows="2" :placeholder="`Message ${view.name}…`" :disabled="!canWrite || sending" @keydown="composerKeys" />
+        <p v-if="sendError" class="send-error" role="alert"><AppIcon name="alert" :size="12" />{{ sendError }}</p>
+        <div class="compose-row">
+          <div class="seg level" role="radiogroup" aria-label="Delivery">
+            <button type="button" role="radio" :aria-checked="level === 'simple'" data-tip="Waits until the agent reads its inbox" @click="level = 'simple'">Simple</button>
+            <button type="button" role="radio" :aria-checked="level === 'steer'" data-tip="Reaches the agent during its current turn" @click="level = 'steer'"><AppIcon name="bolt" :size="11" />Steer</button>
+          </div>
+          <span class="compose-hint" aria-hidden="true"><kbd class="keycap">⌘</kbd><kbd class="keycap"><AppIcon name="enter" /></kbd></span>
+          <button type="submit" class="btn sm primary" :disabled="!draft.trim() || sending || !canWrite"><AppIcon name="send" :size="13" />{{ sending ? 'Sending…' : 'Send' }}</button>
+        </div>
+      </form>
+    </footer>
+  </aside>
+</template>
+
+<style scoped>
+.session-panel {
+  position: fixed; z-index: 15; top: calc(var(--header-h) + 10px); right: 10px; bottom: 10px; width: min(560px, calc(100vw - 20px));
+  display: flex; flex-direction: column; min-height: 0; outline: none;
+  border-radius: var(--radius); border: 1px solid var(--glass-edge);
+  background: linear-gradient(165deg, var(--surface-raised), var(--surface-raised-2)); box-shadow: var(--shadow-pop), var(--shadow);
+  backdrop-filter: blur(20px) saturate(1.15); -webkit-backdrop-filter: blur(20px) saturate(1.15);
+}
+.session-panel:focus-visible { box-shadow: var(--shadow-pop), var(--focus-ring); }
+@media (min-width: 1100px) { .session-panel { width: var(--panel-w); } }
+@media (prefers-reduced-motion: no-preference) {
+  .session-panel { animation: panel-in .22s cubic-bezier(.2, .7, .2, 1); }
+  @keyframes panel-in { from { opacity: 0; transform: translateX(24px); } to { opacity: 1; transform: none; } }
+}
+.panel-bar { display: flex; align-items: center; gap: 8px; height: 48px; flex-shrink: 0; padding: 0 10px 0 18px; border-bottom: 1px solid var(--line); }
+.bar-state { font-size: 12.5px; font-weight: 600; color: var(--ink-2); }
+.spacer { flex: 1; }
+.bar-sep { width: 1px; height: 18px; margin: 0 4px; background: var(--line-2); }
+.panel-bar [aria-disabled="true"] { opacity: .35; cursor: not-allowed; }
+.stop:not([aria-disabled="true"]):hover { color: var(--danger); }
+.scroll { flex: 1; min-height: 0; overflow: auto; overscroll-behavior: contain; padding: 18px 24px 24px; }
+.who { display: grid; gap: 4px; }
+.name { display: flex; align-items: center; gap: 10px; font-size: 22px; font-weight: 650; letter-spacing: -.01em; }
+.harness { display: inline-flex; align-items: center; height: 22px; padding: 0 8px; border-radius: 7px; background: var(--chip-bg); box-shadow: inset 0 0 0 1px var(--chip-line); font: 500 11px/1 var(--mono); color: var(--ink-2); font-variant-ligatures: none; }
+.sub { font-size: 13px; color: var(--ink-2); }
+.sub .mono { font-size: 12px; }
+.callout { display: flex; align-items: center; gap: 12px; margin-top: 16px; padding: 12px 12px 12px 14px; border-radius: 12px; background: var(--gold-wash); box-shadow: inset 0 0 0 1px rgba(214, 155, 49, .35); color: var(--gold-ink); }
+.callout-text { display: grid; flex: 1; min-width: 0; font-size: 12.5px; color: var(--ink-2); }
+.callout-text strong { color: var(--ink); font-size: 13px; }
+.facts { display: grid; grid-template-columns: minmax(0, 1fr) minmax(0, 1fr); align-items: start; gap: 12px 20px; margin: 20px 0 0; padding: 16px 0 0; border-top: 1px solid var(--line); }
+.fact { display: grid; grid-template-columns: minmax(0, 1fr); gap: 3px; min-width: 0; }
+.fact.wide { grid-column: 1 / -1; }
+.fact dt { font: 500 10px/1.5 var(--mono); letter-spacing: .14em; text-transform: uppercase; color: var(--ink-3); font-variant-ligatures: none; }
+.fact dd { margin: 0; font-size: 13px; color: var(--ink); overflow-wrap: anywhere; display: flex; align-items: center; gap: 6px; flex-wrap: wrap; }
+.fact dd.mono { font-size: 12px; }
+.muted { color: var(--ink-3); }
+.evidence { display: inline-grid; place-items: center; width: 16px; height: 16px; border-radius: 50%; background: var(--chip-teal-bg); color: var(--teal-ink); }
+.ticket-link, .project-link { display: inline-flex; align-items: center; gap: 8px; min-width: 0; max-width: 100%; color: var(--ink); text-decoration: none; }
+.ticket-link:hover .ticket-title, .project-link:hover { color: var(--teal-ink); }
+.ticket-chip { flex-shrink: 0; display: inline-flex; align-items: center; height: 22px; padding: 0 8px; border-radius: 6px; background: var(--chip-teal-bg); box-shadow: inset 0 0 0 1px var(--chip-teal-line); color: var(--teal-ink); font: 600 11.5px/1 var(--mono); font-variant-ligatures: none; }
+.ticket-title { min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; font-weight: 600; }
+.block { margin-top: 26px; }
+.block h3 { margin-bottom: 10px; }
+.telemetry { display: grid; grid-template-columns: repeat(4, minmax(0, 1fr)); gap: 8px; }
+.metric { display: grid; gap: 4px; padding: 10px 12px; border-radius: 10px; background: var(--code-bg); }
+.metric-label { font-size: 11.5px; color: var(--ink-3); }
+.metric b { font: 600 15px/1.2 var(--mono); color: var(--ink); font-variant-numeric: tabular-nums; }
+.run-chip { justify-self: start; display: inline-flex; align-items: center; height: 20px; padding: 0 8px; border-radius: 999px; font: 600 10.5px/1 var(--mono); letter-spacing: .04em; font-variant-ligatures: none; background: var(--chip-bg); color: var(--ink-2); box-shadow: inset 0 0 0 1px var(--chip-line); }
+.run-chip.ok { background: rgba(47, 122, 90, .1); color: var(--ok); box-shadow: inset 0 0 0 1px rgba(47, 122, 90, .3); }
+.run-chip.busy { background: var(--chip-teal-bg); color: var(--teal-ink); box-shadow: inset 0 0 0 1px var(--chip-teal-line); }
+.run-chip.bad { background: var(--danger-bg); color: var(--danger); box-shadow: inset 0 0 0 1px var(--danger-line); }
+.empty-line { font-size: 13px; color: var(--ink-3); }
+.runs { margin: 0; padding: 0; list-style: none; }
+.run-row { display: grid; grid-template-columns: 96px minmax(0, 1fr) 70px 64px 70px; align-items: center; gap: 10px; min-height: 36px; border-bottom: 1px solid var(--line); font-size: 12.5px; }
+.run-row:last-child { border-bottom: 0; }
+.run-model { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; font-size: 12px; color: var(--ink); }
+.run-tokens, .run-duration { font-size: 12px; color: var(--ink-2); text-align: right; font-variant-numeric: tabular-nums; }
+.run-when { font-size: 12px; color: var(--ink-3); text-align: right; white-space: nowrap; }
+.thread { display: grid; grid-template-columns: minmax(0, 1fr); gap: 10px; margin: 0; padding: 0; list-style: none; }
+.msg { position: relative; max-width: 88%; padding: 10px 12px; border-radius: 12px 12px 12px 4px; background: var(--comment-bg, var(--code-bg)); box-shadow: inset 0 0 0 1px var(--line); }
+.msg.mine { justify-self: end; border-radius: 12px 12px 4px 12px; background: var(--chip-teal-bg); box-shadow: inset 0 0 0 1px var(--chip-teal-line); }
+.msg-meta { display: flex; align-items: center; flex-wrap: wrap; gap: 6px; margin-bottom: 4px; font-size: 11.5px; }
+.msg-author { font-weight: 650; color: var(--ink); }
+.msg-chip { display: inline-flex; align-items: center; gap: 3px; height: 17px; padding: 0 6px; border-radius: 999px; font: 600 9.5px/1 var(--mono); letter-spacing: .06em; text-transform: uppercase; font-variant-ligatures: none; background: var(--chip-bg); color: var(--ink-2); }
+.msg-chip.steer { background: var(--gold-wash); color: var(--gold-ink); }
+.msg-chip.open { background: var(--chip-teal-bg); color: var(--teal-ink); }
+.msg-body { font-size: 13.5px; line-height: 1.5; color: var(--ink); white-space: pre-wrap; overflow-wrap: anywhere; }
+.reply { margin-top: 6px; padding: 0; border: 0; background: transparent; color: var(--teal-ink); font-size: 12px; font-weight: 600; }
+.reply:hover { text-decoration: underline; }
+.reply:focus-visible { box-shadow: var(--focus-ring); border-radius: 4px; }
+.composer { flex-shrink: 0; padding: 10px 14px 12px; border-top: 1px solid var(--line); background: var(--surface-raised-2); border-radius: 0 0 var(--radius) var(--radius); }
+.compose { display: grid; grid-template-columns: minmax(0, 1fr); gap: 8px; }
+.compose textarea { width: 100%; min-height: 56px; max-height: 180px; resize: vertical; padding: 9px 11px; font: inherit; font-size: 13.5px; line-height: 1.45; }
+.compose-row { display: flex; align-items: center; gap: 10px; }
+.level button { display: inline-flex; align-items: center; gap: 4px; }
+.compose-hint { margin-left: auto; display: inline-flex; gap: 2px; }
+.compose-block { display: flex; align-items: center; gap: 8px; font-size: 12.5px; color: var(--ink-2); padding: 6px 2px; }
+.replying { display: flex; align-items: center; gap: 6px; min-width: 0; padding: 4px 4px 4px 10px; border-radius: 8px; background: var(--code-bg); font-size: 12px; color: var(--ink-2); }
+.replying span { flex: 1; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.send-error { display: flex; align-items: center; gap: 6px; font-size: 12px; color: var(--danger); }
+.gone { display: grid; justify-items: center; gap: 8px; padding: 56px 16px; text-align: center; }
+.gone h2 { font-size: 17px; }
+.gone p { font-size: 13.5px; color: var(--ink-2); }
+.gone .btn { margin-top: 8px; }
+.gone-icon { display: grid; place-items: center; width: 44px; height: 44px; border-radius: 50%; background: var(--chip-teal-bg); box-shadow: inset 0 0 0 1px var(--chip-teal-line); color: var(--teal-ink); }
+.sk { display: grid; gap: 14px; }
+.sk .w40 { width: 40%; height: 18px; } .sk .w70 { width: 70%; } .sk .w90 { width: 90%; } .sk .w60 { width: 60%; }
+@media (max-width: 720px) {
+  .session-panel { z-index: 40; inset: 0; width: auto; height: 100dvh; border-radius: 0; border: 0; background: var(--canvas); }
+  .panel-bar { padding-left: 16px; }
+  .panel-bar .icon-btn { width: 40px; height: 40px; }
+  .scroll { padding: 16px 18px 24px; }
+  .telemetry { grid-template-columns: 1fr 1fr; }
+  .run-row { grid-template-columns: 88px minmax(0, 1fr) 60px; }
+  .run-tokens, .run-when { display: none; }
+  .composer { border-radius: 0; padding: 8px 12px calc(8px + env(safe-area-inset-bottom)); background: var(--surface-raised); }
+  .compose-hint { display: none; }
+  .compose-row .btn { margin-left: auto; height: 40px; }
+  @media (prefers-reduced-motion: no-preference) { .session-panel { animation-name: sheet-in; } @keyframes sheet-in { from { transform: translateY(24px); opacity: 0; } to { transform: none; opacity: 1; } } }
+}
+</style>

@@ -57,6 +57,7 @@ const actions = computed<ActionResult[]>(() => {
     out.push({ type: 'action', id: outline ? 'go-list' : 'go-outline', label: outline ? 'Go to List' : 'Go to Outline', hint: here.title, icon: outline ? 'list' : 'outline' })
   }
   if (route.path !== '/') out.push({ type: 'action', id: 'go-projects', label: 'Go to Projects', icon: 'folder' })
+  if (!route.path.startsWith('/agents')) out.push({ type: 'action', id: 'go-agents', label: 'Go to Agents', hint: 'Sessions, approvals and pacing', icon: 'agent' })
   out.push({ type: 'action', id: 'theme', label: dark.value ? 'Switch to light theme' : 'Switch to dark theme', icon: dark.value ? 'sun' : 'moon' })
   out.push({ type: 'action', id: 'shortcuts', label: 'Keyboard shortcuts', icon: 'keyboard', keys: ['?'] })
   return out
@@ -146,6 +147,7 @@ function act(id: string) {
     const { view: _view, ...rest } = route.query
     void router.push({ path: here ? `/p/${encodeURIComponent(here.routeKey)}` : route.path, query: id === 'go-outline' ? { ...rest, view: 'outline' } : rest })
   } else if (id === 'go-projects') void router.push('/')
+  else if (id === 'go-agents') void router.push('/agents')
   else if (id === 'theme') toggleTheme()
   else if (id === 'shortcuts') run({ name: 'shortcuts' })
 }

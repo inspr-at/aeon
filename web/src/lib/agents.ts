@@ -1,11 +1,32 @@
 // SPDX-License-Identifier: AGPL-3.0-only
-// R2 HTTP surface. Daemon-only endpoints are deliberately absent from this UI.
+// The agents workspace HTTP surface for a person's session: harness sessions and
+// their typed controls, runs, approvals, accounts with allowance windows, models
+// and project messages. Worker-only endpoints (heartbeat, drain, claim) are absent.
 import { api, APIError } from './api.ts'
 
+export type Harness = 'codex' | 'claude' | 'pi' | 'cursor' | 'grok'
+export interface HarnessSession {
+  id: string; project_id: string; agent_principal_id: string
+  run_id: string | null; ticket_node_id: string | null; work_order_id: string | null; parent_harness_session_id: string | null
+  harness: Harness; host: string; management_mode: 'managed' | 'unmanaged'; role: 'coordinator' | 'worker'
+  work_shape: 'unknown' | 'ship' | 'scout'; advertised_capabilities: string[]
+  phase: 'starting' | 'working' | 'yielded' | 'stopping' | 'stopped'; activity: 'unknown' | 'busy' | 'idle'
+  activity_sequence: number; revision: number; heartbeat_at: string | null; stopped_at: string | null; stop_reason: string | null; created_at: string
+}
+export interface SessionControl {
+  id: string; session_id: string; kind: 'interrupt' | 'stop'; state: 'pending' | 'claimed' | 'completed'; sequence: number
+  outcome: 'applied' | 'rejected' | null; reason: string | null; created_at: string; claimed_at: string | null; completed_at: string | null
+}
+export interface AllowanceWrite {
+  starts_at: string; ends_at: string; unit: 'requests' | 'tokens' | 'cost_micros'
+  allowance: number; pace_model: 'steady' | 'frontload' | 'unrestricted'; burst_ratio: number
+}
+export interface AllowanceWindow extends AllowanceWrite { id: string; account_id: string; used: number; reserved: number }
 export interface AgentAccount {
   id: string; account_key: string; harness: string; daemon_id: string; label: string
   registered_by_principal_id: string; state: 'available' | 'draining' | 'unavailable'
   max_parallel_runs?: number; last_probe_at?: string | null; last_probe_ok?: boolean | null; created_at: string
+  windows?: AllowanceWindow[]
 }
 export interface AgentRun {
   id: string; work_order_id: string; agent_principal_id: string; model_profile_id?: string | null
@@ -16,14 +37,18 @@ export interface AgentRun {
 }
 export interface Approval {
   id: string; agent_principal_id: string; scope: string; resource_kind: 'tenant' | 'node' | 'run'
-  resource_id?: string; run_id?: string; rationale: string; expires_at: string; proposed_at: string
+  resource_id?: string | null; run_id?: string | null; rationale: string; expires_at: string; proposed_at: string
   decision: 'approved' | 'denied' | null; decided_by_principal_id?: string | null
 }
-export interface AllowanceWrite {
-  starts_at: string; ends_at: string; unit: 'requests' | 'tokens' | 'cost_micros'
-  allowance: number; pace_model: 'steady' | 'frontload' | 'unrestricted'; burst_ratio: number
+export interface ModelProfile { id: string; slug: string; harness: string; family: string; model: string; effort: string; tier: string; enabled: boolean }
+export interface MessageTarget { id: string; principal_id: string; address: string; adapter: string; target_kind: string; maximum_level: string; role: string; enabled: boolean }
+export interface ProjectMessage {
+  id: string; sender_principal_id: string; recipient_principal_id: string; to: string; body: string; reply_to?: string | null
+  sent_event_id: number; is_action_request: boolean; expects_reply: boolean; delivery_level: 'simple' | 'steer'
+  status: 'accepted' | 'held'; reply_obligation: 'none' | 'open' | 'closed'
 }
-export interface AllowanceWindow extends AllowanceWrite { id: string; account_id: string; used: number; reserved: number }
+export interface MessagePage { items: ProjectMessage[]; next_after: number; preamble?: string }
+export interface MessageSend { to: string; body: string; idempotency_key: string; reply_to?: string; expects_reply: boolean; is_action_request: boolean; delivery_level: 'simple' | 'steer' }
 
 async function request<T>(path: string, method = 'GET', body?: unknown): Promise<T> {
   const response = await api(path, { method, ...(body === undefined ? {} : {
@@ -35,13 +60,25 @@ async function request<T>(path: string, method = 'GET', body?: unknown): Promise
   }
   return response.json()
 }
+const enc = encodeURIComponent
+const sessionPath = (projectId: string, sessionId = '') => `/projects/${enc(projectId)}/harness-sessions${sessionId ? `/${enc(sessionId)}` : ''}`
+
+export const listSessions = (projectId: string) => request<HarnessSession[]>(sessionPath(projectId))
+export const getSession = (projectId: string, sessionId: string) => request<HarnessSession>(sessionPath(projectId, sessionId))
+export const requestControl = (projectId: string, sessionId: string, kind: SessionControl['kind']) => request<SessionControl>(`${sessionPath(projectId, sessionId)}/controls/${kind}`, 'POST', {})
+export const getControl = (projectId: string, sessionId: string, controlId: string) => request<SessionControl>(`${sessionPath(projectId, sessionId)}/controls/${enc(controlId)}`)
 export const listAccounts = () => request<AgentAccount[]>('/agent-accounts')
-export const setAccountState = (id: string, state: AgentAccount['state']) => request<AgentAccount>(`/agent-accounts/${encodeURIComponent(id)}`, 'PATCH', { state })
-export const getRun = (id: string) => request<AgentRun>(`/runs/${encodeURIComponent(id)}`)
+export const setAccountState = (id: string, state: AgentAccount['state']) => request<AgentAccount>(`/agent-accounts/${enc(id)}`, 'PATCH', { state })
+export const getRun = (id: string) => request<AgentRun>(`/runs/${enc(id)}`)
 export const listApprovals = () => request<Approval[]>('/approvals?limit=200')
-export const decideApproval = (id: string, decision: 'approved' | 'denied', reason: string) => request<Approval>(`/approvals/${encodeURIComponent(id)}/decision`, 'POST', { decision, reason })
-export const revokeApproval = (id: string) => request<Approval>(`/approvals/${encodeURIComponent(id)}/revoke`, 'POST')
-export const createWindow = (id: string, body: AllowanceWrite) => request<AllowanceWindow>(`/agent-accounts/${encodeURIComponent(id)}/windows`, 'POST', body)
+export const decideApproval = (id: string, decision: 'approved' | 'denied', reason: string) => request<Approval>(`/approvals/${enc(id)}/decision`, 'POST', { decision, reason })
+export const revokeApproval = (id: string) => request<Approval>(`/approvals/${enc(id)}/revoke`, 'POST')
+export const createWindow = (id: string, body: AllowanceWrite) => request<AllowanceWindow>(`/agent-accounts/${enc(id)}/windows`, 'POST', body)
+export const listModels = () => request<ModelProfile[]>('/models')
+export const listTargets = (projectId: string) => request<MessageTarget[]>(`/projects/${enc(projectId)}/message-targets`)
+export const listMessages = (projectId: string, after = 0) => request<MessagePage>(`/projects/${enc(projectId)}/messages?after=${after}&limit=10`)
+export const sendMessage = (projectId: string, body: MessageSend) => request<ProjectMessage>(`/projects/${enc(projectId)}/messages`, 'POST', body)
+
 export const message = (error: unknown) => error instanceof Error ? error.message : 'Request failed. Please retry.'
 export const timestamp = (value?: string | null) => value ? new Date(value).toLocaleString() : 'Not reported'
 export const uuidPattern = '[0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{12}'
@@ -51,4 +88,18 @@ export function paceFraction(model: AllowanceWrite['pace_model'], elapsed: numbe
   const f = Math.min(1, Math.max(0, elapsed))
   const pace = model === 'steady' ? f : model === 'frontload' ? 1 - (1 - f) ** 2 : 1
   return Math.min(1, pace + burst)
+}
+
+// Named server events that change what the agents workspace shows. They are wake
+// hints only: the caller re-reads the authorized projections. Heartbeats are left
+// out: they are frequent, and the page's clock and poll keep them current.
+const HARNESS_EVENTS = ['registered', 'bound', 'yielded', 'stopped', 'control_requested', 'control_claimed', 'control_completed']
+const OTHER_EVENTS = ['approval.proposed', 'approval.approved', 'approval.denied', 'approval.revoked', 'run.created', 'run.claimed', 'run.telemetry', 'work_order.started', 'work_order.updated', 'inbox.compat_sent', 'inbox.delivery_queued', 'inbox.reply_obligation_closed']
+export function subscribeAgents(changed: () => void, connection: (live: boolean) => void = () => {}): () => void {
+  if (typeof EventSource === 'undefined') return () => {}
+  const stream = new EventSource('/api/events/stream')
+  stream.onopen = () => connection(true)
+  stream.onerror = () => connection(false)
+  for (const name of [...HARNESS_EVENTS.map(kind => `harness.${kind}`), ...OTHER_EVENTS]) stream.addEventListener(name, changed)
+  return () => stream.close()
 }

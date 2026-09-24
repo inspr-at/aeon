@@ -1,12 +1,14 @@
 <!-- SPDX-License-Identifier: AGPL-3.0-only -->
 <script setup lang="ts">
-import { computed, ref } from 'vue'
+import { computed, onBeforeUnmount, onMounted, ref, watch } from 'vue'
 import type { ListItem } from '../../lib/api'
 import { absoluteTime, kindLabel, priorityLabel, relativeTime, statusMeta } from '../../lib/work'
 import AppIcon from '../AppIcon.vue'
 import PersonAvatar from './PersonAvatar.vue'
 import PriorityIcon from './PriorityIcon.vue'
 import StatusIcon from './StatusIcon.vue'
+import LiveDot from '../agents/LiveDot.vue'
+import { useAgents } from '../../stores/agents'
 
 // Status, priority, assignee (editable popovers), type (read-only), the parent
 // epic, and estimate, dates and release only when they have values.
@@ -33,6 +35,13 @@ const release = computed(() => {
   const value = props.item.fields.release
   return value && typeof value === 'object' && typeof (value as { label?: unknown }).label === 'string' ? (value as { label: string }).label : ''
 })
+// Agent sessions bound to this ticket, with their live state; refreshed while shown.
+const agents = useAgents()
+const bound = computed(() => agents.forTicket(props.item.id))
+let refresh: ReturnType<typeof setInterval> | undefined
+watch(() => props.item.project?.id, id => { if (id) void agents.ensureProject(id) }, { immediate: true })
+onMounted(() => { refresh = setInterval(() => { if (props.item.project?.id) void agents.ensureProject(props.item.project.id) }, 20_000) })
+onBeforeUnmount(() => clearInterval(refresh))
 const epicParent = computed(() => props.item.parent && props.item.parent.kind_slug !== 'project' ? props.item.parent : null)
 const target = (event: Event) => event.currentTarget as HTMLElement
 // The phone chip row scrolls sideways; its fades show which way there is more.
@@ -50,6 +59,15 @@ function onScroll(event: Event) {
     <div class="prop">
       <dt>Status</dt>
       <dd><button type="button" class="prop-btn" :disabled="!editable" aria-haspopup="menu" aria-keyshortcuts="s" :aria-label="`Status: ${statusMeta(item.state).label}. Change status`" @click="emit('status', target($event))"><StatusIcon :state="item.state" />{{ statusMeta(item.state).label }}<AppIcon v-if="editable" name="chevron" :size="12" class="chev" /></button></dd>
+    </div>
+    <div v-if="bound.length" class="prop agents-prop">
+      <dt>Agents</dt>
+      <dd class="agent-chips">
+        <RouterLink
+          v-for="view in bound" :key="view.session.id" class="prop-btn agent-chip" :class="view.status.group" :to="`/agents/${view.session.id}`"
+          :aria-label="`${view.harness} ${view.name}: ${view.status.label}. Open the session`" :data-tip="`${view.harness} · ${view.status.label}`"
+        ><LiveDot :tone="view.status.tone" :size="8" /><span class="agent-name">{{ view.name }}</span></RouterLink>
+      </dd>
     </div>
     <div class="prop">
       <dt>Priority</dt>
@@ -105,6 +123,12 @@ function onScroll(event: Event) {
 .dash, .faint, .unset { color: var(--ink-3); }
 .kind { color: var(--ink-3); }
 .kind.epic { color: var(--gold); }
+.agent-chips { display: flex; flex-wrap: wrap; gap: 6px; }
+.row .agent-chips { flex-wrap: nowrap; }
+.agent-chip { text-decoration: none; }
+.agent-chip.needs { box-shadow: inset 0 0 0 1px rgba(214, 155, 49, .45); }
+.agent-name { max-width: 16ch; overflow: hidden; text-overflow: ellipsis; font-weight: 600; }
+.column .agent-chips { gap: 2px 10px; }
 .epic-chip { max-width: 100%; }
 .epic-chip .mono { font-size: 11px; color: var(--ink-2); }
 .epic-title { min-width: 0; overflow: hidden; text-overflow: ellipsis; }

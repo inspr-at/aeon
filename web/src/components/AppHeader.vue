@@ -5,6 +5,7 @@ import { useRoute, useRouter } from 'vue-router'
 import mark from '../assets/brand/aeon-mark.svg'
 import { useSession } from '../stores/session'
 import { useProjects } from '../stores/projects'
+import { useAgents } from '../stores/agents'
 import { dark, setTheme, themeChoice, toggleTheme, type ThemeChoice } from '../lib/theme'
 import { canWrite } from '../lib/activity'
 import { command, consume, run } from '../lib/commands'
@@ -16,6 +17,7 @@ import VersionDisplay from './VersionDisplay.vue'
 
 const session = useSession()
 const projects = useProjects()
+const agents = useAgents()
 const route = useRoute()
 const router = useRouter()
 const open = ref(false)
@@ -39,6 +41,8 @@ const onProjects = computed(() => route.path === '/')
 // Full-page tickets get their own crumb; the side panel keeps the list as the page.
 const fullTicket = computed(() => typeof route.params.ticketKey === 'string' && route.query.view === 'full' ? route.params.ticketKey.toUpperCase() : '')
 const pageTitle = computed(() => !onProjects.value && !projectKey.value && route.path !== '/signin' ? String(route.meta.title ?? '') : '')
+// Agents sits beside Projects, not under it.
+const agentsPage = computed(() => route.path === '/agents' || route.path.startsWith('/agents/'))
 
 async function toggleMenu() {
   open.value = !open.value
@@ -96,8 +100,14 @@ function shortcut(event: KeyboardEvent) {
   if (event.key === '/' && !pageOwnsSlash.value) { event.preventDefault(); palette.value?.open() }
   else if (event.key === '?') { event.preventDefault(); run({ name: 'shortcuts' }) }
 }
-onMounted(() => { document.addEventListener('pointerdown', outside); window.addEventListener('keydown', shortcut) })
-onBeforeUnmount(() => { document.removeEventListener('pointerdown', outside); window.removeEventListener('keydown', shortcut) })
+// The Agents badge: permission requests and held action requests, checked each minute.
+let needsPoll: ReturnType<typeof setInterval> | undefined
+watch(() => session.identity?.principal.id, id => { if (id) void agents.loadNeeds(true) }, { immediate: true })
+onMounted(() => {
+  document.addEventListener('pointerdown', outside); window.addEventListener('keydown', shortcut)
+  needsPoll = setInterval(() => { if (session.identity && !agentsPage.value) void agents.loadNeeds() }, 60_000)
+})
+onBeforeUnmount(() => { document.removeEventListener('pointerdown', outside); window.removeEventListener('keydown', shortcut); clearInterval(needsPoll) })
 </script>
 
 <template>
@@ -107,7 +117,7 @@ onBeforeUnmount(() => { document.removeEventListener('pointerdown', outside); wi
       <span class="wordmark">PAIMOS<sup>AEON</sup></span>
     </RouterLink>
     <nav v-if="session.identity" class="crumbs" :class="{ deep: !!projectKey || !!pageTitle }" aria-label="Breadcrumb">
-      <RouterLink class="crumb" to="/" :aria-current="onProjects ? 'page' : undefined">Projects</RouterLink>
+      <RouterLink v-if="!agentsPage" class="crumb home-crumb" to="/" :aria-current="onProjects ? 'page' : undefined">Projects</RouterLink>
       <template v-if="projectKey">
         <span class="sep" aria-hidden="true">/</span>
         <RouterLink class="crumb project-crumb" :to="`/p/${encodeURIComponent(project?.routeKey ?? projectKey)}`" :aria-current="fullTicket ? undefined : 'page'">
@@ -120,17 +130,25 @@ onBeforeUnmount(() => { document.removeEventListener('pointerdown', outside); wi
         </template>
       </template>
       <template v-else-if="pageTitle">
-        <span class="sep" aria-hidden="true">/</span>
+        <span v-if="!agentsPage" class="sep" aria-hidden="true">/</span>
         <span class="crumb current" aria-current="page">{{ pageTitle }}</span>
       </template>
     </nav>
     <span class="spacer" />
+    <RouterLink
+      v-if="session.identity" class="agents-link" to="/agents" :aria-current="agentsPage ? 'page' : undefined"
+      :aria-label="agents.needsCount ? `Agents, ${agents.needsCount} ${agents.needsCount === 1 ? 'needs' : 'need'} you` : 'Agents'"
+      :data-tip="agents.needsCount ? `${agents.needsCount} waiting for you` : undefined"
+    >
+      <AppIcon name="agent" :size="16" /><span class="agents-text">Agents</span>
+      <span v-if="agents.needsCount" class="needs-badge" aria-hidden="true">{{ agents.needsCount > 99 ? '99+' : agents.needsCount }}</span>
+    </RouterLink>
     <button v-if="globalSearch" class="search-pill" type="button" aria-label="Search everything" aria-keyshortcuts="Control+K Meta+K" @click="palette?.open()">
       <AppIcon name="search" :size="15" />
       <span class="pill-text">Search</span>
       <span class="pill-keys"><kbd class="keycap">{{ mac ? '⌘' : 'Ctrl' }}</kbd><kbd class="keycap">K</kbd></span>
     </button>
-    <button class="icon-btn header-btn" type="button" :aria-label="dark ? 'Switch to light theme' : 'Switch to dark theme'" :data-tip="dark ? 'Light theme' : 'Dark theme'" @click="toggleTheme">
+    <button class="icon-btn header-btn theme-btn" type="button" :aria-label="dark ? 'Switch to light theme' : 'Switch to dark theme'" :data-tip="dark ? 'Light theme' : 'Dark theme'" @click="toggleTheme">
       <AppIcon :name="dark ? 'sun' : 'moon'" />
     </button>
     <div v-if="session.identity" ref="account" class="account" @keydown.esc.stop.prevent="closeMenu(true)" @focusout="focusOut">
@@ -187,7 +205,16 @@ onBeforeUnmount(() => { document.removeEventListener('pointerdown', outside); wi
 .sep { color: var(--ink-3); font-weight: 300; font-size: 16px; }
 .mono-crumb { font: 500 12px/1 var(--mono); letter-spacing: .02em; font-variant-ligatures: none; }
 .spacer { flex: 1 1 0; min-width: 0; }
-.search-pill, .header-btn, .account { flex-shrink: 0; }
+.search-pill, .header-btn, .account, .agents-link { flex-shrink: 0; }
+.agents-link {
+  position: relative; display: inline-flex; align-items: center; gap: 7px; height: 34px; padding: 0 12px 0 11px; border-radius: 999px;
+  color: var(--ink-2); font-size: 13px; font-weight: 600; text-decoration: none;
+}
+.agents-link:hover { color: var(--teal-ink); background: var(--row-hover); }
+.agents-link:active { background: var(--row-selected); }
+.agents-link:focus-visible { box-shadow: var(--focus-ring); }
+.agents-link[aria-current="page"] { color: var(--teal-ink); background: var(--chip-teal-bg); box-shadow: inset 0 0 0 1px var(--chip-teal-line); }
+.needs-badge { display: inline-grid; place-items: center; min-width: 18px; height: 18px; padding: 0 5px; border-radius: 999px; background: var(--gold); color: #fff; font: 700 10.5px/1 var(--mono); font-variant-numeric: tabular-nums; box-shadow: 0 0 0 2px var(--surface-raised); }
 .search-pill {
   display: inline-flex; align-items: center; gap: 9px; width: 240px; height: 34px; padding: 0 6px 0 12px; border: 1px solid var(--glass-edge); border-radius: 999px;
   background: var(--field-bg); box-shadow: var(--field-inset), 0 0 0 1px var(--line); color: var(--ink-3); font-size: 13px;
@@ -234,12 +261,17 @@ onBeforeUnmount(() => { document.removeEventListener('pointerdown', outside); wi
   .lockup.compact .wordmark { display: none; }
   .wordmark { font-size: 11.5px; letter-spacing: .22em; }
   .crumbs { padding-left: 10px; gap: 8px; }
-  .crumbs.deep > .crumb:first-child, .crumbs.deep > .sep { display: none; }
+  .crumbs.deep > .home-crumb, .crumbs.deep > .sep { display: none; }
   .crumb.current { overflow: hidden; text-overflow: ellipsis; }
   .crumb { height: 44px; }
   .crumb-name { display: none; }
   .search-pill { width: 44px; height: 44px; padding: 0; justify-content: center; }
   .pill-text, .pill-keys { display: none; }
   .header-btn, .avatar-btn { width: 44px; height: 44px; }
+  .agents-link { width: 44px; height: 44px; padding: 0; justify-content: center; }
+  .agents-text { display: none; }
+  .needs-badge { position: absolute; top: 3px; right: 1px; }
+  /* The theme lives in the account menu on phones. */
+  .theme-btn { display: none; }
 }
 </style>
