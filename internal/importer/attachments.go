@@ -6,6 +6,7 @@ import (
 	"errors"
 	"fmt"
 	"io"
+	"log/slog"
 	"net/http"
 	"path"
 	"strconv"
@@ -67,6 +68,12 @@ func ImportAttachments(ctx context.Context, pool *pgxpool.Pool, store attachment
 				continue
 			}
 			body, err := source.downloadAttachment(ctx, attachmentID)
+			if isNotFound(err) {
+				// The classic record exists but its file is gone (deleted or
+				// purged); skip it like deleted issues and keep importing.
+				slog.Warn("classic attachment file missing; skipped", "attachment", attachmentID, "issue", issueID)
+				continue
+			}
 			if err != nil {
 				return created, err
 			}
@@ -138,7 +145,7 @@ func (s *HTTPSource) downloadAttachment(ctx context.Context, id int64) (io.ReadC
 	}
 	if resp.StatusCode != 200 {
 		resp.Body.Close()
-		return nil, fmt.Errorf("attachment %d download returned HTTP %d", id, resp.StatusCode)
+		return nil, &sourceHTTPError{method: http.MethodGet, path: path, status: resp.StatusCode}
 	}
 	return resp.Body, nil
 }
