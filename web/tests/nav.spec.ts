@@ -124,6 +124,28 @@ test('on phones the places are round buttons and nothing in the header is cut', 
   }
 })
 
+test('at 390 the ticket fits: previous and next fold into More, chips and screens wrap', async ({ page }) => {
+  await page.setViewportSize({ width: 390, height: 844 })
+  // Without the business mock: its fixed clock trips Vue's event-timestamp guard on the
+  // ticket panel's capture listener, which no real browser clock does.
+  await mockWork(page, fixtures())
+  for (const path of ['/p/PHAROS/PHAROS-11?view=full', '/p/PHAROS/PHAROS-11']) {
+    await page.goto(path)
+    await expect(page.locator('.ticket-ws .props.row')).toBeVisible()
+    await page.waitForTimeout(300)
+    const cut = await page.evaluate(() => [...document.querySelectorAll<HTMLElement>('.ticket-ws *')].filter(el => {
+      const r = el.getBoundingClientRect(), c = getComputedStyle(el)
+      if (r.width <= 1 || r.height <= 1 || c.display === 'none' || el.closest('svg')) return false
+      return r.left < -0.5 || r.right > innerWidth + 0.5 || ((c.overflowX === 'auto' || c.overflowX === 'scroll') && el.scrollWidth > el.clientWidth + 1)
+    }).map(el => `${el.tagName}.${el.className}`))
+    expect(cut, path).toEqual([])
+  }
+  await expect(page.getByRole('button', { name: 'Next ticket' })).toBeHidden()
+  await page.getByRole('button', { name: 'More actions' }).click()
+  await page.getByRole('menuitem', { name: 'Next ticket' }).click()
+  await expect(page).toHaveURL('/p/PHAROS/PHAROS-12')
+})
+
 for (const colorScheme of ['light', 'dark'] as const) {
   test(`axe: header places and the business tabs in ${colorScheme}`, async ({ page }) => {
     await page.emulateMedia({ colorScheme, reducedMotion: 'reduce' })

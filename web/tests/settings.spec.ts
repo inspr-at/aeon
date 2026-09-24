@@ -87,6 +87,29 @@ test('Workspace lists members and agent keys, read-only', async ({ page }) => {
   await expect(page.locator('#agent-keys').getByRole('button')).toHaveCount(0)
 })
 
+test('without the directory the members note says why in plain words', async ({ page }) => {
+  await mockWork(page, fixtures())
+  await mockBusiness(page, businessData(), { noDirectory: true })
+  await mockSettings(page, settingsData())
+  await page.goto('/settings/workspace')
+  await expect(page.locator('#members')).toContainText('Members show here only while a Business part is on, and none is on in this workspace.')
+})
+
+test('card controls share one alignment: centred on the title and its line', async ({ page }) => {
+  await setup(page)
+  await page.goto('/settings/personal')
+  await expect(page.getByRole('checkbox', { name: 'Greeting On' })).toBeVisible()
+  for (const id of ['appearance', 'greeting', 'keys']) {
+    const offset = await page.locator(`#${id}`).evaluate(card => {
+      const titles = card.querySelector('.card-titles')!.getBoundingClientRect(), aside = card.querySelector('.card-aside')!.getBoundingClientRect()
+      return Math.abs((titles.top + titles.height / 2) - (aside.top + aside.height / 2))
+    })
+    expect(offset, id).toBeLessThanOrEqual(1)
+  }
+  // No empty body under a card that has none.
+  await expect(page.locator('#greeting .card-body')).toHaveCount(0)
+})
+
 test('Business shows the parts and the stored quote settings; a deep link rings its card', async ({ page }) => {
   await setup(page)
   await page.goto('/settings/business#quotes')

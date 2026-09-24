@@ -252,6 +252,7 @@ a.ticket-chip:hover { text-decoration: underline; }
 .ticket-chip:focus-visible { box-shadow: var(--focus-ring); }
 .ticket-chip.plain { background: var(--chip-bg); box-shadow: inset 0 0 0 1px var(--chip-line); color: var(--ink-2); }
 .t-title { min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+@media (max-width: 600px) { .t-title { white-space: normal; overflow: visible; overflow-wrap: anywhere; } }
 .t-bar { height: 5px; border-radius: 999px; background: var(--track); overflow: hidden; }
 .t-bar i { display: block; height: 100%; border-radius: 999px; background: linear-gradient(90deg, #0e6f6c, #a4e5df); }
 .t-time { text-align: right; font-size: 12.5px; }

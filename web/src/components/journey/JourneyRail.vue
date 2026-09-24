@@ -117,4 +117,12 @@ li.done .link::after { content: ''; position: absolute; right: -2px; top: -2px; 
   .next-line b { color: var(--ink); font-weight: 600; }
   .next-line .why { flex-basis: 100%; padding-left: 13px; font-size: 12px; color: var(--ink-3); }
 }
+/* Phones: the eight stages wrap into two rows of four; none scrolls out of view. */
+@media (max-width: 600px) {
+  .stages { display: grid; grid-template-columns: repeat(4, minmax(0, 1fr)); gap: 6px 4px; overflow: visible; margin: 0; padding: 0; }
+  .stages li { justify-content: center; }
+  .link { display: none; }
+  .stages li .step { width: 100%; padding: 4px 2px; font-size: 10.5px; }
+  .stages li .t { max-width: 100%; overflow: visible; }
+}
 </style>

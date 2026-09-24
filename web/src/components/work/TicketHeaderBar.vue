@@ -1,6 +1,6 @@
 <!-- SPDX-License-Identifier: AGPL-3.0-only -->
 <script setup lang="ts">
-import { ref } from 'vue'
+import { onBeforeUnmount, ref } from 'vue'
 import AppIcon from '../AppIcon.vue'
 import FloatingPanel from './FloatingPanel.vue'
 
@@ -18,12 +18,20 @@ const mac = /Mac|iPhone|iPad/.test(navigator.platform || navigator.userAgent)
 // The trail shows its last two steps; older ones fold into an ellipsis.
 const crumbs = () => (props.trail ?? []).map((key, index, all) => ({ key, steps: all.length - index })).slice(-2)
 const moreAnchor = ref<HTMLElement | null>(null)
+// Phones fold previous/next into More, so the bar fits in one row.
+const phoneQuery = window.matchMedia('(max-width: 600px)')
+const phone = ref(phoneQuery.matches)
+const onPhone = (event: MediaQueryListEvent) => { phone.value = event.matches }
+phoneQuery.addEventListener('change', onPhone)
+onBeforeUnmount(() => phoneQuery.removeEventListener('change', onPhone))
 const moreButton = ref<HTMLButtonElement>()
 function toggleMore(event: MouseEvent) { moreAnchor.value = moreAnchor.value ? null : event.currentTarget as HTMLElement }
 function closeMore(restore: boolean) { moreAnchor.value = null; if (restore) moreButton.value?.focus() }
-function pick(action: 'copyKey' | 'copyLink' | 'delete') {
+function pick(action: 'copyKey' | 'copyLink' | 'delete' | 'prev' | 'next') {
   moreAnchor.value = null
-  if (action === 'copyKey') emit('copyKey')
+  if (action === 'prev') emit('prev')
+  else if (action === 'next') emit('next')
+  else if (action === 'copyKey') emit('copyKey')
   else if (action === 'copyLink') emit('copyLink')
   else emit('delete')
 }
@@ -79,6 +87,11 @@ void props
     </template>
     <FloatingPanel v-if="moreAnchor" :anchor="moreAnchor" :width="220" align="end" :label="`Actions for ${ticketKey}`" @close="closeMore">
       <div class="more-menu" role="menu" :aria-label="`Actions for ${ticketKey}`" @keydown="menuKeys">
+        <template v-if="phone && position">
+          <button type="button" role="menuitem" class="menu-item" :disabled="position.index === 0" @click="pick('prev')"><AppIcon name="chevron-up" :size="14" />Previous ticket</button>
+          <button type="button" role="menuitem" class="menu-item" :disabled="position.index >= position.count - 1" @click="pick('next')"><AppIcon name="chevron" :size="14" />Next ticket</button>
+          <div class="menu-sep" role="separator" />
+        </template>
         <button type="button" role="menuitem" class="menu-item" data-autofocus @click="pick('copyLink')"><AppIcon name="link" :size="14" />Copy link</button>
         <button type="button" role="menuitem" class="menu-item" @click="pick('copyKey')"><AppIcon name="copy" :size="14" />Copy key</button>
         <button v-if="canMove" type="button" role="menuitem" class="menu-item" :disabled="!canWrite" @click="pickMove"><AppIcon name="epic" :size="14" />Move to another epic…</button>
@@ -136,4 +149,5 @@ void props
   .trail, .position { display: none; }
   .edit-btn { height: 40px; }
 }
+@media (max-width: 600px) { .nav { display: none; } }
 </style>

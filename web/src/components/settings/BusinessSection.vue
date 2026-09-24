@@ -54,11 +54,11 @@ onMounted(() => { void business.loadPlugins(); void loadQuotes() })
 .section { display: grid; gap: 14px; }
 .parts-anchor { scroll-margin-top: 20px; }
 /* The parts card is the overview's own; here it takes the settings cards' measure. */
-.parts-anchor :deep(.setup) { margin: 0; padding: 18px 20px; }
+.parts-anchor :deep(.setup) { margin: 0; padding: 20px; }
 .parts-anchor :deep(.setup-head) { gap: 12px; }
 .parts-anchor :deep(.setup-icon) { width: 32px; height: 32px; border-radius: 10px; }
 .parts-anchor :deep(.setup-head h2) { font: 600 15px/1.35 var(--font); letter-spacing: 0; }
 .parts-anchor :deep(.setup-head p) { margin-top: 2px; font-size: 13px; }
-@media (max-width: 600px) { .parts-anchor :deep(.setup) { padding: 16px 14px; } }
+@media (max-width: 600px) { .parts-anchor :deep(.setup) { padding: 16px; } }
 .mono { font-family: var(--mono); }
 </style>

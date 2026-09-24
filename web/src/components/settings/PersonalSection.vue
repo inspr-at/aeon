@@ -102,7 +102,7 @@ const KEYS: { keys: string[][]; label: string }[] = [
           <span id="greeting-state">{{ profile!.greeting_enabled ? 'On' : 'Off' }}</span>
         </label>
       </template>
-      <p v-if="profileError" class="error-line" role="alert"><AppIcon name="alert" :size="13" />{{ profileError }}</p>
+      <template v-if="profileError" #default><p class="error-line" role="alert"><AppIcon name="alert" :size="13" />{{ profileError }}</p></template>
     </SettingsCard>
 
     <SettingsCard title="Keyboard" icon="keyboard" anchor="keys">

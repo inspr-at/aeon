@@ -85,4 +85,9 @@ const stateOf = (ticket: WalkerTicket) => props.workById.get(ticket.ticket_node_
 .tk:hover .open, .open:focus-visible { opacity: 1; }
 @media (hover: none) { .open { opacity: 1; } }
 @media (max-width: 720px) { .key { width: auto; } .title { font-size: 13.5px; } }
+/* Phones: titles wrap in full; nothing ends in a cut. */
+@media (max-width: 600px) {
+  .tk { padding-block: 6px; }
+  .title, .ft { white-space: normal; overflow: visible; overflow-wrap: anywhere; line-height: 1.4; }
+}
 </style>

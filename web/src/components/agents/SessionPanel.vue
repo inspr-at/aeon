@@ -224,6 +224,11 @@ defineExpose({ focus: () => root.value?.focus({ preventScroll: true }) })
 .head-ticket { min-width: 0; flex: 1; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; color: var(--ink); font-weight: 600; }
 .head-account { flex-shrink: 0; display: inline-flex; align-items: center; gap: 5px; margin-left: auto; padding-left: 10px; box-shadow: inset 1px 0 0 var(--line-2); }
 .head-account svg { color: var(--ink-3); }
+@media (max-width: 600px) {
+  .head-sub { flex-wrap: wrap; row-gap: 4px; }
+  .head-ticket { flex-basis: calc(100% - 80px); white-space: normal; overflow: visible; overflow-wrap: anywhere; }
+  .head-account { margin-left: 0; padding-left: 0; box-shadow: none; }
+}
 .spacer { flex: 1; }
 .bar-sep { width: 1px; height: 18px; margin: 0 4px; background: var(--line-2); }
 .panel-head [aria-disabled="true"] { opacity: .35; cursor: not-allowed; }

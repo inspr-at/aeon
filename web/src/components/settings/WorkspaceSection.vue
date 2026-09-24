@@ -51,7 +51,7 @@ onMounted(() => { void loadMembers(); void loadKeys() })
     <SettingsCard title="Members" icon="users" anchor="members">
       <template #lead>People and agents who work in this workspace.</template>
       <div v-if="membersState === 'loading'" class="set-skeleton" role="status" aria-label="Loading members"><span class="skeleton" /><span class="skeleton" /><span class="skeleton" /></div>
-      <p v-else-if="membersState === 'closed'" class="set-note"><AppIcon name="info" :size="14" />The member list arrives with workspace administration. Until then it shows here while a Business part is enabled.</p>
+      <p v-else-if="membersState === 'closed'" class="set-note"><AppIcon name="info" :size="14" />Members show here only while a Business part is on, and none is on in this workspace. A member list of its own arrives with workspace administration.</p>
       <p v-else-if="membersState === 'error'" class="set-note error" role="alert"><AppIcon name="alert" :size="14" />The members could not be loaded.<button type="button" class="btn sm" @click="loadMembers">Try again</button></p>
       <template v-else>
         <p class="group-h">People <span class="count">{{ people.length }}</span></p>

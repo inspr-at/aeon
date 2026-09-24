@@ -1,6 +1,6 @@
 <!-- SPDX-License-Identifier: AGPL-3.0-only -->
 <script setup lang="ts">
-import { computed, ref } from 'vue'
+import { computed, onBeforeUnmount, ref } from 'vue'
 import { APIError } from '../../lib/api'
 import { ACTION_LONG, gateApprovals, hours, offeredApproval, RELEASE_STATE_LABEL } from '../../lib/journey'
 import { toast } from '../../lib/toast'
@@ -10,6 +10,12 @@ import { useJourney } from '../../stores/journey'
 import AppIcon from '../AppIcon.vue'
 import GateApprovals from './GateApprovals.vue'
 import GateCard from './GateCard.vue'
+// Phones get the short prompt: the example would be cut at the field's edge.
+const narrowQuery = window.matchMedia('(max-width: 600px)')
+const narrow = ref(narrowQuery.matches)
+const onNarrow = (event: MediaQueryListEvent) => { narrow.value = event.matches }
+narrowQuery.addEventListener('change', onNarrow)
+onBeforeUnmount(() => narrowQuery.removeEventListener('change', onNarrow))
 import ReleaseList from './ReleaseList.vue'
 import ReleaseTickets from './ReleaseTickets.vue'
 
@@ -79,7 +85,7 @@ async function addTicket() {
         </div>
         <div v-else-if="walker && !walker.tickets.length" class="j-empty"><strong>No tickets yet</strong><span>Agreeing the requirements generates the tickets{{ ctx.editable.value ? "; you can also add one below" : "" }}.</span></div>
         <form v-if="ctx.editable.value && walker" class="add-row" @submit.prevent="addTicket">
-          <input v-model="newTitle" class="field" placeholder="Add a ticket, e.g. Show opening hours on the order form" aria-label="New ticket for this release" maxlength="500" />
+          <input v-model="newTitle" class="field" :placeholder="narrow ? 'Add a ticket' : 'Add a ticket, e.g. Show opening hours on the order form'" aria-label="New ticket for this release" maxlength="500" />
           <select v-if="features.length" v-model="newFeature" class="field feature" aria-label="Feature of the new ticket">
             <option value="">No feature</option>
             <option v-for="f in features" :key="f.id" :value="f.id">{{ f.title }}</option>
