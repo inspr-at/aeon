@@ -2,6 +2,7 @@
 import { defineStore } from 'pinia'
 import { ref } from 'vue'
 import { api, getSession, type Identity } from '../lib/api'
+import { restoreTheme } from '../lib/theme'
 
 export class SignInError extends Error {
   readonly reason: 'not_member' | 'disabled' | 'invalid' | 'network' | 'failed'
@@ -19,6 +20,7 @@ export const useSession = defineStore('session', () => {
       const session = await getSession()
       identity.value = session.identity
       devMode.value = session.devMode
+      if (session.identity) void restoreTheme()
     } catch {
       identity.value = null
       devMode.value = false

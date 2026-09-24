@@ -64,7 +64,7 @@ const KEYS: { keys: string[][]; label: string }[] = [
     </SettingsCard>
 
     <SettingsCard title="Appearance" icon="sun" anchor="appearance">
-      <template #lead>Light, dark, or whatever your system uses. It applies to this browser session.</template>
+      <template #lead>Light, dark, or whatever your system uses. Saved to your account, so it stays after a reload and on your other devices.</template>
       <template #aside>
         <div ref="themeGroup" class="seg" role="radiogroup" aria-label="Theme" @keydown="themeKeys">
           <button v-for="option in themes" :key="option.value" type="button" role="radio" :aria-checked="themeChoice === option.value" :tabindex="themeChoice === option.value ? 0 : -1" @click="setTheme(option.value)">

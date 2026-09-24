@@ -106,7 +106,7 @@ function dismiss() { const { error: _error, ...rest } = route.query; void router
       <footer class="card-foot">
         <span class="foot-name">{{ brand.wordmark }}</span>
         <VersionDisplay />
-        <button class="icon-btn sm flat theme" type="button" :aria-label="dark ? 'Switch to light theme' : 'Switch to dark theme'" :data-tip="dark ? 'Light theme' : 'Dark theme'" @click="toggleTheme"><AppIcon :name="dark ? 'sun' : 'moon'" :size="14" /></button>
+        <button class="icon-btn sm flat theme" type="button" :aria-label="dark ? 'Switch to light theme' : 'Switch to dark theme'" :data-tip="dark ? 'Light theme' : 'Dark theme'" @click="toggleTheme(false)"><AppIcon :name="dark ? 'sun' : 'moon'" :size="14" /></button>
       </footer>
     </div>
   </section>

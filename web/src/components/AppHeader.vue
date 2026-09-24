@@ -193,7 +193,7 @@ onBeforeUnmount(() => { document.removeEventListener('pointerdown', outside); wi
       <span class="pill-text">Search</span>
       <span class="pill-keys"><kbd class="keycap">{{ mac ? '⌘' : 'Ctrl' }}</kbd><kbd class="keycap">K</kbd></span>
     </button>
-    <button class="icon-btn header-btn theme-btn" type="button" :aria-label="dark ? 'Switch to light theme' : 'Switch to dark theme'" :data-tip="dark ? 'Light theme' : 'Dark theme'" @click="toggleTheme">
+    <button class="icon-btn header-btn theme-btn" type="button" :aria-label="dark ? 'Switch to light theme' : 'Switch to dark theme'" :data-tip="dark ? 'Light theme' : 'Dark theme'" @click="toggleTheme()">
       <AppIcon :name="dark ? 'sun' : 'moon'" />
     </button>
     <div v-if="session.identity" ref="account" class="account" @keydown.esc.stop.prevent="closeMenu(true)" @focusout="focusOut">
