@@ -39,12 +39,9 @@ func (c Config) Dev() bool { return c.Env == envDev }
 
 // FromEnv reads configuration. AEON_SESSION_KEY_FILE must contain at least 32
 // bytes, except when AEON_ENV=dev and the file is unset: then the key is a
-// random 32 bytes kept only in memory.
+// random 32 bytes kept only in memory. An unset AEON_ENV does not enable dev login.
 func FromEnv() (Config, error) {
 	env := strings.TrimSpace(os.Getenv(envAppEnv))
-	if env == "" {
-		env = envDev // same default as internal/config
-	}
 	key, err := sessionKey(env)
 	if err != nil {
 		return Config{}, err
