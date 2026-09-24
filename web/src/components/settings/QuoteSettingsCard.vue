@@ -70,8 +70,8 @@ const preview = computed(() => {
     company: v('company'),
     address: [v('street'), [v('postal_code'), v('city')].filter(Boolean).join(' '), v('country')].filter(Boolean),
     reach: [v('contact_person'), v('email'), v('phone'), v('website')].filter(Boolean),
-    legal: [v('uid') && `VAT ${v('uid')}`, v('register_no'), v('register_court')].filter(Boolean).join(' · '),
-    bank: [v('bank_name'), v('iban') && `IBAN ${v('iban').toUpperCase()}`, v('bic') && `BIC ${v('bic')}`].filter(Boolean).join(' · '),
+    legal: [v('uid') && `VAT ${v('uid')}`, v('register_no'), v('register_court')].filter(Boolean),
+    bank: [v('bank_name'), v('iban') && `IBAN ${v('iban').toUpperCase()}`, v('bic') && `BIC ${v('bic')}`].filter(Boolean),
   }
 })
 onMounted(load)
@@ -123,10 +123,10 @@ onMounted(load)
           <div class="paper">
             <p class="lh-company" :class="{ unset: !preview.company }">{{ preview.company || 'Your company' }}</p>
             <p v-for="line in preview.address" :key="line" class="lh-line">{{ line }}</p>
-            <p v-if="preview.reach.length" class="lh-line lh-reach">{{ preview.reach.join(' · ') }}</p>
-            <hr v-if="preview.legal || preview.bank" />
-            <p v-if="preview.legal" class="lh-small">{{ preview.legal }}</p>
-            <p v-if="preview.bank" class="lh-small">{{ preview.bank }}</p>
+            <p v-if="preview.reach.length" class="lh-line lh-reach dot-list"><span v-for="part in preview.reach" :key="part">{{ part }}</span></p>
+            <hr v-if="preview.legal.length || preview.bank.length" />
+            <p v-if="preview.legal.length" class="lh-small dot-list"><span v-for="part in preview.legal" :key="part">{{ part }}</span></p>
+            <p v-if="preview.bank.length" class="lh-small dot-list"><span v-for="part in preview.bank" :key="part">{{ part }}</span></p>
           </div>
           <p class="lh-note">Confirmations: {{ !quotes?.smtp_configured ? 'no mail server configured' : quotes.smtp_confirmation_enabled ? 'sent by email' : 'off' }}. Texts and layout arrive with the quote editor.</p>
         </aside>
@@ -160,6 +160,7 @@ onMounted(load)
 .paper .lh-company.unset { color: var(--paper-ink-3); font-weight: 600; }
 .lh-line { color: var(--paper-ink); }
 .lh-reach { margin-top: 4px; }
+.paper .dot-list > *::before { color: var(--paper-ink-3); }
 .paper hr { margin: 10px 0 6px; border: 0; border-top: 1px solid var(--paper-line); }
 .paper .lh-small { font-size: 11px; color: var(--paper-ink-2); }
 .lh-note { font-size: 12px; line-height: 1.5; color: var(--ink-2); }

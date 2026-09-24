@@ -1,5 +1,6 @@
 <!-- SPDX-License-Identifier: AGPL-3.0-only -->
 <script setup lang="ts">
+import '../../styles/crm.css'
 import { computed, onBeforeUnmount, onMounted, ref, watch } from 'vue'
 import { useRouter } from 'vue-router'
 import { NO_FILTER, countryOf, facetOf, filtered, matchesCustomer, sortCustomers, undoLatest, type ColumnId, type Customer, type SortKey } from '../../lib/crm'
@@ -116,7 +117,8 @@ watch(() => business.open.crm, on => { if (on) void store.load(true) })
 <template>
   <BusinessPage title="Customers" area="crm">
     <template #summary>
-      <span v-if="store.items">{{ all.length ? `${plural(all.length, 'customer')} · ${numbered} with a number` : 'No customers yet' }}</span>
+      <span v-if="store.items && all.length" class="dot-list"><span>{{ plural(all.length, 'customer') }}</span><span>{{ numbered }} with a number</span></span>
+      <span v-else-if="store.items">No customers yet</span>
       <span v-else-if="store.error">Customers could not be loaded</span>
       <span v-else class="skeleton summary-skeleton" />
     </template>
@@ -170,8 +172,8 @@ watch(() => business.open.crm, on => { if (on) void store.load(true) })
         <p class="aside-note"><BizIcon name="plug" :size="13" />Importing from another CRM needs a connected provider. None is connected{{ business.admin ? '; an operator sets one up on the server' : '' }}.</p>
       </div>
     </CustomerTable>
-    <p v-if="store.items && rows.length" class="keys-hint" aria-hidden="true">
-      <kbd class="keycap">j</kbd><kbd class="keycap">k</kbd> move · <kbd class="keycap"><AppIcon name="enter" /></kbd> open · <kbd class="keycap">/</kbd> search<template v-if="business.admin"> · <kbd class="keycap">n</kbd> new customer</template>
+    <p v-if="store.items && rows.length" class="keys-hint dot-list" aria-hidden="true">
+      <span><kbd class="keycap">j</kbd><kbd class="keycap">k</kbd> move</span><span><kbd class="keycap"><AppIcon name="enter" /></kbd> open</span><span><kbd class="keycap">/</kbd> search</span><span v-if="business.admin"><kbd class="keycap">n</kbd> new customer</span>
     </p>
     <CustomerCreateDialog ref="create" @created="created" />
   </BusinessPage>
@@ -196,7 +198,9 @@ watch(() => business.open.crm, on => { if (on) void store.load(true) })
 .state-icon.danger { background: var(--danger-bg); box-shadow: inset 0 0 0 1px var(--danger-line); color: var(--danger); }
 .aside-note { display: flex; align-items: flex-start; gap: 7px; margin-top: 14px; padding: 9px 12px; border-radius: 10px; background: var(--surface-2); font-size: 12.5px !important; text-align: left; }
 .aside-note svg { margin-top: 2px; flex-shrink: 0; color: var(--ink-3); }
-.keys-hint { display: flex; flex-wrap: wrap; align-items: center; justify-content: flex-end; gap: 4px; margin-top: 10px; font-size: 12px; color: var(--ink-3); }
+/* Right-aligned as a whole; inside, lines start on the left so no dot leads a line. */
+.keys-hint { width: fit-content; max-width: 100%; align-items: center; margin: 10px 0 0 auto; font-size: 12px; color: var(--ink-3); }
+.keys-hint > span { display: inline-flex; align-items: center; gap: 4px; }
 @media (max-width: 720px) {
   .toolbar { gap: 8px; }
   .list-search { flex: 1 1 100%; width: auto; }

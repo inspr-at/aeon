@@ -1,6 +1,7 @@
 <!-- SPDX-License-Identifier: AGPL-3.0-only -->
 <script setup lang="ts">
 import { computed } from 'vue'
+import '../../styles/crm.css'
 import { diffCounts, lineDiff } from '../../lib/crm'
 import AppIcon from '../AppIcon.vue'
 
@@ -15,7 +16,7 @@ const counts = computed(() => diffCounts(lines.value))
   <figure class="diff">
     <figcaption class="diff-head">
       <span>{{ label }}</span>
-      <span class="counts"><span class="added">{{ counts.added }} added</span> · <span class="removed">{{ counts.removed }} removed</span></span>
+      <span class="counts dot-list"><span>{{ counts.added }} added</span><span>{{ counts.removed }} removed</span></span>
     </figcaption>
     <ol class="lines" :aria-label="label">
       <li v-for="(line, i) in lines" :key="i" class="line" :class="line.kind">

@@ -2,6 +2,7 @@
 <script setup lang="ts">
 import { computed } from 'vue'
 import type { Related } from '../../lib/crm'
+import '../../styles/crm.css'
 import { contentUrl } from '../../lib/attachments'
 import { formatAmount } from '../business/money'
 import { formatSpan } from '../business/duration'
@@ -26,7 +27,9 @@ const hours = computed(() => [...(props.related?.hours ?? [])].sort((a, b) => b.
 const totalSeconds = computed(() => hours.value.reduce((sum, h) => sum + h.duration_seconds, 0))
 const quotes = computed(() => [...(props.related?.quotes ?? [])].sort((a, b) => Number(a.archived) - Number(b.archived) || (b.offer_no ?? '').localeCompare(a.offer_no ?? '')))
 const day = (value: string | null) => value ? new Intl.DateTimeFormat('en-GB', { day: 'numeric', month: 'short', year: 'numeric', timeZone: 'UTC' }).format(new Date(`${value.slice(0, 10)}T00:00:00Z`)) : ''
-const validity = (from: string | null, until: string | null) => from && until ? `${day(from)} – ${day(until)}` : from ? `from ${day(from)}` : until ? `until ${day(until)}` : ''
+// A range keeps its dash with both dates (no line starts or ends with it).
+const validity = (from: string | null, until: string | null) => from && until ? `${day(from)}\u00a0–\u00a0${day(until)}` : from ? `from ${day(from)}` : until ? `until ${day(until)}` : ''
+const docMeta = (d: Related['documents'][number]) => [d.category && sentenceCase(d.category), d.status && sentenceCase(d.status), validity(d.valid_from, d.valid_until)].filter(Boolean) as string[]
 </script>
 
 <template>
@@ -64,7 +67,7 @@ const validity = (from: string | null, until: string | null) => from && until ? 
             <RouterLink class="rel-row" to="/business/quotes" :class="{ archived: q.archived }">
               <BizIcon name="document" :size="13" class="rel-icon" />
               <span class="rel-title" :class="{ mono: q.offer_no }">{{ q.offer_no ?? 'Draft, no number yet' }}</span>
-              <span class="rel-meta">{{ sentenceCase(q.state) }}{{ q.archived ? ' · archived' : '' }}</span>
+              <span class="rel-meta dot-list"><span>{{ sentenceCase(q.state) }}</span><span v-if="q.archived">archived</span></span>
               <AppIcon name="chevron-right" :size="13" class="go" />
             </RouterLink>
           </li>
@@ -95,7 +98,7 @@ const validity = (from: string | null, until: string | null) => from && until ? 
             <a class="rel-row" :href="contentUrl(d.attachment_id, 'original')" target="_blank" rel="noopener">
               <AppIcon name="paperclip" :size="13" class="rel-icon" />
               <span class="rel-title">{{ d.title || d.name }}</span>
-              <span class="rel-meta">{{ [d.category && sentenceCase(d.category), d.status && sentenceCase(d.status), validity(d.valid_from, d.valid_until)].filter(Boolean).join(' · ') }}</span>
+              <span class="rel-meta dot-list"><span v-for="part in docMeta(d)" :key="part">{{ part }}</span></span>
               <AppIcon name="external" :size="12" class="go" />
             </a>
           </li>
@@ -119,7 +122,7 @@ const validity = (from: string | null, until: string | null) => from && until ? 
 .rel-icon { flex-shrink: 0; color: var(--ink-3); }
 .rel-title { flex: 1; min-width: 0; font-size: 13.5px; overflow-wrap: anywhere; }
 .rel-title.mono { font-family: var(--mono); font-size: 13px; font-variant-ligatures: none; }
-.rel-meta { flex-shrink: 0; font-size: 12.5px; color: var(--ink-2); }
+.rel-meta { flex: 0 1 auto; font-size: 12.5px; color: var(--ink-2); }
 .rel-amount { flex-shrink: 0; min-width: 96px; text-align: right; font-size: 12.5px; color: var(--ink); }
 .mono { font-family: var(--mono); font-variant-numeric: tabular-nums; font-variant-ligatures: none; }
 .go { flex-shrink: 0; color: var(--ink-3); }

@@ -57,3 +57,11 @@
   .crm-card > .card-head > .card-titles { flex: 1 1 calc(100% - 42px); }
   .crm-card > .card-head > .btn { margin-left: 42px; }
 }
+
+/* Items with a middle dot between them that never starts or ends a line: each
+   dot sits in its item's leading margin, and the list clips that margin at the
+   start of every line, so wrapping drops the dot instead of stranding it. Lines
+   start on the left; to right-align a list, size it to fit and push it right. */
+.dot-list { --dot-gap: 17px; display: flex; flex-wrap: wrap; align-items: baseline; row-gap: 2px; min-width: 0; margin-left: calc(-1 * var(--dot-gap)); clip-path: inset(-6px -6px -6px var(--dot-gap)); }
+.dot-list > * { position: relative; min-width: 0; margin-left: var(--dot-gap); overflow-wrap: anywhere; }
+.dot-list > *::before { content: '·' / ''; position: absolute; left: calc(var(--dot-gap) / -2 - .3em); width: .6em; text-align: center; color: var(--ink-3); }

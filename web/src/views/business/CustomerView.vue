@@ -202,7 +202,7 @@ watch(id, value => { if (!value || !route.path.startsWith('/business/customers/'
   <BusinessPage :title="customer?.name ?? (state === 'missing' ? 'Customer not found' : 'Customer')" area="crm">
     <template #eyebrow><RouterLink class="back" to="/business/customers"><AppIcon name="arrow-left" :size="12" />Customers</RouterLink></template>
     <template #summary>
-      <span v-if="customer" class="summary-line">
+      <span v-if="customer" class="summary-line dot-list">
         <span v-if="customer.legal_name && customer.legal_name !== customer.name">{{ customer.legal_name }}</span>
         <span v-if="customer.industry">{{ customer.industry }}</span>
         <a v-if="customer.website" :href="customer.website" target="_blank" rel="noopener" class="site">{{ websiteHost(customer.website) }}<AppIcon name="external" :size="11" /></a>
@@ -317,7 +317,6 @@ watch(id, value => { if (!value || !route.path.startsWith('/business/customers/'
               <div v-if="lpRate"><dt>Rate per point</dt><dd class="mono">{{ lpRate }}</dd></div>
               <div v-if="customer.employee_count != null"><dt>Employees</dt><dd class="mono">{{ customer.employee_count.toLocaleString('en-GB') }}</dd></div>
               <div v-if="customer.annual_revenue_minor != null"><dt>Annual revenue</dt><dd class="mono">{{ minorMoney(customer.annual_revenue_minor, customer.currency) }}</dd></div>
-              <div><dt>Key</dt><dd class="mono">{{ customer.key }}</dd></div>
             </dl>
           </section>
           <section class="crm-card glass-card" aria-labelledby="addresses-title">
@@ -350,8 +349,6 @@ watch(id, value => { if (!value || !route.path.startsWith('/business/customers/'
 .back { display: inline-flex; align-items: center; gap: 6px; min-height: 24px; margin: -4px -6px; padding: 0 6px; border-radius: 6px; color: var(--ink-2); text-decoration: none; }
 .back:hover { color: var(--teal-ink); background: var(--row-hover); }
 .back:focus-visible { box-shadow: var(--focus-ring); }
-.summary-line { display: inline-flex; flex-wrap: wrap; align-items: center; gap: 4px 0; }
-.summary-line > * + *::before { content: '·'; margin: 0 8px; color: var(--ink-3); }
 .site { display: inline-flex; align-items: center; gap: 4px; color: var(--teal-ink); text-decoration: none; }
 .site:hover { text-decoration: underline; }
 .summary-skeleton { display: inline-block; width: 240px; }
@@ -422,9 +419,6 @@ address { display: grid; font-style: normal; font-size: 13.5px; line-height: 1.5
   .hero-cell:nth-child(n + 3) { border-top: 1px solid var(--line); }
 }
 @media (max-width: 600px) {
-  /* Phones: the summary wraps without separators that could start a line. */
-  .summary-line { gap: 2px 12px; }
-  .summary-line > * + *::before { content: none; }
   /* Phones: the contact across, number and rate side by side, the place across. */
   .hero { grid-template-columns: repeat(2, minmax(0, 1fr)); }
   .hero-cell { border-left: 0; padding: 14px 16px; }

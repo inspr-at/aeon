@@ -272,7 +272,7 @@ export function matchesCustomer(c: Customer, f: CustomerFilter, contact?: Contac
   if (f.industries.length && !f.industries.includes(c.industry.trim())) return false
   const q = f.q.trim().toLowerCase()
   if (!q) return true
-  return [c.name, c.legal_name, c.customer_no, c.industry, c.domain, c.website, contact?.name, contact?.email, placeOf(c), c.key].some(v => lower(v).includes(q))
+  return [c.name, c.legal_name, c.customer_no, c.industry, c.domain, c.website, contact?.name, contact?.email, placeOf(c)].some(v => lower(v).includes(q))
 }
 export function sortCustomers(list: Customer[], key: SortKey, dir: 'asc' | 'desc', contactName: (c: Customer) => string = () => '') {
   const value = (c: Customer): string | number => {
@@ -308,9 +308,9 @@ export interface ColumnDef { id: ColumnId; label: string; width: number; min: nu
 export const COLUMNS: ColumnDef[] = [
   { id: 'name', label: 'Customer', width: 0, min: 220, max: 4000 },
   { id: 'number', label: 'Number', width: 132, min: 96, max: 240 },
-  { id: 'contact', label: 'Primary contact', width: 230, min: 120, max: 420 },
+  { id: 'contact', label: 'Primary contact', width: 260, min: 140, max: 460 },
   { id: 'place', label: 'Location', width: 190, min: 110, max: 380 },
-  { id: 'industry', label: 'Industry', width: 170, min: 96, max: 340 },
+  { id: 'industry', label: 'Industry', width: 160, min: 96, max: 320 },
   { id: 'rate', label: 'Hourly rate', width: 136, min: 96, max: 220, end: true },
 ]
 export const COLUMN_BY_ID = new Map(COLUMNS.map(c => [c.id, c]))
@@ -326,6 +326,32 @@ export function visibleColumns(tableWidth: number, widths: Partial<Record<Column
   const total = () => ids.reduce((sum, id) => sum + (id === 'name' ? COLUMN_BY_ID.get('name')!.min : clampWidth(id, widths[id])), 0)
   for (const id of DROP) { if (tableWidth <= 0 || total() <= tableWidth) break; ids = ids.filter(x => x !== id) }
   return ids
+}
+
+// Customer stops near NAME_TARGET on its own; spare width widens Primary
+// contact, Location and Industry (not ones the person sized) up to their
+// maximum, in proportion to their normal width. What is left goes to Customer.
+export const NAME_TARGET = 360
+const GROWS: ColumnId[] = ['contact', 'place', 'industry']
+export function layoutWidths(ids: ColumnId[], tableWidth: number, sized: Partial<Record<ColumnId, number>> = {}): Partial<Record<ColumnId, number>> {
+  const out: Partial<Record<ColumnId, number>> = {}
+  for (const id of ids) if (id !== 'name') out[id] = clampWidth(id, sized[id])
+  let spare = tableWidth - Object.values(out).reduce((sum, w) => sum + (w ?? 0), 0) - NAME_TARGET
+  const growing = GROWS.filter(id => ids.includes(id) && sized[id] === undefined)
+  while (spare >= 1 && growing.length) {
+    const weight = growing.reduce((sum, id) => sum + COLUMN_BY_ID.get(id)!.width, 0)
+    let used = 0
+    for (const id of [...growing]) {
+      const def = COLUMN_BY_ID.get(id)!
+      const add = Math.min(def.max - out[id]!, spare * def.width / weight)
+      out[id] = out[id]! + add; used += add
+      if (out[id]! >= def.max - 0.5) growing.splice(growing.indexOf(id), 1)
+    }
+    spare -= used
+    if (used < 0.5) break
+  }
+  for (const id of Object.keys(out) as ColumnId[]) out[id] = Math.floor(out[id]!)
+  return out
 }
 
 // ---------- Note proposals: a line diff ----------

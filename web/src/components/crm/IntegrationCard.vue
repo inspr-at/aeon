@@ -1,5 +1,6 @@
 <!-- SPDX-License-Identifier: AGPL-3.0-only -->
 <script setup lang="ts">
+import '../../styles/crm.css'
 import { computed, onMounted, ref } from 'vue'
 import { listProviders, websiteHost, type Customer, type Provider } from '../../lib/crm'
 import AppIcon from '../AppIcon.vue'
@@ -34,8 +35,10 @@ const linked = computed(() => !!props.customer?.external_provider)
     </div>
     <p v-if="linked" class="linked">
       <AppIcon name="link" :size="13" />
-      <span>Linked to {{ customer!.external_provider }} · <span class="mono">{{ customer!.external_id }}</span></span>
-      <a v-if="customer!.external_url" :href="customer!.external_url" target="_blank" rel="noopener" class="ext">{{ websiteHost(customer!.external_url) }}<AppIcon name="external" :size="11" /></a>
+      <span class="dot-list">
+        <span>Linked to {{ customer!.external_provider }}</span><span class="mono">{{ customer!.external_id }}</span>
+        <a v-if="customer!.external_url" :href="customer!.external_url" target="_blank" rel="noopener" class="ext">{{ websiteHost(customer!.external_url) }}<AppIcon name="external" :size="11" /></a>
+      </span>
     </p>
     <p class="hint">
       <template v-if="connected.length">Searching, importing and syncing from here arrive in a later version. Until then customers are kept by hand.</template>

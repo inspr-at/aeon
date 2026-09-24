@@ -25,10 +25,23 @@ async function axe(page: Page) {
   const summary = results.violations.map(v => `${v.id} (${v.impact}): ${v.help}\n${v.nodes.slice(0, 4).map(n => `    ${n.target.join(' ')} — ${n.failureSummary?.split('\n').slice(1, 2).join(' ').trim()}`).join('\n')}`)
   expect(summary, summary.join('\n')).toEqual([])
 }
+// Every line of every dot list starts at the list's clipped edge, so no dot leads a line
+// (and none can end one: a dot always sits before its item).
+async function dotsNeverLead(page: Page) {
+  const off = await page.locator('.dot-list').evaluateAll(lists => lists.flatMap(list => {
+    const box = list.getBoundingClientRect()
+    if (!box.width) return []
+    const edge = box.left + parseFloat(getComputedStyle(list).getPropertyValue('--dot-gap'))
+    const items = [...list.children].map(el => el.getBoundingClientRect()).filter(r => r.width > 0)
+    return items.filter((r, i) => (i === 0 || r.top > items[i - 1].top + 2) && Math.abs(r.left - edge) > 1).map(() => list.textContent?.trim() ?? '')
+  }))
+  expect(off).toEqual([])
+}
 async function noClipping(page: Page, scope: string) {
   const cut = await page.evaluate(selector => [...document.querySelectorAll<HTMLElement>(`${selector} *`)].filter(el => {
     const r = el.getBoundingClientRect(), c = getComputedStyle(el)
-    if (r.width <= 1 || r.height <= 1 || c.display === 'none' || el.closest('svg') || el.closest('.sr-only')) return false
+    // A dot list reaches into a clipped leading margin by design (its line-start dots hide there).
+    if (r.width <= 1 || r.height <= 1 || c.display === 'none' || el.closest('svg') || el.closest('.sr-only') || el.classList.contains('dot-list')) return false
     return r.left < -0.5 || r.right > innerWidth + 0.5 || ((c.overflowX === 'auto' || c.overflowX === 'scroll' || c.overflowX === 'hidden') && el.scrollWidth > el.clientWidth + 1 && c.textOverflow !== 'ellipsis')
   }).map(el => `${el.tagName}.${el.className}`), scope)
   expect(cut, scope).toEqual([])
@@ -41,8 +54,9 @@ test('the list: numbers as the server writes them, search, sort, filters and the
   await page.goto('/business/customers')
   await ready(page)
   await expect(page.getByRole('heading', { name: 'Customers', level: 1 })).toBeVisible()
-  await expect(page.locator('.summary')).toHaveText('7 customers · 5 with a number')
+  await expect(page.locator('.summary .dot-list > span')).toHaveText(['7 customers', '5 with a number'])
   await expect(names(page)).toHaveText(['Alder & Rowe Architects', 'Atelier Lumen', 'Bäckerei Hofer', 'Café Vogel', 'Grünwerk Energie', 'Klinik Nordstern', 'Studio Meridian'])
+  await dotsNeverLead(page)
   const hofer = table(page).getByRole('row').filter({ hasText: 'Bäckerei Hofer' })
   await expect(hofer.locator('.number')).toHaveText('K-0042')
   await expect(hofer).toContainText('Jana Hofer')
@@ -94,6 +108,34 @@ test('the list: numbers as the server writes them, search, sort, filters and the
   await page.goBack()
   await expect(table(page).locator('tr.cursor')).toContainText('Bäckerei Hofer')
   expect(errors).toEqual([])
+})
+
+test('at 1440 names get the room: the role drops out whole, and cut values show in full on hover', async ({ page }) => {
+  await page.setViewportSize({ width: 1440, height: 900 })
+  await setup(page)
+  await page.goto('/business/customers')
+  await ready(page)
+  const cell = table(page).getByRole('row').filter({ hasText: 'Bäckerei Hofer' }).locator('td.c-contact .cell')
+  // Cut: ellipsised, or dropped to the cell's hidden second line.
+  const cut = (selector: string) => cell.locator(selector).evaluate(el => el.scrollWidth > el.clientWidth + 1 || el.getBoundingClientRect().top >= el.parentElement!.getBoundingClientRect().bottom - 1)
+  // Wide enough for both: nothing is cut, and Customer is no wider than it needs.
+  expect(await cut('.person')).toBe(false)
+  expect(await cut('.role')).toBe(false)
+  const widths = await table(page).locator('thead th').evaluateAll(ths => ths.map(th => Math.round(th.getBoundingClientRect().width)))
+  expect(widths[0]).toBeLessThan(widths[2] + 120)
+  // Narrowed from the keyboard: the role leaves whole, the name stays whole.
+  const edge = page.getByRole('separator', { name: 'Resize Primary contact column' })
+  await edge.focus()
+  for (let i = 0; i < 7; i++) await page.keyboard.press('ArrowLeft')
+  await expect.poll(() => cut('.role')).toBe(true)
+  expect(await cut('.person')).toBe(false)
+  expect(await cell.locator('.role').evaluate(el => el.scrollWidth <= el.clientWidth + 1)).toBe(true)
+  await cell.hover()
+  await expect(page.locator('.tooltip')).toHaveText('Jana Hofer · Managing director')
+  // A value that fits carries no tooltip.
+  await table(page).getByRole('row').filter({ hasText: 'Café Vogel' }).locator('td.c-place .cell').hover()
+  await page.waitForTimeout(500)
+  await expect(page.locator('.tooltip')).toHaveCount(0)
 })
 
 test('columns resize from the keyboard and the widths are saved', async ({ page }) => {
@@ -303,7 +345,7 @@ test('a note rewrite is a draft first; applying it shows the difference and can 
   await expect(proposal.locator('.line.add .text')).toHaveText(['Invoices go to Max Brandl in accounting.'])
   await proposal.getByRole('button', { name: 'Review and apply…' }).click()
   const dialog = page.getByRole('dialog', { name: 'Apply this rewrite?' })
-  await expect(dialog).toContainText('1 added · 1 removed')
+  await expect(dialog.locator('.counts > span')).toHaveText(['1 added', '1 removed'])
   await axe(page)
   await dialog.getByRole('button', { name: 'Apply rewrite' }).click()
   await expect(dialog).toBeHidden()
@@ -336,6 +378,7 @@ test('Settings › Business: the quote sender is a form with a preview; saving k
   const card = page.locator('#quotes')
   await expect(card).toHaveClass(/arrived/)
   await expect(card.getByLabel('Company', { exact: true })).toHaveValue('INSPR Studio')
+  await dotsNeverLead(page)
   await expect(card.locator('.paper')).toContainText('Annenstraße 1')
   await card.getByLabel('Company', { exact: true }).fill('INSPR Studio GmbH')
   await card.getByLabel('BIC').fill('rzstat2g')
@@ -397,6 +440,20 @@ test('gate states: a digest mismatch or missing permissions close Customers and 
   await page.goto('/settings/business')
   await expect(page.locator('#parts .area').filter({ has: page.locator('.area-name', { hasText: /^Customers/ }) })).toContainText('Permissions incomplete')
   await expect(page.locator('#parts')).toContainText('Not allowed connecting other services yet. Enabling grants what it needs.')
+})
+
+test('at 390 the meta line wraps without a separator at the start or end of a line; the internal key stays hidden', async ({ page }) => {
+  await page.setViewportSize({ width: 390, height: 844 })
+  await setup(page)
+  await page.goto(`/business/customers/${HOFER}`)
+  const line = page.locator('.summary .dot-list')
+  await expect(line.locator('> *')).toHaveCount(3)
+  // The website wraps to a second line, which starts at the clipped edge: no dot leads it.
+  expect(await line.evaluate(list => new Set([...list.children].map(el => Math.round(el.getBoundingClientRect().top))).size)).toBe(2)
+  await expect(page.getByRole('region', { name: 'Projects, quotes and hours' }).getByText('Framework agreement')).toBeVisible()
+  await dotsNeverLead(page)
+  await expect(page.getByRole('region', { name: 'About' })).not.toContainText('ORG-1')
+  await expect(page.getByRole('region', { name: 'About' })).not.toContainText('Key')
 })
 
 test('at 390 the list is cards and the customer page fits', async ({ page }) => {

@@ -1,7 +1,7 @@
 <!-- SPDX-License-Identifier: AGPL-3.0-only -->
 <script setup lang="ts">
 import { computed, nextTick, onBeforeUnmount, onMounted, ref, watch } from 'vue'
-import { COLUMN_BY_ID, clampWidth, minorMoney, placeOf, visibleColumns, type ColumnId, type ContactCard, type Customer, type SortKey } from '../../lib/crm'
+import { COLUMN_BY_ID, clampWidth, layoutWidths, minorMoney, placeOf, visibleColumns, type ColumnId, type ContactCard, type Customer, type SortKey } from '../../lib/crm'
 import { highlight } from '../../lib/work'
 import AppIcon from '../AppIcon.vue'
 import Avatar from '../Avatar.vue'
@@ -32,8 +32,11 @@ onBeforeUnmount(() => { phoneQuery.removeEventListener('change', phoneChange); s
 // Live widths while an edge is dragged; saved when the drag ends.
 const live = ref<Partial<Record<ColumnId, number>>>({})
 watch(() => props.widths, () => { if (!resizing) live.value = {} })
-const shown = (id: ColumnId) => live.value[id] ?? clampWidth(id, props.widths[id])
-const ids = computed(() => visibleColumns(width.value, { ...props.widths, ...live.value }))
+const sized = computed(() => ({ ...props.widths, ...live.value }))
+const ids = computed(() => visibleColumns(width.value, sized.value))
+// Customer stops near its target; spare width widens the contact, place and industry.
+const layout = computed(() => layoutWidths(ids.value, width.value, sized.value))
+const shown = (id: ColumnId) => layout.value[id] ?? clampWidth(id, sized.value[id])
 const columns = computed(() => ids.value.map(id => COLUMN_BY_ID.get(id)!))
 const nameWidth = computed(() => Math.max(COLUMN_BY_ID.get('name')!.min, Math.round(width.value - ids.value.filter(id => id !== 'name').reduce((sum, id) => sum + shown(id), 0))))
 const colWidth = (id: ColumnId) => id === 'name' ? null : shown(id)
@@ -93,6 +96,27 @@ watch(() => props.cursorId, async id => {
   await nextTick()
   document.getElementById(`customer-${id}`)?.scrollIntoView({ block: 'nearest' })
 })
+// The full value of a cell, shown as a tooltip when the cell cannot show all of it.
+function fullOf(c: Customer, id: ColumnId) {
+  const person = props.contact(c)
+  switch (id) {
+    case 'name': return [c.name, c.legal_name !== c.name ? c.legal_name : ''].filter(Boolean).join(' · ')
+    case 'contact': return person ? [person.name, person.role].filter(Boolean).join(' · ') : ''
+    case 'place': return placeOf(c)
+    case 'industry': return c.industry
+    case 'number': return c.customer_no ?? ''
+    default: return money(c)
+  }
+}
+// Runs before the tooltip host reads data-tip: a cell carries its full value
+// only while something in it is cut off or has dropped to the hidden line.
+function tipIfCut(event: PointerEvent) {
+  const cell = event.currentTarget as HTMLElement
+  const bottom = cell.getBoundingClientRect().bottom
+  const cut = ([...cell.children] as HTMLElement[]).some(el => el.getBoundingClientRect().top >= bottom - 1 || el.scrollWidth > el.clientWidth + 1)
+  if (cut && cell.dataset.full) cell.dataset.tip = cell.dataset.full
+  else delete cell.dataset.tip
+}
 const skeletonRows = 8
 const money = (c: Customer) => minorMoney(c.hourly_rate_minor, c.currency)
 defineExpose({ focus: () => (phone.value ? card.value?.querySelector<HTMLElement>('.card-link') : grid.value)?.focus() })
@@ -153,7 +177,7 @@ defineExpose({ focus: () => (phone.value ? card.value?.querySelector<HTMLElement
         >
           <template v-for="column in columns" :key="column.id">
             <td v-if="column.id === 'name'" class="c-name">
-              <div class="cell">
+              <div class="cell drop" :data-full="fullOf(c, 'name')" @pointerover="tipIfCut">
                 <span class="org-mark" aria-hidden="true"><BizIcon name="building" :size="14" /></span>
                 <RouterLink class="name-link" :to="`/business/customers/${c.id}`" tabindex="-1">
                   <template v-for="(part, i) in highlight(c.name, query)" :key="i"><mark v-if="part.match">{{ part.text }}</mark><template v-else>{{ part.text }}</template></template>
@@ -168,13 +192,13 @@ defineExpose({ focus: () => (phone.value ? card.value?.querySelector<HTMLElement
               </div>
             </td>
             <td v-else-if="column.id === 'contact'" class="c-contact">
-              <div class="cell">
+              <div class="cell" :class="{ drop: contact(c) }" :data-full="fullOf(c, 'contact')" @pointerover="tipIfCut">
                 <template v-if="contact(c)"><Avatar :name="contact(c)!.name" :size="20" /><span class="person">{{ contact(c)!.name }}</span><span v-if="contact(c)!.role" class="role">{{ contact(c)!.role }}</span></template>
                 <span v-else class="empty">—</span>
               </div>
             </td>
-            <td v-else-if="column.id === 'place'" class="c-place"><div class="cell"><span v-if="placeOf(c)" class="text">{{ placeOf(c) }}</span><span v-else class="empty">—</span></div></td>
-            <td v-else-if="column.id === 'industry'" class="c-industry"><div class="cell"><span v-if="c.industry" class="text">{{ c.industry }}</span><span v-else class="empty">—</span></div></td>
+            <td v-else-if="column.id === 'place'" class="c-place"><div class="cell" :data-full="fullOf(c, 'place')" @pointerover="tipIfCut"><span v-if="placeOf(c)" class="text">{{ placeOf(c) }}</span><span v-else class="empty">—</span></div></td>
+            <td v-else-if="column.id === 'industry'" class="c-industry"><div class="cell" :data-full="fullOf(c, 'industry')" @pointerover="tipIfCut"><span v-if="c.industry" class="text">{{ c.industry }}</span><span v-else class="empty">—</span></div></td>
             <td v-else class="c-rate end"><div class="cell"><span v-if="money(c)" class="mono">{{ money(c) }}</span><span v-else class="empty">—</span></div></td>
           </template>
         </tr>
@@ -214,6 +238,11 @@ thead th:hover .col-resize::after { opacity: 1; }
 .row td:first-child { padding-left: 18px; }
 tbody .row:last-child td { border-bottom: 0; }
 .cell { display: flex; align-items: center; gap: 8px; min-width: 0; line-height: 18px; white-space: nowrap; }
+/* The secondary value (legal name, role) drops out whole before the main one is
+   cut: what does not fit wraps to a second line the cell never shows. */
+.cell.drop { flex-wrap: wrap; align-content: flex-start; row-gap: 24px; height: 24px; overflow: hidden; }
+/* One line is as tall as its tallest item (the 20px avatar here, the 24px mark by the name). */
+.c-contact .cell.drop { height: 20px; row-gap: 20px; }
 .end .cell { justify-content: flex-end; }
 @media (hover: hover) { .row:hover td { background: var(--row-hover); } }
 .row.cursor td { background: var(--row-selected); }
@@ -222,12 +251,11 @@ tbody.dim { opacity: .55; }
 .row.cursor .org-mark { background: var(--chip-teal-bg); color: var(--teal-ink); }
 .name-link { flex: 0 1 auto; min-width: 0; overflow: hidden; text-overflow: ellipsis; color: var(--ink); font-weight: 600; text-decoration: none; }
 .name-link:focus-visible { box-shadow: var(--focus-ring); border-radius: 4px; }
-.legal { flex: 0 100 auto; min-width: 0; overflow: hidden; text-overflow: ellipsis; color: var(--ink-3); font-size: 12.5px; }
+.legal { flex: 0 0 auto; min-width: 0; overflow: hidden; text-overflow: ellipsis; color: var(--ink-3); font-size: 12.5px; }
 .number { padding: 2px 7px; border-radius: 6px; background: var(--chip-bg); box-shadow: inset 0 0 0 1px var(--chip-line); color: var(--ink); font: 500 12px/16px var(--mono); font-variant-ligatures: none; }
 .empty { color: var(--ink-3); font-size: 12.5px; }
 .person { flex: 0 1 auto; min-width: 0; overflow: hidden; text-overflow: ellipsis; color: var(--ink); }
-/* The role gives way long before the name does. */
-.role { flex: 0 100 auto; min-width: 0; overflow: hidden; text-overflow: ellipsis; color: var(--ink-3); font-size: 12.5px; }
+.role { flex: 0 0 auto; color: var(--ink-3); font-size: 12.5px; }
 .text { overflow: hidden; text-overflow: ellipsis; color: var(--ink-2); }
 .mono { font-family: var(--mono); font-size: 12.5px; font-variant-numeric: tabular-nums; font-variant-ligatures: none; color: var(--ink); }
 .ghost .skeleton { height: 10px; }

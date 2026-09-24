@@ -84,6 +84,20 @@ test('columns step aside as the table narrows, Name and Number stay', () => {
   assert.deepEqual(visibleColumns(1100, { contact: 420 }), ['name', 'number', 'contact', 'place', 'rate'])
 })
 
+test('spare width goes to the contact, place and industry, not to a wide Customer column', async () => {
+  const { NAME_TARGET, layoutWidths } = await import('../src/lib/crm.ts')
+  const all = ['name', 'number', 'contact', 'place', 'industry', 'rate'] as const
+  const wide = layoutWidths([...all], 1382)
+  const others = Object.values(wide).reduce((a, b) => a + (b ?? 0), 0)
+  assert.ok(wide.contact! > 300, `contact ${wide.contact}`)
+  assert.ok(1382 - others >= NAME_TARGET && 1382 - others <= NAME_TARGET + 3, `name ${1382 - others}`)
+  // Narrow tables keep the defaults; a column the person sized keeps its width.
+  assert.deepEqual(layoutWidths([...all], 1100), { number: 132, contact: 260, place: 190, industry: 160, rate: 136 })
+  assert.equal(layoutWidths([...all], 1382, { contact: 200 }).contact, 200)
+  // Maximums hold on very wide tables.
+  assert.equal(layoutWidths([...all], 3000).contact, 460)
+})
+
 test('a note proposal reads as a line diff', () => {
   assert.deepEqual(lineDiff('a\nb\nc', 'a\nB\nc\nd'), [
     { kind: 'same', text: 'a' }, { kind: 'remove', text: 'b' }, { kind: 'add', text: 'B' }, { kind: 'same', text: 'c' }, { kind: 'add', text: 'd' },
