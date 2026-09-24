@@ -22,6 +22,13 @@ const sections: { title: string; rows: { keys: Key[][]; label: string; joiner?: 
     { keys: [['a'], ['d']], label: 'Approve or deny a permission; resolve or dismiss a held request' },
     { keys: [[{ icon: 'enter', label: 'Enter' }]], label: 'Open the selected session' },
   ] },
+  { title: 'Hours', rows: [
+    { keys: [['l']], label: 'Log time' },
+    { keys: [[{ icon: 'arrow-left', label: 'Left arrow' }], [{ icon: 'arrow', label: 'Right arrow' }]], label: 'Previous and next week' },
+    { keys: [['t']], label: 'This week' },
+    { keys: [[{ icon: 'enter', label: 'Enter' }]], label: 'Log the entry' },
+    { keys: [['Esc']], label: 'Close the review' },
+  ] },
   { title: 'Ticket list', rows: [
     { keys: [['j'], [{ icon: 'arrow-down', label: 'Down arrow' }]], label: 'Next ticket' },
     { keys: [['k'], [{ icon: 'arrow-up', label: 'Up arrow' }]], label: 'Previous ticket' },
@@ -37,7 +44,10 @@ const sections: { title: string; rows: { keys: Key[][]; label: string; joiner?: 
   ] },
   { title: 'Open ticket', rows: [
     { keys: [['j'], ['k']], label: 'Next and previous ticket, the list follows' },
-    { keys: [['e']], label: 'Edit the title' },
+    { keys: [['e']], label: 'Edit the whole ticket' },
+    { keys: [[mac ? '⌘' : 'Ctrl', { icon: 'enter', label: 'Enter' }]], label: 'Save the edit' },
+    { keys: [[mac ? '⌥' : 'Alt', { icon: 'arrow-left', label: 'Left arrow' }]], label: 'Back along followed links' },
+    { keys: [[mac ? '⌘' : 'Ctrl', 'V']], label: 'Paste a screenshot as an attachment' },
     { keys: [['s']], label: 'Status' },
     { keys: [['p']], label: 'Priority' },
     { keys: [['a']], label: 'Assignee' },

@@ -737,6 +737,38 @@ paths:
           $ref: '#/components/responses/View'
         '400':
           $ref: '#/components/responses/Error'
+  /preferences/{key}:
+    parameters:
+      - {name: key, in: path, required: true, schema: {type: string, pattern: '^[a-z][a-z0-9_.:-]{0,127}$'}}
+    get:
+      operationId: getPreference
+      description: The calling person's own UI preference (for example list columns and widths). A key never written returns value null.
+      responses:
+        '200':
+          description: Preference
+          content: {application/json: {schema: {$ref: '#/components/schemas/Preference'}}}
+        '400': {description: Invalid key}
+        '401': {description: Authentication required}
+    put:
+      operationId: putPreference
+      description: Replace the calling person's preference. The value is a JSON object of at most 16 KiB. Private to the principal; no event is appended.
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              additionalProperties: false
+              required: [value]
+              properties:
+                value: {type: object}
+      responses:
+        '200':
+          description: Stored preference
+          content: {application/json: {schema: {$ref: '#/components/schemas/Preference'}}}
+        '400': {description: Invalid key or value}
+        '401': {description: Authentication required}
+        '413': {description: Value too large}
   /views/{viewId}:
     parameters: [{$ref: '#/components/parameters/ViewId'}]
     get:
@@ -2225,6 +2257,13 @@ components:
         daemon_id: {type: string, minLength: 1, maxLength: 128}
         daemon_generation: {type: string, minLength: 1, maxLength: 128}
         reservation_ids: {type: array, minItems: 1, items: {type: string, format: uuid}}
+    Preference:
+      type: object
+      required: [key, value, updated_at]
+      properties:
+        key: {type: string}
+        value: {type: [object, 'null']}
+        updated_at: {type: [string, 'null'], format: date-time}
     NodeSummary:
       type: object
       required: [id, key, title]
@@ -2810,7 +2849,7 @@ components:
       allOf:
         - $ref: '#/components/schemas/Node'
         - type: object
-          required: [kind_slug, kind_label, priority, assignee, parent, children_count, project]
+          required: [kind_slug, kind_label, priority, assignee, parent, children_count, project, epic]
           properties:
             kind_slug: {type: string}
             kind_label: {type: string}
@@ -2829,6 +2868,13 @@ components:
                 kind_slug: {type: string}
             children_count: {type: integer, minimum: 0}
             project:
+              type: [object, 'null']
+              properties:
+                id: {type: string, format: uuid}
+                key: {type: string}
+                title: {type: string}
+            epic:
+              description: The nearest epic above the item (a task's is its ticket's epic); null under no epic.
               type: [object, 'null']
               properties:
                 id: {type: string, format: uuid}

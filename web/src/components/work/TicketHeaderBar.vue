@@ -7,10 +7,16 @@ import FloatingPanel from './FloatingPanel.vue'
 const props = defineProps<{
   ticketKey: string; kind: string | null; position: { index: number; count: number } | null
   mode: 'panel' | 'full'; canWrite: boolean; canMove: boolean
+  // Keys of the tickets followed to get here (oldest first), and the edit state.
+  trail?: string[]; editing?: boolean; saving?: boolean; dirty?: boolean
 }>()
 const emit = defineEmits<{
   copyKey: []; copyLink: []; prev: []; next: []; expand: []; collapse: []; newTab: []; close: []; move: [anchor: HTMLElement]; delete: []
+  back: [steps: number]; edit: []; save: []; cancel: []
 }>()
+const mac = /Mac|iPhone|iPad/.test(navigator.platform || navigator.userAgent)
+// The trail shows its last two steps; older ones fold into an ellipsis.
+const crumbs = () => (props.trail ?? []).map((key, index, all) => ({ key, steps: all.length - index })).slice(-2)
 const moreAnchor = ref<HTMLElement | null>(null)
 const moreButton = ref<HTMLButtonElement>()
 function toggleMore(event: MouseEvent) { moreAnchor.value = moreAnchor.value ? null : event.currentTarget as HTMLElement }
@@ -35,8 +41,18 @@ void props
 </script>
 
 <template>
-  <header class="panel-bar" :class="mode">
+  <header class="panel-bar" :class="[mode, { 'has-trail': !!trail?.length }]">
     <button v-if="mode === 'full'" type="button" class="icon-btn sm flat" aria-label="Back to the list" data-tip="Back to the list · Esc" @click="emit('close')"><AppIcon name="chevron-left" :size="16" /></button>
+    <template v-if="trail?.length">
+      <button type="button" class="icon-btn sm flat back-btn" :aria-label="`Back to ${trail[trail.length - 1]}`" aria-keyshortcuts="Alt+ArrowLeft" :data-tip="`Back to ${trail[trail.length - 1]} · ${mac ? '⌥' : 'Alt'}←`" @click="emit('back', 1)"><AppIcon name="arrow-left" :size="15" /></button>
+      <nav class="trail" aria-label="Followed tickets">
+        <span v-if="trail.length > 1" class="trail-more" :class="{ always: trail.length > 2 }" aria-hidden="true">…</span>
+        <span v-for="crumb in crumbs()" :key="crumb.key + crumb.steps" class="crumb-item">
+          <button type="button" class="crumb mono" :data-tip="`Back to ${crumb.key}`" @click="emit('back', crumb.steps)">{{ crumb.key }}</button>
+          <AppIcon name="chevron-right" :size="12" class="crumb-sep" />
+        </span>
+      </nav>
+    </template>
     <button type="button" class="key-chip" :aria-label="`Copy ${ticketKey}`" :data-tip="`Copy ${ticketKey}`" @click="emit('copyKey')">
       <AppIcon v-if="kind" :name="kind === 'epic' ? 'epic' : kind === 'task' ? 'task' : 'ticket'" :size="12" :class="kind" />
       <span>{{ ticketKey }}</span>
@@ -48,11 +64,19 @@ void props
       <button type="button" class="icon-btn sm flat" aria-label="Next ticket" aria-keyshortcuts="j" data-tip="Next · j" :disabled="!position || position.index >= position.count - 1" @click="emit('next')"><AppIcon name="chevron" :size="15" /></button>
     </div>
     <span class="spacer" />
+    <template v-if="editing">
+      <span v-if="dirty" class="unsaved" aria-live="polite">Unsaved</span>
+      <button type="button" class="btn sm ghost" :disabled="saving" aria-keyshortcuts="Escape" data-tip="Cancel · Esc" @click="emit('cancel')">Cancel</button>
+      <button type="button" class="btn sm primary" :disabled="saving" :aria-keyshortcuts="mac ? 'Meta+Enter' : 'Control+Enter'" :data-tip="`Save · ${mac ? '⌘' : 'Ctrl'}↵`" @click="emit('save')"><AppIcon name="check" :size="13" />{{ saving ? 'Saving…' : 'Save' }}</button>
+    </template>
+    <template v-else>
+    <button v-if="canWrite" type="button" class="btn sm edit-btn" aria-keyshortcuts="e" data-tip="Edit title, text and properties · e" @click="emit('edit')"><AppIcon name="edit" :size="13" />Edit</button>
     <button v-if="mode === 'panel'" type="button" class="icon-btn sm flat wide-only" aria-label="Open as full page" data-tip="Full page · f" @click="emit('expand')"><AppIcon name="expand" :size="14" /></button>
     <button v-else type="button" class="icon-btn sm flat wide-only" aria-label="Show beside the list" data-tip="Side panel · f" @click="emit('collapse')"><AppIcon name="collapse" :size="14" /></button>
     <button type="button" class="icon-btn sm flat wide-only" aria-label="Open in a new tab" data-tip="Open in new tab" @click="emit('newTab')"><AppIcon name="external" :size="14" /></button>
     <button ref="moreButton" type="button" class="icon-btn sm flat" aria-label="More actions" aria-haspopup="menu" :aria-expanded="!!moreAnchor" data-tip="More" @click="toggleMore"><AppIcon name="more" :size="15" /></button>
     <button v-if="mode === 'panel'" type="button" class="icon-btn sm flat" aria-label="Close ticket details" aria-keyshortcuts="Escape" data-tip="Close · Esc" @click="emit('close')"><AppIcon name="close" :size="15" /></button>
+    </template>
     <FloatingPanel v-if="moreAnchor" :anchor="moreAnchor" :width="220" align="end" :label="`Actions for ${ticketKey}`" @close="closeMore">
       <div class="more-menu" role="menu" :aria-label="`Actions for ${ticketKey}`" @keydown="menuKeys">
         <button type="button" role="menuitem" class="menu-item" data-autofocus @click="pick('copyLink')"><AppIcon name="link" :size="14" />Copy link</button>
@@ -66,7 +90,7 @@ void props
 </template>
 
 <style scoped>
-.panel-bar { display: flex; align-items: center; gap: 6px; height: 52px; padding: 0 10px 0 14px; border-bottom: 1px solid var(--line); flex-shrink: 0; }
+.panel-bar { container: panel-bar / inline-size; display: flex; align-items: center; gap: 6px; height: 52px; padding: 0 10px 0 14px; border-bottom: 1px solid var(--line); flex-shrink: 0; }
 .panel-bar.full { padding-left: 8px; }
 .key-chip { display: inline-flex; flex-shrink: 0; align-items: center; gap: 6px; height: 26px; white-space: nowrap; padding: 0 9px 0 10px; border: 0; border-radius: 7px; background: var(--chip-teal-bg); box-shadow: inset 0 0 0 1px var(--chip-teal-line); color: var(--teal-ink); font: 600 12px/1 var(--mono); letter-spacing: .03em; font-variant-ligatures: none; }
 .key-chip:hover { box-shadow: inset 0 0 0 1px var(--teal); }
@@ -75,10 +99,21 @@ void props
 .key-chip .epic { color: var(--gold); }
 .copy-glyph { opacity: .45; }
 .key-chip:hover .copy-glyph { opacity: .9; }
-.position { margin-left: 6px; font-size: 11.5px; color: var(--ink-3); }
+.position { flex-shrink: 0; margin-left: 6px; font-size: 11.5px; color: var(--ink-3); white-space: nowrap; }
 .nav { display: inline-flex; gap: 2px; margin-left: 2px; }
 .nav .icon-btn:disabled { opacity: .35; }
 .spacer { flex: 1; }
+.back-btn { margin-right: -2px; }
+.trail { display: inline-flex; align-items: center; gap: 2px; min-width: 0; }
+.crumb { height: 24px; padding: 0 6px; border: 0; border-radius: 6px; background: transparent; color: var(--ink-2); font: 500 11.5px/1 var(--mono); white-space: nowrap; font-variant-ligatures: none; }
+.crumb:hover { color: var(--teal-ink); background: var(--row-hover); }
+.crumb:focus-visible { box-shadow: var(--focus-ring); }
+.crumb-sep { flex-shrink: 0; color: var(--ink-3); }
+.crumb-item { display: inline-flex; align-items: center; gap: 2px; }
+.trail-more { display: none; padding: 0 2px; color: var(--ink-3); }
+.trail-more.always { display: inline; }
+.edit-btn { gap: 6px; margin-right: 4px; }
+.unsaved { font-size: 12px; color: var(--gold-ink); font-weight: 600; margin-right: 4px; }
 .more-menu { display: grid; gap: 1px; }
 .menu-item { display: flex; align-items: center; gap: 10px; width: 100%; height: 34px; padding: 0 10px; border: 0; border-radius: 8px; background: transparent; color: var(--ink); font-size: 13.5px; text-align: left; }
 .menu-item svg { color: var(--ink-2); }
@@ -87,11 +122,18 @@ void props
 .menu-item.danger, .menu-item.danger svg { color: var(--danger); }
 .menu-item.danger:hover:not(:disabled) { background: var(--danger-bg); }
 .menu-sep { height: 1px; margin: 4px 6px; background: var(--line); }
+/* A narrow panel with a trail keeps the last crumb (after an ellipsis) and drops the list position. */
+@container panel-bar (max-width: 640px) {
+  .has-trail .position, .crumb-item:not(:last-child) { display: none; }
+  .trail-more { display: inline; }
+}
 @media (max-width: 720px) {
   .panel-bar { height: 56px; padding: 0 6px 0 12px; }
   .panel-bar .icon-btn { width: 44px; height: 44px; }
   .position { display: none; }
   .wide-only { display: none; }
   .nav { gap: 0; }
+  .trail, .position { display: none; }
+  .edit-btn { height: 40px; }
 }
 </style>

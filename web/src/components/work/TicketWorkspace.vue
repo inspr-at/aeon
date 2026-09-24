@@ -1,20 +1,28 @@
 <!-- SPDX-License-Identifier: AGPL-3.0-only -->
 <script setup lang="ts">
-import { computed, nextTick, ref, toRef, watch } from 'vue'
+import { computed, nextTick, onBeforeUnmount, onMounted, reactive, ref, toRef, useId, watch } from 'vue'
 import type { ListItem } from '../../lib/api'
 import { confirmAction } from '../../lib/confirm'
 import { toast } from '../../lib/toast'
 import { useActivity } from '../../lib/useActivity'
 import { useTicket } from '../../lib/useTicket'
-import { absoluteTime, kindLabel, relativeTime } from '../../lib/work'
+import { absoluteTime, kindLabel, priorityLabel, relativeTime, statusMeta, statusOptions } from '../../lib/work'
+import { useAttachments } from '../../lib/useAttachments'
 import AppIcon from '../AppIcon.vue'
 import ActivityTimeline from './ActivityTimeline.vue'
+import AttachmentLightbox from './AttachmentLightbox.vue'
+import AttachmentStrip from './AttachmentStrip.vue'
+import MarkdownEditor from './MarkdownEditor.vue'
 import ChildList from './ChildList.vue'
 import CommentComposer from './CommentComposer.vue'
 import EpicPicker from './EpicPicker.vue'
 import InlineTitle from './InlineTitle.vue'
 import MarkdownSection from './MarkdownSection.vue'
 import OptionMenu, { type MenuOption } from './OptionMenu.vue'
+import PersonAvatar from './PersonAvatar.vue'
+import PriorityIcon from './PriorityIcon.vue'
+import StatusIcon from './StatusIcon.vue'
+import StatusMenu from './StatusMenu.vue'
 import RelationList from './RelationList.vue'
 import TicketHeaderBar from './TicketHeaderBar.vue'
 import TicketProperties from './TicketProperties.vue'
@@ -26,9 +34,11 @@ const props = defineProps<{
   position: { index: number; count: number } | null; now: number; mode: 'panel' | 'full'
   project: { id: string; routeKey: string }; names: Map<string, string>
   me: { id: string; name: string } | null; canWrite: boolean; people: { id: string; name: string }[]
+  // Tickets followed to get here, oldest first (the panel's back trail).
+  trail?: string[]
 }>()
 const emit = defineEmits<{
-  close: []; prev: []; next: []; expand: []; collapse: []; newTab: []; openKey: [key: string]; status: [anchor: HTMLElement]
+  close: []; prev: []; next: []; expand: []; collapse: []; newTab: []; openKey: [key: string, newTab: boolean]; status: [anchor: HTMLElement]; trailBack: [steps: number]
   removed: [item: ListItem]; created: [item: ListItem]; moved: [item: ListItem, fromParent: string | null]; retry: []
 }>()
 
@@ -41,8 +51,150 @@ const ticket = useTicket(item, {
 })
 const activity = useActivity(computed(() => props.item?.id ?? null))
 const editable = computed(() => props.canWrite && !ticket.readOnly.value && !ticket.gone.value)
+const attachments = useAttachments(computed(() => props.item?.id ?? null))
+const lightbox = ref<InstanceType<typeof AttachmentLightbox>>()
+
+// ---------- Following links: a modified click opens a new tab ----------
+let modifiedClick = false
+function rememberClick(event: MouseEvent) { modifiedClick = event.metaKey || event.ctrlKey || event.shiftKey }
+function openLinked(key: string) { const tab = modifiedClick; modifiedClick = false; emit('openKey', key, tab) }
+
+// ---------- Layout: a context column (activity, attachments, relations) when there is room ----------
+const width = ref(0)
+const wideScreen = ref(window.matchMedia('(min-width: 1800px)').matches)
+const wideQuery = window.matchMedia('(min-width: 1800px)')
+const onWide = (event: MediaQueryListEvent) => { wideScreen.value = event.matches }
+let sizer: ResizeObserver | undefined
+onMounted(() => {
+  wideQuery.addEventListener('change', onWide)
+  if (root.value) { sizer = new ResizeObserver(([entry]) => { width.value = entry.contentRect.width }); sizer.observe(root.value) }
+})
+onBeforeUnmount(() => { wideQuery.removeEventListener('change', onWide); sizer?.disconnect() })
+const contextColumn = computed(() => props.mode === 'full' ? wideScreen.value : width.value >= 860)
+
+// ---------- Edit mode: title, text and properties together, one Save ----------
+const editing = ref(false)
+const saving = ref(false)
+const titleField = ref<HTMLTextAreaElement>()
+const draft = reactive({ title: '', body: '', acceptance: '', notes: '', state: '', priority: '', assignee: '' })
+let base = { ...draft }
+function snapshot() {
+  const it = props.item!
+  return {
+    title: it.title, body: it.body ?? '', acceptance: typeof it.fields.acceptance_criteria === 'string' ? it.fields.acceptance_criteria : '',
+    notes: typeof it.fields.notes === 'string' ? it.fields.notes : '', state: it.state, priority: it.priority && it.priority !== 'none' ? it.priority : '', assignee: it.assignee?.id ?? '',
+  }
+}
+const editDirty = computed(() => editing.value && (Object.keys(base) as (keyof typeof base)[]).some(key => draft[key] !== base[key]))
+const editStatusOptions = computed(() => {
+  const options = statusOptions([props.item?.state ?? ''])
+  return options.some(o => o.value === draft.state) || !draft.state ? options : [{ value: draft.state, meta: statusMeta(draft.state) }, ...options]
+})
+async function startEdit(focus: 'title' | 'body' = 'title') {
+  if (!editable.value || !props.item || editing.value) return
+  base = snapshot(); Object.assign(draft, base)
+  editing.value = true
+  await nextTick()
+  // The caret goes to the end of the title: typing adds to it rather than replacing it.
+  if (focus === 'title') { const el = titleField.value; el?.focus(); el?.setSelectionRange(el.value.length, el.value.length); growTitle() }
+  else root.value?.querySelector<HTMLTextAreaElement>('.edit-form .md-area')?.focus()
+}
+function growTitle() { const el = titleField.value; if (el) { el.style.height = 'auto'; el.style.height = `${el.scrollHeight}px` } }
+async function saveEdit() {
+  const target = props.item
+  if (!target || saving.value) return
+  if (!draft.title.trim()) { toast('A title is needed.', { tone: 'error' }); titleField.value?.focus(); return }
+  if (!editDirty.value) { editing.value = false; return }
+  const patch: Record<string, unknown> = {}
+  if (draft.title.trim() !== base.title) patch.title = draft.title.trim()
+  if (draft.body !== base.body) patch.body = draft.body
+  if (draft.state !== base.state) patch.state = draft.state
+  const fields = { ...target.fields }
+  let fieldsChanged = false
+  const setField = (name: string, value: string, before: string) => { if (value === before) return; fieldsChanged = true; if (value.trim()) fields[name] = value; else delete fields[name] }
+  setField('acceptance_criteria', draft.acceptance, base.acceptance)
+  setField('notes', draft.notes, base.notes)
+  setField('priority', draft.priority, base.priority)
+  setField('assignee', draft.assignee, base.assignee)
+  if (fieldsChanged) patch.fields = fields
+  saving.value = true
+  const result = await ticket.patch(patch)
+  saving.value = false
+  if (result === 'ok') {
+    if (draft.assignee !== base.assignee) {
+      const option = assigneeOptions.value.find(o => o.value === draft.assignee)
+      target.assignee = draft.assignee && option ? { id: draft.assignee, name: option.label } : null
+      if (target.assignee) props.names.set(target.assignee.id, target.assignee.name)
+    }
+    editing.value = false
+    toast(`Saved ${target.key}`)
+    void nextTick(() => root.value?.focus({ preventScroll: true }))
+  } else if (result === 'conflict') {
+    // The newer version is loaded; the draft stays, compared against it from now on.
+    base = snapshot()
+  }
+}
+async function cancelEdit() {
+  if (editDirty.value && !(await confirmAction({ title: 'Discard your changes?', body: `Your edits to ${props.item?.key ?? 'this ticket'} have not been saved.`, confirmLabel: 'Discard', danger: true }))) return
+  editing.value = false
+  void nextTick(() => root.value?.focus({ preventScroll: true }))
+}
+// Status, priority and assignee in the form: the app's own menus (icons, arrows,
+// digits, a filter for people), styled as form fields; a choice only edits the draft.
+const uid = useId()
+const editMenu = ref<{ kind: 'status' | 'priority' | 'assignee'; anchor: HTMLElement } | null>(null)
+function openEditMenu(kind: 'status' | 'priority' | 'assignee', event: Event) {
+  const anchor = event.currentTarget as HTMLElement
+  editMenu.value = editMenu.value?.kind === kind ? null : { kind, anchor }
+}
+function editMenuKeys(kind: 'status' | 'priority' | 'assignee', event: KeyboardEvent) {
+  if (event.key === 'ArrowDown' || event.key === 'ArrowUp') { event.preventDefault(); if (editMenu.value?.kind !== kind) openEditMenu(kind, event) }
+}
+function closeEditMenu(restore: boolean) { const anchor = editMenu.value?.anchor; editMenu.value = null; if (restore) anchor?.focus() }
+function chooseEdit(kind: 'status' | 'priority' | 'assignee', value: string) {
+  if (kind === 'status') draft.state = value
+  else if (kind === 'priority') draft.priority = value
+  else draft.assignee = value
+  closeEditMenu(true)
+}
+const draftAssignee = computed(() => assigneeOptions.value.find(option => option.value === draft.assignee && option.value))
+function editKeys(event: KeyboardEvent) {
+  if ((event.metaKey || event.ctrlKey) && event.key === 'Enter') { event.preventDefault(); event.stopPropagation(); void saveEdit() }
+  else if (event.key === 'Escape') { event.preventDefault(); event.stopPropagation(); void cancelEdit() }
+}
+watch(() => props.item?.id, () => { editing.value = false })
+watch(editing, value => { if (!value) editMenu.value = null })
+
+// ---------- Attachments: drop anywhere on the ticket, paste a screenshot ----------
+const dropping = ref(false)
+let dragDepth = 0
+const hasFiles = (event: DragEvent) => !!event.dataTransfer?.types.includes('Files')
+function dragEnter(event: DragEvent) { if (!hasFiles(event) || !editable.value) return; event.preventDefault(); dragDepth++; dropping.value = true }
+function dragOverRoot(event: DragEvent) { if (!hasFiles(event) || !editable.value) return; event.preventDefault(); if (event.dataTransfer) event.dataTransfer.dropEffect = 'copy' }
+function dragLeaveRoot(event: DragEvent) { if (!hasFiles(event)) return; dragDepth = Math.max(0, dragDepth - 1); if (!dragDepth) dropping.value = false }
+function dropFiles(event: DragEvent) {
+  if (!hasFiles(event) || !editable.value) return
+  event.preventDefault(); dragDepth = 0; dropping.value = false
+  const files = [...(event.dataTransfer?.files ?? [])]
+  if (files.length) void attachments.add(files)
+}
+function pasteFiles(event: ClipboardEvent) {
+  const target = event.target as HTMLElement
+  if (!editable.value || target.closest('input, textarea, [contenteditable="true"]')) return
+  const files = [...(event.clipboardData?.files ?? [])]
+  if (!files.length) return
+  event.preventDefault()
+  // Pasted screenshots arrive as "image.png"; name them by local date and time.
+  const stamp = new Date(), two = (n: number) => String(n).padStart(2, '0')
+  const when = `${stamp.getFullYear()}-${two(stamp.getMonth() + 1)}-${two(stamp.getDate())} ${two(stamp.getHours())}.${two(stamp.getMinutes())}`
+  void attachments.add(files.map((file, i) => file.name && file.name !== 'image.png' ? file : new File([file], `Screenshot ${when}${files.length > 1 ? ` (${i + 1})` : ''}.png`, { type: file.type })))
+}
+// Pasting into an editor uploads and inserts the image reference at the caret.
+async function attachmentId(file: File) { return (await attachments.upload(file))?.id ?? null }
+function openAttachment(id: string) { lightbox.value?.open(id) }
 
 const root = ref<HTMLElement>()
+const mac = /Mac|iPhone|iPad/.test(navigator.platform || navigator.userAgent)
 const scroller = ref<HTMLElement>()
 const title = ref<InstanceType<typeof InlineTitle>>()
 const descSection = ref<InstanceType<typeof MarkdownSection>>()
@@ -108,12 +260,13 @@ async function addSection(kind: 'acceptance' | 'notes') {
 }
 
 function isDirty() {
-  return !!title.value?.isDirty() || sections.value.some(section => section.isDirty()) || !!composer.value?.isDirty() || !!timeline.value?.isDirty()
+  return editDirty.value || !!title.value?.isDirty() || sections.value.some(section => section.isDirty()) || !!composer.value?.isDirty() || !!timeline.value?.isDirty()
 }
 function focus() { root.value?.focus({ preventScroll: true }) }
 defineExpose({
   el: root, focus, isDirty,
   editTitle: () => title.value?.start(),
+  startEdit, editing,
   openStatus: () => { const anchor = anchorFor('s'); if (anchor && editable.value) emit('status', anchor) },
   openPriority: () => openMenu('priority', anchorFor('p')),
   openAssignee: () => openMenu('assignee', anchorFor('a')),
@@ -122,13 +275,17 @@ defineExpose({
 </script>
 
 <template>
-  <component :is="mode === 'panel' ? 'aside' : 'article'" ref="root" class="ticket-ws" :class="mode" aria-label="Ticket details" tabindex="-1">
+  <component
+    :is="mode === 'panel' ? 'aside' : 'article'" ref="root" class="ticket-ws" :class="[mode, { 'has-context': contextColumn && !editing, editing }]" aria-label="Ticket details" tabindex="-1"
+    @click.capture="rememberClick" @dragenter="dragEnter" @dragover="dragOverRoot" @dragleave="dragLeaveRoot" @drop="dropFiles" @paste="pasteFiles"
+  >
     <TicketHeaderBar
       :ticket-key="item?.key ?? ticketKey" :kind="item?.kind_slug ?? null" :position="position" :mode="mode" :can-write="editable"
-      :can-move="item?.kind_slug === 'ticket'"
+      :can-move="item?.kind_slug === 'ticket'" :trail="trail" :editing="editing" :saving="saving" :dirty="editDirty"
       @copy-key="copy(item?.key ?? ticketKey, item?.key ?? ticketKey)" @copy-link="copy(link(), 'link')" @prev="emit('prev')" @next="emit('next')"
       @expand="emit('expand')" @collapse="emit('collapse')" @new-tab="emit('newTab')" @close="emit('close')"
-      @move="anchor => openMenu('epic', anchor)" @delete="remove"
+      @move="anchor => openMenu('epic', anchor)" @delete="remove" @back="steps => emit('trailBack', steps)"
+      @edit="startEdit()" @save="saveEdit" @cancel="cancelEdit"
     />
 
     <div ref="scroller" class="ws-scroll">
@@ -150,6 +307,42 @@ defineExpose({
         <span class="skeleton w90" /><span class="skeleton w80" /><span class="skeleton w60" /><span class="skeleton w85" />
       </div>
 
+      <!-- Edit mode: the whole ticket as one form, one Save -->
+      <form v-else-if="editing" class="edit-form" :aria-label="`Edit ${item.key}`" @submit.prevent="saveEdit" @keydown="editKeys">
+        <label class="sr-only" for="edit-title">Title</label>
+        <textarea id="edit-title" ref="titleField" v-model="draft.title" class="edit-title" :class="{ large: mode === 'full' }" rows="1" maxlength="500" placeholder="Title" @input="growTitle" @keydown.enter.exact.prevent />
+        <div class="edit-props">
+          <div class="edit-prop"><span :id="`${uid}-status`" class="prop-label">Status</span>
+            <button
+              type="button" class="field field-pick" aria-haspopup="menu" :aria-expanded="editMenu?.kind === 'status'" :aria-labelledby="`${uid}-status ${uid}-status-value`"
+              @click="openEditMenu('status', $event)" @keydown="editMenuKeys('status', $event)"
+            ><StatusIcon :state="draft.state" /><span :id="`${uid}-status-value`" class="pick-value">{{ statusMeta(draft.state).label }}</span><AppIcon name="chevron" :size="12" class="pick-chev" /></button>
+          </div>
+          <div class="edit-prop"><span :id="`${uid}-priority`" class="prop-label">Priority</span>
+            <button
+              type="button" class="field field-pick" aria-haspopup="menu" :aria-expanded="editMenu?.kind === 'priority'" :aria-labelledby="`${uid}-priority ${uid}-priority-value`"
+              @click="openEditMenu('priority', $event)" @keydown="editMenuKeys('priority', $event)"
+            ><PriorityIcon v-if="draft.priority" :priority="draft.priority" /><span v-else class="pick-none" aria-hidden="true">—</span><span :id="`${uid}-priority-value`" class="pick-value" :class="{ unset: !draft.priority }">{{ draft.priority ? priorityLabel(draft.priority) : 'No priority' }}</span><AppIcon name="chevron" :size="12" class="pick-chev" /></button>
+          </div>
+          <div class="edit-prop"><span :id="`${uid}-assignee`" class="prop-label">Assignee</span>
+            <button
+              type="button" class="field field-pick" aria-haspopup="menu" :aria-expanded="editMenu?.kind === 'assignee'" :aria-labelledby="`${uid}-assignee ${uid}-assignee-value`"
+              @click="openEditMenu('assignee', $event)" @keydown="editMenuKeys('assignee', $event)"
+            ><PersonAvatar v-if="draftAssignee" :name="draftAssignee.label" :size="18" /><AppIcon v-else name="user" :size="13" class="pick-none" /><span :id="`${uid}-assignee-value`" class="pick-value" :class="{ unset: !draftAssignee }">{{ draftAssignee?.label ?? 'Unassigned' }}</span><AppIcon name="chevron" :size="12" class="pick-chev" /></button>
+          </div>
+        </div>
+        <section class="edit-section" aria-labelledby="edit-desc"><h3 id="edit-desc" class="eyebrow">Description</h3>
+          <MarkdownEditor v-model="draft.body" label="Description" bare :split="mode === 'full'" :min-rows="mode === 'full' ? 12 : 7" :attachment-id="attachmentId" placeholder="What is this about? Paste a screenshot to add it inline." @save="saveEdit" @cancel="cancelEdit" />
+        </section>
+        <section class="edit-section" aria-labelledby="edit-ac"><h3 id="edit-ac" class="eyebrow">Acceptance criteria</h3>
+          <MarkdownEditor v-model="draft.acceptance" label="Acceptance criteria" bare :split="mode === 'full'" :min-rows="4" :attachment-id="attachmentId" placeholder="- [ ] What must be true when this is done" @save="saveEdit" @cancel="cancelEdit" />
+        </section>
+        <section class="edit-section" aria-labelledby="edit-notes"><h3 id="edit-notes" class="eyebrow">Notes</h3>
+          <MarkdownEditor v-model="draft.notes" label="Notes" bare :split="mode === 'full'" :min-rows="3" :attachment-id="attachmentId" @save="saveEdit" @cancel="cancelEdit" />
+        </section>
+        <p class="edit-hint"><kbd class="keycap">{{ mac ? '⌘' : 'Ctrl' }}</kbd><kbd class="keycap"><AppIcon name="enter" /></kbd> save · <kbd class="keycap">esc</kbd> cancel · paste or drop images to attach them</p>
+      </form>
+
       <div v-else class="ws-grid">
         <div class="ws-main">
           <p v-if="!editable" class="read-only" role="note"><AppIcon name="alert" :size="13" />You can read this {{ kindLabel(item.kind_slug).toLowerCase() }} but not change it.</p>
@@ -157,18 +350,24 @@ defineExpose({
           <TicketProperties
             class="ws-props" :class="{ 'only-narrow': mode === 'full' }" :item="item" :editable="editable" layout="row" :now="now"
             @status="anchor => emit('status', anchor)" @priority="anchor => openMenu('priority', anchor)" @assignee="anchor => openMenu('assignee', anchor)"
-            @epic="anchor => openMenu('epic', anchor)" @open-parent="key => emit('openKey', key)"
+            @epic="anchor => openMenu('epic', anchor)" @open-parent="openLinked"
           />
           <p class="meta" :class="{ 'only-narrow': mode === 'full' }">
             Updated <time :datetime="item.updated_at" :data-tip="absoluteTime(item.updated_at)">{{ relativeTime(item.updated_at, { now, long: true }) }}</time>
             · Created <time :datetime="item.created_at" :data-tip="absoluteTime(item.created_at)">{{ relativeTime(item.created_at, { now, long: true }) }}</time>
           </p>
+          <AttachmentStrip
+            v-if="!contextColumn && (attachments.count.value || editable)" class="ws-attachments" layout="strip" :items="attachments.items.value" :uploads="attachments.uploads.value"
+            :can-write="editable" :loading="attachments.loading.value" :error="attachments.error.value"
+            @open="openAttachment" @add="files => attachments.add(files)" @remove="attachments.remove" @reorder="attachments.reorder" @caption="attachments.setCaption"
+            @retry="attachments.retry" @cancel="attachments.cancel" @reload="attachments.load"
+          />
           <div class="divider" />
 
           <div class="sections">
-            <MarkdownSection ref="descSection" title="Description" :value="item.body" :editable="editable" :save="ticket.setBody" empty-text="Add a description" />
-            <MarkdownSection v-if="acceptance.trim() || showAcceptance" ref="acSection" title="Acceptance criteria" :value="acceptance" :editable="editable" :save="value => ticket.setField('acceptance_criteria', value)" />
-            <MarkdownSection v-if="notes.trim() || showNotes" ref="notesSection" title="Notes" :value="notes" :editable="editable" :save="value => ticket.setField('notes', value)" />
+            <MarkdownSection ref="descSection" title="Description" :value="item.body" :editable="editable" :save="ticket.setBody" :attachment-id="attachmentId" empty-text="Add a description" @open-attachment="openAttachment" />
+            <MarkdownSection v-if="acceptance.trim() || showAcceptance" ref="acSection" title="Acceptance criteria" :value="acceptance" :editable="editable" :save="value => ticket.setField('acceptance_criteria', value)" :attachment-id="attachmentId" @open-attachment="openAttachment" />
+            <MarkdownSection v-if="notes.trim() || showNotes" ref="notesSection" title="Notes" :value="notes" :editable="editable" :save="value => ticket.setField('notes', value)" :attachment-id="attachmentId" @open-attachment="openAttachment" />
             <div v-if="editable && (!(acceptance.trim() || showAcceptance) || !(notes.trim() || showNotes))" class="add-sections">
               <button v-if="!(acceptance.trim() || showAcceptance)" type="button" class="add-section" @click="addSection('acceptance')"><AppIcon name="plus" :size="12" />Acceptance criteria</button>
               <button v-if="!(notes.trim() || showNotes)" type="button" class="add-section" @click="addSection('notes')"><AppIcon name="plus" :size="12" />Notes</button>
@@ -178,37 +377,63 @@ defineExpose({
           <ChildList
             v-if="hasChildren" class="ws-block" :children="ticket.children.value" :loading="ticket.childrenLoading.value" :editable="editable"
             :child-label="item.kind_slug === 'epic' ? 'ticket' : 'task'" :progress="ticket.childProgress()" :add="title => ticket.addChild(title, project.routeKey)"
-            @open="key => emit('openKey', key)"
+            @open="openLinked"
           />
-          <RelationList class="ws-block" :class="{ 'only-narrow': mode === 'full' }" :related="ticket.related.value" @open="key => emit('openKey', key)" />
+          <template v-if="!contextColumn">
+            <RelationList class="ws-block" :class="{ 'only-narrow': mode === 'full' }" :related="ticket.related.value" @open="openLinked" />
+            <ActivityTimeline
+              ref="timeline" class="ws-block" :entries="activity.timeline.value" :loading="activity.loading.value" :loading-older="activity.loadingOlder.value"
+              :has-older="!!activity.cursor.value" :error="activity.error.value" :me="me?.id" :now="now" :can-write="editable"
+              :edit="activity.edit" :remove="activity.remove" @older="activity.loadOlder" @retry="activity.load"
+            />
+            <CommentComposer v-if="mode === 'full'" ref="composer" class="ws-block inline-composer" :me="me?.name ?? '?'" :post="activity.add" :disabled="!editable" />
+          </template>
+        </div>
 
+        <!-- Wide: a context column beside the reading column -->
+        <aside v-if="contextColumn" class="ws-context" aria-label="Attachments, relations and activity">
+          <AttachmentStrip
+            v-if="attachments.count.value || editable" layout="gallery" :items="attachments.items.value" :uploads="attachments.uploads.value"
+            :can-write="editable" :loading="attachments.loading.value" :error="attachments.error.value"
+            @open="openAttachment" @add="files => attachments.add(files)" @remove="attachments.remove" @reorder="attachments.reorder" @caption="attachments.setCaption"
+            @retry="attachments.retry" @cancel="attachments.cancel" @reload="attachments.load"
+          />
+          <RelationList v-if="mode === 'panel' || ticket.related.value.length" class="ctx-block" :related="ticket.related.value" @open="openLinked" />
           <ActivityTimeline
-            ref="timeline" class="ws-block" :entries="activity.timeline.value" :loading="activity.loading.value" :loading-older="activity.loadingOlder.value"
+            ref="timeline" class="ctx-block" :entries="activity.timeline.value" :loading="activity.loading.value" :loading-older="activity.loadingOlder.value"
             :has-older="!!activity.cursor.value" :error="activity.error.value" :me="me?.id" :now="now" :can-write="editable"
             :edit="activity.edit" :remove="activity.remove" @older="activity.loadOlder" @retry="activity.load"
           />
-          <CommentComposer v-if="mode === 'full'" ref="composer" class="ws-block inline-composer" :me="me?.name ?? '?'" :post="activity.add" :disabled="!editable" />
-        </div>
+          <CommentComposer v-if="mode === 'full'" ref="composer" class="ctx-block inline-composer" :me="me?.name ?? '?'" :post="activity.add" :disabled="!editable" />
+        </aside>
 
         <aside v-if="mode === 'full'" class="ws-side" aria-label="Properties">
           <div class="side-card">
             <TicketProperties
               :item="item" :editable="editable" layout="column" :now="now"
               @status="anchor => emit('status', anchor)" @priority="anchor => openMenu('priority', anchor)" @assignee="anchor => openMenu('assignee', anchor)"
-              @epic="anchor => openMenu('epic', anchor)" @open-parent="key => emit('openKey', key)"
+              @epic="anchor => openMenu('epic', anchor)" @open-parent="openLinked"
             />
           </div>
-          <div v-if="ticket.related.value.length" class="side-card"><RelationList :related="ticket.related.value" @open="key => emit('openKey', key)" /></div>
+          <div v-if="ticket.related.value.length && !contextColumn" class="side-card"><RelationList :related="ticket.related.value" @open="openLinked" /></div>
         </aside>
       </div>
     </div>
 
-    <footer v-if="mode === 'panel' && item && !ticket.gone.value" class="ws-composer">
+    <footer v-if="mode === 'panel' && item && !ticket.gone.value && !editing" class="ws-composer">
       <CommentComposer ref="composer" :me="me?.name ?? '?'" :post="activity.add" :disabled="!editable" />
     </footer>
 
+    <div v-if="dropping" class="drop-overlay" aria-hidden="true">
+      <div class="drop-card"><AppIcon name="upload" :size="22" /><strong>Drop to attach to {{ item?.key ?? ticketKey }}</strong><span>Images show as thumbnails; other files as cards.</span></div>
+    </div>
+    <AttachmentLightbox ref="lightbox" :items="attachments.items.value" :ticket-key="item?.key ?? ticketKey" :can-write="editable" :set-caption="attachments.setCaption" :names="names" />
+
     <OptionMenu v-if="menu?.kind === 'priority' && item" :anchor="menu.anchor" title="Priority" :subject="item.key" kind="priority" :options="priorityOptions" :current="item.priority ?? ''" @choose="choosePriority" @close="closeMenu" />
     <OptionMenu v-if="menu?.kind === 'assignee' && item" :anchor="menu.anchor" title="Assignee" :subject="item.key" kind="assignee" :options="assigneeOptions" :current="item.assignee?.id ?? ''" searchable @choose="chooseAssignee" @close="closeMenu" />
+    <StatusMenu v-if="editMenu?.kind === 'status' && item" :anchor="editMenu.anchor" :current="draft.state" :known-states="editStatusOptions.map(option => option.value)" :ticket-key="item.key" @choose="value => chooseEdit('status', value)" @close="closeEditMenu" />
+    <OptionMenu v-if="editMenu?.kind === 'priority' && item" :anchor="editMenu.anchor" title="Priority" :subject="item.key" kind="priority" :options="priorityOptions" :current="draft.priority" @choose="value => chooseEdit('priority', value)" @close="closeEditMenu" />
+    <OptionMenu v-if="editMenu?.kind === 'assignee' && item" :anchor="editMenu.anchor" title="Assignee" :subject="item.key" kind="assignee" :options="assigneeOptions" :current="draft.assignee" searchable @choose="value => chooseEdit('assignee', value)" @close="closeEditMenu" />
     <EpicPicker v-if="menu?.kind === 'epic' && item" :anchor="menu.anchor" :project-id="project.id" :current="item.parent?.kind_slug === 'epic' ? item.parent.id : null" :subject="item.key" @choose="chooseEpic" @close="closeMenu" />
   </component>
 </template>
@@ -249,10 +474,57 @@ defineExpose({
 .ws-skeleton .chips { display: flex; gap: 8px; margin: 4px 0 12px; }
 .ws-skeleton .chip { width: 86px; height: 26px; border-radius: 999px; }
 
+.ws-attachments { margin-top: 16px; }
+/* Context column: activity, attachments and relations beside a clean reading column. */
+.panel.has-context .ws-grid { display: grid; grid-template-columns: minmax(0, 1fr) clamp(300px, 36%, 400px); gap: 28px; align-items: start; }
+.panel.has-context .ws-main { min-width: 0; max-width: 72ch; }
+.ws-context { display: grid; grid-template-columns: minmax(0, 1fr); gap: 22px; min-width: 0; align-content: start; }
+.panel .ws-context { padding-left: 24px; border-left: 1px solid var(--line); }
+.ctx-block { min-width: 0; }
+/* Edit mode: one form, one Save. */
+.edit-form { display: grid; gap: 16px; }
+.panel .edit-form { padding-bottom: 12px; }
+.edit-title {
+  width: 100%; min-height: 40px; padding: 6px 10px; border: 1px solid var(--glass-edge); border-radius: 10px; resize: none; overflow: hidden;
+  background: var(--field-bg); box-shadow: var(--field-inset), 0 0 0 1px var(--line); color: var(--ink); font: 650 20px/1.3 var(--font); letter-spacing: -.01em;
+}
+.edit-title.large { font-size: 28px; }
+.edit-title:focus { box-shadow: var(--focus-ring); }
+.edit-props { display: grid; grid-template-columns: repeat(auto-fit, minmax(150px, 1fr)); gap: 10px; }
+.edit-prop { display: grid; gap: 4px; }
+.prop-label { font: 500 10px/1.5 var(--mono); letter-spacing: .14em; text-transform: uppercase; color: var(--ink-3); font-variant-ligatures: none; }
+/* Status, priority and assignee as form fields that open the app's own menus. */
+.field-pick { display: flex; align-items: center; gap: 8px; height: 36px; padding: 0 10px 0 11px; color: var(--ink); font-size: 13.5px; text-align: left; cursor: pointer; }
+.field-pick:hover { border-color: var(--chip-teal-line); }
+.field-pick[aria-expanded="true"] { box-shadow: var(--focus-ring); }
+.pick-value { flex: 1; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.pick-value.unset, .pick-none { color: var(--ink-3); }
+.pick-chev { flex-shrink: 0; color: var(--ink-3); }
+.edit-section { display: grid; gap: 8px; }
+.edit-section .eyebrow { margin: 0; }
+.edit-hint { display: flex; align-items: center; gap: 4px; font-size: 12px; color: var(--ink-3); }
+/* Full page editing is a focused writing layout: editor and preview side by side. */
+.ticket-ws.full.editing { max-width: 1480px; }
+.full .edit-form { padding: 26px 0 40px; }
+/* Dropping files anywhere on the ticket. */
+.drop-overlay { position: absolute; inset: 0; z-index: 30; display: grid; place-items: center; padding: 24px; border-radius: inherit; background: rgba(14, 111, 108, .12); box-shadow: inset 0 0 0 2px var(--teal); backdrop-filter: blur(3px); -webkit-backdrop-filter: blur(3px); pointer-events: none; }
+.full .drop-overlay { position: fixed; inset: calc(var(--header-h) + 8px) 8px 8px; border-radius: var(--radius); }
+.drop-card { display: grid; justify-items: center; gap: 6px; padding: 22px 28px; border-radius: 16px; background: var(--surface-raised); box-shadow: var(--shadow-pop); color: var(--ink); text-align: center; }
+.drop-card svg { color: var(--teal); }
+.drop-card span { font-size: 12.5px; color: var(--ink-2); }
+.ticket-ws { position: relative; }
+.ticket-ws.panel { position: fixed; }
+
 /* Full page: content left at a readable measure, properties and relations right. */
 .ticket-ws.full { width: 100%; max-width: 1160px; min-height: 100%; margin: 0 auto; }
 .full .ws-scroll { overflow: visible; }
 .full .ws-grid { display: grid; grid-template-columns: minmax(0, 1fr) 320px; gap: 40px; align-items: start; padding: 26px 0 40px; }
+/* Three columns: a ~72ch reading column, the context (attachments, relations,
+   activity) and the properties; the set stays together in the middle. */
+.ticket-ws.full.has-context { max-width: 1480px; }
+.full.has-context .ws-grid { grid-template-columns: minmax(0, 1fr) clamp(340px, 24vw, 440px) 300px; gap: 44px; }
+.full.has-context .ws-main { max-width: none; }
+.full.has-context .ws-context { position: sticky; top: 16px; max-height: calc(100dvh - var(--header-h) - 32px); overflow: auto; padding-right: 4px; }
 .full .ws-main { min-width: 0; max-width: 820px; }
 .full .sections :deep(.markdown-body), .full .inline-composer, .full .activity, .full .children { max-width: 72ch; }
 .full .ws-side { position: sticky; top: 16px; display: grid; gap: 14px; }

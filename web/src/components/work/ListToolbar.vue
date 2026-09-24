@@ -6,6 +6,8 @@ import { plural } from '../../lib/work'
 import AppIcon from '../AppIcon.vue'
 import FacetMenu from './FacetMenu.vue'
 import FloatingPanel from './FloatingPanel.vue'
+import ColumnPicker from './ColumnPicker.vue'
+import type { ColumnId } from '../../lib/columns'
 
 const props = defineProps<{
   filters: ListFilters
@@ -15,6 +17,8 @@ const props = defineProps<{
   density: 'comfortable' | 'compact'
   stuck: boolean
   view: 'list' | 'outline'
+  // The table's columns for the Display menu's picker.
+  columns?: { order: ColumnId[]; visible: ColumnId[]; customised: boolean } | null
 }>()
 const emit = defineEmits<{
   search: [q: string]
@@ -30,6 +34,8 @@ const emit = defineEmits<{
   view: [value: 'list' | 'outline']
   expandAll: []
   collapseAll: []
+  columns: [order: ColumnId[], visible: ColumnId[]]
+  columnsReset: []
 }>()
 
 const draft = ref(props.filters.q)
@@ -136,7 +142,7 @@ defineExpose({ focusSearch, input })
       type="button" class="btn sm closed-pill" :class="{ on: !filters.showClosed }" :aria-pressed="!filters.showClosed" aria-label="Hide closed tickets"
       :data-tip="filters.showClosed ? 'Closed tickets are shown\nClick to hide them' : 'Closed tickets are hidden\nClick to show them'" @click="emit('showClosed', !filters.showClosed)"
     ><AppIcon :name="filters.showClosed ? 'eye' : 'eye-off'" :size="14" />Closed</button>
-    <button type="button" class="btn sm display-btn" :class="{ on: view === 'list' && filters.group !== 'none' }" aria-haspopup="dialog" :aria-expanded="!!displayAnchor" :aria-label="`Display: ${displayLabel}`" data-tip="Grouping and row height" @click="displayAnchor = displayAnchor ? null : ($event.currentTarget as HTMLElement)">
+    <button type="button" class="btn sm display-btn" :class="{ on: view === 'list' && filters.group !== 'none' }" aria-haspopup="dialog" :aria-expanded="!!displayAnchor" :aria-label="`Display: ${displayLabel}`" data-tip="Grouping, row height and columns" @click="displayAnchor = displayAnchor ? null : ($event.currentTarget as HTMLElement)">
       <AppIcon name="layers" :size="13" /><span class="display-label">{{ displayLabel }}</span><AppIcon name="chevron" :size="12" class="facet-chevron" />
     </button>
 
@@ -149,7 +155,7 @@ defineExpose({ focusSearch, input })
       v-if="open" :anchor="open.anchor" :dimension="open.dimension" :title="title(open.dimension)" :options="options(open.dimension)" :selected="filters[open.dimension]"
       @toggle="value => emit('toggle', open!.dimension, value)" @clear="emit('clear', open!.dimension)" @close="closeMenu"
     />
-    <FloatingPanel v-if="displayAnchor" :anchor="displayAnchor" :width="296" align="end" label="Display options" @close="closeDisplay">
+    <FloatingPanel v-if="displayAnchor" :anchor="displayAnchor" :width="300" :tallest="720" align="end" label="Display options" @close="closeDisplay">
       <div class="display-panel">
         <template v-if="view === 'list'">
           <p class="eyebrow">Group by</p>
@@ -169,6 +175,7 @@ defineExpose({ focusSearch, input })
           <button type="button" role="radio" :aria-checked="density === 'comfortable'" @click="emit('density', 'comfortable')"><AppIcon name="rows-comfortable" :size="14" />Comfortable</button>
           <button type="button" role="radio" :aria-checked="density === 'compact'" @click="emit('density', 'compact')"><AppIcon name="rows-compact" :size="14" />Compact</button>
         </div>
+        <ColumnPicker v-if="columns" class="column-picker" :order="columns.order" :visible="columns.visible" :customised="columns.customised" @change="(order, visible) => emit('columns', order, visible)" @reset="emit('columnsReset')" />
       </div>
     </FloatingPanel>
   </div>
@@ -213,6 +220,7 @@ defineExpose({ focusSearch, input })
 .new-btn { height: 32px; padding: 0 14px 0 11px; gap: 6px; }
 .display-panel { display: grid; gap: 8px; padding: 6px 8px 8px; }
 .display-panel .eyebrow + .seg, .outline-actions { margin-bottom: 6px; }
+.column-picker { margin-top: 8px; padding-top: 10px; border-top: 1px solid var(--line); }
 .outline-actions { display: grid; grid-template-columns: 1fr 1fr; gap: 6px; }
 .view-seg { flex-shrink: 0; }
 .view-seg button { height: 26px; padding: 0 11px; }

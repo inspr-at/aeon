@@ -109,3 +109,43 @@ for (const colorScheme of ['light', 'dark'] as const) {
     })
   }
 }
+
+// U11 screens: the wide panel with its context column, edit mode, the column
+// picker and the attachment viewer.
+const wideScreens: [string, number, string, (page: Page) => Promise<void>][] = [
+  ['wide panel with attachments', 1920, '/p/PHAROS/PHAROS-11', async page => { await expect(page.locator('.attachments.gallery .tile').first()).toBeVisible() }],
+  ['edit mode', 1440, '/p/PHAROS/PHAROS-11', async page => {
+    await expect(page.locator('.attachments .tile').first()).toBeVisible()
+    await page.keyboard.press('e')
+    await expect(page.getByRole('form', { name: 'Edit PHAROS-11' })).toBeVisible()
+  }],
+  ['column picker', 1440, '/p/PHAROS', async page => {
+    await expect(page.locator('tr.ticket-row:not(.ghost)')).toHaveCount(5)
+    await page.getByRole('button', { name: /^Display/ }).click()
+    await expect(page.getByRole('dialog', { name: 'Display options' }).getByRole('checkbox', { name: 'Epic' })).toBeVisible()
+  }],
+  ['attachment viewer', 1440, '/p/PHAROS/PHAROS-11', async page => {
+    await page.locator('.attachments .tile').first().click()
+    await expect(page.locator('dialog.lightbox .name')).toBeVisible()
+  }],
+  ['attachment compare', 1440, '/p/PHAROS/PHAROS-11', async page => {
+    await page.locator('.attachments .tile').first().click()
+    await page.keyboard.press('c')
+    await expect(page.getByRole('slider', { name: 'Compare divide' })).toBeVisible()
+  }],
+]
+for (const colorScheme of ['light', 'dark'] as const) {
+  for (const [name, width, path, ready] of wideScreens) {
+    test(`axe: ${name} in ${colorScheme}`, async ({ page }) => {
+      await page.setViewportSize({ width, height: 1000 })
+      await page.emulateMedia({ colorScheme, reducedMotion: 'reduce' })
+      await signedIn(page)
+      await page.goto(path)
+      await ready(page)
+      await page.waitForTimeout(250)
+      const results = await new AxeBuilder({ page }).withTags(['wcag2a', 'wcag2aa', 'wcag21a', 'wcag21aa']).exclude('.version-coordinate').analyze()
+      const summary = results.violations.map(v => `${v.id} (${v.impact}): ${v.help}\n${v.nodes.slice(0, 4).map(n => `    ${n.target.join(' ')} — ${n.failureSummary?.split('\n').slice(1, 2).join(' ').trim()}`).join('\n')}`)
+      expect(summary, summary.join('\n')).toEqual([])
+    })
+  }
+}

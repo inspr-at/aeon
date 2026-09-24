@@ -103,8 +103,12 @@
 
   /* Shell metrics */
   --header-h: 56px;
-  /* Docked ticket panel width on wide screens */
-  --panel-w: clamp(440px, 38vw, 560px);
+  /* Page gutter: 28px at 1440 growing to about 48px at 2560. */
+  --gutter: clamp(28px, calc(28px + (100vw - 1440px) / 56), 48px);
+  /* Docked panel: ~560px at 1440 growing towards 40% on wide screens (two columns
+     from 1800px). A width the person dragged (--panel-user-w) wins, within 72vw. */
+  --panel-default: clamp(440px, calc(560px + (100vw - 1440px) * .4), 40vw);
+  --panel-w: min(var(--panel-user-w, var(--panel-default)), 72vw);
 
   /* Legacy aliases kept for older views */
   --brand-teal: #0e6f6c;
@@ -193,3 +197,5 @@
     color-scheme: dark;
   }
 }
+
+@media (min-width: 1800px) { :root { --panel-default: min(max(40vw, 880px), 1100px); } }

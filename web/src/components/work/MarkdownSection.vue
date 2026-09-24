@@ -9,7 +9,8 @@ import MarkdownEditor from './MarkdownEditor.vue'
 
 // One Markdown section of a ticket (Description, Acceptance criteria, Notes):
 // rendered by default, edited in place, conflicts keep the draft.
-const props = defineProps<{ title: string; value: string; editable: boolean; save: (value: string) => Promise<SaveResult>; emptyText?: string }>()
+const props = defineProps<{ title: string; value: string; editable: boolean; save: (value: string) => Promise<SaveResult>; emptyText?: string; attachmentId?: (file: File) => Promise<string | null> }>()
+const emit = defineEmits<{ openAttachment: [id: string] }>()
 const editing = ref(false)
 const draft = ref('')
 const saving = ref(false)
@@ -53,10 +54,10 @@ defineExpose({ start, isDirty: () => dirty.value, editing })
           <details><summary>Show the newer version</summary><MarkdownBody :body="value || '*Empty*'" /></details>
         </div>
       </div>
-      <MarkdownEditor ref="editor" v-model="draft" :label="title" :saving="saving" :save-label="conflict ? 'Save anyway' : 'Save'" @save="commit" @cancel="cancel" />
+      <MarkdownEditor ref="editor" v-model="draft" :label="title" :saving="saving" :attachment-id="attachmentId" :save-label="conflict ? 'Save anyway' : 'Save'" @save="commit" @cancel="cancel" />
     </template>
     <div v-else-if="value.trim()" class="section-body" :class="{ clickable: editable }" @dblclick="start">
-      <MarkdownBody :body="value" />
+      <MarkdownBody :body="value" @open-attachment="id => emit('openAttachment', id)" />
     </div>
     <button v-else-if="editable" type="button" class="empty-add" @click="start"><AppIcon name="plus" :size="13" />{{ emptyText ?? `Add ${title.toLowerCase()}` }}</button>
   </section>

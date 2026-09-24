@@ -2,10 +2,22 @@
 <script setup lang="ts">
 import { computed } from 'vue'
 import MarkdownIt from 'markdown-it'
+import { ATTACHMENT_REF, contentUrl } from '../lib/attachments'
 const props = defineProps<{ body: string }>()
-// Raw HTML stays text; markdown-it rejects script/data links. Images stay text
-// so viewing another principal's Markdown never loads third-party resources.
-const markdown = new MarkdownIt({ html: false, linkify: false }).disable('image')
+const emit = defineEmits<{ openAttachment: [id: string] }>()
+// Raw HTML stays text; markdown-it rejects script/data links. Only this ticket's own
+// attachments render as images (![caption](attachment:<id>)); any other image stays
+// text, so viewing another principal's Markdown never loads third-party resources.
+const markdown = new MarkdownIt({ html: false, linkify: false })
+markdown.renderer.rules.image = (tokens, index) => {
+  const token = tokens[index]
+  const src = String(token.attrGet('src') ?? '')
+  const alt = markdown.utils.escapeHtml(token.content || '')
+  const match = ATTACHMENT_REF.exec(src)
+  if (!match) return markdown.utils.escapeHtml(`![${token.content}](${src})`)
+  const id = match[1]
+  return `<button type="button" class="md-attachment" data-attachment="${id}" aria-label="Open ${alt || 'attachment'}"><img src="${contentUrl(id, 'preview')}" alt="${alt}" loading="lazy" decoding="async"></button>`
+}
 
 // GitHub-style task lists: "- [ ] open" and "- [x] done" render as read-only checkboxes.
 markdown.core.ruler.after('inline', 'task-lists', state => {
@@ -27,8 +39,12 @@ markdown.renderer.rules.task_checkbox = (tokens, index) =>
   `<input class="task-box" type="checkbox" disabled${tokens[index].meta?.checked ? ' checked' : ''} aria-label="${tokens[index].meta?.checked ? 'Done' : 'Not done'}"> `
 
 const rendered = computed(() => markdown.render(props.body))
+function click(event: MouseEvent) {
+  const button = (event.target as HTMLElement).closest<HTMLElement>('.md-attachment')
+  if (button?.dataset.attachment) { event.preventDefault(); emit('openAttachment', button.dataset.attachment) }
+}
 </script>
-<template><div class="markdown-body" v-html="rendered" /></template>
+<template><div class="markdown-body" v-html="rendered" @click="click" /></template>
 <style scoped>
 .markdown-body { overflow-wrap: anywhere; font-size: 14px; line-height: 1.65; color: var(--ink); }
 .markdown-body > :deep(:first-child) { margin-top: 0; }
@@ -62,4 +78,7 @@ const rendered = computed(() => markdown.render(props.body))
 .markdown-body :deep(td), .markdown-body :deep(th) { padding: 6px 10px; border: 1px solid var(--line); text-align: left; }
 .markdown-body :deep(th) { font: 500 10.5px var(--mono); letter-spacing: .1em; text-transform: uppercase; color: var(--ink-3); }
 .markdown-body :deep(a) { color: var(--teal); text-decoration: underline; text-decoration-color: var(--gold); text-underline-offset: 3px; }
+.markdown-body :deep(.md-attachment) { display: block; max-width: 100%; margin: .4em 0 1em; padding: 0; border: 0; border-radius: 10px; overflow: hidden; background: var(--surface-sunken, var(--code-bg)); box-shadow: inset 0 0 0 1px var(--line), 0 10px 26px -18px rgba(16, 35, 39, .5); cursor: zoom-in; }
+.markdown-body :deep(.md-attachment img) { display: block; max-width: 100%; height: auto; }
+.markdown-body :deep(.md-attachment:focus-visible) { box-shadow: var(--focus-ring); }
 </style>

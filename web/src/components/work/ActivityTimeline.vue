@@ -139,7 +139,7 @@ defineExpose({ isDirty })
 .older:hover { background: var(--row-hover); }
 .older:focus-visible { box-shadow: var(--focus-ring); }
 /* One timeline: a hairline through 26px nodes (avatars, agent marks, dots). */
-.timeline { position: relative; display: grid; gap: 12px; margin: 0; padding: 0; list-style: none; }
+.timeline { position: relative; display: grid; grid-template-columns: minmax(0, 1fr); gap: 12px; margin: 0; padding: 0; list-style: none; }
 .timeline::before { content: ''; position: absolute; left: 12.5px; top: 8px; bottom: 8px; width: 1px; background: var(--line-2); }
 .entry { position: relative; display: grid; grid-template-columns: 26px minmax(0, 1fr); column-gap: 12px; align-items: start; }
 .node { position: relative; z-index: 1; justify-self: center; }
@@ -156,13 +156,13 @@ defineExpose({ isDirty })
 .line-actions { display: inline-flex; gap: 2px; margin-left: auto; }
 .line-actions .icon-btn { width: 24px; height: 24px; color: var(--ink-3); }
 .danger-icon:hover { color: var(--danger) !important; }
-.comment-body { margin-top: 2px; font-size: 13.5px; }
+.comment-body { margin-top: 2px; font-size: 13.5px; overflow-wrap: anywhere; }
 .comment-card .md-editor { margin: 6px 0 10px; }
 .change-line, .system-line { display: flex; align-items: center; flex-wrap: wrap; gap: 0 4px; min-height: 22px; margin: 0; font-size: 12.5px; color: var(--ink-2); }
 .change-line strong { color: var(--ink); font-weight: 600; }
 .value { display: inline-flex; align-items: center; gap: 4px; color: var(--ink); }
 .arrow, .sep, .change-line time, .system-line time { color: var(--ink-3); }
-.marker-body { display: grid; gap: 8px; min-width: 0; }
+.marker-body { display: grid; grid-template-columns: minmax(0, 1fr); gap: 8px; min-width: 0; }
 .marker-toggle { display: inline-flex; align-items: center; gap: 5px; min-width: 0; max-width: 100%; height: 22px; margin-left: -6px; padding: 0 6px; border: 0; border-radius: 6px; background: transparent; color: var(--ink-2); font-size: 12.5px; }
 @media (hover: hover) { .marker-toggle:hover { background: var(--row-hover); } }
 .marker-toggle:focus-visible { box-shadow: var(--focus-ring); }

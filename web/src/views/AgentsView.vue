@@ -243,7 +243,7 @@ watch(sessionId, id => { if (id) cursor.value = `s:${id}` }, { immediate: true }
 </template>
 
 <style scoped>
-.agents-page { width: 100%; max-width: 1600px; margin: 0 auto; padding: 22px 28px 24px; }
+.agents-page { width: 100%; margin: 0; padding: 22px var(--gutter) 24px; }
 .page-head { display: flex; align-items: flex-end; justify-content: space-between; gap: 24px; margin-bottom: 20px; }
 .page-head h1 { margin-top: 6px; }
 .summary { margin-top: 6px; min-height: 20px; font-size: 13.5px; color: var(--ink-2); }

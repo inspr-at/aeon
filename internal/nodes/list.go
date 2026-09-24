@@ -31,6 +31,14 @@ type listProject struct {
 	Key   string `json:"key"`
 	Title string `json:"title"`
 }
+
+// listEpic is the nearest epic above an item: a ticket's own epic, or for a
+// task the epic of its ticket. Nil when the item sits under no epic.
+type listEpic struct {
+	ID    string `json:"id"`
+	Key   string `json:"key"`
+	Title string `json:"title"`
+}
 type listItem struct {
 	nodeJSON
 	KindSlug      string       `json:"kind_slug"`
@@ -40,6 +48,7 @@ type listItem struct {
 	Parent        *listParent  `json:"parent"`
 	ChildrenCount int          `json:"children_count"`
 	Project       *listProject `json:"project"`
+	Epic          *listEpic    `json:"epic"`
 }
 type nodePage struct {
 	Items      []listItem                `json:"items"`
@@ -305,8 +314,8 @@ func (m *Module) listNodes(ctx context.Context, tenantID string, q listQuery) (n
 		for rows.Next() {
 			var item listItem
 			var fields, position string
-			var assigneeID, assigneeName, parentID, parentKey, parentTitle, parentKind, projectID, projectKey, projectTitle *string
-			err = rows.Scan(&item.ID, &item.Key, &item.KindID, &item.Title, &item.Body, &fields, &item.State, &item.ParentID, &position, &item.CreatedAt, &item.UpdatedAt, &item.DeletedAt, &item.KindSlug, &item.KindLabel, &item.Priority, &assigneeID, &assigneeName, &parentID, &parentKey, &parentTitle, &parentKind, &item.ChildrenCount, &projectID, &projectKey, &projectTitle)
+			var assigneeID, assigneeName, parentID, parentKey, parentTitle, parentKind, projectID, projectKey, projectTitle, epicID, epicKey, epicTitle *string
+			err = rows.Scan(&item.ID, &item.Key, &item.KindID, &item.Title, &item.Body, &fields, &item.State, &item.ParentID, &position, &item.CreatedAt, &item.UpdatedAt, &item.DeletedAt, &item.KindSlug, &item.KindLabel, &item.Priority, &assigneeID, &assigneeName, &parentID, &parentKey, &parentTitle, &parentKind, &item.ChildrenCount, &projectID, &projectKey, &projectTitle, &epicID, &epicKey, &epicTitle)
 			if err != nil {
 				rows.Close()
 				return err
@@ -321,6 +330,9 @@ func (m *Module) listNodes(ctx context.Context, tenantID string, q listQuery) (n
 			}
 			if projectID != nil {
 				item.Project = &listProject{*projectID, *projectKey, *projectTitle}
+			}
+			if epicID != nil {
+				item.Epic = &listEpic{*epicID, *epicKey, *epicTitle}
 			}
 			page.Items = append(page.Items, item)
 		}
@@ -446,7 +458,8 @@ func listSQL(q listQuery, anchor any) (string, []any) {
     SELECT ` + nodeCols + `,k.slug,k.label,nullif(n.fields->>'priority',''),assignee.id::text,assignee.name,
            par.id::text,par.key,par.title,pk.slug,
            (SELECT count(*)::int FROM nodes c WHERE c.parent_id=n.id AND c.deleted_at IS NULL),
-           project.id::text,project.key,project.title
+           project.id::text,project.key,project.title,
+           epic.id::text,epic.key,epic.title
     FROM selected s JOIN nodes n ON n.id=s.id JOIN node_kinds k ON k.id=n.kind_id
     ` + assigneeJoin + `
     LEFT JOIN nodes par ON par.id=n.parent_id AND par.deleted_at IS NULL
@@ -457,6 +470,16 @@ func listSQL(q listQuery, anchor any) (string, []any) {
             UNION ALL SELECT a.id,a.parent_id,a.kind_id,a.key,a.title,anc.depth+1 FROM nodes a JOIN ancestors anc ON a.id=anc.parent_id WHERE a.deleted_at IS NULL
         ) SELECT a.id,a.key,a.title FROM ancestors a JOIN node_kinds ak ON ak.id=a.kind_id WHERE ak.slug='project' ORDER BY a.depth LIMIT 1
     ) project ON true
+    LEFT JOIN LATERAL (
+        -- The nearest epic above the item; the walk stops at the first epic or project.
+        WITH RECURSIVE up AS (
+            SELECT par.id,par.parent_id,par.kind_id,par.key,par.title,1 AS depth WHERE par.id IS NOT NULL
+            UNION ALL SELECT a.id,a.parent_id,a.kind_id,a.key,a.title,up.depth+1 FROM up
+                JOIN node_kinds uk ON uk.id=up.kind_id AND uk.slug NOT IN ('epic','project')
+                JOIN nodes a ON a.id=up.parent_id AND a.deleted_at IS NULL
+            WHERE up.depth<32
+        ) SELECT u.id,u.key,u.title FROM up u JOIN node_kinds ek ON ek.id=u.kind_id WHERE ek.slug='epic' ORDER BY u.depth LIMIT 1
+    ) epic ON true
     ORDER BY s.rn`
 	return sql, args
 }

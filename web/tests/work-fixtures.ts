@@ -24,6 +24,7 @@ export interface MockOptions {
   failPatch?: boolean
   conflictOn?: string
   bigProject?: number
+  failUpload?: boolean
 }
 
 const CLOSED = ['done', 'cancelled', 'archived', 'delivered', 'accepted']
@@ -44,9 +45,9 @@ export function fixtures(options: MockOptions = {}) {
     return full
   }
   const epic = add({ id: 'n-epic', key: 'PHAROS-10', kind_slug: 'epic', title: 'Guarded multi-cloud provisioning', state: 'backlog', project: 'p-pharos', fields: { priority: 'high' }, updated_at: ago(40) })
-  add({ id: 'n-1', key: 'PHAROS-11', kind_slug: 'ticket', title: 'Connect Hetzner Cloud for managed provisioning', state: 'in-progress', project: 'p-pharos', parent_id: epic.id, fields: { priority: 'high', assignee: me.id }, updated_at: ago(1), body: '## Acceptance\n\n- [x] Token stored in the vault\n- [ ] Cleanup runs => nothing left behind\n\n`a => b`' })
+  add({ id: 'n-1', key: 'PHAROS-11', kind_slug: 'ticket', title: 'Connect Hetzner Cloud for managed provisioning', state: 'in-progress', project: 'p-pharos', parent_id: epic.id, fields: { priority: 'high', assignee: me.id, release: { id: 5668, label: 'v4.7.8' }, tags: [{ id: 16, name: 'CUSTOMERPORTAL', color: 'blue' }, { id: 5, name: 'hsb8', color: 'green' }] }, updated_at: ago(1), body: '## Acceptance\n\n- [x] Token stored in the vault\n- [ ] Cleanup runs => nothing left behind\n\n`a => b`' })
   const parentTicket = add({ id: 'n-2', key: 'PHAROS-12', kind_slug: 'ticket', title: 'Add an Oracle Cloud connector', state: 'backlog', project: 'p-pharos', parent_id: epic.id, fields: { priority: 'medium' }, updated_at: ago(3) })
-  add({ id: 'n-3', key: 'PHAROS-13', kind_slug: 'task', title: 'Run the disposable Hetzner end-to-end check', state: 'qa', project: 'p-pharos', parent_id: parentTicket.id, fields: { priority: 'low', assignee: mira.id }, updated_at: ago(6) })
+  add({ id: 'n-3', key: 'PHAROS-13', kind_slug: 'task', title: 'Run the disposable Hetzner end-to-end check', state: 'qa', project: 'p-pharos', parent_id: parentTicket.id, fields: { priority: 'low', assignee: mira.id, tags: [{ id: 11, name: 'BUG', color: 'red' }] }, updated_at: ago(6) })
   add({ id: 'n-4', key: 'PHAROS-14', kind_slug: 'ticket', title: 'Visual acceptance of the version pill', state: 'new', project: 'p-pharos', fields: {}, updated_at: ago(12) })
   add({ id: 'n-5', key: 'PHAROS-15', kind_slug: 'ticket', title: 'Beacon health probes', state: 'done', project: 'p-pharos', fields: { priority: 'medium' }, updated_at: ago(48) })
   add({ id: 'n-6', key: 'PHAROS-16', kind_slug: 'ticket', title: 'Retire the old dashboard', state: 'cancelled', project: 'p-pharos', fields: { priority: 'low' }, updated_at: ago(72) })
@@ -69,8 +70,26 @@ export function fixtures(options: MockOptions = {}) {
     { id: 'r-1', source_node_id: 'n-4', target_node_id: 'n-1', type: 'blocks', created_at: ago(40) },
     { id: 'r-2', source_node_id: 'n-1', target_node_id: 'n-5', type: 'relates', created_at: ago(40) },
   ]
-  return { projects, nodes, people: [me, mira], activity, relations, counter: { next: 100 } }
+  // Attachments per node (B8 shape: decimal-string positions, created_by is an id).
+  const attachment = (id: string, node: string, name: string, position: number, extra: Record<string, unknown> = {}) => ({
+    id, node_id: node, sha256: id.padEnd(64, '0'), name, content_type: 'image/png', size: 184_320 + position, width: 1440, height: 900, caption: '',
+    position: String(position), created_by: me.id, created_at: ago(30 - position / 1024), updated_at: ago(30 - position / 1024), deleted_at: null as string | null, ...extra,
+  })
+  const attachments: Record<string, ReturnType<typeof attachment>[]> = {
+    'n-1': [
+      attachment('att-1', 'n-1', 'fleet-list-before.png', 1024, { caption: 'Before: card grid' }),
+      attachment('att-2', 'n-1', 'fleet-list-after.png', 2048, { caption: 'After: compact list' }),
+      attachment('att-3', 'n-1', 'phone.png', 3072, { width: 390, height: 844 }),
+      attachment('att-4', 'n-1', 'provider-notes.pdf', 4096, { content_type: 'application/pdf', width: null, height: null, size: 48_200 }),
+    ],
+  }
+  const preferences: Record<string, Record<string, unknown>> = {}
+  // Events the mock records (attachment removals and their undo), oldest first.
+  const events: { id: number; node_id: string; type: string; before: ReturnType<typeof attachment>; after: ReturnType<typeof attachment>; undo_of: number | null }[] = []
+  return { projects, nodes, people: [me, mira], activity, relations, attachments, preferences, events, counter: { next: 100 } }
 }
+// A 1x1 PNG for every attachment variant.
+export const PNG = Buffer.from('iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAYAAAAfFcSJAAAADUlEQVR42mNk+M9QDwADhgGAWjR9awAAAABJRU5ErkJggg==', 'base64')
 
 export type Fixtures = ReturnType<typeof fixtures>
 export interface Call { path: string; method: string; query: URLSearchParams; body: unknown; headers: Record<string, string> }
@@ -88,7 +107,14 @@ function item(node: MockNode, data: Fixtures) {
     parent: parent ? { id: parent.id, key: parent.key, title: parent.title, kind_slug: parent.kind_slug } : node.parent_id ? { id: project.id, key: project.key, title: project.title, kind_slug: 'project' } : null,
     children_count: data.nodes.filter(n => n.parent_id === node.id).length,
     project: { id: project.id, key: project.key, title: project.title },
+    epic: epicAbove(node, data),
   }
+}
+// The nearest epic above a node, like the server's list projection.
+function epicAbove(node: MockNode, data: Fixtures): { id: string; key: string; title: string } | null {
+  let up = node.parent_id ? data.nodes.find(n => n.id === node.parent_id) : undefined
+  while (up && up.kind_slug !== 'epic') up = up.parent_id ? data.nodes.find(n => n.id === up!.parent_id) : undefined
+  return up ? { id: up.id, key: up.key, title: up.title } : null
 }
 function projectItem(project: Fixtures['projects'][number]) {
   return {
@@ -97,6 +123,7 @@ function projectItem(project: Fixtures['projects'][number]) {
     parent_id: null, position: '0', created_at: ago(24 * 90), updated_at: project.last, deleted_at: null,
     kind_slug: 'project', kind_label: 'Project', priority: null, assignee: null, parent: null, children_count: 0,
     project: { id: project.id, key: project.key, title: project.title },
+    epic: null,
   }
 }
 const listParam = (query: URLSearchParams, name: string) => (query.get(name) ?? '').split(',').map(v => v.trim()).filter(Boolean)
@@ -109,6 +136,67 @@ export async function mockWork(page: Page, data: Fixtures, options: MockOptions 
     let body: unknown = null
     try { body = request.postDataJSON() } catch { body = request.postData() }
     calls.push({ path, method, query, body, headers: request.headers() })
+    // ---------- Preferences ----------
+    const prefPath = /^\/api\/preferences\/([^/]+)$/.exec(path)
+    if (prefPath) {
+      const key = prefPath[1]
+      if (method === 'PUT') { data.preferences[key] = (body as { value: Record<string, unknown> }).value; return route.fulfill({ json: { key, value: data.preferences[key], updated_at: new Date(now).toISOString() } }) }
+      return route.fulfill({ json: { key, value: data.preferences[key] ?? null, updated_at: null } })
+    }
+    // ---------- Events (attachment removals and their undo) ----------
+    if (path === '/api/events' && method === 'GET') {
+      const after = Number(query.get('after') ?? 0)
+      const items = data.events.filter(e => e.id > after && (!query.get('node_id') || e.node_id === query.get('node_id')))
+      return route.fulfill({ json: { items, next_after: null } })
+    }
+    const undoPath = /^\/api\/events\/(\d+)\/undo$/.exec(path)
+    if (undoPath && method === 'POST') {
+      const event = data.events.find(e => e.id === Number(undoPath[1]))
+      if (!event || data.events.some(e => e.undo_of === event.id)) return route.fulfill({ status: 409, json: { error: 'conflict' } })
+      const restored = { ...event.before, updated_at: new Date(now + 5000).toISOString() }
+      ;(data.attachments[event.node_id] ??= []).push(restored)
+      const undone = { id: data.events.length + 1, node_id: event.node_id, type: event.type, before: event.after, after: restored, undo_of: event.id }
+      data.events.push(undone)
+      return route.fulfill({ status: 201, json: undone })
+    }
+    // ---------- Attachments ----------
+    const listPath = /^\/api\/nodes\/([^/]+)\/attachments$/.exec(path)
+    if (listPath) {
+      const list = (data.attachments[listPath[1]] ??= [])
+      if (method === 'GET') return route.fulfill({ json: [...list].sort((a, b) => Number(a.position) - Number(b.position)) })
+      if (options.failUpload) return route.fulfill({ status: 413, json: { error: 'The file is too large' } })
+      const raw = request.postDataBuffer()?.toString('latin1') ?? ''
+      const files = [...raw.matchAll(/name="file"; filename="([^"]*)"\r\nContent-Type: ([^\r]+)/g)]
+      const created = files.map(([, name, type], i) => {
+        const id = `att-new-${calls.length}-${i}`
+        const last = Math.max(0, ...list.map(a => Number(a.position)))
+        const item = { id, node_id: listPath[1], sha256: id.padEnd(64, '0'), name, content_type: type, size: 1024, width: type.startsWith('image/') ? 800 : null, height: type.startsWith('image/') ? 500 : null, caption: '', position: String(last + 1024), created_by: me.id, created_at: new Date(now).toISOString(), updated_at: new Date(now).toISOString(), deleted_at: null }
+        list.push(item)
+        return item
+      })
+      return route.fulfill({ status: 201, json: created })
+    }
+    const attPath = /^\/api\/attachments\/([^/]+)(\/content)?$/.exec(path)
+    if (attPath) {
+      const [, id, content] = attPath
+      if (content) return route.fulfill({ contentType: 'image/png', body: PNG })
+      for (const list of Object.values(data.attachments)) {
+        const index = list.findIndex(a => a.id === id)
+        if (index === -1) continue
+        if (method === 'DELETE') {
+          const [gone] = list.splice(index, 1)
+          data.events.push({ id: data.events.length + 1, node_id: gone.node_id, type: 'attachment.removed', before: gone, after: { ...gone, deleted_at: new Date(now).toISOString() }, undo_of: null })
+          return route.fulfill({ status: 204 })
+        }
+        if (method === 'PATCH') {
+          const expected = request.headers()['if-unmodified-since']
+          if (expected && expected !== list[index].updated_at) return route.fulfill({ status: 412, json: { error: 'stale attachment' } })
+          Object.assign(list[index], body as object, { updated_at: new Date(now + 1000 * calls.length).toISOString() })
+          return route.fulfill({ json: list[index] })
+        }
+      }
+      return route.fulfill({ status: 404, json: { error: 'attachment not found' } })
+    }
     if (path === '/api/me') return route.fulfill({ json: { principal: { id: me.id, name: me.name, roles: options.readOnly ? ['viewer'] : ['member'] }, tenant: { id: 't1', name: 'INSPR Studio' } } })
     if (path === '/api/kinds') return route.fulfill({ json: { items: ['epic', 'ticket', 'task', 'project'].map(slug => ({ id: `k-${slug}`, slug, label: slug[0].toUpperCase() + slug.slice(1), short_prefix: slug.slice(0, 3).toUpperCase(), icon: slug, allowed_child_kinds: null, field_schema: {} })) } })
     if (path === '/api/relations') return route.fulfill({ json: { items: data.relations.filter(r => r.source_node_id === query.get('node_id') || r.target_node_id === query.get('node_id')), next_cursor: null } })

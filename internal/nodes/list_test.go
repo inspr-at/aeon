@@ -9,6 +9,7 @@ import (
 	"net/http"
 	"net/url"
 	"os"
+	"strings"
 	"testing"
 	"time"
 
@@ -134,6 +135,49 @@ func TestPolishedNodeList(t *testing.T) {
 		t.Fatalf("cross tenant within: %#v", page.Items)
 	}
 }
+// Every row names its nearest epic: a ticket its own, a task its ticket's.
+func TestListNearestEpic(t *testing.T) {
+	p := newPrincipal(t, "nearest-epic")
+	project := kindBySlug(t, p, "project")
+	epicKind := kindBySlug(t, p, "epic")
+	ticket := kindBySlug(t, p, "ticket")
+	task := kindBySlug(t, p, "task")
+	create := func(kind, key, parent string) nodeJSON {
+		t.Helper()
+		body := map[string]any{"kind_id": kind, "key": key, "title": key, "state": "new", "fields": map[string]any{}}
+		if parent != "" {
+			body["parent_id"] = parent
+		}
+		raw, _ := json.Marshal(body)
+		return mustNode(t, p, string(raw))
+	}
+	root := create(project.ID, "EP-1", "")
+	epic := create(epicKind.ID, "EP-2", root.ID)
+	inEpic := create(ticket.ID, "EP-3", epic.ID)
+	taskInEpic := create(task.ID, "EP-4", inEpic.ID)
+	loose := create(ticket.ID, "EP-5", root.ID)
+	looseTask := create(task.ID, "EP-6", loose.ID)
+	status, body := call(t, &p, http.MethodGet, "/api/nodes?within="+root.ID+"&sort=key", "")
+	page := decode[nodePage](t, status, body, http.StatusOK)
+	epics := map[string]*listEpic{}
+	for _, item := range page.Items {
+		epics[item.ID] = item.Epic
+	}
+	for _, id := range []string{inEpic.ID, taskInEpic.ID} {
+		if got := epics[id]; got == nil || got.ID != epic.ID || got.Key != "EP-2" || got.Title != "EP-2" {
+			t.Fatalf("epic of %s: %#v", id, got)
+		}
+	}
+	for _, id := range []string{epic.ID, loose.ID, looseTask.ID} {
+		if got, ok := epics[id]; !ok || got != nil {
+			t.Fatalf("%s should list without an epic: %#v (listed %v)", id, got, ok)
+		}
+	}
+	if !strings.Contains(string(body), `"epic":null`) {
+		t.Fatalf("items without an epic send null: %s", body)
+	}
+}
+
 func assertTenantEmpty(t *testing.T, p tenant.Principal, path string) {
 	t.Helper()
 	status, body := call(t, &p, http.MethodGet, path, "")
