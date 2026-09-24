@@ -20,6 +20,8 @@ type Run struct {
 	AgentID        string     `json:"agent_principal_id"`
 	ProfileID      *string    `json:"model_profile_id"`
 	AccountID      *string    `json:"account_id"`
+	Outcome        *string    `json:"outcome"`
+	DurationMS     *int64     `json:"duration_ms"`
 	Status         string     `json:"status"`
 	RequestedModel *string    `json:"requested_model"`
 	EffectiveModel *string    `json:"effective_model"`
@@ -64,6 +66,7 @@ func (m *module) Mount(mux *http.ServeMux) {
 		fn             func(*http.Request, pgx.Tx, tenant.Principal) (any, error)
 	}{
 		{"POST /api/work-orders/{workOrderId}/runs", "run.create", false, 201, m.create},
+		{"GET /api/runs", "run.read", false, 200, m.list},
 		{"GET /api/runs/queued", "run.read", true, 200, m.queued},
 		{"GET /api/runs/{runId}", "run.read", false, 200, m.get},
 		{"POST /api/runs/{runId}/claim", "run.claim", true, 200, m.claim},
@@ -79,6 +82,14 @@ const columns = `id::text,work_order_id::text,agent_principal_id::text,model_pro
 func scan(row pgx.Row) (Run, error) {
 	var v Run
 	err := row.Scan(&v.ID, &v.OrderID, &v.AgentID, &v.ProfileID, &v.AccountID, &v.Status, &v.RequestedModel, &v.EffectiveModel, &v.ModelEvidence, &v.InputTokens, &v.OutputTokens, &v.Cost, &v.StartedAt, &v.EndedAt, &v.CreatedAt, &v.DaemonID, &v.Generation)
+	if terminal(v.Status) {
+		outcome := v.Status
+		v.Outcome = &outcome
+	}
+	if v.StartedAt != nil && v.EndedAt != nil {
+		duration := v.EndedAt.Sub(*v.StartedAt).Milliseconds()
+		v.DurationMS = &duration
+	}
 	return v, err
 }
 func load(ctx context.Context, tx pgx.Tx, id string, lock bool) (Run, error) {

@@ -2,8 +2,18 @@
 
 // Package agentruns implements AEON-28 / P2.3 queued runs, fenced claims and
 // content-free telemetry. New(pool, recorder) returns an httpapi.Module for
-// /api/runs/* and /api/work-orders/{workOrderId}/runs. Mount alongside
+// /api/runs, /api/runs/* and /api/work-orders/{workOrderId}/runs. Mount alongside
 // workorders.New(pool) behind auth.Middleware; only the coordinator edits cmd.
+//
+// B7 history: GET /api/runs accepts session, agent and work_order UUID filters
+// (intersection), limit 1..200 and an opaque cursor. It returns items and
+// next_cursor, newest first by (created_at,id). Cursors bind tenant, principal
+// and filters; agents still see only their own runs. A session selects its
+// explicitly bound run_id, never all runs for the same agent or work order.
+// Run responses include nullable outcome and duration_ms (whole milliseconds
+// between terminal timestamps), requested/effective model and existing exact
+// integer token/cost_micros counters. Missing terminal data stays null.
+// This extends New; no new plugin installation or server wiring is required.
 //
 // Agent keys require exact run.read, run.create, run.claim or run.telemetry
 // scopes. People may create/read runs; queue, claim and telemetry are agent-only.

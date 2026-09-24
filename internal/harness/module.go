@@ -3,6 +3,13 @@
 // Package harness exposes classic-compatible public harness generations on top
 // of Aeon's tenant-scoped agent runs, work orders and principal inbox. New
 // returns an httpapi.Module; the coordinator mounts it behind auth middleware.
+// B7 adds GET /api/harness-sessions with state, harness, agent, project and
+// ticket filters, limit 1..200 and a tenant/principal/filter-bound cursor.
+// It returns items/next_cursor in descending (created_at,id) order. Each item
+// extends Session with project and nullable ticket {id,key,title} summaries.
+// State is stopped after closure, otherwise phase. Historical node bindings
+// retain their summaries after soft deletion. Existing Plugin() supplies the
+// compiled manifest; no new manifest registration or cmd wiring is needed.
 package harness
 
 import (
@@ -37,6 +44,7 @@ func (m *Module) Mount(mux *http.ServeMux) {
 		fn             func(*http.Request, pgx.Tx, tenant.Principal) (any, error)
 	}{
 		{"POST /api/projects/{projectId}/harness-sessions", "harness.write", false, 201, m.register},
+		{"GET /api/harness-sessions", "harness.read", false, 200, m.listAll},
 		{"GET /api/projects/{projectId}/harness-sessions", "harness.read", false, 200, m.list},
 		{"GET /api/projects/{projectId}/harness-sessions/orchestrator", "harness.read", false, 200, m.orchestrator},
 		{"GET /api/projects/{projectId}/harness-sessions/{sessionId}", "harness.read", false, 200, m.status},
