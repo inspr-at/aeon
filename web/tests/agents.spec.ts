@@ -193,6 +193,23 @@ test('Enter opens a session, j and k move the panel along, Escape closes it', as
   await expect(page).toHaveURL(`/agents/${nova}`)
 })
 
+test('closing a session panel goes back instead of adding history, like the ticket panel', async ({ page }) => {
+  await setup(page)
+  await page.goto('/')
+  await expect(page.getByRole('list', { name: 'Projects' })).toBeVisible()
+  await page.getByRole('link', { name: /^Agents/ }).click()
+  await expect(page.locator('.agents-page .row').first()).toBeVisible()
+  await row(page, camy).locator('.c-state').click()
+  await expect(page).toHaveURL(`/agents/${camy}`)
+  await row(page, nova).locator('.c-state').click()
+  await expect(page).toHaveURL(`/agents/${nova}`)
+  await page.keyboard.press('Escape')
+  await expect(page).toHaveURL('/agents')
+  await expect(row(page, nova)).toBeFocused()
+  await page.goBack()
+  await expect(page).toHaveURL('/')
+})
+
 test('a held action request opens the asking agent’s conversation', async ({ page }) => {
   await setup(page)
   await openAgents(page)

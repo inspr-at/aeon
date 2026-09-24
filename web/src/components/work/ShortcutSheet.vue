@@ -81,9 +81,9 @@ defineExpose({ open, close })
               <template v-for="(combo, c) in row.keys" :key="c">
                 <span v-if="c > 0" class="or">{{ row.joiner ?? 'or' }}</span>
                 <span class="combo">
-                  <kbd v-for="(key, k) in combo" :key="k" class="keycap" :aria-label="typeof key === 'string' ? undefined : key.label">
+                  <kbd v-for="(key, k) in combo" :key="k" class="keycap">
                     <template v-if="typeof key === 'string'">{{ key }}</template>
-                    <AppIcon v-else :name="key.icon" />
+                    <template v-else><AppIcon :name="key.icon" /><span class="sr-only">{{ key.label }}</span></template>
                   </kbd>
                 </span>
               </template>

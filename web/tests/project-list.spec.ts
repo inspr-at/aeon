@@ -263,10 +263,21 @@ test('long lists load 200 rows per page while scrolling', async ({ page }) => {
 test('skeleton rows while loading, then an empty state that clears filters', async ({ page }) => {
   await mockWork(page, fixtures(), { delayList: 800 })
   await page.goto('/p/PHAROS?q=nothing-matches')
-  await expect(page.locator('.skeleton-body tr')).toHaveCount(14)
+  // A filtered load expects few rows, so the skeleton stays short.
+  await expect(page.locator('.skeleton-body tr')).toHaveCount(8)
   await expect(page.getByRole('heading', { name: 'No tickets match these filters' })).toBeVisible()
   await page.getByRole('button', { name: 'Clear filters' }).click()
   await expect(rows(page)).toHaveCount(5)
+})
+
+test('an unfiltered load holds about the height of the first page', async ({ page }) => {
+  await mockWork(page, fixtures(), { delayList: 800 })
+  await page.goto('/p/PHAROS')
+  // The summary counts 3 open and 2 in progress for PHAROS; the closed ones stay hidden.
+  await expect(page.locator('.skeleton-body tr')).toHaveCount(5)
+  await expect(page.locator('main footer.app-footer')).toBeHidden()
+  await expect(rows(page)).toHaveCount(5)
+  await expect(page.locator('main footer.app-footer')).toBeVisible()
 })
 
 test('load errors offer a retry', async ({ page }) => {

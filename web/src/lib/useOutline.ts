@@ -189,7 +189,9 @@ export function useOutline(projectId: Ref<string | null>, filters: Ref<ListFilte
   }))
   watch(() => roots.value.epics, ids => { if (active.value) for (const id of ids) ensureStats(id) }, { immediate: true })
   const rows = computed(() => entries.value.flatMap(entry => entry.type === 'row' ? [entry.row] : []))
-  const loading = computed(() => matchMode.value ? (list.loading.value || (resolving.value && !entries.value.length)) : (epicBlock.value.loading || looseBlock.value.loading) && !epicBlock.value.ids.length && !looseBlock.value.ids.length)
+  // The first page shows once both blocks have their first rows, so epics never
+  // arrive above tickets that are already on screen.
+  const loading = computed(() => matchMode.value ? (list.loading.value || (resolving.value && !entries.value.length)) : (epicBlock.value.loading && !epicBlock.value.ids.length) || (looseBlock.value.loading && !looseBlock.value.ids.length))
   const error = computed(() => matchMode.value ? '' : epicBlock.value.error || looseBlock.value.error)
 
   // ---------- Actions ----------

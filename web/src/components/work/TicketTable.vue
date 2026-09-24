@@ -12,6 +12,8 @@ import StatusIcon from './StatusIcon.vue'
 import QuickCreateRow, { type QuickDraft } from './QuickCreateRow.vue'
 
 const props = defineProps<{
+  // How many rows the first page will likely show, so the skeleton holds that height.
+  expectedRows?: number
   groups: RowGroup[]
   group: GroupBy
   rowsById: Map<string, ListItem>
@@ -41,6 +43,8 @@ const props = defineProps<{
   outline?: OutlineEntry[] | null
   canDrag?: boolean
 }>()
+// Unfiltered loads hold the expected height (so nothing below jumps); 1..28 rows.
+const skeletonRows = computed(() => Math.max(1, Math.min(28, props.expectedRows ?? 14)))
 const emit = defineEmits<{
   open: [row: ListItem]
   cursor: [id: string]
@@ -227,7 +231,7 @@ defineExpose({
         <QuickCreateRow ref="quick" :project-id="projectId" :known-states="knownStates" :trailing="columns.length - 4" :create="create" @close="emit('closeCreate')" />
       </tbody>
       <tbody v-if="loading && !entries.length" class="skeleton-body" aria-hidden="true">
-        <tr v-for="index in 14" :key="index" class="ticket-row ghost">
+        <tr v-for="index in skeletonRows" :key="index" class="ticket-row ghost">
           <td class="c-key"><div class="cell"><span class="skeleton sk-key" /></div></td>
           <td class="c-title"><div class="cell"><span class="skeleton sk-title" :style="{ width: `${38 + ((index * 37) % 45)}%` }" /></div></td>
           <td class="c-status"><div class="cell"><span class="sk-dot" /><span class="skeleton sk-word" /></div></td>

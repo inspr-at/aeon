@@ -73,10 +73,13 @@ watch(() => [route.path, route.params.projectKey, route.params.ticketKey] as con
 <style scoped>
 .app-shell { height: 100%; display: grid; grid-template-rows: var(--header-h) minmax(0, 1fr); }
 .app-shell.bare { grid-template-rows: minmax(0, 1fr); }
-main { position: relative; min-height: 0; overflow: auto; outline: none; scroll-padding-top: 96px; }
+/* The gutter is reserved so a scrollbar appearing as content loads never shifts the page sideways. */
+main { position: relative; min-height: 0; overflow: auto; scrollbar-gutter: stable; outline: none; scroll-padding-top: 96px; }
 main:focus-visible { box-shadow: none; }
 .page-flow { display: flex; flex-direction: column; min-height: 100%; }
 .page-flow > :first-child { flex: 1 0 auto; }
+/* While a page still shows its loading skeleton the footer waits, so it never jumps down as content arrives. */
+.page-flow:has(.head-skeleton, .skeleton-body) > .app-footer { visibility: hidden; }
 .page-flow.fill { height: 100%; }
 .page-flow.fill > :first-child { flex: 1 1 auto; min-height: 0; }
 /* The vendored version renderer nudges separators with transforms; clip them to the bar. */

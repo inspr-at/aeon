@@ -136,7 +136,7 @@ defineExpose({ focusSearch, input })
       type="button" class="btn sm closed-pill" :class="{ on: !filters.showClosed }" :aria-pressed="!filters.showClosed" aria-label="Hide closed tickets"
       :data-tip="filters.showClosed ? 'Closed tickets are shown\nClick to hide them' : 'Closed tickets are hidden\nClick to show them'" @click="emit('showClosed', !filters.showClosed)"
     ><AppIcon :name="filters.showClosed ? 'eye' : 'eye-off'" :size="14" />Closed</button>
-    <button type="button" class="btn sm display-btn" :class="{ on: view === 'list' && filters.group !== 'none' }" aria-haspopup="dialog" :aria-expanded="!!displayAnchor" data-tip="Grouping and row height" @click="displayAnchor = displayAnchor ? null : ($event.currentTarget as HTMLElement)">
+    <button type="button" class="btn sm display-btn" :class="{ on: view === 'list' && filters.group !== 'none' }" aria-haspopup="dialog" :aria-expanded="!!displayAnchor" :aria-label="`Display: ${displayLabel}`" data-tip="Grouping and row height" @click="displayAnchor = displayAnchor ? null : ($event.currentTarget as HTMLElement)">
       <AppIcon name="layers" :size="13" /><span class="display-label">{{ displayLabel }}</span><AppIcon name="chevron" :size="12" class="facet-chevron" />
     </button>
 
@@ -204,7 +204,7 @@ defineExpose({ focusSearch, input })
 .clear-all { padding: 0 8px; }
 .spacer { flex: 1; }
 /* The count keeps its width while numbers change, so the controls beside it never shift. */
-.count { display: inline-block; min-width: 10ch; text-align: right; font-size: 12px; color: var(--ink-2); white-space: nowrap; }
+.count { display: inline-block; min-width: 13ch; text-align: right; font-size: 12px; color: var(--ink-2); white-space: nowrap; }
 .count-skeleton { display: inline-block; width: 64px; height: 8px; vertical-align: middle; }
 .closed-switch { font-size: 12.5px; }
 .display-btn { gap: 6px; color: var(--ink-2); }

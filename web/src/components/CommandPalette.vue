@@ -228,8 +228,8 @@ const iconOf = (result: Result): IconName => result.type === 'action' ? result.i
           <button v-if="scope" type="button" class="btn sm" @click="scope = null; input?.focus()">Search everywhere</button>
         </div>
         <template v-else>
-          <section v-for="group in groups" :key="group.id" class="group" :aria-label="group.label">
-            <p class="group-label eyebrow">{{ group.label }}</p>
+          <section v-for="group in groups" :key="group.id" class="group" role="group" :aria-label="group.label">
+            <p class="group-label eyebrow" aria-hidden="true">{{ group.label }}</p>
             <div
               v-for="result in group.items" :id="`palette-item-${indexOf(result)}`" :key="result.id" class="item" :class="[result.type, { active: indexOf(result) === active }]"
               role="option" :aria-selected="indexOf(result) === active" :data-index="indexOf(result)" @pointermove="active = indexOf(result)" @click="choose(result, $event.metaKey || $event.ctrlKey)"
@@ -276,7 +276,8 @@ const iconOf = (result: Result): IconName => result.type === 'action' ? result.i
 .palette::backdrop { background: var(--palette-scrim); backdrop-filter: blur(3px) saturate(1.05); -webkit-backdrop-filter: blur(3px) saturate(1.05); }
 .sheet {
   display: flex; flex-direction: column; border-radius: 18px; border: 1px solid var(--glass-edge); overflow: hidden;
-  background: linear-gradient(165deg, var(--surface-raised-2), var(--glass) 70%); box-shadow: var(--shadow-pop), var(--shadow);
+  /* Near-opaque: the list behind must never read through the results. */
+  background: linear-gradient(165deg, var(--surface-raised), var(--surface-raised-2) 70%) var(--surface-raised); box-shadow: var(--shadow-pop), var(--shadow);
   backdrop-filter: blur(22px) saturate(1.2); -webkit-backdrop-filter: blur(22px) saturate(1.2);
 }
 @media (prefers-reduced-motion: no-preference) {
