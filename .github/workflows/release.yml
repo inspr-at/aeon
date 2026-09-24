@@ -88,6 +88,12 @@ jobs:
 
       - uses: docker/setup-buildx-action@v4
 
+      # Build and exercise the exact runtime layout before any image or release is published.
+      - name: Smoke production image
+        env:
+          AEON_SMOKE_VERSION: ${{ steps.version.outputs.version }}
+        run: bash scripts/smoke-image.sh
+
       - uses: docker/login-action@v4
         with:
           registry: ghcr.io
