@@ -1,5 +1,6 @@
 // SPDX-License-Identifier: AGPL-3.0-only
 import { createRouter, createWebHistory } from 'vue-router'
+import { useProjects } from './stores/projects'
 import { useSession } from './stores/session'
 import ProjectsView from './views/ProjectsView.vue'
 import SignInView from './views/SignInView.vue'
@@ -13,8 +14,18 @@ export const router = createRouter({
     { path: '/p/:projectKey/:ticketKey?', component: () => import('./views/ProjectView.vue'), meta: { title: 'Project' } },
     // Earlier workspace tree and list, kept reachable but unlinked.
     { path: '/workspace', component: () => import('./views/HomeView.vue'), meta: { title: 'Workspace', legacySearch: true, fill: true } },
-    { path: '/projects/:projectId', component: () => import('./views/JourneyView.vue'), meta: { title: 'Journey', fill: true } },
-    { path: '/projects/:projectId/journey/:stage', component: () => import('./views/JourneyView.vue'), meta: { title: 'Journey', fill: true } },
+    // The journey lives in the project page (?view=journey); earlier journey links lead there.
+    {
+      path: '/projects/:projectId/:rest(.*)*', component: NotFoundView, meta: { title: 'Journey' },
+      beforeEnter: async to => {
+        const projects = useProjects()
+        await projects.load()
+        const project = projects.byId(String(to.params.projectId))
+        const rest = Array.isArray(to.params.rest) ? to.params.rest : []
+        const stage = rest[0] === 'journey' && rest[1] ? { stage: rest[1] } : {}
+        return project ? { path: `/p/${encodeURIComponent(project.routeKey)}`, query: { view: 'journey', ...stage }, replace: true } : true
+      },
+    },
     // Business: an overview, hours and rates. Quotes and organisations are parked
     // (their views stay in views/business, unrouted) until they are ported from classic Paimos.
     { path: '/business', component: () => import('./views/business/BusinessHome.vue'), meta: { title: 'Business' } },

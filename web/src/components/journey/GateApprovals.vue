@@ -1,0 +1,126 @@
+<!-- SPDX-License-Identifier: AGPL-3.0-only -->
+<script setup lang="ts">
+import { computed, nextTick, ref } from 'vue'
+import type { Approval } from '../../lib/agents'
+import { expiresIn, expiresSoon, RISK_LABEL, riskFor } from '../../lib/agentState'
+import { GATE_LABEL, type Gate } from '../../lib/journey'
+import { relativeTime } from '../../lib/work'
+import { useAgents } from '../../stores/agents'
+import AppIcon from '../AppIcon.vue'
+
+// A gate as approvals, in the agents workspace's "Needs you" pattern: who asks,
+// for which gate, how risky and until when, with Approve and Deny. Decided ones
+// stay as a record line. Approving here only decides the gate; the stage's one
+// primary button then takes the step.
+const props = defineProps<{ gate: Gate; approvals: Approval[]; on: string; canDecide: boolean; now: number; me: string | null }>()
+const emit = defineEmits<{ decided: [approval: Approval, decision: 'approved' | 'denied'] }>()
+const agents = useAgents()
+const live = computed(() => props.approvals.filter(a => a.decision === null && Date.parse(a.expires_at) > props.now))
+const past = computed(() => props.approvals.filter(a => !live.value.includes(a)).slice(0, 3))
+const open = ref<{ id: string; mode: 'approve' | 'deny' } | null>(null)
+const reason = ref('')
+const error = ref('')
+const saving = ref(false)
+const area = ref<HTMLTextAreaElement[]>([])
+async function begin(approval: Approval, mode: 'approve' | 'deny') {
+  open.value = { id: approval.id, mode }; reason.value = ''; error.value = ''
+  await nextTick(); area.value[0]?.focus()
+}
+function cancel() { open.value = null; error.value = '' }
+async function submit(approval: Approval) {
+  if (!open.value || saving.value) return
+  const decision = open.value.mode === 'approve' ? 'approved' : 'denied'
+  if (decision === 'denied' && !reason.value.trim()) { error.value = 'Say why, so the agent can change course.'; return }
+  saving.value = true; error.value = ''
+  try {
+    await agents.decide(approval, decision, reason.value.trim())
+    open.value = null
+    emit('decided', approval, decision)
+  } catch (e) { error.value = e instanceof Error ? e.message : 'The decision was not recorded.' } finally { saving.value = false }
+}
+function keys(event: KeyboardEvent, approval: Approval) {
+  if (event.key === 'Enter' && !event.shiftKey) { event.preventDefault(); void submit(approval) }
+  else if (event.key === 'Escape') { event.preventDefault(); event.stopPropagation(); cancel() }
+}
+const who = (approval: Approval) => agents.askerName(approval.agent_principal_id)
+const decidedBy = (approval: Approval) => approval.decided_by_principal_id && approval.decided_by_principal_id === props.me ? 'you' : 'someone else'
+</script>
+
+<template>
+  <div class="gate-approvals">
+    <ul v-if="live.length" class="items" :aria-label="`${GATE_LABEL[gate]} requests`">
+      <li v-for="approval in live" :key="approval.id" class="item" :class="riskFor(approval)" :aria-label="`${GATE_LABEL[gate]} on ${on}, asked by ${who(approval).name}`">
+        <span class="mark" aria-hidden="true"><AppIcon name="shield" :size="15" /></span>
+        <div class="body">
+          <p class="line1">
+            <strong class="what">{{ GATE_LABEL[gate] }}</strong>
+            <span class="risk-chip" :class="riskFor(approval)">{{ RISK_LABEL[riskFor(approval)] }}</span>
+            <span class="expiry" :class="{ soon: expiresSoon(approval, now) }"><AppIcon name="clock" :size="12" />{{ expiresIn(approval, now) }}</span>
+          </p>
+          <p class="line2"><span v-if="who(approval).harness" class="harness mono">{{ who(approval).harness }}</span><strong>{{ who(approval).name }}</strong><span class="asks">asks for</span><code class="scope">{{ approval.scope }}</code><span class="asks">on</span><span class="on">{{ on }}</span></p>
+          <p v-if="approval.rationale" class="why">“{{ approval.rationale }}”</p>
+          <form v-if="open?.id === approval.id" class="decision" @submit.prevent="submit(approval)">
+            <label :for="`gate-reason-${approval.id}`">{{ open.mode === 'approve' ? 'Reason (optional)' : 'Why not? The agent sees this.' }}</label>
+            <textarea :id="`gate-reason-${approval.id}`" ref="area" v-model="reason" class="field" rows="2" maxlength="4000" @keydown="keys($event, approval)" />
+            <p v-if="error" class="error" role="alert">{{ error }}</p>
+            <div class="decision-actions">
+              <span class="hint"><kbd class="keycap"><AppIcon name="enter" /></kbd> to {{ open.mode }} · <kbd class="keycap">esc</kbd> to cancel</span>
+              <button type="button" class="btn sm ghost" @click="cancel">Cancel</button>
+              <button type="submit" class="btn sm" :class="open.mode === 'approve' ? 'primary' : 'deny'" :disabled="saving"><AppIcon :name="open.mode === 'approve' ? 'check' : 'close'" :size="13" />{{ open.mode === 'approve' ? 'Approve gate' : 'Deny gate' }}</button>
+            </div>
+          </form>
+        </div>
+        <div v-if="open?.id !== approval.id && canDecide" class="row-actions">
+          <button type="button" class="btn sm" @click="begin(approval, 'deny')"><AppIcon name="close" :size="13" />Deny</button>
+          <button type="button" class="btn sm approve-soft" @click="begin(approval, 'approve')"><AppIcon name="check" :size="13" />Approve</button>
+        </div>
+      </li>
+    </ul>
+    <ul v-if="past.length" class="records" aria-label="Earlier gate decisions">
+      <li v-for="approval in past" :key="approval.id" class="record">
+        <AppIcon :name="approval.decision === 'approved' ? 'check' : approval.decision === 'denied' ? 'close' : 'clock'" :size="12" :class="approval.decision ?? 'expired'" />
+        <span>{{ approval.decision === 'approved' ? `Approved by ${decidedBy(approval)}` : approval.decision === 'denied' ? `Denied by ${decidedBy(approval)}` : 'Expired unanswered' }}</span>
+        <span class="faint">· {{ who(approval).name }} asked {{ relativeTime(approval.proposed_at, { now }) }}</span>
+      </li>
+    </ul>
+  </div>
+</template>
+
+<style scoped>
+.gate-approvals { display: grid; gap: 8px; container: gate / inline-size; }
+.items, .records { display: grid; gap: 6px; margin: 0; padding: 0; list-style: none; }
+.item { display: grid; grid-template-columns: 30px minmax(0, 1fr) auto; gap: 10px; align-items: start; padding: 10px 10px 10px 8px; border-radius: 12px; background: var(--surface); box-shadow: 0 0 0 1px var(--line); }
+.mark { display: grid; place-items: center; width: 28px; height: 28px; border-radius: 8px; background: var(--row-selected); color: var(--teal-ink); }
+.item.medium .mark { background: var(--gold-wash); color: var(--gold-ink); }
+.item.high .mark { background: var(--danger-bg); color: var(--danger); }
+.body { display: grid; gap: 4px; min-width: 0; }
+.line1 { display: flex; align-items: center; flex-wrap: wrap; gap: 6px 8px; }
+.what { font-size: 13.5px; font-weight: 600; color: var(--ink); }
+.risk-chip { height: 18px; padding: 0 7px; border-radius: 999px; font: 600 10px/18px var(--mono); letter-spacing: .06em; text-transform: uppercase; background: var(--row-selected); color: var(--teal-ink); }
+.risk-chip.medium { background: transparent; box-shadow: inset 0 0 0 1px rgba(214, 155, 49, .55); color: var(--gold-ink); }
+.risk-chip.high { background: var(--danger-bg); color: var(--danger); }
+.expiry { display: inline-flex; align-items: center; gap: 4px; font-size: 12px; color: var(--ink-3); }
+.expiry.soon { color: var(--gold-ink); }
+.line2 { display: flex; align-items: center; flex-wrap: wrap; gap: 4px 6px; font-size: 12.5px; color: var(--ink-2); min-width: 0; }
+.line2 strong { color: var(--ink); font-weight: 600; }
+.harness { padding: 0 6px; border-radius: 5px; background: var(--chip-bg); box-shadow: inset 0 0 0 1px var(--chip-line); font-size: 10.5px; }
+.asks { color: var(--ink-3); }
+.scope { padding: 1px 6px; border-radius: 5px; background: var(--code-bg, var(--surface-2)); font: 11px var(--mono); overflow-wrap: anywhere; }
+.on { color: var(--ink); }
+.why { font-size: 12.5px; color: var(--ink-2); font-style: italic; overflow-wrap: anywhere; }
+.row-actions { display: flex; gap: 6px; }
+.btn.approve-soft { color: var(--teal-ink); box-shadow: inset 0 0 0 1px var(--chip-teal-line); background: var(--chip-teal-bg); }
+.btn.deny { background: var(--danger-bg); color: var(--danger); box-shadow: inset 0 0 0 1px var(--danger-line); }
+.decision { display: grid; gap: 6px; margin-top: 6px; }
+.decision label { font-size: 12px; color: var(--ink-2); }
+.decision textarea { height: auto; padding: 8px 10px; resize: vertical; }
+.decision-actions { display: flex; align-items: center; justify-content: flex-end; flex-wrap: wrap; gap: 6px; }
+.decision-actions .hint { margin-right: auto; font-size: 11.5px; color: var(--ink-3); }
+.record { display: flex; align-items: center; flex-wrap: wrap; gap: 6px; font-size: 12.5px; color: var(--ink-2); }
+.record svg.approved { color: var(--ok); } .record svg.denied { color: var(--danger); } .record svg.expired { color: var(--ink-3); }
+.faint { color: var(--ink-3); }
+@container gate (max-width: 460px) {
+  .item { grid-template-columns: 30px minmax(0, 1fr); }
+  .row-actions { grid-column: 2; }
+}
+</style>

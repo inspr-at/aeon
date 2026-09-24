@@ -7,7 +7,7 @@ export type IconName =
   | 'rows-comfortable' | 'rows-compact' | 'keyboard' | 'epic' | 'ticket' | 'task' | 'alert' | 'refresh' | 'sliders' | 'enter'
   | 'inbox' | 'folder' | 'layers' | 'archive' | 'clock' | 'expand' | 'collapse' | 'more' | 'link' | 'trash' | 'agent' | 'outline' | 'expand-all' | 'collapse-all' | 'arrow-left' | 'eye' | 'eye-off' | 'monitor' | 'key'
   | 'pause' | 'stop' | 'shield' | 'send' | 'bolt' | 'gauge' | 'interrupt' | 'halt'
-  | 'minus' | 'compare' | 'download' | 'paperclip' | 'image' | 'upload' | 'info'
+  | 'minus' | 'compare' | 'download' | 'paperclip' | 'image' | 'upload' | 'info' | 'journey'
 </script>
 <script setup lang="ts">
 withDefaults(defineProps<{ name: IconName; size?: number }>(), { size: 16 })
@@ -78,6 +78,7 @@ withDefaults(defineProps<{ name: IconName; size?: number }>(), { size: 16 })
     <path v-else-if="name === 'upload'" d="M8 10.6V2.4M4.8 5.6 8 2.4l3.2 3.2M2.8 13.4h10.4" />
     <path v-else-if="name === 'paperclip'" d="m13 7.4-5 5a3.2 3.2 0 0 1-4.6-4.6l5.3-5.2a2.1 2.1 0 0 1 3 3L6.4 10.8a1 1 0 0 1-1.5-1.4l4.6-4.6" />
     <template v-else-if="name === 'image'"><rect x="2" y="2.6" width="12" height="10.8" rx="1.8" /><circle cx="5.8" cy="6.2" r="1.2" /><path d="m2.4 12 3.6-3.4 2.6 2.4 2.2-2 3 2.8" /></template>
+    <template v-else-if="name === 'journey'"><circle cx="3.2" cy="11.6" r="1.7" /><circle cx="8" cy="4.6" r="1.7" /><circle cx="12.8" cy="10.2" r="1.7" /><path d="m4.3 10.1 2.6-4M9.2 6l2.4 2.7" /></template>
     <template v-else-if="name === 'clock'"><circle cx="8" cy="8" r="6.2" /><path d="M8 4.6V8l2.2 1.4" /></template>
     <template v-else-if="name === 'info'"><circle cx="8" cy="8" r="6.2" /><path d="M8 7.4v3.8M8 4.9v.05" /></template>
     <template v-else><circle cx="8" cy="8" r="6.2" /><path d="M10.6 5.4 9.2 9.2l-3.8 1.4 1.4-3.8Z" /></template>
