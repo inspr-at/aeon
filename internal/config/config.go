@@ -25,6 +25,8 @@ type Config struct {
 	// AEON_MESSAGING_KEY_FILE contents; in dev without a file it is random and
 	// lives only in memory; in prod without a file it is nil and messaging is off.
 	MessagingKey []byte
+	// FilesDir is the attachment store root (AEON_FILES_DIR, default data/files).
+	FilesDir string
 }
 
 // FromEnv reads AEON_* variables. Empty optional values take their defaults.
@@ -40,6 +42,7 @@ func FromEnv() (Config, error) {
 		WebDir:              os.Getenv("AEON_WEB_DIR"),
 		BootstrapTenantSlug: getenv("AEON_BOOTSTRAP_TENANT_SLUG", "inspr"),
 		BootstrapTenantName: getenv("AEON_BOOTSTRAP_TENANT_NAME", "INSPR"),
+		FilesDir:            getenv("AEON_FILES_DIR", "data/files"),
 	}
 	switch cfg.Env {
 	case "dev", "prod":
