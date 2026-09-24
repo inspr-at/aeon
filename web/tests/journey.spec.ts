@@ -204,7 +204,7 @@ test('Deploy shows launch admission as a blocked gate and the refused handoff', 
   await open(page, 'deploy')
   await expect(page.getByRole('region', { name: 'Blocked: Launch admission is closed' })).toContainText('Pharos launch checks are unavailable')
   await expect(page.getByText('The host policy refused it')).toBeVisible()
-  await expect(page.getByText('Launch admission · unavailable')).toBeVisible()
+  await expect(page.getByText('Launch admission · closed')).toBeVisible()
   await expect(page.getByRole('region', { name: 'Decision: The host did not apply it' })).toBeVisible()
 })
 
@@ -289,12 +289,36 @@ test('the header chip shows once there are sources, or when the stage is derived
 })
 
 test('Deploy follows launch readiness: ready shows a check, blocked shows its reason', async ({ page }) => {
-  await open(page, 'deploy', '/p/PHAROS?view=journey', { readiness: { state: 'blocked', reason: 'Backup evidence is older than the policy allows.', observed_at: '2026-09-23T11:40:00Z' } })
-  await expect(page.getByRole('region', { name: 'Blocked: Launch admission is blocked' })).toContainText('Backup evidence is older than the policy allows.')
-  await expect(page.getByText('Launch admission · blocked')).toBeVisible()
+  await open(page, 'deploy', '/p/PHAROS?view=journey', { readiness: { can_admit: false, reason: 'Backup evidence is older than the policy allows.' } })
+  await expect(page.getByRole('region', { name: 'Blocked: Launch admission is closed' })).toContainText('Backup evidence is older than the policy allows.')
+  await expect(page.getByText('Launch admission · closed')).toBeVisible()
   await page.unroute('**/api/**')
-  await open(page, 'deploy', '/p/PHAROS?view=journey', { readiness: { state: 'ready', reason: null, observed_at: '2026-09-23T11:40:00Z' } })
+  await open(page, 'deploy', '/p/PHAROS?view=journey', { readiness: { can_admit: true, reason: '' } })
   await expect(page.getByRole('region', { name: 'Launch admission is ready' })).toBeVisible()
   await expect(page.getByText('Launch admission · ready')).toBeVisible()
   await expect(page.getByRole('region', { name: /Blocked: Launch admission/ })).toHaveCount(0)
+})
+
+test('Build: marking the candidate approves the build gate and sends mark_candidate', async ({ page }) => {
+  const { calls } = await open(page, 'mark')
+  const card = page.getByRole('region', { name: 'Decision: Mark release 2 as the candidate' })
+  await expect(card.getByRole('listitem', { name: /Build gate on Release 2, asked by/ })).toBeVisible()
+  await expect(page.locator('.btn.primary:visible')).toHaveText(['Approve and mark candidate'])
+  await card.getByRole('button', { name: 'Approve and mark candidate' }).click()
+  await page.getByRole('dialog', { name: 'Mark candidate?' }).getByRole('button', { name: 'Approve and mark candidate' }).click()
+  await expect(page.locator('.toast').filter({ hasText: 'Release 2 is the candidate.' })).toBeVisible()
+  expect(writes(calls, '/journey/actions')[0].body).toMatchObject({ action: 'mark_candidate', approval_request_id: 'ap-mark', release_id: 'r-2' })
+  await expect(page.getByRole('region', { name: 'Decision: Approve the release candidate' })).toBeVisible()
+})
+
+test('Plan: a project without a release opens release 1 with one click', async ({ page }) => {
+  const { calls } = await open(page, 'open')
+  const card = page.getByRole('region', { name: 'Decision: Open release 1' })
+  await card.getByRole('button', { name: 'Open release 1' }).click()
+  await page.getByRole('dialog', { name: 'Open release 1?' }).getByRole('button', { name: 'Open release 1' }).click()
+  await expect(page.locator('.toast').filter({ hasText: 'Release 1 is open.' })).toBeVisible()
+  const action = writes(calls, '/journey/actions')[0].body as Record<string, unknown>
+  expect(action).toMatchObject({ action: 'open_first_release', approval_request_id: null })
+  expect(action.release_id).toBeUndefined()
+  await expect(page.getByRole('checkbox', { name: 'PHAROS-14 in the release' })).toBeVisible()
 })

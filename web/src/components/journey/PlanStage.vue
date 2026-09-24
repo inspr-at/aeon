@@ -24,6 +24,7 @@ const walker = computed(() => ctx.data.walker.value.value)
 const status = computed(() => ctx.data.walker.status.value)
 const stats = computed(() => ctx.plan.stats.value)
 const planning = computed(() => journey.value.next_action.key === 'start_build')
+const opening = computed(() => journey.value.next_action.key === 'open_first_release')
 const approvals = computed(() => gateApprovals(ctx.approvals.value, 'build', journey.value.current_release_id))
 const approval = computed(() => offeredApproval(ctx.approvals.value, journey.value, 'build', ctx.now.value))
 const releases = computed(() => ctx.data.releases.value)
@@ -62,7 +63,7 @@ async function addTicket() {
         <div class="j-empty">
           <span class="j-empty-icon"><AppIcon name="layers" :size="16" /></span>
           <strong>No release is open</strong>
-          <span>{{ journey.next_action.key === 'start_build' && journey.next_action.reason ? journey.next_action.reason : 'Agreeing the requirements opens release 1; its tickets are chosen here.' }}</span>
+          <span>{{ opening ? 'Open release 1 to choose its tickets; the rest stay in the backlog.' : journey.next_action.key === 'start_build' && journey.next_action.reason ? journey.next_action.reason : 'Once release 1 is open, its tickets are chosen here.' }}</span>
           <span v-if="releases.length">Earlier releases of this project are listed below; open one to walk through its tickets.</span>
         </div>
       </section>
@@ -94,7 +95,13 @@ async function addTicket() {
     </div>
     <div class="j-col">
       <GateCard
-        v-if="planning && ctx.current.value" eyebrow="Decision" :title="ctx.releaseLabel.value"
+        v-if="opening" eyebrow="Decision" title="Open release 1"
+        :action="{ label: ctx.next.value.label, disabled: ctx.next.value.disabled, busy: ctx.next.value.busy, tip: ctx.next.value.tip }" @act="ctx.runNext()"
+      >
+        <p>{{ ACTION_LONG.open_first_release }}</p>
+      </GateCard>
+      <GateCard
+        v-else-if="planning && ctx.current.value" eyebrow="Decision" :title="ctx.releaseLabel.value"
         :action="{ label: ctx.next.value.label, disabled: ctx.next.value.disabled, busy: ctx.next.value.busy, tip: ctx.next.value.tip }" @act="ctx.runNext()"
       >
         <div class="j-stats">
@@ -127,7 +134,7 @@ async function addTicket() {
         <p v-if="!ctx.current.value" class="j-note">An earlier release: its tickets are shown as they were planned.</p>
         <p v-if="journey.stage !== 'plan'"><button type="button" class="linkish" @click="ctx.view(journey.stage)">Where the journey is now <AppIcon name="arrow" :size="12" /></button></p>
       </GateCard>
-      <GateCard v-if="!planning && !ctx.release.value" eyebrow="Later" title="Not yet" tone="record"><p>Choosing the tickets of the release. Agreeing the requirements opens release 1.</p></GateCard>
+      <GateCard v-if="!planning && !opening && !ctx.release.value" eyebrow="Later" title="Not yet" tone="record"><p>Choosing the tickets of the release. Agreeing the requirements opens release 1.</p></GateCard>
       <p v-if="store.busy || ctx.plan.saving.value" class="saving" role="status">Saving the plan…</p>
     </div>
   </div>

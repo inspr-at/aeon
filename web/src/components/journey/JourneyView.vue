@@ -124,6 +124,8 @@ async function act(action: ActionKey, options: { approval?: Approval | null; rea
 }
 const DONE: Partial<Record<string, (n: string) => string>> = {
   confirm_brief: () => 'Brief confirmed. The lenses run; then you decide.',
+  open_first_release: () => 'Release 1 is open. Tick the tickets that form it.',
+  mark_candidate: n => `${n} is the candidate. Review it next.`,
   start_build: n => `${n} build started · ${plan.stats.value.inRelease} tickets.`,
   approve_candidate: () => 'Release candidate approved. Deployment is next.',
   approve_deploy: () => 'Deployment approved.',

@@ -24,22 +24,24 @@ export const PROFILES: Record<Profile, { label: string; line: string }> = {
 
 export type StageState = 'done' | 'current' | 'later' | 'skipped' | 'blocked'
 export interface JourneyStage { key: Stage; state: StageState; gate_approval_id: string | null; handoff_id: string | null }
-export type ActionKey = 'confirm_brief' | 'go' | 'reduce_scope' | 'park' | 'drop' | 'reopen' | 'start_build' | 'approve_candidate' | 'reject_candidate'
-  | 'approve_deploy' | 'retry_deploy' | 'approve_permit' | 'plan_next_release'
-export type NextKey = 'continue_intake' | 'confirm_brief' | 'decide' | 'reopen' | 'approve_requirements' | 'start_build' | 'wait_for_build'
-  | 'approve_candidate' | 'approve_deploy' | 'retry_deploy' | 'approve_permit' | 'plan_next_release'
+export type ActionKey = 'confirm_brief' | 'go' | 'reduce_scope' | 'park' | 'drop' | 'reopen' | 'open_first_release' | 'start_build' | 'mark_candidate'
+  | 'approve_candidate' | 'reject_candidate' | 'approve_deploy' | 'retry_deploy' | 'approve_permit' | 'plan_next_release'
+export type NextKey = 'continue_intake' | 'confirm_brief' | 'decide' | 'reopen' | 'approve_requirements' | 'open_first_release' | 'start_build' | 'wait_for_build'
+  | 'mark_candidate' | 'approve_candidate' | 'approve_deploy' | 'retry_deploy' | 'approve_permit' | 'plan_next_release'
 export interface NextAction { key: NextKey; label: string; stage: Stage; available: boolean; reason?: string; approval_request_id: string | null }
-// Whether Pharos can admit a launch now, and why not.
-export interface LaunchReadiness { state: 'ready' | 'blocked' | 'unavailable'; reason: string | null; observed_at: string | null }
+// Whether Pharos can admit a launch now; the reason is the current blocker (empty when it can).
+export interface LaunchReadiness { can_admit: boolean; reason: string }
 export interface Journey {
   project_node_id: string; profile: Profile; revision: number; stage: Stage; stages: JourneyStage[]
   next_action: NextAction; requirements_revision: number; current_release_id: string | null
-  // B10 (AEON-78), absent on older servers: how the stage was reached ('derived'
-  // from an imported project's data), the exact scope the requirements gate needs,
-  // and launch readiness for the Deploy stage.
+  // B10 (AEON-78): the requirements content digest, the exact approval scope the
+  // requirements gate needs, and launch readiness for the Deploy stage.
+  requirements_digest_sha256: string
+  requirements_approval_scope: string
+  launch_readiness: LaunchReadiness
+  // B11, not on the server yet: how the stage was reached ('derived' from an
+  // imported project's history). Absent means unknown.
   stage_source?: 'journey' | 'derived'
-  requirements_gate_scope?: string | null
-  launch_readiness?: LaunchReadiness | null
 }
 export interface Requirement {
   node_id: string; project_node_id: string; kind: 'functional' | 'nonfunctional'; revision: number
@@ -224,7 +226,7 @@ export const hours = (value: number | null | undefined) => value == null ? '' : 
 // ---------- Gates ----------
 export type Gate = 'shape' | 'requirements' | 'build' | 'candidate' | 'deploy' | 'access'
 export const GATE_OF_ACTION: Partial<Record<NextKey, Gate>> = {
-  decide: 'shape', reopen: 'shape', approve_requirements: 'requirements', start_build: 'build', approve_candidate: 'candidate',
+  decide: 'shape', reopen: 'shape', approve_requirements: 'requirements', start_build: 'build', mark_candidate: 'build', approve_candidate: 'candidate',
   approve_deploy: 'deploy', retry_deploy: 'deploy', approve_permit: 'access',
 }
 export const GATE_OF_STAGE: Record<Stage, Gate | null> = {
@@ -250,9 +252,9 @@ export function offeredApproval(approvals: Approval[], journey: Journey, gate: G
   const resource = gateOnRelease(gate) ? journey.current_release_id : journey.project_node_id
   const candidates = gateApprovals(approvals, gate, resource).filter(a => a.decision !== 'denied' && Date.parse(a.expires_at) > now)
   if (gate === 'requirements') {
-    // The server names the exact scope when it can; otherwise the revision's.
-    if (journey.requirements_gate_scope) {
-      const exact = candidates.filter(a => a.scope === journey.requirements_gate_scope)
+    // The server names the exact scope (revision and content digest); older servers do not.
+    if (journey.requirements_approval_scope) {
+      const exact = candidates.filter(a => a.scope === journey.requirements_approval_scope)
       return exact.find(a => a.decision === 'approved') ?? exact[0] ?? null
     }
     const refined = candidates.filter(a => a.scope.startsWith('journey.requirements.r'))
@@ -272,8 +274,10 @@ export const ACTION_LONG: Record<NextKey, string> = {
   decide: 'Compare the estimate with the budget, then go, reduce scope, park or drop. The decision is recorded.',
   reopen: 'This project is parked or dropped with its reason. Reopen it to decide again.',
   approve_requirements: 'Agreed requirements become features with tickets. Non-functional ones become knowledge entries and acceptance criteria.',
+  open_first_release: 'Opens release 1 for planning. Tickets are then ticked into it; the rest stay in the backlog.',
   start_build: 'The ticked tickets form the release. The crew builds them; unticked tickets stay in the backlog.',
   wait_for_build: 'Agents are working on the release. You approve the release candidate when it is ready.',
+  mark_candidate: 'Every ticket of the release is done. Marking it as the candidate hands it to review.',
   approve_candidate: 'Check the preview. Approving hands the release to deployment.',
   approve_deploy: 'Backup evidence and the build are recorded, then the host applies the release.',
   retry_deploy: 'The host refused the release. Retry with fresh evidence, or send the candidate back.',

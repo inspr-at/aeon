@@ -170,7 +170,9 @@ const journeyScreens: [string, JourneyStart, string, (page: Page) => Promise<voi
     await page.locator('section.history').getByRole('button', { name: 'Show the sources' }).click()
     await expect(page.getByText('Sources · stored with the project')).toBeVisible()
   }, { derived: true }],
-  ['journey deploy ready', 'deploy', '/p/PHAROS?view=journey', async page => { await expect(page.getByRole('region', { name: 'Launch admission is ready' })).toBeVisible() }, { readiness: { state: 'ready', reason: null, observed_at: '2026-09-23T11:40:00Z' } }],
+  ['journey deploy ready', 'deploy', '/p/PHAROS?view=journey', async page => { await expect(page.getByRole('region', { name: 'Launch admission is ready' })).toBeVisible() }, { readiness: { can_admit: true, reason: '' } }],
+  ['journey mark candidate', 'mark', '/p/PHAROS?view=journey', async page => { await expect(page.getByRole('listitem', { name: /Build gate/ })).toBeVisible() }],
+  ['journey open release 1', 'open', '/p/PHAROS?view=journey', async page => { await expect(page.getByRole('region', { name: 'Decision: Open release 1' })).toBeVisible() }],
   ['journey walker sheet', 'plan', '/p/PHAROS?view=journey&walk=PHAROS-12', async page => {
     await expect(page.locator('dialog.walker .ck.on')).toBeVisible()
     await page.keyboard.press('?')

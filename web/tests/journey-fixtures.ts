@@ -15,13 +15,14 @@ type Stage = typeof STAGES[number]
 export const AGENT = 'a0000000-0000-4000-8000-000000000001'
 export const PROJECT = 'p-pharos'
 
-export type JourneyStart = 'inspire' | 'shape' | 'requirements' | 'plan' | 'build' | 'deploy' | 'live'
+export type JourneyStart = 'inspire' | 'shape' | 'requirements' | 'open' | 'plan' | 'build' | 'mark' | 'deploy' | 'live'
 export interface JourneyWorld {
   journey: {
     project_node_id: string; profile: string; revision: number; stage: Stage; next_action: { key: string; label: string; stage: Stage; available: boolean; reason?: string; approval_request_id: string | null }
     requirements_revision: number; current_release_id: string | null; stages: { key: Stage; state: string; gate_approval_id: string | null; handoff_id: string | null }[]
-    stage_source?: 'journey' | 'derived'; requirements_gate_scope?: string | null
-    launch_readiness?: { state: 'ready' | 'blocked' | 'unavailable'; reason: string | null; observed_at: string | null } | null
+    requirements_digest_sha256: string; requirements_approval_scope: string
+    launch_readiness: { can_admit: boolean; reason: string }
+    stage_source?: 'journey' | 'derived'
   }
   approvals: { id: string; agent_principal_id: string; scope: string; resource_kind: 'node'; resource_id: string; run_id: null; rationale: string; expires_at: string; proposed_at: string; decision: 'approved' | 'denied' | null; decided_by_principal_id: string | null; risk: 'low' | 'medium' | 'high' }[]
   intake: { sources: unknown[]; turns: unknown[]; drafts: { id: string; kind: string; title: string; body: string; base_event_id: number; citations: unknown[]; ticket_suggestions: unknown[]; status: string; proposed_at: string; accepted_at: string | null; requirement_kind?: string }[] }
@@ -33,6 +34,7 @@ export interface JourneyWorld {
 
 const LABEL: Record<string, string> = {
   continue_intake: 'Continue intake', confirm_brief: 'Confirm brief', decide: 'Decide', reopen: 'Reopen', approve_requirements: 'Approve requirements',
+  open_first_release: 'Open release 1', mark_candidate: 'Mark candidate',
   start_build: 'Start build', wait_for_build: 'Building', approve_candidate: 'Approve candidate', approve_deploy: 'Approve deployment',
   retry_deploy: 'Retry deployment', approve_permit: 'Approve permit', plan_next_release: 'Plan release 3',
 }
@@ -70,7 +72,12 @@ export function journeyWorld(start: JourneyStart = 'plan', options: WorldOptions
       ] },
   }
   const world: JourneyWorld = {
-    journey: { project_node_id: PROJECT, profile: 'professional', revision: 12, stage: 'plan', next_action: { key: 'start_build', label: 'Start build', stage: 'plan', available: false, reason: 'Build start needs an approved gate.', approval_request_id: 'ap-build' }, requirements_revision: 3, current_release_id: 'r-2', stages: rail('plan') },
+    journey: {
+      project_node_id: PROJECT, profile: 'professional', revision: 12, stage: 'plan', next_action: { key: 'start_build', label: 'Start build', stage: 'plan', available: false, reason: 'Build start needs an approved gate.', approval_request_id: 'ap-build' },
+      requirements_revision: 3, current_release_id: 'r-2', stages: rail('plan'),
+      requirements_digest_sha256: '9f2c1'.padEnd(64, '0'), requirements_approval_scope: `journey.requirements.r12.d${'9f2c1'.padEnd(64, '0')}`,
+      launch_readiness: { can_admit: false, reason: 'The release is not ready for deployment.' },
+    },
     approvals: options.noGate ? [] : [approval('ap-build', 'journey.build', 'r-2', 'Release 2 is planned and estimated; ready to build.')],
     intake: {
       sources: [
@@ -102,10 +109,17 @@ export function journeyWorld(start: JourneyStart = 'plan', options: WorldOptions
   }
   if (start === 'inspire') { set('inspire', 'continue_intake'); world.journey.current_release_id = null; world.requirements = [] }
   if (start === 'shape') { set('shape', 'decide', { available: false, reason: 'Shape needs an approved gate before go, reduce scope, park or drop.' }); world.journey.current_release_id = null; world.intake.drafts[0].status = 'accepted'; world.intake.drafts[0].accepted_at = ago(60 * 19); world.approvals = options.noGate ? [] : [approval('ap-shape', 'journey.shape', PROJECT, 'The brief is confirmed; the estimate fits the cap.')] }
-  if (start === 'requirements') { set('requirements', 'approve_requirements', { available: false, reason: 'Requirements need an approved gate.' }); world.requirements = world.requirements.map(r => ({ ...r, status: 'draft', revision: 0, generated_ticket_ids: [] })); world.approvals = options.noGate ? [] : [approval('ap-req', 'journey.requirements.r12.d9f2c1', PROJECT, 'Three requirements are drafted with their sources.')] }
+  if (start === 'requirements') { set('requirements', 'approve_requirements', { available: false, reason: 'Requirements need an approved gate.' }); world.requirements = world.requirements.map(r => ({ ...r, status: 'draft', revision: 0, generated_ticket_ids: [] })); world.approvals = options.noGate ? [] : [approval('ap-req-old', 'journey.requirements.r11.dold', PROJECT, 'An earlier revision.'), approval('ap-req', world.journey.requirements_approval_scope, PROJECT, 'Three requirements are drafted with their sources.')] }
+  if (start === 'open') { set('plan', 'open_first_release'); world.journey.current_release_id = null; world.releases = []; world.approvals = [] }
+  if (start === 'mark') {
+    set('build', 'mark_candidate', { available: false, reason: 'Marking a candidate needs an approved build gate.', approval_request_id: options.noGate ? null : 'ap-mark' })
+    world.walkers['r-2'] = { ...world.walkers['r-2'], state: 'building', tickets: [{ ticket_node_id: 'n-5', key: 'PHAROS-15', title: 'Beacon health probes', feature_node_id: 'n-epic', included: true, position: 0, estimated_hours: 5, screen_node_ids: [] }] }
+    world.approvals = options.noGate ? [] : [approval('ap-mark', 'journey.build', 'r-2', 'Every ticket of release 2 is done; mark it as the candidate.')]
+  }
   if (start === 'build') { set('build', 'wait_for_build', { available: false, reason: 'The build is still in progress.' }); world.walkers['r-2'].state = 'building' }
   if (start === 'deploy') {
     set('deploy', 'retry_deploy', { available: false, reason: 'Deployment retry needs an approved gate.' })
+    world.journey.launch_readiness = { can_admit: false, reason: 'Pharos launch checks are unavailable.' }
     world.journey.stages = world.journey.stages.map(s => s.key === 'deploy' ? { ...s, state: 'blocked', handoff_id: 'h-1' } : s)
     world.walkers['r-2'].state = 'refused'
     world.handoffs['h-1'] = { id: 'h-1', project_node_id: PROJECT, release_node_id: 'r-2', stage: 'deploy', operation: 'deploy', plugin_id: 'pharos', attempt: 1, authority_epoch: 1, state: 'failed', expires_at: ago(10), result: { outcome: 'failed', blocker_code: 'policy_refused', completed_at: ago(20) } }
@@ -120,7 +134,6 @@ export function journeyWorld(start: JourneyStart = 'plan', options: WorldOptions
   }
   if (options.noIntake) world.intake = { sources: [], turns: [], drafts: [] }
   if (options.readiness !== undefined) world.journey.launch_readiness = options.readiness
-  if (start === 'requirements') world.journey.requirements_gate_scope = 'journey.requirements.r12.d9f2c1'
   return world
 }
 
@@ -180,12 +193,20 @@ export async function mockJourney(page: Page, world: JourneyWorld, options: { fa
       const next = world.journey.next_action
       if (body.action !== next.key && !(next.key === 'decide' && ['go', 'reduce_scope', 'park', 'drop'].includes(String(body.action))) && body.action !== 'reject_candidate') return route.fulfill({ status: 409, json: { error: 'that action is not available' } })
       const gate = world.approvals.find(a => a.id === body.approval_request_id)
-      if (next.key !== 'confirm_brief' && next.key !== 'plan_next_release' && (!gate || gate.decision !== 'approved')) return route.fulfill({ status: 403, json: { error: 'approval does not grant this action' } })
+      if (!['confirm_brief', 'plan_next_release', 'open_first_release'].includes(next.key) && (!gate || gate.decision !== 'approved')) return route.fulfill({ status: 403, json: { error: 'approval does not grant this action' } })
       bump()
       if (body.action === 'start_build') {
         world.walkers['r-2'].state = 'building'
         world.journey.stage = 'build'; world.journey.stages = rail('build')
         world.journey.next_action = { key: 'wait_for_build', label: 'Building', stage: 'build', available: false, reason: 'The build is still in progress.', approval_request_id: null }
+      } else if (body.action === 'mark_candidate') {
+        world.walkers['r-2'].state = 'candidate'
+        world.journey.next_action = { key: 'approve_candidate', label: 'Approve candidate', stage: 'build', available: false, reason: 'Candidate review needs an approved gate.', approval_request_id: null }
+      } else if (body.action === 'open_first_release') {
+        world.releases = [{ id: 'r-new', key: 'PHAROS-40', kind_id: 'k-release', title: 'Release 1', body: '', fields: {}, state: 'backlog', parent_id: PROJECT, position: '1', created_at: new Date(now).toISOString(), updated_at: new Date(now).toISOString(), deleted_at: null }]
+        world.walkers['r-new'] = { release_node_id: 'r-new', project_node_id: PROJECT, state: 'planning', revision: 1, features: [], tickets: [{ ticket_node_id: 'n-4', key: 'PHAROS-14', title: 'Visual acceptance of the version pill', feature_node_id: null, included: false, position: 0, estimated_hours: null, screen_node_ids: [] }] }
+        world.journey.current_release_id = 'r-new'
+        world.journey.next_action = { key: 'start_build', label: 'Start build', stage: 'plan', available: false, reason: 'Select at least one ticket for this release.', approval_request_id: null }
       } else if (body.action === 'go') {
         world.journey.stage = 'requirements'; world.journey.stages = rail('requirements')
         world.journey.next_action = { key: 'approve_requirements', label: 'Approve requirements', stage: 'requirements', available: false, reason: 'Requirements need an approved gate.', approval_request_id: null }

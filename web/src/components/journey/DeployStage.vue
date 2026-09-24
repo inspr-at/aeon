@@ -2,7 +2,6 @@
 <script setup lang="ts">
 import { computed } from 'vue'
 import { ACTION_LONG, gateApprovals, offeredApproval, PLUGIN_GATE } from '../../lib/journey'
-import { absoluteTime, relativeTime } from '../../lib/work'
 import { useJourneyContext } from '../../lib/journeyContext'
 import AppIcon from '../AppIcon.vue'
 import GateApprovals from './GateApprovals.vue'
@@ -10,9 +9,8 @@ import GateCard from './GateCard.vue'
 import HandoffList from './HandoffList.vue'
 
 // Deploy: Pharos applies the release after your approval. Its deploy step has
-// gates of its own; launch admission among them comes from the server's launch
-// readiness. Servers without that field fail closed (no launch-checks provider),
-// which is said as such.
+// gates of its own; launch admission among them comes from the projection's
+// launch readiness (can it admit, and the current blocker).
 const ctx = useJourneyContext()
 const journey = computed(() => ctx.journey.value)
 const next = computed(() => journey.value.next_action)
@@ -24,10 +22,11 @@ const deciding = computed(() => next.value.key === 'approve_deploy' || next.valu
 const approvals = computed(() => gateApprovals(ctx.approvals.value, 'deploy', journey.value.current_release_id))
 const approval = computed(() => offeredApproval(ctx.approvals.value, journey.value, 'deploy', ctx.now.value))
 const state = computed(() => journey.value.stages.find(s => s.key === 'deploy')?.state ?? 'later')
-// Launch readiness from the server, or the known fail-closed default.
-const launch = computed(() => journey.value.launch_readiness ?? { state: 'unavailable' as const, reason: 'Pharos launch checks are unavailable: this server has no launch-checks provider, so launch admission fails closed and no release can be admitted for deployment.', observed_at: null })
-const launchReady = computed(() => launch.value.state === 'ready')
-const launchNote = computed(() => launch.value.state === 'ready' ? 'ready' : launch.value.state === 'blocked' ? 'blocked' : 'unavailable')
+// Launch readiness: a blocker once the release is at Deploy; before that, what it waits for.
+const launch = computed(() => journey.value.launch_readiness ?? { can_admit: false, reason: 'This server does not report launch readiness.' })
+const launchReady = computed(() => launch.value.can_admit)
+const atDeploy = computed(() => journey.value.stage === 'deploy')
+const launchNote = computed(() => launchReady.value ? 'ready' : atDeploy.value ? 'closed' : 'not yet')
 </script>
 
 <template>
@@ -42,7 +41,7 @@ const launchNote = computed(() => launch.value.state === 'ready' ? 'ready' : lau
           <dd>
             <ul class="j-checks">
               <li v-for="gate in deployGates" :key="gate">
-                <AppIcon :name="gate === 'launch_admission' ? (launchReady ? 'check' : 'close') : gate === 'person_decision' ? 'user' : 'info'" :size="13" :class="gate === 'launch_admission' ? (launchReady ? 'ok' : 'bad') : 'info'" />
+                <AppIcon :name="gate === 'launch_admission' ? (launchReady ? 'check' : atDeploy ? 'close' : 'clock') : gate === 'person_decision' ? 'user' : 'info'" :size="13" :class="gate === 'launch_admission' ? (launchReady ? 'ok' : atDeploy ? 'bad' : 'info') : 'info'" />
                 <span>{{ PLUGIN_GATE[gate] ?? gate.replace(/_/g, ' ') }}<template v-if="gate === 'launch_admission'"> · {{ launchNote }}</template><template v-else-if="gate === 'person_decision'"> · the deployment gate below</template></span>
               </li>
               <li v-if="!deployGates.length"><AppIcon name="info" :size="13" class="info" /><span>Pharos lists its checks once it is installed.</span></li>
@@ -56,14 +55,13 @@ const launchNote = computed(() => launch.value.state === 'ready' ? 'ready' : lau
       </section>
     </div>
     <div class="j-col">
-      <GateCard v-if="!launchReady" eyebrow="Blocked" :title="launch.state === 'blocked' ? 'Launch admission is blocked' : 'Launch admission is closed'" tone="blocked">
+      <GateCard v-if="!launchReady && atDeploy" eyebrow="Blocked" title="Launch admission is closed" tone="blocked">
         <p>{{ launch.reason || 'Pharos did not say why.' }}</p>
-        <p v-if="launch.observed_at" class="j-note">Checked <time :datetime="launch.observed_at" :data-tip="absoluteTime(launch.observed_at)">{{ relativeTime(launch.observed_at, { now: ctx.now.value }) }}</time>.</p>
         <p class="j-note">Approving the deployment still records your decision; the host applies the release once admission can succeed.</p>
       </GateCard>
-      <section v-else class="j-card ready" aria-label="Launch admission is ready">
+      <section v-else-if="launchReady" class="j-card ready" aria-label="Launch admission is ready">
         <p class="eyebrow ok-eyebrow"><AppIcon name="check" :size="11" />Launch admission</p>
-        <p>Pharos can admit this release.<template v-if="launch.observed_at"> Checked <time :datetime="launch.observed_at" :data-tip="absoluteTime(launch.observed_at)">{{ relativeTime(launch.observed_at, { now: ctx.now.value }) }}</time>.</template></p>
+        <p>Pharos can admit this release.</p>
       </section>
       <GateCard
         v-if="deciding" eyebrow="Decision" :title="next.key === 'retry_deploy' ? 'The host did not apply it' : 'Approve deployment'"
@@ -75,7 +73,10 @@ const launchNote = computed(() => launch.value.state === 'ready' ? 'ready' : lau
         <p v-if="!approval" class="j-note">An agent asks for the deployment gate; it appears here for you to approve.</p>
       </GateCard>
       <GateCard v-else-if="state === 'done' || deployed" eyebrow="Deployed" :title="ctx.releaseLabel.value" tone="record"><p>Pharos applied and verified the release.</p></GateCard>
-      <GateCard v-else eyebrow="Later" title="Not yet" tone="record"><p>The host applies the release after your approval.</p></GateCard>
+      <GateCard v-else eyebrow="Later" title="Not yet" tone="record">
+        <p>The host applies the release after your approval.</p>
+        <p v-if="!launchReady" class="j-note">Launch admission: {{ launch.reason || 'the release is not ready for deployment.' }}</p>
+      </GateCard>
     </div>
   </div>
 </template>

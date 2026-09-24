@@ -39,6 +39,9 @@ const percent = computed(() => scope.value ? Math.round(counts.value.done / scop
 const next = computed(() => journey.value.next_action)
 const building = computed(() => next.value.key === 'wait_for_build')
 const candidate = computed(() => next.value.key === 'approve_candidate')
+const marking = computed(() => next.value.key === 'mark_candidate')
+const buildApprovals = computed(() => gateApprovals(ctx.approvals.value, 'build', journey.value.current_release_id))
+const buildApproval = computed(() => offeredApproval(ctx.approvals.value, journey.value, 'build', ctx.now.value))
 const here = computed(() => journey.value.stage === 'build')
 const approvals = computed(() => gateApprovals(ctx.approvals.value, 'candidate', journey.value.current_release_id))
 const approval = computed(() => offeredApproval(ctx.approvals.value, journey.value, 'candidate', ctx.now.value))
@@ -92,13 +95,23 @@ async function reject() {
         <ul class="j-checks">
           <li v-if="left"><AppIcon name="clock" :size="13" class="warn" /><span><b>{{ plural(left, 'ticket') }}</b> still open{{ counts.qa ? ` · ${counts.qa} in QA` : '' }}{{ counts.progress ? ` · ${counts.progress} in progress` : '' }}</span></li>
           <li v-else-if="tickets.length"><AppIcon name="check" :size="13" class="ok" /><span>Every ticket of {{ ctx.releaseLabel.value }} is done</span></li>
-          <li v-if="!next.available && next.reason"><AppIcon name="info" :size="13" class="info" /><span>{{ next.reason }}</span></li>
-          <li><AppIcon :name="approvals.some(a => a.decision === null) ? 'shield' : 'info'" :size="13" :class="approvals.some(a => a.decision === null) ? 'warn' : 'info'" /><span>{{ approvals.some(a => a.decision === null) ? 'The candidate gate is requested' : 'The candidate gate is asked for when the build is ready' }}</span></li>
+          <li v-if="!next.available && next.reason && !marking"><AppIcon name="info" :size="13" class="info" /><span>{{ next.reason }}</span></li>
+          <li v-if="marking"><AppIcon :name="buildApproval ? 'shield' : 'info'" :size="13" :class="buildApproval ? 'warn' : 'info'" /><span>{{ buildApproval ? 'The build gate is requested: approve it to mark the candidate' : 'Marking the candidate needs the build gate, which an agent asks for' }}</span></li>
+          <li v-else><AppIcon :name="approvals.some(a => a.decision === null) ? 'shield' : 'info'" :size="13" :class="approvals.some(a => a.decision === null) ? 'warn' : 'info'" /><span>{{ approvals.some(a => a.decision === null) ? 'The candidate gate is requested' : 'The candidate gate is asked for when the build is ready' }}</span></li>
         </ul>
-        <p class="j-note">{{ ACTION_LONG.wait_for_build }}</p>
+        <p v-if="!marking" class="j-note">{{ ACTION_LONG.wait_for_build }}</p>
       </section>
       <GateCard
-        v-if="candidate" eyebrow="Decision" title="Approve the release candidate"
+        v-if="marking" eyebrow="Decision" :title="`Mark ${ctx.releaseLabel.value.toLowerCase()} as the candidate`"
+        :action="{ label: ctx.next.value.label, disabled: ctx.next.value.disabled, busy: ctx.next.value.busy, tip: ctx.next.value.tip }" @act="ctx.runNext()"
+      >
+        <p>{{ ACTION_LONG.mark_candidate }}</p>
+        <p v-if="!next.available && next.reason" class="j-note">{{ next.reason }}</p>
+        <GateApprovals gate="build" :approvals="buildApprovals" :on="ctx.releaseLabel.value" :can-decide="ctx.canAct.value" :now="ctx.now.value" :me="ctx.me.value" />
+        <p v-if="!buildApproval" class="j-note">An agent asks for the build gate on {{ ctx.releaseLabel.value }}; it appears here for you to approve.</p>
+      </GateCard>
+      <GateCard
+        v-else-if="candidate" eyebrow="Decision" title="Approve the release candidate"
         :action="{ label: ctx.next.value.label, disabled: ctx.next.value.disabled, busy: ctx.next.value.busy, tip: ctx.next.value.tip }" @act="ctx.runNext()"
       >
         <p>All {{ plural(tickets.length, 'ticket') }} of {{ ctx.releaseLabel.value }} are built. {{ ACTION_LONG.approve_candidate }}</p>

@@ -62,7 +62,8 @@
 // key, and commits nodes, links and one R1 event per mutation atomically.
 //
 // Vue split: components/journey/JourneyView owns loading and the one next
-// action; JourneyRail owns the eight-step rail and its primary button;
+// action; JourneyRail owns the eight-step rail (navigation only; the stage's
+// decision card carries the one primary button);
 // InspireStage, ShapeStage, RequirementsStage, PlanStage, BuildStage,
 // DeployStage, AccessStage and LiveStage own stage content; GateCard and
 // GateApprovals render R2 gates in the agents' "Needs you" pattern;
