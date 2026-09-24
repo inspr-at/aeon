@@ -1,100 +1,89 @@
 // SPDX-License-Identifier: AGPL-3.0-only
-// Coordinator route: /business/cost-units -> views/business/CostUnitsView.vue
+// Rates: cost units with dated bill and internal rates; admins add rates inline.
 import { test, expect, type Page } from '@playwright/test'
+import { fixtures, mockWork, watchErrors } from './work-fixtures'
+import { businessData, mockBusiness, type BusinessMockOptions } from './business-fixtures'
 
-const kindID = '10000000-0000-4000-8000-0000000000c1'
-const nodeID = '20000000-0000-4000-8000-0000000000c1'
-const rateID = '30000000-0000-4000-8000-0000000000c1'
-const stamp = '2026-09-23T10:00:00Z'
-const costUnit = {
-  id: nodeID, key: 'PAI-101', kind_id: kindID, title: 'Studio delivery', body: '',
-  fields: { classic: { source_id: 'ppm', id: 101, issue_key: 'PAI-101', type: 'cost_unit' }, notes: 'imported' },
-  state: 'open', parent_id: null, position: '1', created_at: stamp, updated_at: stamp,
-}
-const rate = {
-  id: rateID, cost_unit_node_id: nodeID, unit: 'hour', currency: 'EUR',
-  internal_amount: 125.5, bill_amount: 180, effective_from: '2026-01-01', effective_until: null,
-  created_by_principal_id: 'person-1', created_at: stamp,
-}
+test.use({ timezoneId: 'Europe/Vienna' })
 
-async function setup(page: Page, options: { admin?: boolean; empty?: boolean; conflict?: boolean } = {}) {
-  const calls: { path: string; method: string; raw: string | null }[] = []
-  await page.route('**/api/**', async route => {
-    const path = new URL(route.request().url()).pathname
-    const method = route.request().method()
-    const raw = route.request().postData()
-    calls.push({ path, method, raw })
-    if (path === '/api/me') return route.fulfill({ json: { principal: { id: 'person-1', name: 'Markus Barta', kind: 'person', roles: options.admin === false ? [] : ['admin'] }, tenant: { id: 'tenant-1', name: 'INSPR Studio' } } })
-    if (path === '/api/version') return route.fulfill({ json: { version: '260923180522.0.0', scheme: 'inspr-calendar-v2' } })
-    if (path === '/api/kinds') return route.fulfill({ json: { items: options.empty ? [] : [{ id: kindID, slug: 'cost_unit', label: 'Cost unit', short_prefix: 'CU', icon: 'cost_unit', allowed_child_kinds: [], field_schema: {} }] } })
-    if (path === '/api/nodes') return route.fulfill({ json: { items: options.empty ? [] : [costUnit], next_cursor: null } })
-    if (path === `/api/cost-units/${nodeID}/rates` && method === 'GET') return route.fulfill({ json: options.empty ? [] : [rate] })
-    if (path === `/api/cost-units/${nodeID}/rates` && method === 'POST') {
-      if (options.conflict) return route.fulfill({ status: 409, json: { code: 'conflict', message: 'rate intervals overlap' } })
-      return route.fulfill({ status: 201, json: { ...rate, id: '40000000-0000-4000-8000-0000000000c1', internal_amount: 125.25, bill_amount: 200, effective_from: '2026-06-01' } })
-    }
-    if (path === '/api/views') return route.fulfill({ json: { items: [] } })
-    return route.fulfill({ status: 404, json: { code: 'not_found', message: 'Uncontracted route' } })
-  })
-  return calls
+async function setup(page: Page, options: BusinessMockOptions = {}) {
+  await mockWork(page, fixtures())
+  const data = businessData(options)
+  const calls = await mockBusiness(page, data, options)
+  return { data, calls }
+}
+async function openRates(page: Page) {
+  await page.goto('/business/rates')
+  await expect(page.getByRole('heading', { name: 'Rates', level: 1 })).toBeVisible()
+  await expect(page.getByRole('table', { name: 'Rates of Development' })).toBeVisible()
 }
 
-test('imported cost unit keeps its key and shows exact rate amounts', async ({ page }) => {
+test('each cost unit lists its rates with what is in force', async ({ page }) => {
+  const errors = watchErrors(page)
   await setup(page)
-  await page.goto('/business/cost-units')
-  await expect(page.getByRole('heading', { name: 'Cost units' })).toBeVisible()
-  await expect(page.getByRole('button', { name: /PAI-101/ })).toBeVisible()
-  await expect(page.getByText('Imported', { exact: true })).toBeVisible()
-  await expect(page.getByText('101', { exact: true })).toBeVisible()
-  await expect(page.getByRole('cell', { name: '125.5', exact: true })).toBeVisible()
-  await expect(page.getByRole('cell', { name: '180', exact: true })).toBeVisible()
-  await expect(page.getByRole('heading', { name: 'EUR' })).toBeVisible()
+  await openRates(page)
+  await expect(page.getByText('2 cost units · 3 rates in force')).toBeVisible()
+  const dev = page.getByRole('table', { name: 'Rates of Development' })
+  await expect(dev.locator('tbody tr')).toHaveCount(3)
+  const day = dev.locator('tbody tr').first()
+  for (const text of ['per day', '720.00', '480.00', 'from 1 Jan 2026', 'In force']) await expect(day).toContainText(text)
+  await expect(dev.locator('tbody tr').last()).toContainText('1 Jan 2025 – 1 Jan 2026')
+  await expect(dev.locator('tbody tr').last()).toContainText('Ended')
+  // Retired cost units stay out of the way until asked for.
+  await expect(page.getByRole('heading', { name: 'Legacy support' })).toHaveCount(0)
+  await page.getByRole('checkbox', { name: /Retired/ }).check()
+  await expect(page.getByRole('heading', { name: 'Legacy support' })).toBeVisible()
+  await expect(page.getByText('No rate yet, so quotes and hours cannot use it.')).toBeVisible()
+  expect(errors).toEqual([])
 })
 
-test('admin records an exact decimal rate', async ({ page }) => {
-  const calls = await setup(page)
-  await page.goto('/business/cost-units')
-  await page.getByLabel('Internal amount').fill('125.25')
-  await page.getByLabel('Bill amount').fill('200')
-  await page.getByLabel('Effective from').fill('2026-06-01')
-  await page.getByRole('button', { name: 'Record rate' }).click()
-  await expect(page.getByRole('status')).toHaveText('Rate recorded.')
-  const posted = calls.find(call => call.method === 'POST' && call.path.endsWith('/rates'))
-  expect(posted?.raw).toContain('"internal_amount":125.25')
-  expect(posted?.raw).toContain('"bill_amount":200')
-  expect(posted?.raw).not.toContain('"internal_amount":"')
+test('an admin adds a rate that closes the current one', async ({ page }) => {
+  const { calls } = await setup(page)
+  await openRates(page)
+  await page.getByRole('button', { name: 'Add rate' }).nth(1).click()
+  await expect(page.getByRole('combobox', { name: 'Unit' })).toBeFocused()
+  await page.getByRole('combobox', { name: 'Unit' }).selectOption('hour')
+  await page.getByRole('textbox', { name: 'Bill rate' }).fill('99.5')
+  await page.getByRole('textbox', { name: 'Internal rate' }).fill('64,25')
+  await page.getByRole('textbox', { name: 'Valid from' }).fill('1.10.2026')
+  await page.getByRole('textbox', { name: 'Valid from' }).press('Enter')
+  await expect(page.getByText('Rate added to Development.')).toBeVisible()
+  const post = calls.find(c => c.method === 'POST')!
+  expect(post.path).toBe('/api/cost-units/cu-dev/rates')
+  expect(post.body).toEqual({ unit: 'hour', currency: 'EUR', bill_amount: 99.5, internal_amount: 64.25, effective_from: '2026-10-01', effective_until: null })
+  const dev = page.getByRole('table', { name: 'Rates of Development' })
+  await expect(dev.getByText('Scheduled')).toBeVisible()
+  await expect(dev.getByText('1 Jan 2026 – 1 Oct 2026')).toBeVisible()
 })
 
-test('a member does not get the rate form', async ({ page }) => {
-  const calls = await setup(page, { admin: false })
-  await page.goto('/business/cost-units')
-  await expect(page.getByRole('button', { name: /PAI-101/ })).toBeVisible()
-  await expect(page.getByRole('button', { name: 'Record rate' })).toHaveCount(0)
-  expect(calls.some(call => call.method === 'POST')).toBe(false)
-})
-
-test('a rejected rate keeps the typed amount', async ({ page }) => {
-  await setup(page, { conflict: true })
-  await page.goto('/business/cost-units')
-  await page.getByLabel('Internal amount').fill('10.25')
-  await page.getByLabel('Bill amount').fill('12')
-  await page.getByLabel('Effective from').fill('2026-03-01')
-  await page.getByRole('button', { name: 'Record rate' }).click()
-  await expect(page.getByRole('alert')).toContainText('rate intervals overlap')
-  await expect(page.getByLabel('Internal amount')).toHaveValue('10.25')
-})
-
-test('empty tenant explains that imported keys are kept', async ({ page }) => {
-  await setup(page, { empty: true })
-  await page.goto('/business/cost-units')
-  await expect(page.getByText(/original keys/)).toBeVisible()
-})
-
-test('the cost unit screen fits a phone width', async ({ page }) => {
-  await page.setViewportSize({ width: 390, height: 844 })
+test('a clash is explained and nothing else changes', async ({ page }) => {
   await setup(page)
-  await page.goto('/business/cost-units')
-  await expect(page.getByRole('heading', { name: 'Studio delivery' })).toBeVisible()
-  const overflow = await page.evaluate(() => document.documentElement.scrollWidth > document.documentElement.clientWidth + 1)
-  expect(overflow).toBe(false)
+  await openRates(page)
+  await page.getByRole('button', { name: 'Add rate' }).nth(1).click()
+  await page.getByRole('combobox', { name: 'Unit' }).selectOption('hour')
+  await page.getByRole('textbox', { name: 'Bill rate' }).fill('abc')
+  await page.getByRole('button', { name: 'Add rate' }).last().click()
+  await expect(page.getByText('Bill rate is an amount with at most four decimals.')).toBeVisible()
+  await page.getByRole('textbox', { name: 'Bill rate' }).fill('100')
+  await page.getByRole('textbox', { name: 'Valid from' }).fill('2026-01-01')
+  await page.getByRole('button', { name: 'Add rate' }).last().click()
+  await expect(page.getByText('A rate already starts on that date. Rates for one unit and currency cannot overlap.')).toBeVisible()
+})
+
+test('an admin adds a cost unit and goes straight to its first rate', async ({ page }) => {
+  await setup(page)
+  await openRates(page)
+  await page.getByRole('button', { name: 'New cost unit' }).click()
+  await page.getByRole('textbox', { name: 'New cost unit name' }).fill('Consulting')
+  await page.keyboard.press('Enter')
+  await expect(page.getByRole('heading', { name: 'Consulting' })).toBeVisible()
+  await expect(page.getByRole('combobox', { name: 'Unit' })).toBeFocused()
+})
+
+test('members read rates without changing them', async ({ page }) => {
+  await setup(page, { role: 'member' })
+  await openRates(page)
+  await expect(page.getByText('Workspace admins set rates.')).toBeVisible()
+  await expect(page.getByRole('button', { name: 'Add rate' })).toHaveCount(0)
+  await expect(page.getByRole('button', { name: 'New cost unit' })).toHaveCount(0)
 })

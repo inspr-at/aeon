@@ -104,6 +104,7 @@ function keys(event: KeyboardEvent) {
 .opt-label { min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 .opt-note { font-size: 11.5px; color: var(--ink-3); overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 .opt-hint { flex-shrink: 0; font-size: 11.5px; color: var(--ink-3); font-variant-numeric: tabular-nums; }
+.picker-option.active .opt-hint, .picker-option.active .opt-note { color: var(--ink-2); }
 .tick { color: var(--teal); }
 .none { padding: 8px 10px; font-size: 13px; color: var(--ink-3); }
 </style>

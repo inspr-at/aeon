@@ -11,7 +11,7 @@ const tone = computed(() => !props.signed ? '' : text.value.startsWith('+') ? 'u
 </script>
 
 <template>
-  <span class="money" :class="[tone, { strong }]"><span v-if="text" class="amount">{{ text }}</span><span v-else class="unavailable">—</span><span class="cur">{{ currency }}</span></span>
+  <span class="money" :class="[tone, { strong }]"><span v-if="text" class="amount">{{ text }}</span><span v-else class="unavailable">—</span> <span class="cur">{{ currency }}</span></span>
 </template>
 
 <style scoped>
