@@ -1785,6 +1785,14 @@ paths:
       parameters: [{name: organisationId, in: path, required: true, schema: {type: string, format: uuid}}]
       responses:
         '200': {description: Customer, content: {application/json: {schema: {$ref: '#/components/schemas/CRMOrganisation'}}}}
+  /crm/organisations/{organisationId}/sync-status:
+    get:
+      operationId: getCRMProviderSyncStatus
+      description: Admin-only status for an externally linked customer. Errors are safe categories, never provider responses or credentials.
+      security: [{session: []}]
+      parameters: [{name: organisationId, in: path, required: true, schema: {type: string, format: uuid}}]
+      responses:
+        '200': {description: Latest provider sync outcome, content: {application/json: {schema: {type: object, required: [state, provider_id], properties: {state: {type: string, enum: [never, ok, error]}, provider_id: {type: string}, attempted_at: {type: [string, 'null'], format: date-time}, synced_at: {type: [string, 'null'], format: date-time}, error: {type: string}}}}}}
   /business/principals:
     get:
       operationId: listBusinessPrincipals
@@ -1836,7 +1844,7 @@ paths:
     patch:
       operationId: updateQuoteSettings
       summary: Compare and set future quote defaults
-      description: Admin person only. expected_revision is zero for first setup. SMTP confirmation remains disabled until a configured transport is available. Existing drafts and versions are not rewritten.
+      description: Admin person only. expected_revision is zero for first setup. Email delivery is disabled; smtp_confirmation_enabled must be false. Existing drafts and versions are not rewritten.
       security: [{session: []}]
       requestBody: {required: true, content: {application/json: {schema: {$ref: '#/components/schemas/QuoteSettingsWrite'}}}}
       responses:
@@ -2032,7 +2040,7 @@ paths:
       description: Admin person only. The one-time token is returned only on creation and stored as a SHA-256 verifier. Revoke before reissue; expired links stay readable but cannot accept.
       security: [{session: []}]
       parameters: [{name: quoteId, in: path, required: true, schema: {type: string, format: uuid}}, {name: version, in: path, required: true, schema: {type: integer, minimum: 1}}]
-      requestBody: {required: true, content: {application/json: {schema: {type: object, additionalProperties: false, properties: {expires_at: {type: string, format: date-time}}}}}}
+      requestBody: {required: false, content: {application/json: {schema: {type: object, additionalProperties: false, properties: {expires_at: {type: string, format: date-time}}}}}}
       responses:
         '201': {description: One-time link and metadata, content: {application/json: {schema: {$ref: '#/components/schemas/QuotePublicLink'}}}}
         '409': {$ref: '#/components/responses/Error'}
@@ -2848,7 +2856,7 @@ components:
         sender: {type: object}
         defaults: {type: object}
         layout: {type: object}
-        smtp_confirmation_enabled: {type: boolean, description: May become true only after a tenant SMTP transport is configured}
+        smtp_confirmation_enabled: {type: boolean, enum: [false], description: Email delivery is disabled}
     QuoteDocument:
       type: object
       additionalProperties: false

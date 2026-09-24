@@ -369,8 +369,8 @@ func parseQuantity(s string) (int64, error) {
 }
 func makeDocument(ctx context.Context, tx pgx.Tx, settings quoteSettings, org, title, customerNo string, day time.Time) (quoteDocument, error) {
 	var d quoteDocument
-	var orgTitle string
-	if err := tx.QueryRow(ctx, `SELECT title FROM nodes WHERE id=$1::uuid AND deleted_at IS NULL`, org).Scan(&orgTitle); err != nil {
+	recipient, err := customerRecipient(ctx, tx, org, customerNo)
+	if err != nil {
 		return d, err
 	}
 	var defaults struct {
@@ -386,9 +386,13 @@ func makeDocument(ctx context.Context, tx pgx.Tx, settings quoteSettings, org, t
 	if err := json.Unmarshal(settings.Defaults, &defaults); err != nil {
 		return d, err
 	}
-	recipient, _ := json.Marshal(map[string]string{"name": orgTitle, "address": "", "contact": "", "country": "", "customer_no": customerNo, "email": ""})
+	recipientRaw, _ := json.Marshal(recipient)
 	legal, _ := json.Marshal(map[string]string{"intro": defaults.Intro, "accept_text": defaults.AcceptText, "vat_note": defaults.VATNote})
-	d = quoteDocument{SchemaVersion: 1, MinimumWriterVersion: 1, Title: title, OfferDate: day.Format("2006-01-02"), ValidUntil: day.AddDate(0, 0, 30).Format("2006-01-02"), Currency: settings.DefaultCurrency, Sender: settings.Sender, Recipient: recipient, Legal: legal, Layout: settings.Layout, Sections: []documentSection{}, Positions: []documentPosition{}}
+	positionID, err := newID()
+	if err != nil {
+		return d, err
+	}
+	d = quoteDocument{SchemaVersion: 1, MinimumWriterVersion: 1, Title: title, OfferDate: day.Format("2006-01-02"), ValidUntil: day.AddDate(0, 0, 30).Format("2006-01-02"), Currency: settings.DefaultCurrency, Sender: settings.Sender, Recipient: recipientRaw, Legal: legal, Layout: settings.Layout, Sections: []documentSection{}, Positions: []documentPosition{{ID: positionID, PricingSource: "manual", Quantity: "1", UnitLabel: "item", Currency: settings.DefaultCurrency}}}
 	for _, b := range defaults.Blocks {
 		id, e := newID()
 		if e != nil {
@@ -408,4 +412,54 @@ func makeDocument(ctx context.Context, tx pgx.Tx, settings quoteSettings, org, t
 		d.Sections = append(d.Sections, section)
 	}
 	return d, nil
+}
+
+func customerRecipient(ctx context.Context, tx pgx.Tx, org, customerNo string) (map[string]string, error) {
+	var name string
+	var orgFields, contactFields []byte
+	var contactName, contactID string
+	err := tx.QueryRow(ctx, `SELECT o.title,o.fields,coalesce(c.title,''),coalesce(c.fields,'{}'::jsonb),coalesce(c.id::text,'')
+		FROM nodes o LEFT JOIN crm_organisation_profiles p ON p.tenant_id=o.tenant_id AND p.organisation_node_id=o.id
+		LEFT JOIN nodes c ON c.tenant_id=p.tenant_id AND c.id=p.primary_contact_node_id AND c.deleted_at IS NULL
+		WHERE o.id=$1::uuid AND o.deleted_at IS NULL`, org).Scan(&name, &orgFields, &contactName, &contactFields, &contactID)
+	if err != nil {
+		return nil, err
+	}
+	var fields struct {
+		BillingAddress  quoteAddress `json:"billing_address"`
+		VisitingAddress quoteAddress `json:"visiting_address"`
+	}
+	if err := json.Unmarshal(orgFields, &fields); err != nil {
+		return nil, err
+	}
+	var contact struct {
+		Email string `json:"email"`
+	}
+	if err := json.Unmarshal(contactFields, &contact); err != nil {
+		return nil, err
+	}
+	address := fields.VisitingAddress
+	if fields.BillingAddress.hasValue() {
+		address = fields.BillingAddress
+	}
+	return map[string]string{"name": name, "address": address.display(), "contact": contactName, "country": address.Country, "customer_no": customerNo, "email": contact.Email, "contact_node_id": contactID}, nil
+}
+
+type quoteAddress struct {
+	Street     string `json:"street"`
+	PostalCode string `json:"postal_code"`
+	City       string `json:"city"`
+	Country    string `json:"country"`
+	Freeform   string `json:"freeform"`
+}
+
+func (a quoteAddress) hasValue() bool {
+	return strings.TrimSpace(a.Street+a.PostalCode+a.City+a.Freeform) != ""
+}
+
+func (a quoteAddress) display() string {
+	if strings.TrimSpace(a.Freeform) != "" {
+		return strings.TrimSpace(a.Freeform)
+	}
+	return strings.TrimSpace(strings.Join([]string{strings.TrimSpace(a.Street), strings.TrimSpace(a.PostalCode + " " + a.City)}, "\n"))
 }

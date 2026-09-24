@@ -11,6 +11,7 @@ import (
 	"strings"
 	"sync"
 	"testing"
+	"time"
 
 	"github.com/inspr-at/aeon/internal/db"
 	"github.com/inspr-at/aeon/internal/dbtest"
@@ -50,6 +51,18 @@ func TestExactMoneyAndManifest(t *testing.T) {
 	r := plugins.NewRegistry()
 	if e := r.Register(p); e != nil {
 		t.Fatal(e)
+	}
+}
+
+func TestViennaNumberingBoundary(t *testing.T) {
+	settings := quoteSettings{Revision: 1, NumberingTimeZone: "Europe/Vienna"}
+	before, err := quoteDay(settings, time.Date(2026, 9, 30, 21, 30, 0, 0, time.UTC))
+	if err != nil || before.Format("2006-01-02") != "2026-09-30" || before.Format("0601") != "2609" {
+		t.Fatalf("September Vienna day: %s %v", before, err)
+	}
+	after, err := quoteDay(settings, time.Date(2026, 9, 30, 22, 30, 0, 0, time.UTC))
+	if err != nil || after.Format("2006-01-02") != "2026-10-01" || after.Format("0601") != "2610" || after.Format("060102") != "261001" {
+		t.Fatalf("October Vienna day: %s %v", after, err)
 	}
 }
 
@@ -310,9 +323,27 @@ func TestQuoteFlowAndGates(t *testing.T) {
 	if status != 200 || settings["revision"] != json.Number("1") {
 		t.Fatalf("settings %d %v", status, settings)
 	}
+	requestedEmail := strings.Replace(settingsBody, `"smtp_confirmation_enabled":false`, `"smtp_confirmation_enabled":true`, 1)
+	status, _ = call("admin", "PATCH", "/api/quotes/settings", requestedEmail)
+	if status != 400 {
+		t.Fatalf("disabled email transport enabled: %d", status)
+	}
 	status, _ = call("admin", "PATCH", "/api/quotes/settings", settingsBody)
 	if status != 409 {
 		t.Fatalf("stale settings revision %d", status)
+	}
+	e = db.InTenant(ctx, database.App, tenantID, func(tx pgx.Tx) error {
+		if _, err := tx.Exec(ctx, `UPDATE nodes SET fields=$2::jsonb WHERE id=$1::uuid`, ids["org"], `{"billing_address":{"street":"Billing Lane 4","postal_code":"8010","city":"Graz","country":"AT"},"visiting_address":{"street":"Visit Lane 8","postal_code":"8020","city":"Graz","country":"AT"}}`); err != nil {
+			return err
+		}
+		if _, err := tx.Exec(ctx, `UPDATE nodes SET fields=$2::jsonb WHERE id=$1::uuid`, ids["contact"], `{"email":"first@example.test"}`); err != nil {
+			return err
+		}
+		_, err := tx.Exec(ctx, `UPDATE crm_organisation_profiles SET primary_contact_node_id=$2::uuid WHERE organisation_node_id=$1::uuid`, ids["org"], ids["contact"])
+		return err
+	})
+	if e != nil {
+		t.Fatal(e)
 	}
 	const writers = 8
 	var wg sync.WaitGroup
@@ -342,6 +373,22 @@ func TestQuoteFlowAndGates(t *testing.T) {
 	}
 	if len(seen) != writers {
 		t.Fatal("missing commercial numbers")
+	}
+	localDay, e := quoteDay(quoteSettings{Revision: 1, NumberingTimeZone: "Europe/Vienna"}, time.Now())
+	if e != nil {
+		t.Fatal(e)
+	}
+	for number := range seen {
+		if !strings.HasPrefix(number, "A"+localDay.Format("060102")+"-") {
+			t.Fatalf("offer number used wrong day: %s", number)
+		}
+	}
+	var customerNo string
+	e = db.InTenant(ctx, database.App, tenantID, func(tx pgx.Tx) error {
+		return tx.QueryRow(ctx, `SELECT customer_no FROM crm_customer_numbers WHERE organisation_node_id=$1::uuid`, ids["org"]).Scan(&customerNo)
+	})
+	if e != nil || !strings.HasPrefix(customerNo, "K"+localDay.Format("0601")) || customerNo == "K"+localDay.Format("0601") {
+		t.Fatalf("customer number %q: %v", customerNo, e)
 	}
 	pageReq := httptest.NewRequest("GET", "/api/quotes?limit=3", nil)
 	pageReq = pageReq.WithContext(tenant.WithPrincipal(pageReq.Context(), as("admin")))
@@ -402,8 +449,12 @@ func TestQuoteFlowAndGates(t *testing.T) {
 	}
 	doc := draft["document"].(map[string]any)
 	recipient := doc["recipient"].(map[string]any)
+	if recipient["address"] != "Billing Lane 4\n8010 Graz" || recipient["country"] != "AT" || recipient["contact"] != "contact" || recipient["email"] != "first@example.test" || recipient["contact_node_id"] != ids["contact"] || doc["positions"].([]any)[0].(map[string]any)["quantity"] != "1" {
+		t.Fatalf("customer draft snapshot %v", doc)
+	}
 	recipient["address"] = "Example Address"
 	recipient["email"] = "customer@example.test"
+	doc["sections"] = []any{map[string]any{"id": "aaaaaaaa-1111-4111-8111-111111111111", "heading": "Scope", "body": "A😀B", "nodes": []any{map[string]any{"id": "bbbbbbbb-2222-4222-8222-222222222222", "kind": "paragraph", "text": "A😀B", "marks": []any{map[string]any{"start": 1, "end": 3, "bold": true, "italic": true}}}}}}
 	doc["positions"] = []any{map[string]any{"id": "11111111-1111-4111-8111-111111111111", "pricing_source": "manual", "short_text": "Work", "long_text": "Description", "quantity": "1.5", "unit_label": "item", "unit_price_cents": 9999, "total_cents": 0, "currency": "EUR"}}
 	patchBody, _ := json.Marshal(map[string]any{"client_session_id": "22222222-2222-4222-8222-222222222222", "mutation_id": "33333333-3333-4333-8333-333333333333", "writer_version": 1, "document": doc})
 	patch := func(body []byte, tag string) (int, map[string]any) {
@@ -431,6 +482,9 @@ func TestQuoteFlowAndGates(t *testing.T) {
 	position := receipt["document"].(map[string]any)["positions"].([]any)[0].(map[string]any)
 	if position["total_cents"] != json.Number("14999") {
 		t.Fatalf("cent rounding %v", position)
+	}
+	if marks := receipt["document"].(map[string]any)["sections"].([]any)[0].(map[string]any)["nodes"].([]any)[0].(map[string]any)["marks"].([]any); len(marks) != 1 || marks[0].(map[string]any)["end"] != json.Number("3") {
+		t.Fatalf("inline marks lost on save: %v", marks)
 	}
 	status, replay := patch(patchBody, `"qd-1"`)
 	if status != 200 || replay["replayed"] != true {
@@ -471,6 +525,9 @@ func TestQuoteFlowAndGates(t *testing.T) {
 	status, vDoc := call("admin", "GET", "/api/quotes/"+newID+"/versions/1", "")
 	if status != 200 || vDoc["pricing_mode"] != "cent-half-up-v1" || vDoc["total"] != json.Number("149.9900") {
 		t.Fatalf("frozen document %d %v", status, vDoc)
+	}
+	if marks := vDoc["document"].(map[string]any)["sections"].([]any)[0].(map[string]any)["nodes"].([]any)[0].(map[string]any)["marks"].([]any); len(marks) != 1 || marks[0].(map[string]any)["bold"] != true || marks[0].(map[string]any)["italic"] != true {
+		t.Fatalf("inline marks lost on finalize: %v", marks)
 	}
 	rateQuoteID := created[1]["quote_node_id"].(string)
 	status, rateDraft := call("admin", "GET", "/api/quotes/"+rateQuoteID+"/draft", "")
@@ -556,9 +613,20 @@ func TestQuoteFlowAndGates(t *testing.T) {
 		t.Fatalf("stale duplicate revision %d", status)
 	}
 	status, issuedNow := call("admin", "GET", "/api/quotes/"+newID, "")
+	e = db.InTenant(ctx, database.App, tenantID, func(tx pgx.Tx) error {
+		_, err := tx.Exec(ctx, `UPDATE nodes SET fields=$2::jsonb WHERE id=$1::uuid`, ids["contact"], `{"email":"latest@example.test"}`)
+		return err
+	})
+	if e != nil {
+		t.Fatal(e)
+	}
 	status, duplicated := call("admin", "POST", "/api/quotes/"+newID+"/duplicate", fmt.Sprintf(`{"expected_revision":%s}`, issuedNow["revision"]))
 	if status != 201 || duplicated["offer_no"] == issuedNow["offer_no"] || duplicated["state"] != "draft" {
 		t.Fatalf("duplicate %d %v", status, duplicated)
+	}
+	status, copiedDraft := call("admin", "GET", "/api/quotes/"+duplicated["quote_node_id"].(string)+"/draft", "")
+	if status != 200 || copiedDraft["document"].(map[string]any)["recipient"].(map[string]any)["email"] != "latest@example.test" || copiedDraft["document"].(map[string]any)["net_total_cents"] != json.Number("14999") {
+		t.Fatalf("duplicate snapshot %d %v", status, copiedDraft)
 	}
 	status, archived := call("admin", "PATCH", "/api/quotes/"+newID+"/visibility", fmt.Sprintf(`{"expected_revision":%s,"archived":true}`, issuedNow["revision"]))
 	if status != 200 || archived["archived"] != true {

@@ -71,6 +71,7 @@ type Document struct {
 	Status       string  `json:"status"`
 	ValidFrom    *string `json:"valid_from"`
 	ValidUntil   *string `json:"valid_until"`
+	Revision     int64   `json:"revision"`
 }
 type Related struct {
 	Projects  []RelatedNode  `json:"projects"`
@@ -152,13 +153,13 @@ func (m *module) related(w http.ResponseWriter, r *http.Request) {
 		if e != nil {
 			return e
 		}
-		rows, e = tx.Query(ctx, `SELECT a.id::text,a.node_id::text,a.name,coalesce(d.title,''),coalesce(d.category,''),coalesce(d.status,'draft'),d.valid_from::text,d.valid_until::text FROM attachments a LEFT JOIN crm_document_metadata d ON d.tenant_id=a.tenant_id AND d.attachment_id=a.id WHERE a.deleted_at IS NULL AND (a.node_id=$1::uuid OR a.node_id IN(SELECT target_node_id FROM node_relations WHERE source_node_id=$1::uuid AND type='customer_of')) ORDER BY a.created_at DESC,a.id`, id)
+		rows, e = tx.Query(ctx, `SELECT a.id::text,a.node_id::text,a.name,coalesce(d.title,''),coalesce(d.category,''),coalesce(d.status,'draft'),d.valid_from::text,d.valid_until::text,coalesce(d.revision,0) FROM attachments a LEFT JOIN crm_document_metadata d ON d.tenant_id=a.tenant_id AND d.attachment_id=a.id WHERE a.deleted_at IS NULL AND (a.node_id=$1::uuid OR a.node_id IN(SELECT target_node_id FROM node_relations WHERE source_node_id=$1::uuid AND type='customer_of')) ORDER BY a.created_at DESC,a.id`, id)
 		if e != nil {
 			return e
 		}
 		for rows.Next() {
 			var v Document
-			if e = rows.Scan(&v.AttachmentID, &v.NodeID, &v.Name, &v.Title, &v.Category, &v.Status, &v.ValidFrom, &v.ValidUntil); e != nil {
+			if e = rows.Scan(&v.AttachmentID, &v.NodeID, &v.Name, &v.Title, &v.Category, &v.Status, &v.ValidFrom, &v.ValidUntil, &v.Revision); e != nil {
 				break
 			}
 			out.Documents = append(out.Documents, v)

@@ -379,6 +379,13 @@ func (m *Module) duplicate(w http.ResponseWriter, r *http.Request) {
 			return bad("invalid recipient")
 		}
 		recipient["customer_no"] = customerNo
+		currentRecipient, err := customerRecipient(r.Context(), tx, source.CustomerOrgNodeID, customerNo)
+		if err != nil {
+			return err
+		}
+		for _, field := range []string{"contact", "email", "contact_node_id"} {
+			recipient[field] = currentRecipient[field]
+		}
 		doc.Recipient, err = json.Marshal(recipient)
 		if err != nil {
 			return err
@@ -394,9 +401,8 @@ func (m *Module) duplicate(w http.ResponseWriter, r *http.Request) {
 		if err != nil {
 			return err
 		}
-		doc.NetTotalCents = 0
-		for i := range doc.Positions {
-			doc.Positions[i].TotalCents = 0
+		if err := validateDocument(&doc, false); err != nil {
+			return err
 		}
 		raw, err = json.Marshal(doc)
 		if err != nil {

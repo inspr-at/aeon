@@ -18,6 +18,7 @@ import (
 func TestHTTPProviderContractAndImport(t *testing.T) {
 	f := setup(t)
 	hits := 0
+	failFetch := false
 	server := httptest.NewTLSServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		if r.Header.Get("Authorization") != "Bearer fake" {
 			t.Error("authorization header missing")
@@ -30,6 +31,10 @@ func TestHTTPProviderContractAndImport(t *testing.T) {
 			_ = json.NewEncoder(w).Encode([]RemoteCustomer{{ExternalID: "ext-1", Name: "Acme", Fields: CustomerFields{Domain: "example.test"}}})
 		case "/customers/ext-1":
 			hits++
+			if failFetch {
+				http.Error(w, "private provider detail", http.StatusServiceUnavailable)
+				return
+			}
 			_ = json.NewEncoder(w).Encode(RemoteCustomer{ExternalID: "ext-1", Name: "Acme", Fields: CustomerFields{Domain: "example.test"}})
 		default:
 			http.NotFound(w, r)
@@ -82,7 +87,20 @@ func TestHTTPProviderContractAndImport(t *testing.T) {
 	if hits != 2 {
 		t.Fatalf("fetch calls %d", hits)
 	}
-	expect(t,jsonRequest(t,f,f.admin,"POST","/api/crm/providers/http/import",map[string]any{"external_id":"ext-1"}),409)
+	w = request(f.handler, f.admin, "GET", "/api/crm/organisations/"+imported.ID+"/sync-status", "")
+	expect(t, w, 200)
+	if !strings.Contains(w.Body.String(), `"state":"ok"`) || !strings.Contains(w.Body.String(), `"synced_at":`) {
+		t.Fatalf("missing sync success status: %s", w.Body.String())
+	}
+	failFetch = true
+	expect(t, request(f.handler, f.admin, "POST", "/api/crm/organisations/"+imported.ID+"/sync", ""), 409)
+	w = request(f.handler, f.admin, "GET", "/api/crm/organisations/"+imported.ID+"/sync-status", "")
+	expect(t, w, 200)
+	if !strings.Contains(w.Body.String(), `"state":"error"`) || !strings.Contains(w.Body.String(), `"error":"provider_unavailable"`) || strings.Contains(w.Body.String(), "private provider detail") || !strings.Contains(w.Body.String(), `"synced_at":`) {
+		t.Fatalf("unsafe or missing sync failure status: %s", w.Body.String())
+	}
+	failFetch = false
+	expect(t, jsonRequest(t, f, f.admin, "POST", "/api/crm/providers/http/import", map[string]any{"external_id": "ext-1"}), 409)
 	w = jsonRequest(t, f, f.admin, "PUT", "/api/crm/providers/http/config", map[string]any{"enabled": false, "secret_ref": "", "expected_revision": 1})
 	expect(t, w, 200)
 	expect(t, request(f.handler, f.admin, "GET", "/api/crm/organisations?q=Acme", ""), 200)

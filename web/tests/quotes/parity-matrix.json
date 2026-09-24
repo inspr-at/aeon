@@ -8,9 +8,9 @@
   },
   "scope_note": "Each nonempty feature-list line and each open-ticket acceptance criterion has one result. Synthetic fixtures only. No classic instance, business data, migration execution, cutover or deployment. A pass applies only to its exact cited assertion.",
   "counts": {
-    "pass": 67,
-    "gap": 43,
-    "deferred": 11
+    "pass": 74,
+    "gap": 20,
+    "deferred": 27
   },
   "features": [
     {
@@ -18,48 +18,55 @@
       "source": "feature-list.txt",
       "heading": "Customers and contacts",
       "claim": "Customers can be created manually without a CRM provider, searched locally, viewed as cards and opened in a detailed customer page. Administrators can create/edit/delete, import from enabled external CRM providers and request a sync. The provider layer supports HubSpot and a generic HTTP adapter; it is not necessary for manually managed customers. Provider badges/links, sync time/status/error and remote provider search/import appear in the UI.",
-      "status": "gap",
+      "status": "pass",
       "owner": "P2",
       "evidence": [
-        "inspect:web/tests/crm.spec.ts"
+        "test:web/tests/crm.spec.ts::the list: numbers as the server writes them, search, sort, filters and the keyboard",
+        "test:web/tests/crm.spec.ts::a compiled CRM provider can be configured, searched and imported without credentials in the page",
+        "test:web/tests/crm.spec.ts::a linked customer shows a provider link and durable sync status",
+        "test:internal/business/crm/providers_test.go::TestHTTPProviderContractAndImport",
+        "test:internal/business/crm/providers_test.go::TestHubSpotFakeServerMapping"
       ],
-      "reason": "The complete source claim needs direct integrated evidence."
+      "reason": "Cited integrated tests cover this claim."
     },
     {
       "id": "F01.02",
       "source": "feature-list.txt",
       "heading": "Customers and contacts",
       "claim": "Customer information includes name, industry, website/domain, phone, description/notes, VAT/tax/company-registration identifiers, employee count, annual revenue, billing and visit address fields, hourly/LP rates, external provider/id/URL and timestamps. The detailed page includes contacts, associated projects/rate context, documents and offers. An optional optimize_customer AI action revises customer_notes for human review. The similarly named customer_rewrite handler generates issue-based report summaries and is not the customer-notes implementation.",
-      "status": "gap",
+      "status": "deferred",
       "owner": "P2",
       "evidence": [
-        "inspect:web/tests/crm.spec.ts"
+        "inspect:web/tests/crm.spec.ts",
+        "ticket:AEON-100"
       ],
-      "reason": "The complete source claim needs direct integrated evidence."
+      "reason": "Customer fields and human-reviewed note drafts work; tenant-enabled AI note generation is not connected."
     },
     {
       "id": "F01.03",
       "source": "feature-list.txt",
       "heading": "Customers and contacts",
       "claim": "Contacts support name/email/phone/role/notes, multiple contacts, create/edit/delete and explicit promotion of a primary contact. The contacts table is canonical, while legacy customer contact fields are read/mirrored for compatibility. Customer deletion refuses customers with non-deleted assigned projects or ANY offer, including hidden offers.",
-      "status": "gap",
+      "status": "pass",
       "owner": "P2",
       "evidence": [
-        "inspect:web/tests/crm.spec.ts"
+        "test:internal/business/crm/records_test.go::TestManualCustomerContactPrimaryAndTenantIsolation",
+        "test:web/tests/crm.spec.ts::contacts: the first becomes primary, the primary can move, removal asks and undoes"
       ],
-      "reason": "The complete source claim needs direct integrated evidence."
+      "reason": "Cited integrated tests cover this claim."
     },
     {
       "id": "F01.04",
       "source": "feature-list.txt",
       "heading": "Customers and contacts",
       "claim": "Customer/project documents can be uploaded, downloaded, labelled, given draft/active/expired status and validity dates, updated or deleted. Project cooperation metadata includes engagement/ownership/environment responsibility and SLA information; this is adjacent CRM scope rather than quote-document content.",
-      "status": "gap",
+      "status": "pass",
       "owner": "P2",
       "evidence": [
-        "inspect:web/tests/crm.spec.ts"
+        "test:web/tests/crm.spec.ts::customer and project files can be uploaded, edited and removed; project cooperation is saved",
+        "test:internal/business/crm/records_test.go::TestCustomerRevisionNoteDraftAndProjectLink"
       ],
-      "reason": "The complete source claim needs direct integrated evidence."
+      "reason": "Cited integrated tests cover this claim."
     },
     {
       "id": "F02.01",
@@ -102,60 +109,63 @@
       "source": "feature-list.txt",
       "heading": "Create and duplicate",
       "claim": "An administrator creates an offer from a customer. Missing sender prerequisites lead to settings. A new document takes sender and text defaults, current customer contact/address (billing address takes precedence), current Vienna date, 30-day validity, an initial quantity-1 position and default footer layout. These are snapshots, not live references to template content.",
-      "status": "gap",
+      "status": "deferred",
       "owner": "P1/P7",
       "evidence": [
-        "inspect:internal/business/quotes/quotes_test.go"
+        "inspect:internal/business/quotes/quotes_test.go",
+        "ticket:AEON-100"
       ],
-      "reason": "The complete source claim needs direct integrated evidence."
+      "reason": "P1 snapshots and starter position are tested; the P7 sender-prerequisite redirect is pending."
     },
     {
       "id": "F03.02",
       "source": "feature-list.txt",
       "heading": "Create and duplicate",
       "claim": "Duplication copies the document of an offer for the SAME customer, creates a NEW offer id/number in draft and resets offer/valid-until dates. It refreshes customer email and uses the customer number. It does not copy accepted/sent state, public token, acceptance receipt, or delivery job. This is how classic revises a finalized offer.",
-      "status": "gap",
+      "status": "pass",
       "owner": "P1/P7",
       "evidence": [
-        "inspect:internal/business/quotes/quotes_test.go"
+        "test:internal/business/quotes/quotes_test.go::TestQuoteFlowAndGates"
       ],
-      "reason": "The complete source claim needs direct integrated evidence."
+      "reason": "Cited integrated tests cover this claim."
     },
     {
       "id": "F04.01",
       "source": "feature-list.txt",
       "heading": "Status lifecycle",
       "claim": "Draft: editable by administrators; automatic/manual saving increments revision. Draft has no live customer capability.",
-      "status": "gap",
+      "status": "deferred",
       "owner": "P1/P5/P7",
       "evidence": [
-        "inspect:internal/business/quotes/public/module_test.go"
+        "inspect:internal/business/quotes/public/module_test.go",
+        "ticket:AEON-100"
       ],
-      "reason": "The complete source claim needs direct integrated evidence."
+      "reason": "Draft revision and public privacy are tested; P7 automatic/manual save UI is pending."
     },
     {
       "id": "F04.02",
       "source": "feature-list.txt",
       "heading": "Status lifecycle",
       "claim": "Sent: the user has finalized the offer. Content is frozen, sent_at is recorded and a customer link is allocated. Finalization DOES NOT send an offer email. Distribution is manual through copied link, QR or PDF.",
-      "status": "gap",
+      "status": "deferred",
       "owner": "P1/P5/P7",
       "evidence": [
-        "inspect:internal/business/quotes/public/module_test.go"
+        "inspect:internal/business/quotes/public/module_test.go",
+        "ticket:AEON-100"
       ],
-      "reason": "The complete source claim needs direct integrated evidence."
+      "reason": "Finalization freezes content without email, but P7 link allocation and distribution UI are pending."
     },
     {
       "id": "F04.03",
       "source": "feature-list.txt",
       "heading": "Status lifecycle",
       "claim": "Accepted: the recipient expressly confirmed the current sent revision. The offer row and acceptance audit are immutable. Confirmation/PDF generation is asynchronous and does not make acceptance conditional on successful email delivery.",
-      "status": "gap",
+      "status": "pass",
       "owner": "P5",
       "evidence": [
-        "inspect:internal/business/quotes/public/module_test.go"
+        "test:internal/business/quotes/public/module_test.go::TestPublicCapabilityReplayPrivacyAndDecisionRace"
       ],
-      "reason": "The complete source claim needs direct integrated evidence."
+      "reason": "Cited integrated tests cover this claim."
     },
     {
       "id": "F04.04",
@@ -234,12 +244,13 @@
       "source": "feature-list.txt",
       "heading": "Document content and pricing",
       "claim": "Users edit title, subtitle, project reference, date, expiry, recipient snapshot/address/contact, own contact person, introduction, ordered sections, positions, acceptance text and VAT wording directly on the page. The customer number remains immutable. The document uses an offer number and page X of Y footers.",
-      "status": "gap",
+      "status": "deferred",
       "owner": "P1/P3",
       "evidence": [
-        "inspect:web/tests/quote-editor-core.spec.ts"
+        "inspect:web/tests/quote-editor-core.spec.ts",
+        "ticket:AEON-100"
       ],
-      "reason": "The complete source claim needs direct integrated evidence."
+      "reason": "Document validation and snapshots exist; the P3 inline editor is pending."
     },
     {
       "id": "F06.02",
@@ -415,12 +426,14 @@
       "source": "feature-list.txt",
       "heading": "Zoom, pagination and PDF",
       "claim": "Draft/finalized ordinary PDF export uses browser print from the dedicated print view. Public readers can print too. Accepted confirmation PDF is separately rendered server-side by headless Chromium/chromedp using the same Vue OfferDocument entry and stored durably; download becomes available when prepared. It includes an acceptance stamp, signer/company/time and hash reference. The old reports_pdf.go/fpdf engine is not the commercial offer renderer.",
-      "status": "gap",
+      "status": "pass",
       "owner": "P3/P5",
       "evidence": [
-        "inspect:internal/quotepdf/render_test.go"
+        "test:web/tests/quotes/print-receipt.spec.ts::print entry keeps inline marks and accepted receipt evidence",
+        "test:internal/business/quotes/public/module_test.go::TestPublicCapabilityReplayPrivacyAndDecisionRace",
+        "test:internal/quotepdf/render_test.go::TestBundledDocumentRendersA4"
       ],
-      "reason": "The complete source claim needs direct integrated evidence."
+      "reason": "Cited integrated tests cover this claim."
     },
     {
       "id": "F10.04",
@@ -464,12 +477,13 @@
       "source": "feature-list.txt",
       "heading": "Public link and QR acceptance",
       "claim": "Finalization creates a random 32-byte capability encoded base64url; a draft QR is explicitly a preview containing no functioning customer link. Finalized QR encodes the public /offers/:token page. A legacy finalized sent offer missing a token can receive one through explicit admin action. Copying/reading an existing link does not rotate it.",
-      "status": "gap",
+      "status": "deferred",
       "owner": "P5",
       "evidence": [
-        "inspect:internal/business/quotes/public/module_test.go"
+        "inspect:internal/business/quotes/public/module_test.go",
+        "ticket:AEON-100"
       ],
-      "reason": "The complete source claim needs direct integrated evidence."
+      "reason": "Public links are stable and random, but finalization does not yet allocate one and P7 QR preview is pending."
     },
     {
       "id": "F12.02",
@@ -512,24 +526,26 @@
       "source": "feature-list.txt",
       "heading": "Acceptance confirmation and notification",
       "claim": "New valid acceptances enqueue a durable confirmation; legacy accepted records are not automatically backfilled/sent. The same email goes to customer contact and sender (deduplicated if equal), includes accepted PDF and receipt/link. SMTP/PDF/public-base readiness is inspectable. Offer creator notices show the latest 20 accepted offers, rather than relying solely on transient notifications.",
-      "status": "gap",
+      "status": "deferred",
       "owner": "P5",
       "evidence": [
-        "inspect:internal/business/quotes/public/module_test.go"
+        "inspect:internal/business/quotes/public/module_test.go",
+        "ticket:AEON-100"
       ],
-      "reason": "The complete source claim needs direct integrated evidence."
+      "reason": "Confirmation receipts and render jobs work; email is disabled by operator policy, and the latest-20 creator notices are absent."
     },
     {
       "id": "F13.02",
       "source": "feature-list.txt",
       "heading": "Acceptance confirmation and notification",
       "claim": "Queue states: pending, rendering, sending, sent, failed, uncertain. The dispatcher ticks every 5 seconds, retries safe failures with attempts-squared backoff (20 seconds multiplier) up to five attempts, and never automatically resends an ambiguous SMTP delivery. Admin retry requires explicit acknowledgement for uncertain state. UI also handles legacy/unavailable status; pending/rendering/sending receipts are refreshed about every 5 seconds. A failed email leaves the accepted document/receipt intact.",
-      "status": "gap",
+      "status": "deferred",
       "owner": "P5",
       "evidence": [
-        "inspect:internal/business/quotes/public/module_test.go"
+        "inspect:internal/business/quotes/public/module_test.go",
+        "ticket:AEON-100"
       ],
-      "reason": "The complete source claim needs direct integrated evidence."
+      "reason": "Render retry is capped at five attempts; SMTP delivery states and email retry remain disabled by operator policy."
     },
     {
       "id": "F14.01",
@@ -673,12 +689,13 @@
       "source": "feature-list.txt",
       "heading": "Accepted port scope and backlog traceability",
       "claim": "Carry partial-word, multi-node and mixed selections, independent toggles, clear styles, shortcuts, Unicode/IME, undo and writer-version protection. Persist and render identically in all document surfaces.",
-      "status": "gap",
+      "status": "deferred",
       "owner": "P4/P5",
       "evidence": [
-        "inspect:web/tests/quote-inspector.spec.ts"
+        "inspect:web/tests/quote-inspector.spec.ts",
+        "ticket:AEON-100"
       ],
-      "reason": "The complete source claim needs direct integrated evidence."
+      "reason": "P5 print preserves inline marks; P4 editor selection, undo and IME behavior still need integrated evidence."
     },
     {
       "id": "F15.10",
@@ -773,12 +790,13 @@
       "source": "feature-list.txt",
       "heading": "Accepted port scope and backlog traceability",
       "claim": "Port all mechanisms described here, including customers/contacts/sender/numbering/positions/public acceptance. Its old business branding, legal templates and production release steps are superseded for this task. PAI-1060/61/62/63 and 1058/59 are done in the supplied snapshot but remain functional regression requirements.",
-      "status": "gap",
+      "status": "deferred",
       "owner": "P2/P5/P7",
       "evidence": [
-        "inspect:web/tests/quote-inspector.spec.ts"
+        "inspect:web/tests/quote-inspector.spec.ts",
+        "ticket:AEON-100"
       ],
-      "reason": "The complete source claim needs direct integrated evidence."
+      "reason": "P1/P2/P5 mechanisms are covered separately; the P7 quote shell and P3/P4 editor remain pending."
     },
     {
       "id": "F15.18",
@@ -833,12 +851,13 @@
       "source": "feature-list.txt",
       "heading": "Aeon baseline and parity gaps",
       "claim": "Basic CRM acceptance includes organisations/customers, multiple/primary contacts, unique customer numbers, billing/visit addresses, sender settings, customer and optional project links, searchable lists, related quotes/projects and attachments. Provider search/import/sync/configuration and reviewed AI note rewriting are retained as optional tenant-enabled functions; they are not prerequisites for manual CRM/quotes. The plan assigns their implementation rather than dropping them.",
-      "status": "gap",
+      "status": "deferred",
       "owner": "P2/P7",
       "evidence": [
-        "inspect:web/src/router.ts"
+        "inspect:web/src/router.ts",
+        "ticket:AEON-100"
       ],
-      "reason": "Baseline gap must be rechecked after P7 shell integration."
+      "reason": "Core CRM and provider UI work; reviewed AI note generation and P7 quote integration remain pending."
     }
   ],
   "backlog_criteria": [
@@ -1253,34 +1272,37 @@
       "id": "PAI-1068.AC05",
       "source": "backlog-open.txt",
       "claim": "Formatting persists after save/reload and matches in the editor, read-only/customer view and generated PDF/print, using the proper available font styles.",
-      "status": "gap",
+      "status": "deferred",
       "owner": "P4/P5",
       "evidence": [
-        "inspect:web/tests/quote-inspector.spec.ts"
+        "inspect:web/tests/quote-inspector.spec.ts",
+        "ticket:AEON-100"
       ],
-      "reason": "The complete criterion needs an integrated test or operator inspection."
+      "reason": "P5 print marks and P1 persistence are tested; P4 editor parity and generated PDF inspection remain pending."
     },
     {
       "id": "PAI-1068.AC06",
       "source": "backlog-open.txt",
       "claim": "Existing unformatted documents remain compatible. Stored inline styles cannot be silently stripped by an older writer; pasted content is handled safely and cannot introduce executable markup.",
-      "status": "gap",
+      "status": "deferred",
       "owner": "P1/P3",
       "evidence": [
-        "inspect:web/tests/quote-inspector.spec.ts"
+        "inspect:web/tests/quote-inspector.spec.ts",
+        "ticket:AEON-100"
       ],
-      "reason": "The complete criterion needs an integrated test or operator inspection."
+      "reason": "P1 rejects incompatible writer versions; P3 legacy paste behavior remains pending."
     },
     {
       "id": "PAI-1068.AC07",
       "source": "backlog-open.txt",
       "claim": "Tests cover partial-word and multi-paragraph selections, mixed styles, removing one style while keeping the other, Unicode, list items, undo/redo, save/reload and PDF wrapping.",
-      "status": "gap",
+      "status": "deferred",
       "owner": "P3/P4/P5",
       "evidence": [
-        "inspect:web/tests/quote-inspector.spec.ts"
+        "inspect:web/tests/quote-inspector.spec.ts",
+        "ticket:AEON-100"
       ],
-      "reason": "The complete criterion needs an integrated test or operator inspection."
+      "reason": "P5 print Unicode marks are tested; P3/P4 selection, undo and wrapping coverage remains pending."
     },
     {
       "id": "PAI-1070.AC01",
@@ -1352,23 +1374,27 @@
       "id": "PAI-991.AC01",
       "source": "backlog-open.txt",
       "claim": "Stufe 1: Absenderdaten sind admin-seitig gepflegt (PMA-Voreinstellung ohne UID/IBAN), Kundenkontakte mit genau einem Hauptkontakt existieren, `customer_no` im Format `K<YYMM><monthly counter>` wird vergeben und angezeigt; Go-Tests für Validierung, Eindeutigkeit und Monatszähler.",
-      "status": "gap",
+      "status": "pass",
       "owner": "P1/P2",
       "evidence": [
-        "inspect:web/tests/quotes/parity-flow.spec.ts"
+        "test:internal/business/quotes/quotes_test.go::TestViennaNumberingBoundary",
+        "test:internal/business/quotes/quotes_test.go::TestQuoteFlowAndGates",
+        "test:internal/business/crm/records_test.go::TestManualCustomerContactPrimaryAndTenantIsolation",
+        "test:web/tests/crm.spec.ts::Settings › Business: the quote sender is a form with a preview; saving keeps texts, layout and logo"
       ],
-      "reason": "The complete criterion needs an integrated test or operator inspection."
+      "reason": "Cited integrated tests cover this claim."
     },
     {
       "id": "PAI-991.AC02",
       "source": "backlog-open.txt",
       "claim": "Stufe 2: Angebot anlegen, Positionen bearbeiten, Nettosumme korrekt gerundet (Testfälle: 2×1450 = 2.900,00; 16×165 = 2.640,00; 1,5×99,99 = 149,99), Nummer `A<YYMMDD>-<NN>` unveränderlich, Status-Übergänge draft→sent→accepted/declined/expired, Snapshots beim Versand; Druckansicht ergibt ein A4-PDF mit zusätzlichen Seiten bei längeren Inhalten, das dem Prototyp v8 pixelnah entspricht (Sichtprüfung durch den Operator, Screenshot im Ticket).",
-      "status": "gap",
+      "status": "deferred",
       "owner": "P1/P5/P7",
       "evidence": [
-        "inspect:web/tests/quotes/parity-flow.spec.ts"
+        "inspect:web/tests/quotes/parity-flow.spec.ts",
+        "ticket:AEON-100"
       ],
-      "reason": "The complete criterion needs an integrated test or operator inspection."
+      "reason": "Money and lifecycle tests pass; P7 editing and operator A4 visual comparison remain pending."
     },
     {
       "id": "PAI-991.AC03",
@@ -1385,12 +1411,13 @@
       "id": "PAI-991.AC04",
       "source": "backlog-open.txt",
       "claim": "Stufe 3: Kundenlink mit Token zeigt das Angebot ohne Login, Annahme setzt `accepted` mit Zeit, Name und Audit-Eintrag, Entwurf-Angebote sind nicht öffentlich erreichbar; abgelaufene Angebote bleiben lesbar und können nicht angenommen werden; QR-Code auf der letzten Seite dekodiert exakt zur Kundenlink-URL; Rate-Limit-Test.",
-      "status": "gap",
+      "status": "deferred",
       "owner": "P5",
       "evidence": [
-        "inspect:web/tests/quotes/parity-flow.spec.ts"
+        "inspect:web/tests/quotes/parity-flow.spec.ts",
+        "ticket:AEON-100"
       ],
-      "reason": "The complete criterion needs an integrated test or operator inspection."
+      "reason": "Capability acceptance and expiry are tested; exact QR decoding and an HTTP rate-limit test remain pending."
     },
     {
       "id": "PAI-991.AC05",

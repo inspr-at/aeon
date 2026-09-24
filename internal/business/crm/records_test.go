@@ -124,6 +124,15 @@ func TestCustomerRevisionNoteDraftAndProjectLink(t *testing.T) {
 	}
 	w = jsonRequest(t, f, f.admin, "PUT", "/api/crm/projects/"+project+"/customer", map[string]any{"organisation_node_id": c.ID})
 	expect(t, w, 200)
+	var attachment string
+	e = db.InTenant(t.Context(), f.db.App, f.admin.TenantID, func(tx pgx.Tx) error {
+		return tx.QueryRow(t.Context(), `INSERT INTO attachments(tenant_id,node_id,sha256,name,content_type,size,created_by) VALUES($1::uuid,$2::uuid,$3,'agreement.pdf','application/pdf',1,$4::uuid) RETURNING id::text`, f.admin.TenantID, project, strings.Repeat("a", 64), f.admin.ID).Scan(&attachment)
+	})
+	if e != nil {
+		t.Fatal(e)
+	}
+	expect(t, jsonRequest(t, f, f.admin, "PUT", "/api/crm/documents/"+attachment+"/metadata", map[string]any{"title": "Agreement", "category": "contract", "status": "active", "valid_from": "2026-01-01", "valid_until": "2027-12-31", "expected_revision": 0}), 200)
+	expect(t, jsonRequest(t, f, f.admin, "PUT", "/api/crm/projects/"+project+"/cooperation", map[string]any{"engagement": "retainer", "sla": "next business day", "expected_revision": 0}), 200)
 	w = request(f.handler, f.admin, "GET", "/api/crm/organisations/"+c.ID+"/related", "")
 	expect(t, w, 200)
 	var related Related
@@ -131,6 +140,10 @@ func TestCustomerRevisionNoteDraftAndProjectLink(t *testing.T) {
 	if len(related.Projects) != 1 || related.Projects[0].ID != project {
 		t.Fatalf("related %+v", related)
 	}
+	if len(related.Documents) != 1 || related.Documents[0].AttachmentID != attachment || related.Documents[0].Revision != 1 || related.Documents[0].Status != "active" || related.Projects[0].CooperationRevision != 1 || !strings.Contains(string(related.Projects[0].Cooperation), "retainer") {
+		t.Fatalf("related metadata %+v", related)
+	}
+	expect(t, jsonRequest(t, f, f.admin, "PUT", "/api/crm/documents/"+attachment+"/metadata", map[string]any{"title": "New", "category": "contract", "status": "expired", "expected_revision": 0}), 409)
 	expect(t, request(f.handler, f.admin, "DELETE", "/api/crm/organisations/"+c.ID, ""), 409)
 	if !strings.Contains(fmt.Sprint(logEvents(t, f)), "crm.note_rewrite_applied") {
 		t.Fatal("missing event")
