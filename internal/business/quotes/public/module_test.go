@@ -24,6 +24,29 @@ import (
 	"github.com/jackc/pgx/v5"
 )
 
+func TestLinkManagementRequiresAdmin(t *testing.T) {
+	m := &Module{}
+	mux := http.NewServeMux()
+	m.Mount(mux)
+	for _, route := range []struct{ method, path string }{
+		{http.MethodGet, "/api/quotes/aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa/versions/1/public-link"},
+		{http.MethodPost, "/api/quotes/aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa/versions/1/public-link"},
+		{http.MethodPost, "/api/quotes/aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa/versions/1/public-link/revoke"},
+	} {
+		for _, principal := range []*tenant.Principal{nil, {TenantID: "bbbbbbbb-bbbb-4bbb-8bbb-bbbbbbbbbbbb", ID: "cccccccc-cccc-4ccc-8ccc-cccccccccccc", Kind: tenant.Person, Roles: []string{"member"}}} {
+			request := httptest.NewRequest(route.method, route.path, nil)
+			if principal != nil {
+				request = request.WithContext(tenant.WithPrincipal(request.Context(), *principal))
+			}
+			rec := httptest.NewRecorder()
+			mux.ServeHTTP(rec, request)
+			if rec.Code != http.StatusForbidden {
+				t.Errorf("%s %s: %d", route.method, route.path, rec.Code)
+			}
+		}
+	}
+}
+
 type fixture struct {
 	t            *testing.T
 	pool         *dbtest.DB
