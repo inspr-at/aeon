@@ -40,6 +40,7 @@ type Module struct {
 	registry *plugins.Registry
 	assets   fs.FS
 	store    attachments.Store
+	renders  chan struct{}
 }
 
 var _ httpapi.Module = (*Module)(nil)
@@ -59,7 +60,17 @@ func New(pool *pgxpool.Pool, registry *plugins.Registry, assets fs.FS, store att
 	if _, ok := registry.Lookup("business_quotes"); !ok {
 		return nil, errors.New("business_quotes manifest absent")
 	}
-	return &Module{pool: pool, registry: registry, assets: assets, store: store}, nil
+	return &Module{pool: pool, registry: registry, assets: assets, store: store, renders: make(chan struct{}, 1)}, nil
+}
+
+// SetRenderConcurrency configures the process-wide limit before the module is
+// mounted. ProcessNext and the plugin job entry share this same semaphore.
+func (m *Module) SetRenderConcurrency(limit int) error {
+	if limit < 1 || limit > 4 {
+		return errors.New("confirmation render concurrency must be between 1 and 4")
+	}
+	m.renders = make(chan struct{}, limit)
+	return nil
 }
 
 // ManifestPlugin declares the tenant-scoped receipt renderer to the R3 job
@@ -362,6 +373,12 @@ func serviceActor(ctx context.Context, tx pgx.Tx, tenantID string) (tenant.Princ
 // snapshot, and binds the immutable PDF hash. It never sends email. A crash
 // leaves a lease that can be reclaimed, without replacing a stored receipt.
 func (m *Module) ProcessNext(ctx context.Context, tenantID string) (bool, error) {
+	select {
+	case m.renders <- struct{}{}:
+		defer func() { <-m.renders }()
+	case <-ctx.Done():
+		return false, ctx.Err()
+	}
 	if !uuidPattern.MatchString(tenantID) {
 		return false, errors.New("invalid tenant")
 	}
