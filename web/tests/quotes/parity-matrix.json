@@ -1,0 +1,1487 @@
+{
+  "schema": "aeon.quote-parity.v1",
+  "ticket": "AEON-98",
+  "baseline": {
+    "classic_commit": "a93317aa15286ee0250b5a14a51b84e19c57e355",
+    "source": "read-only pinned classic source",
+    "aeon_branch": "qp8.parity"
+  },
+  "scope_note": "Each nonempty feature-list line and each open-ticket acceptance criterion has one result. Synthetic fixtures only. No classic instance, business data, migration execution, cutover or deployment. A pass applies only to its exact cited assertion.",
+  "counts": {
+    "pass": 67,
+    "gap": 43,
+    "deferred": 11
+  },
+  "features": [
+    {
+      "id": "F01.01",
+      "source": "feature-list.txt",
+      "heading": "Customers and contacts",
+      "claim": "Customers can be created manually without a CRM provider, searched locally, viewed as cards and opened in a detailed customer page. Administrators can create/edit/delete, import from enabled external CRM providers and request a sync. The provider layer supports HubSpot and a generic HTTP adapter; it is not necessary for manually managed customers. Provider badges/links, sync time/status/error and remote provider search/import appear in the UI.",
+      "status": "gap",
+      "owner": "P2",
+      "evidence": [
+        "inspect:web/tests/crm.spec.ts"
+      ],
+      "reason": "The complete source claim needs direct integrated evidence."
+    },
+    {
+      "id": "F01.02",
+      "source": "feature-list.txt",
+      "heading": "Customers and contacts",
+      "claim": "Customer information includes name, industry, website/domain, phone, description/notes, VAT/tax/company-registration identifiers, employee count, annual revenue, billing and visit address fields, hourly/LP rates, external provider/id/URL and timestamps. The detailed page includes contacts, associated projects/rate context, documents and offers. An optional optimize_customer AI action revises customer_notes for human review. The similarly named customer_rewrite handler generates issue-based report summaries and is not the customer-notes implementation.",
+      "status": "gap",
+      "owner": "P2",
+      "evidence": [
+        "inspect:web/tests/crm.spec.ts"
+      ],
+      "reason": "The complete source claim needs direct integrated evidence."
+    },
+    {
+      "id": "F01.03",
+      "source": "feature-list.txt",
+      "heading": "Customers and contacts",
+      "claim": "Contacts support name/email/phone/role/notes, multiple contacts, create/edit/delete and explicit promotion of a primary contact. The contacts table is canonical, while legacy customer contact fields are read/mirrored for compatibility. Customer deletion refuses customers with non-deleted assigned projects or ANY offer, including hidden offers.",
+      "status": "gap",
+      "owner": "P2",
+      "evidence": [
+        "inspect:web/tests/crm.spec.ts"
+      ],
+      "reason": "The complete source claim needs direct integrated evidence."
+    },
+    {
+      "id": "F01.04",
+      "source": "feature-list.txt",
+      "heading": "Customers and contacts",
+      "claim": "Customer/project documents can be uploaded, downloaded, labelled, given draft/active/expired status and validity dates, updated or deleted. Project cooperation metadata includes engagement/ownership/environment responsibility and SLA information; this is adjacent CRM scope rather than quote-document content.",
+      "status": "gap",
+      "owner": "P2",
+      "evidence": [
+        "inspect:web/tests/crm.spec.ts"
+      ],
+      "reason": "The complete source claim needs direct integrated evidence."
+    },
+    {
+      "id": "F02.01",
+      "source": "feature-list.txt",
+      "heading": "Customer and offer numbers",
+      "claim": "Creating a customer does not itself assign a customer number. The first offer allocates it in the same transaction as offer creation. New customer numbers use K + YYMM + a positive unpadded monthly sequence (e.g. K26091 is September 2026 sequence 1); month boundary is Europe/Vienna. A customer number is unique and normally immutable.",
+      "status": "pass",
+      "owner": "P1/P2",
+      "evidence": [
+        "test:internal/business/quotes/quotes_test.go::TestQuoteFlowAndGates"
+      ],
+      "reason": "The cited passing checks cover this source claim."
+    },
+    {
+      "id": "F02.02",
+      "source": "feature-list.txt",
+      "heading": "Customer and offer numbers",
+      "claim": "Legacy numbers shaped KYY-NNN... can be explicitly converted once using the expected old number, only while every related offer remains draft. All draft customer-number snapshots and save revisions are updated atomically. A finalized offer blocks conversion. No automatic rewrite of existing numbers occurs. The conversion exists as an admin API; a dedicated button was not found in the inspected customer views.",
+      "status": "pass",
+      "owner": "P1/P2",
+      "evidence": [
+        "test:internal/business/quotes/quotes_test.go::TestQuoteFlowAndGates"
+      ],
+      "reason": "The cited passing checks cover this source claim."
+    },
+    {
+      "id": "F02.03",
+      "source": "feature-list.txt",
+      "heading": "Customer and offer numbers",
+      "claim": "Offer numbers use AYYMMDD-NN (daily sequence, minimum two digits, Europe/Vienna). Creation allocates a unique offer number, even for a draft. Identity/customer association cannot later be changed. Sequences do not reuse hidden/deleted offer numbers.",
+      "status": "pass",
+      "owner": "P1/P2",
+      "evidence": [
+        "test:internal/business/quotes/quotes_test.go::TestQuoteFlowAndGates"
+      ],
+      "reason": "The cited passing checks cover this source claim."
+    },
+    {
+      "id": "F03.01",
+      "source": "feature-list.txt",
+      "heading": "Create and duplicate",
+      "claim": "An administrator creates an offer from a customer. Missing sender prerequisites lead to settings. A new document takes sender and text defaults, current customer contact/address (billing address takes precedence), current Vienna date, 30-day validity, an initial quantity-1 position and default footer layout. These are snapshots, not live references to template content.",
+      "status": "gap",
+      "owner": "P1/P7",
+      "evidence": [
+        "inspect:internal/business/quotes/quotes_test.go"
+      ],
+      "reason": "The complete source claim needs direct integrated evidence."
+    },
+    {
+      "id": "F03.02",
+      "source": "feature-list.txt",
+      "heading": "Create and duplicate",
+      "claim": "Duplication copies the document of an offer for the SAME customer, creates a NEW offer id/number in draft and resets offer/valid-until dates. It refreshes customer email and uses the customer number. It does not copy accepted/sent state, public token, acceptance receipt, or delivery job. This is how classic revises a finalized offer.",
+      "status": "gap",
+      "owner": "P1/P7",
+      "evidence": [
+        "inspect:internal/business/quotes/quotes_test.go"
+      ],
+      "reason": "The complete source claim needs direct integrated evidence."
+    },
+    {
+      "id": "F04.01",
+      "source": "feature-list.txt",
+      "heading": "Status lifecycle",
+      "claim": "Draft: editable by administrators; automatic/manual saving increments revision. Draft has no live customer capability.",
+      "status": "gap",
+      "owner": "P1/P5/P7",
+      "evidence": [
+        "inspect:internal/business/quotes/public/module_test.go"
+      ],
+      "reason": "The complete source claim needs direct integrated evidence."
+    },
+    {
+      "id": "F04.02",
+      "source": "feature-list.txt",
+      "heading": "Status lifecycle",
+      "claim": "Sent: the user has finalized the offer. Content is frozen, sent_at is recorded and a customer link is allocated. Finalization DOES NOT send an offer email. Distribution is manual through copied link, QR or PDF.",
+      "status": "gap",
+      "owner": "P1/P5/P7",
+      "evidence": [
+        "inspect:internal/business/quotes/public/module_test.go"
+      ],
+      "reason": "The complete source claim needs direct integrated evidence."
+    },
+    {
+      "id": "F04.03",
+      "source": "feature-list.txt",
+      "heading": "Status lifecycle",
+      "claim": "Accepted: the recipient expressly confirmed the current sent revision. The offer row and acceptance audit are immutable. Confirmation/PDF generation is asynchronous and does not make acceptance conditional on successful email delivery.",
+      "status": "gap",
+      "owner": "P5",
+      "evidence": [
+        "inspect:internal/business/quotes/public/module_test.go"
+      ],
+      "reason": "The complete source claim needs direct integrated evidence."
+    },
+    {
+      "id": "F04.04",
+      "source": "feature-list.txt",
+      "heading": "Status lifecycle",
+      "claim": "Expired: sent offer whose validity date is past (or invalid) is presented as expired on read. Expiry uses the Vienna calendar day; acceptance remains possible through the valid-until day. The stored status need not have been rewritten to expired. The customer can read but cannot accept.",
+      "status": "pass",
+      "owner": "P1/P5/P7",
+      "evidence": [
+        "test:internal/business/quotes/public/module_test.go::TestExpiredReadableAndLinkCreationUndo"
+      ],
+      "reason": "The cited passing checks cover this source claim."
+    },
+    {
+      "id": "F04.05",
+      "source": "feature-list.txt",
+      "heading": "Status lifecycle",
+      "claim": "Declined: allowed by the DB/status labels; no decline action/endpoint was found in the pinned quote implementation. Do not advertise an implemented reject workflow.",
+      "status": "deferred",
+      "owner": "coordinator",
+      "evidence": [
+        "inspect:internal/business/quotes/public/module_test.go"
+      ],
+      "reason": "Historical classic behavior or absent workflow; Aeon scope is traced separately in the open criteria."
+    },
+    {
+      "id": "F04.06",
+      "source": "feature-list.txt",
+      "heading": "Status lifecycle",
+      "claim": "Hidden/deleted: separate visibility flag. Drafts are described as deleted, finalized ones as archived; both can be restored or included in lists. It does not erase content/evidence, revoke an existing customer link or change commercial status.",
+      "status": "pass",
+      "owner": "P1/P5/P7",
+      "evidence": [
+        "test:internal/business/quotes/quotes_test.go::TestQuoteFlowAndGates"
+      ],
+      "reason": "The cited passing checks cover this source claim."
+    },
+    {
+      "id": "F05.01",
+      "source": "feature-list.txt",
+      "heading": "Save, version and conflict behaviour",
+      "claim": "Autosave is debounced about 700 ms; explicit Save and saved-at/saving/unsaved/error feedback are available. Save uses expected revision and only succeeds on a draft; stale writes or already finalized documents return 409. The UI keeps the local draft on conflict, permits a local draft download, and offers an explicit server reload that discards local changes. Save-before-navigation, before-unload warning and save-before-print/finalize protect local work. Invalid numeric inputs block save/print.",
+      "status": "gap",
+      "owner": "P1/P6",
+      "evidence": [
+        "inspect:web/tests/quote-collaboration.spec.ts"
+      ],
+      "reason": "The complete source claim needs direct integrated evidence."
+    },
+    {
+      "id": "F05.02",
+      "source": "feature-list.txt",
+      "heading": "Save, version and conflict behaviour",
+      "claim": "Revision is a monotonically increasing concurrency counter, NOT a retained series of draft snapshots or a user-selectable version history. Undo/redo is in the current document session. Finalized content is revised by duplication, not by editing or opening a newer version on the same offer.",
+      "status": "gap",
+      "owner": "P1/P6",
+      "evidence": [
+        "inspect:web/tests/quote-collaboration.spec.ts"
+      ],
+      "reason": "The complete source claim needs direct integrated evidence."
+    },
+    {
+      "id": "F05.03",
+      "source": "feature-list.txt",
+      "heading": "Save, version and conflict behaviour",
+      "claim": "PAI-1070 suppresses saves while loading/reloading, fences async responses to the current document and retains edits/selection through inspector interaction. Server prose writer guards protect newer structured/inline text from older editor versions, including settings writes inside a transaction.",
+      "status": "gap",
+      "owner": "P1/P6",
+      "evidence": [
+        "inspect:web/tests/quote-collaboration.spec.ts"
+      ],
+      "reason": "The complete source claim needs direct integrated evidence."
+    },
+    {
+      "id": "F06.01",
+      "source": "feature-list.txt",
+      "heading": "Document content and pricing",
+      "claim": "Users edit title, subtitle, project reference, date, expiry, recipient snapshot/address/contact, own contact person, introduction, ordered sections, positions, acceptance text and VAT wording directly on the page. The customer number remains immutable. The document uses an offer number and page X of Y footers.",
+      "status": "gap",
+      "owner": "P1/P3",
+      "evidence": [
+        "inspect:web/tests/quote-editor-core.spec.ts"
+      ],
+      "reason": "The complete source claim needs direct integrated evidence."
+    },
+    {
+      "id": "F06.02",
+      "source": "feature-list.txt",
+      "heading": "Document content and pricing",
+      "claim": "Up to 100 positions have short text, long text, quantity, unit and cent price. Rows can be added, selected, moved and removed. Server recalculates totals; quantity precision is two decimals, prices are nonnegative integer cents and each row rounds half-up to cents. EUR presentation and a textual VAT note are present; this is not a multi-currency/tax/invoice accounting engine. A default VAT note is not a computed tax amount.",
+      "status": "pass",
+      "owner": "P1/P3",
+      "evidence": [
+        "test:web/tests/quote-editor-core.spec.ts::structured prose, all six levels; internal/business/quotes/quotes_test.go::TestQuoteFlowAndGates"
+      ],
+      "reason": "The cited passing checks cover this source claim."
+    },
+    {
+      "id": "F06.03",
+      "source": "feature-list.txt",
+      "heading": "Document content and pricing",
+      "claim": "Finalization requires a title, customer name/address, at least one valid nonempty positive-quantity position, coherent dates, valid sender details and both sender/customer emails. Email and IBAN checks exist. Content becomes immutable on finalization.",
+      "status": "pass",
+      "owner": "P1/P3",
+      "evidence": [
+        "test:internal/business/quotes/quotes_test.go::TestQuoteFlowAndGates"
+      ],
+      "reason": "The cited passing checks cover this source claim."
+    },
+    {
+      "id": "F07.01",
+      "source": "feature-list.txt",
+      "heading": "Sections, lists and inline styles",
+      "claim": "A document has up to 20 text sections with editable headings/body. Sections can be added, selected, reordered and deleted with modal confirmation. Heading/section numbering follows document order; the editor keeps selection and history associated with a section through moves/repagination.",
+      "status": "gap",
+      "owner": "P3/P4",
+      "evidence": [
+        "inspect:web/tests/quote-inspector.spec.ts"
+      ],
+      "reason": "The complete source claim needs direct integrated evidence."
+    },
+    {
+      "id": "F07.02",
+      "source": "feature-list.txt",
+      "heading": "Sections, lists and inline styles",
+      "claim": "Prose supports paragraphs and list items, bullets (disc/circle/square/dash and plain custom glyph), decimal numbering and multilevel outline numbering. Depth 0..5 represents six displayed levels. Tab/Shift-Tab and inspector controls change level. Disabled level controls explain boundaries/limits. Start values up to 9999, restart, continuation across intervening paragraphs and section-bound versus independent numbering are supported. Generated numbers are not stored as part of the user's text.",
+      "status": "pass",
+      "owner": "P3/P4",
+      "evidence": [
+        "test:web/tests/quote-editor-core.spec.ts::numbering restart, explicit start"
+      ],
+      "reason": "The cited passing checks cover this source claim."
+    },
+    {
+      "id": "F07.03",
+      "source": "feature-list.txt",
+      "heading": "Sections, lists and inline styles",
+      "claim": "Marker horizontal/vertical positions and wrapped text start can be adjusted separately in mm (x -30..30; y -20..20; text -20..40). Numeric draft inputs tolerate incomplete typing and commit/canonicalize on completion; do not turn every keystroke into a forced clamp.",
+      "status": "pass",
+      "owner": "P3/P4",
+      "evidence": [
+        "test:web/tests/quote-inspector.spec.ts::millimetre fields"
+      ],
+      "reason": "The cited passing checks cover this source claim."
+    },
+    {
+      "id": "F07.04",
+      "source": "feature-list.txt",
+      "heading": "Sections, lists and inline styles",
+      "claim": "Body prose supports independent bold and italic, together or separately, plus Normal to clear them. Controls reflect mixed selections and can set typing style at a caret, including composed characters. Styles are UTF-16 character ranges on plain text; no arbitrary HTML rich-text payload. Heading/cover OfferText fields remain plain text. There is no Tiptap/ProseMirror dependency in this feature. Classic bundles Manrope weights 400/500/600/700; italic is explicitly CSS-synthesized (font-synthesis: style), rather than a separately imported italic face.",
+      "status": "pass",
+      "owner": "P3/P4",
+      "evidence": [
+        "test:web/tests/quote-inspector.spec.ts::bold and italic toggle; web/tests/quote-editor-input.spec.ts::plain paste"
+      ],
+      "reason": "The cited passing checks cover this source claim."
+    },
+    {
+      "id": "F07.05",
+      "source": "feature-list.txt",
+      "heading": "Sections, lists and inline styles",
+      "claim": "Up to 100 prose nodes/section and 2000 code points/node; strict normalization/validation on server and client. Legacy body strings still render; structured nodes supply a plain-body projection. Newer formatting requires writer version 3.",
+      "status": "pass",
+      "owner": "P3/P4",
+      "evidence": [
+        "test:internal/business/quotes/quotes_test.go::TestQuoteFlowAndGates"
+      ],
+      "reason": "The cited passing checks cover this source claim."
+    },
+    {
+      "id": "F08.01",
+      "source": "feature-list.txt",
+      "heading": "Inspector and document history",
+      "claim": "The right-hand inspector has compact Text, Section and Document tabs with context-sensitive controls, inline formatting, list type/level/numbering/marker placement, section/position actions and footer layout. It can be hidden; the app header can be collapsed. It stacks at narrow widths. Selection is held while operating the inspector, so changes apply to the intended text rather than whichever element happens to have focus.",
+      "status": "pass",
+      "owner": "P4/P7",
+      "evidence": [
+        "test:web/tests/quote-inspector.spec.ts::the inspector follows the selection"
+      ],
+      "reason": "The cited passing checks cover this source claim."
+    },
+    {
+      "id": "F08.02",
+      "source": "feature-list.txt",
+      "heading": "Inspector and document history",
+      "claim": "Undo/redo covers document edits, section operations, position operations, prose and layout; moving a section and typing in it are not isolated incompatible histories. Template settings are clearly future-offer defaults and do not rewrite the open document.",
+      "status": "pass",
+      "owner": "P4/P7",
+      "evidence": [
+        "test:web/tests/quote-editor-core.spec.ts::structured prose, all six levels"
+      ],
+      "reason": "The cited passing checks cover this source claim."
+    },
+    {
+      "id": "F08.03",
+      "source": "feature-list.txt",
+      "heading": "Inspector and document history",
+      "claim": "The selected footer mark can be resized 18..96 mm and offset vertically -6..10 mm in tenths. Existing legacy layout remains representable. Clicking the mark on a later page targets the clicked mark correctly. Embedded tenant-specific artwork and dimensions are not generic product content.",
+      "status": "gap",
+      "owner": "P4",
+      "evidence": [
+        "inspect:web/tests/quote-inspector.spec.ts"
+      ],
+      "reason": "The complete source claim needs direct integrated evidence."
+    },
+    {
+      "id": "F09.01",
+      "source": "feature-list.txt",
+      "heading": "Keyboard/input behaviour",
+      "claim": "Pos1/Home and End in prose and heading/plain fields move to the beginning/end of the VISUAL wrapped line; Shift extends selection. Native Selection.modify is preferred with a measured fallback preserving wrap affinity and scroll. Ctrl/Meta/Alt-modified Home/End are left to the browser. IME composition is protected.",
+      "status": "pass",
+      "owner": "P3/P4",
+      "evidence": [
+        "test:web/tests/quote-editor-input.spec.ts::wrapped Home/End"
+      ],
+      "reason": "The cited passing checks cover this source claim."
+    },
+    {
+      "id": "F09.02",
+      "source": "feature-list.txt",
+      "heading": "Keyboard/input behaviour",
+      "claim": "Ctrl/Cmd-B and -I change body-prose bold/italic. Ctrl/Cmd-Z undoes, Shift-Z or Ctrl/Cmd-Y redoes. Ctrl/Cmd-A selects the current prose editor. Enter splits paragraph/list structure, Shift-Enter inserts a soft break, Tab/Shift-Tab changes indentation, Backspace/Delete perform structured deletions. Paste is normalized to text rather than trusting HTML. Inspector tabs/radio groups/zoom menus support arrow/Home/End keys; modal dialogs trap normal browser focus and restore the trigger on close.",
+      "status": "pass",
+      "owner": "P3/P4",
+      "evidence": [
+        "test:web/tests/quote-editor-input.spec.ts::plain paste, Unicode composition; web/tests/quote-inspector.spec.ts::bold and italic toggle"
+      ],
+      "reason": "The cited passing checks cover this source claim."
+    },
+    {
+      "id": "F10.01",
+      "source": "feature-list.txt",
+      "heading": "Zoom, pagination and PDF",
+      "claim": "Zoom supports Fit width, Fit page, percentage presets/stepping and typed 25..800%. Fit calculations use the actual stage and account for title bar/inspector size. Screen zoom must not affect physical print dimensions.",
+      "status": "pass",
+      "owner": "P3/P5",
+      "evidence": [
+        "test:web/tests/quote-inspector.spec.ts::the title bar: compact zoom"
+      ],
+      "reason": "The cited passing checks cover this source claim."
+    },
+    {
+      "id": "F10.02",
+      "source": "feature-list.txt",
+      "heading": "Zoom, pagination and PDF",
+      "claim": "The renderer measures loaded fonts and content into A4 sheets (210 x 297 mm). Cover/sections paginate as whole blocks; positions start a separate section/page, tables repeat headings and the acceptance area moves as required. A block/row larger than one page produces an overflow warning and blocks print/finalize; it does not silently clip or split long prose across pages.",
+      "status": "pass",
+      "owner": "P3/P5/QP8",
+      "evidence": [
+        "test:web/tests/quote-editor-input.spec.ts::oversized whole section sets the single readiness and overflow contract",
+        "test:scripts/smoke-image.sh::public quote PDF text and A4 geometry"
+      ],
+      "reason": "Overflow and emitted commercial PDF A4/text checks passed with synthetic content."
+    },
+    {
+      "id": "F10.03",
+      "source": "feature-list.txt",
+      "heading": "Zoom, pagination and PDF",
+      "claim": "Draft/finalized ordinary PDF export uses browser print from the dedicated print view. Public readers can print too. Accepted confirmation PDF is separately rendered server-side by headless Chromium/chromedp using the same Vue OfferDocument entry and stored durably; download becomes available when prepared. It includes an acceptance stamp, signer/company/time and hash reference. The old reports_pdf.go/fpdf engine is not the commercial offer renderer.",
+      "status": "gap",
+      "owner": "P3/P5",
+      "evidence": [
+        "inspect:internal/quotepdf/render_test.go"
+      ],
+      "reason": "The complete source claim needs direct integrated evidence."
+    },
+    {
+      "id": "F10.04",
+      "source": "feature-list.txt",
+      "heading": "Zoom, pagination and PDF",
+      "claim": "Server rendering uses an ephemeral loopback asset/payload server, restrictive CSP, isolated temporary browser state, stripped inherited environment, timeout and 20 MiB size limit. No production session is needed by the renderer.",
+      "status": "pass",
+      "owner": "P3/P5",
+      "evidence": [
+        "test:internal/quotepdf/render_test.go::TestBundledDocumentRendersA4"
+      ],
+      "reason": "The cited passing checks cover this source claim."
+    },
+    {
+      "id": "F11.01",
+      "source": "feature-list.txt",
+      "heading": "Document settings",
+      "claim": "An administrator can edit sender identity/address/contact/legal/bank fields and defaults for introduction, sections, acceptance and VAT wording. Changes apply to NEW offers; they do not silently update an existing draft or finalized document. Structured default prose is retained, and its plain textarea is read-only where nodes exist. Existing document footer/layout controls are separate.",
+      "status": "pass",
+      "owner": "P1/P2",
+      "evidence": [
+        "test:web/tests/crm.spec.ts::Settings › Business: the quote sender"
+      ],
+      "reason": "The cited passing checks cover this source claim."
+    },
+    {
+      "id": "F11.02",
+      "source": "feature-list.txt",
+      "heading": "Document settings",
+      "claim": "The classic dialog falls back to bundled prototype-defaults.json when text defaults are empty. Its tenant-owned legal/commercial sections and company artwork must be omitted from the public port. Aeon should start neutral and allow tenant-owned configuration.",
+      "status": "pass",
+      "owner": "P1/P2",
+      "evidence": [
+        "inspect:web/src/print/main.ts",
+        "inspect:web/src/components/quotes/editor/QuoteDocument.vue"
+      ],
+      "reason": "No bundled tenant legal defaults or business artwork in the public quote renderer."
+    },
+    {
+      "id": "F12.01",
+      "source": "feature-list.txt",
+      "heading": "Public link and QR acceptance",
+      "claim": "Finalization creates a random 32-byte capability encoded base64url; a draft QR is explicitly a preview containing no functioning customer link. Finalized QR encodes the public /offers/:token page. A legacy finalized sent offer missing a token can receive one through explicit admin action. Copying/reading an existing link does not rotate it.",
+      "status": "gap",
+      "owner": "P5",
+      "evidence": [
+        "inspect:internal/business/quotes/public/module_test.go"
+      ],
+      "reason": "The complete source claim needs direct integrated evidence."
+    },
+    {
+      "id": "F12.02",
+      "source": "feature-list.txt",
+      "heading": "Public link and QR acceptance",
+      "claim": "The capability holder can view the frozen document without signing in, print it and, while still valid/sent, accept. The form prefills contact/company, requires name, company and an explicit checkbox, allows a note, and sends the exact displayed revision. No signature image, identity proof or authenticated account is required by classic; possession of the link is authority. A second/stale acceptance returns conflict and cannot overwrite the first signer.",
+      "status": "pass",
+      "owner": "P5",
+      "evidence": [
+        "test:web/tests/quote-public.spec.ts::scoped document renders read-only; internal/business/quotes/public/module_test.go::TestPublicCapabilityReplayPrivacyAndDecisionRace"
+      ],
+      "reason": "The cited passing checks cover this source claim."
+    },
+    {
+      "id": "F12.03",
+      "source": "feature-list.txt",
+      "heading": "Public link and QR acceptance",
+      "claim": "Acceptance atomically records time, entered identity/note, trusted-proxy-derived IP, limited user-agent, original document SHA-256 and offered revision; increments offer revision and seals it. Public JSON omits internal ids and audit IP/user-agent. Expired/accepted pages show the appropriate state without an active acceptance form.",
+      "status": "pass",
+      "owner": "P5",
+      "evidence": [
+        "test:internal/business/quotes/public/module_test.go::TestPublicCapabilityReplayPrivacyAndDecisionRace"
+      ],
+      "reason": "The cited passing checks cover this source claim."
+    },
+    {
+      "id": "F12.04",
+      "source": "feature-list.txt",
+      "heading": "Public link and QR acceptance",
+      "claim": "Privacy middleware gives capability paths no-store/no-referrer/noindex headers. Public request code omits credentials; rate limits, JSON/custom-header checks and rejection of cross-site acceptance requests apply. Public access closes when CRM is explicitly disabled; ordinary authenticated CRM APIs are not switched off by this legacy UI setting. Archive does not revoke capabilities.",
+      "status": "pass",
+      "owner": "P5",
+      "evidence": [
+        "test:internal/business/quotes/public/module_test.go::TestAcceptRejectsCrossSiteAndInvalidToken"
+      ],
+      "reason": "The cited passing checks cover this source claim."
+    },
+    {
+      "id": "F13.01",
+      "source": "feature-list.txt",
+      "heading": "Acceptance confirmation and notification",
+      "claim": "New valid acceptances enqueue a durable confirmation; legacy accepted records are not automatically backfilled/sent. The same email goes to customer contact and sender (deduplicated if equal), includes accepted PDF and receipt/link. SMTP/PDF/public-base readiness is inspectable. Offer creator notices show the latest 20 accepted offers, rather than relying solely on transient notifications.",
+      "status": "gap",
+      "owner": "P5",
+      "evidence": [
+        "inspect:internal/business/quotes/public/module_test.go"
+      ],
+      "reason": "The complete source claim needs direct integrated evidence."
+    },
+    {
+      "id": "F13.02",
+      "source": "feature-list.txt",
+      "heading": "Acceptance confirmation and notification",
+      "claim": "Queue states: pending, rendering, sending, sent, failed, uncertain. The dispatcher ticks every 5 seconds, retries safe failures with attempts-squared backoff (20 seconds multiplier) up to five attempts, and never automatically resends an ambiguous SMTP delivery. Admin retry requires explicit acknowledgement for uncertain state. UI also handles legacy/unavailable status; pending/rendering/sending receipts are refreshed about every 5 seconds. A failed email leaves the accepted document/receipt intact.",
+      "status": "gap",
+      "owner": "P5",
+      "evidence": [
+        "inspect:internal/business/quotes/public/module_test.go"
+      ],
+      "reason": "The complete source claim needs direct integrated evidence."
+    },
+    {
+      "id": "F14.01",
+      "source": "feature-list.txt",
+      "heading": "Collaboration: implemented versus requested terminology",
+      "claim": "Implemented: optimistic concurrent save protection, a visible-page GET revision watch with 4/8/16/20-second backoff, immediate focus/visibility recheck, suppression of late/own-save responses, and an external-change notice. A clean document can be explicitly reloaded; dirty/in-flight work asks before replacement. PAI-1070 covers load/save races and maintains the local edit session. This is not operational-transform/CRDT simultaneous editing.",
+      "status": "deferred",
+      "owner": "coordinator",
+      "evidence": [
+        "inspect:web/tests/quote-collaboration.spec.ts"
+      ],
+      "reason": "Historical classic behavior or absent workflow; Aeon scope is traced separately in the open criteria."
+    },
+    {
+      "id": "F14.02",
+      "source": "feature-list.txt",
+      "heading": "Collaboration: implemented versus requested terminology",
+      "claim": "Not found in pinned quote/customer implementation: a per-offer active-user list, presence heartbeat endpoint, shared cursors or editing locks. offerProseSession.active is the active LOCAL editor target. App.vue's “active users” comment describes a five-minute login/session heartbeat, not collaborator presence. Searches covered offer components/view, v6 shell, App.vue, source filenames and active-users/presence terminology. Do not claim presence parity without a concrete source feature; implement it as the explicit new Aeon requirement in PAI-1067 under the 2026-09-24 scope.",
+      "status": "deferred",
+      "owner": "coordinator",
+      "evidence": [
+        "inspect:web/tests/quote-collaboration.spec.ts"
+      ],
+      "reason": "Historical classic behavior or absent workflow; Aeon scope is traced separately in the open criteria."
+    },
+    {
+      "id": "F14.03",
+      "source": "feature-list.txt",
+      "heading": "Collaboration: implemented versus requested terminology",
+      "claim": "“New version” can mean a newer saved revision detected by polling, or an old editor rejected by prose_writer_version. Neither provides document version history or proves a deployed application-update banner in the offer shell. Deployment of PAI-1070 itself was not verified.",
+      "status": "deferred",
+      "owner": "coordinator",
+      "evidence": [
+        "inspect:web/tests/quote-collaboration.spec.ts"
+      ],
+      "reason": "Historical classic behavior or absent workflow; Aeon scope is traced separately in the open criteria."
+    },
+    {
+      "id": "F15.01",
+      "source": "feature-list.txt",
+      "heading": "Accepted port scope and backlog traceability",
+      "claim": "Authoritative input: backlog-open.txt, snapshot 2026-09-24T13:33Z. These statuses are not fresh tracker queries. Complete functional scope is required; none of the following may disappear during visual adaptation to Aeon.",
+      "status": "pass",
+      "owner": "QP8",
+      "evidence": [
+        "inspect:backlog-open.txt",
+        "inspect:web/tests/quotes/parity-matrix.json"
+      ],
+      "reason": "Ticket status and scope are traced to individual acceptance-criterion rows below."
+    },
+    {
+      "id": "F15.02",
+      "source": "feature-list.txt",
+      "heading": "Accepted port scope and backlog traceability",
+      "claim": "PAI-1064 | qa | Compact zoom picker without scrolling.",
+      "status": "pass",
+      "owner": "QP8",
+      "evidence": [
+        "inspect:backlog-open.txt",
+        "inspect:web/tests/quotes/parity-matrix.json"
+      ],
+      "reason": "Ticket status and scope are traced to individual acceptance-criterion rows below."
+    },
+    {
+      "id": "F15.03",
+      "source": "feature-list.txt",
+      "heading": "Accepted port scope and backlog traceability",
+      "claim": "Carry fit width/page, all presets and custom 25..800%; centred titlebar, paired minus/plus, keyboard/Escape/outside dismissal and viewport fitting. Verify narrow layout and caret/print stability in Aeon.",
+      "status": "pass",
+      "owner": "QP8",
+      "evidence": [
+        "test:web/tests/quote-inspector.spec.ts::the title bar: compact zoom"
+      ],
+      "reason": "Integrated browser check passed; remaining criteria are listed separately below."
+    },
+    {
+      "id": "F15.04",
+      "source": "feature-list.txt",
+      "heading": "Accepted port scope and backlog traceability",
+      "claim": "PAI-1065 | qa | Header collapse toggle next to Print.",
+      "status": "pass",
+      "owner": "QP8",
+      "evidence": [
+        "inspect:backlog-open.txt",
+        "inspect:web/tests/quotes/parity-matrix.json"
+      ],
+      "reason": "Ticket status and scope are traced to individual acceptance-criterion rows below."
+    },
+    {
+      "id": "F15.05",
+      "source": "feature-list.txt",
+      "heading": "Accepted port scope and backlog traceability",
+      "claim": "Carry one visible chevron immediately after PDF/print, next-action label and expanded semantics; must remain reachable while headers are collapsed. Map to Aeon's own shell regions without hiding the inspector or creating duplicate actions.",
+      "status": "pass",
+      "owner": "QP8",
+      "evidence": [
+        "test:web/tests/quote-inspector.spec.ts::the title bar: compact zoom"
+      ],
+      "reason": "Integrated browser check passed; remaining criteria are listed separately below."
+    },
+    {
+      "id": "F15.06",
+      "source": "feature-list.txt",
+      "heading": "Accepted port scope and backlog traceability",
+      "claim": "PAI-1066 | qa | Semantic SVG icons on inspector text buttons.",
+      "status": "pass",
+      "owner": "QP8",
+      "evidence": [
+        "inspect:backlog-open.txt",
+        "inspect:web/tests/quotes/parity-matrix.json"
+      ],
+      "reason": "Ticket status and scope are traced to individual acceptance-criterion rows below."
+    },
+    {
+      "id": "F15.07",
+      "source": "feature-list.txt",
+      "heading": "Accepted port scope and backlog traceability",
+      "claim": "Keep readable labels, semantic SVGs and selected/disabled states for insert/move/delete/list/indent/numbering/template actions. Use Aeon's existing icon vocabulary; do not widen the inspector simply for icons.",
+      "status": "gap",
+      "owner": "P4",
+      "evidence": [
+        "inspect:web/tests/quote-inspector.spec.ts"
+      ],
+      "reason": "The complete source claim needs direct integrated evidence."
+    },
+    {
+      "id": "F15.08",
+      "source": "feature-list.txt",
+      "heading": "Accepted port scope and backlog traceability",
+      "claim": "PAI-1068 | qa | Regular/bold/italic selected-text formatting.",
+      "status": "pass",
+      "owner": "QP8",
+      "evidence": [
+        "inspect:backlog-open.txt",
+        "inspect:web/tests/quotes/parity-matrix.json"
+      ],
+      "reason": "Ticket status and scope are traced to individual acceptance-criterion rows below."
+    },
+    {
+      "id": "F15.09",
+      "source": "feature-list.txt",
+      "heading": "Accepted port scope and backlog traceability",
+      "claim": "Carry partial-word, multi-node and mixed selections, independent toggles, clear styles, shortcuts, Unicode/IME, undo and writer-version protection. Persist and render identically in all document surfaces.",
+      "status": "gap",
+      "owner": "P4/P5",
+      "evidence": [
+        "inspect:web/tests/quote-inspector.spec.ts"
+      ],
+      "reason": "The complete source claim needs direct integrated evidence."
+    },
+    {
+      "id": "F15.10",
+      "source": "feature-list.txt",
+      "heading": "Accepted port scope and backlog traceability",
+      "claim": "PAI-1070 | qa | Approved compact inspector implementation.",
+      "status": "pass",
+      "owner": "QP8",
+      "evidence": [
+        "inspect:backlog-open.txt",
+        "inspect:web/tests/quotes/parity-matrix.json"
+      ],
+      "reason": "Ticket status and scope are traced to individual acceptance-criterion rows below."
+    },
+    {
+      "id": "F15.11",
+      "source": "feature-list.txt",
+      "heading": "Accepted port scope and backlog traceability",
+      "claim": "Carry one hideable Text/Section/Document inspector, context, visible level, numbering binding/restart/continue, collapsed optical adjustments, contextual insertion, separate footer/default-template controls and no duplicate inline controls. Use Aeon tokens and shell; classic's image is not Aeon's visual oracle. Pin includes merge #373 and the reload/IME follow-up. QA and deployment remain separate facts.",
+      "status": "pass",
+      "owner": "QP8",
+      "evidence": [
+        "test:web/tests/quote-inspector.spec.ts::the inspector follows the selection"
+      ],
+      "reason": "Integrated browser check passed; remaining criteria are listed separately below."
+    },
+    {
+      "id": "F15.12",
+      "source": "feature-list.txt",
+      "heading": "Accepted port scope and backlog traceability",
+      "claim": "PAI-1071 | qa | External change indicator and safe reload.",
+      "status": "pass",
+      "owner": "QP8",
+      "evidence": [
+        "inspect:backlog-open.txt",
+        "inspect:web/tests/quotes/parity-matrix.json"
+      ],
+      "reason": "Ticket status and scope are traced to individual acceptance-criterion rows below."
+    },
+    {
+      "id": "F15.13",
+      "source": "feature-list.txt",
+      "heading": "Accepted port scope and backlog traceability",
+      "claim": "Carry local-vs-remote state, correct own-save/stale-response handling, bounded/reconnected detection and explicit safe reload. Classic is polling; Aeon should use SSE as specified in concurrency.txt.",
+      "status": "pass",
+      "owner": "QP8",
+      "evidence": [
+        "test:web/tests/quote-collaboration.spec.ts::dirty reload preserves local text"
+      ],
+      "reason": "Integrated browser check passed; remaining criteria are listed separately below."
+    },
+    {
+      "id": "F15.14",
+      "source": "feature-list.txt",
+      "heading": "Accepted port scope and backlog traceability",
+      "claim": "PAI-1067 | backlog | Collaborator presence, live cursors and smart save/reload.",
+      "status": "pass",
+      "owner": "QP8",
+      "evidence": [
+        "inspect:backlog-open.txt",
+        "inspect:web/tests/quotes/parity-matrix.json"
+      ],
+      "reason": "Ticket status and scope are traced to individual acceptance-criterion rows below."
+    },
+    {
+      "id": "F15.15",
+      "source": "feature-list.txt",
+      "heading": "Accepted port scope and backlog traceability",
+      "claim": "NEW implementation required: named stable-colour viewing/editing/idle presence, truthful block/caret overlays, expiry/reconnect and permissions; combine with protected saves and review/recovery. Full concurrent text synchronization is not implied by presence; the selected design uses cursor awareness plus optimistic saves and explicit conflict reconciliation.",
+      "status": "gap",
+      "owner": "P6",
+      "evidence": [
+        "inspect:web/tests/quote-inspector.spec.ts"
+      ],
+      "reason": "The complete source claim needs direct integrated evidence."
+    },
+    {
+      "id": "F15.16",
+      "source": "feature-list.txt",
+      "heading": "Accepted port scope and backlog traceability",
+      "claim": "PAI-991 | in-progress | Original CRM/quotes umbrella.",
+      "status": "pass",
+      "owner": "QP8",
+      "evidence": [
+        "inspect:backlog-open.txt",
+        "inspect:web/tests/quotes/parity-matrix.json"
+      ],
+      "reason": "Ticket status and scope are traced to individual acceptance-criterion rows below."
+    },
+    {
+      "id": "F15.17",
+      "source": "feature-list.txt",
+      "heading": "Accepted port scope and backlog traceability",
+      "claim": "Port all mechanisms described here, including customers/contacts/sender/numbering/positions/public acceptance. Its old business branding, legal templates and production release steps are superseded for this task. PAI-1060/61/62/63 and 1058/59 are done in the supplied snapshot but remain functional regression requirements.",
+      "status": "gap",
+      "owner": "P2/P5/P7",
+      "evidence": [
+        "inspect:web/tests/quote-inspector.spec.ts"
+      ],
+      "reason": "The complete source claim needs direct integrated evidence."
+    },
+    {
+      "id": "F15.18",
+      "source": "feature-list.txt",
+      "heading": "Accepted port scope and backlog traceability",
+      "claim": "PAI-1033 and PAI-931 are tracker-search false positives for this port: agent-message race and release-branch workflow respectively. Their unrelated implementation is outside AEON-80; no quote feature is removed by excluding them.",
+      "status": "deferred",
+      "owner": "QP8",
+      "evidence": [
+        "inspect:web/tests/quote-inspector.spec.ts"
+      ],
+      "reason": "Tracker-search false positives outside this port."
+    },
+    {
+      "id": "F16.01",
+      "source": "feature-list.txt",
+      "heading": "Aeon baseline and parity gaps",
+      "claim": "At Aeon 8f767a703736b178ec861875dd028919411c34e9, CRM/quote Vue surfaces exist but are PARKED by AEON-70: router redirects quotes/organisations/crm to /business. Their code is a reuse candidate, not a currently reachable delivered quote tool.",
+      "status": "gap",
+      "owner": "P7",
+      "evidence": [
+        "inspect:web/src/router.ts"
+      ],
+      "reason": "Baseline gap must be rechecked after P7 shell integration."
+    },
+    {
+      "id": "F16.02",
+      "source": "feature-list.txt",
+      "heading": "Aeon baseline and parity gaps",
+      "claim": "R4 supports organisation/contact nodes and typed links, principal bindings, quote/project/customer linkage, immutable numbered versions and lines, issue events, authenticated bound-customer acceptance, deterministic Markdown/basic PDF export, cost-unit rate snapshots and currency/tax totals. It lacks classic's full editable document, customer/offer number allocation, full CRM fields, settings/sender snapshots, private-to-public acceptance flow and acceptance confirmation outbox. Existing version counter is different from the draft save revision.",
+      "status": "pass",
+      "owner": "P7",
+      "evidence": [
+        "test:internal/business/quotes/quotes_test.go::TestQuoteFlowAndGates"
+      ],
+      "reason": "Migrated R4 quote row reads with original digest/pricing modes and renders PDF."
+    },
+    {
+      "id": "F16.03",
+      "source": "feature-list.txt",
+      "heading": "Aeon baseline and parity gaps",
+      "claim": "R4 currently requires project, recipient contact and an effective cost-unit rate; classic allows customer-originated quotes with a free project reference, free units and direct cent prices. The port must preserve that workflow by adding explicit manual pricing and customer-only draft support while preserving R4 rate-backed/versioned behaviour. Do not silently fabricate projects, rates, customers or authenticated signers to fit the old schema.",
+      "status": "pass",
+      "owner": "P7",
+      "evidence": [
+        "test:internal/business/quotes/quotes_test.go::TestQuoteFlowAndGates"
+      ],
+      "reason": "The cited passing checks cover this source claim."
+    },
+    {
+      "id": "F16.04",
+      "source": "feature-list.txt",
+      "heading": "Aeon baseline and parity gaps",
+      "claim": "Basic CRM acceptance includes organisations/customers, multiple/primary contacts, unique customer numbers, billing/visit addresses, sender settings, customer and optional project links, searchable lists, related quotes/projects and attachments. Provider search/import/sync/configuration and reviewed AI note rewriting are retained as optional tenant-enabled functions; they are not prerequisites for manual CRM/quotes. The plan assigns their implementation rather than dropping them.",
+      "status": "gap",
+      "owner": "P2/P7",
+      "evidence": [
+        "inspect:web/src/router.ts"
+      ],
+      "reason": "Baseline gap must be rechecked after P7 shell integration."
+    }
+  ],
+  "backlog_criteria": [
+    {
+      "id": "PAI-1067.AC01",
+      "source": "backlog-open.txt",
+      "claim": "The editor shows authorised collaborators on the current document with names/avatars or initials, consistent colours, and meaningful active/idle presence; disconnected sessions expire and reconnect without stale ghosts or duplicate users.",
+      "status": "gap",
+      "owner": "P6",
+      "evidence": [
+        "inspect:web/tests/quote-collaboration.spec.ts"
+      ],
+      "reason": "The complete criterion needs an integrated test or operator inspection."
+    },
+    {
+      "id": "PAI-1067.AC02",
+      "source": "backlog-open.txt",
+      "claim": "Other collaborators' selected blocks and/or precise carets/text ranges appear as labelled coloured overlays. Caret/selection fidelity is explicit; a block-level selection is not presented as a precise caret.",
+      "status": "pass",
+      "owner": "P6",
+      "evidence": [
+        "test:web/tests/quotes/two-user-presence.spec.ts::two editors see named presence"
+      ],
+      "reason": "Two independent browser contexts render a named block-level overlay; precise caret publication remains a separate P6 gap."
+    },
+    {
+      "id": "PAI-1067.AC03",
+      "source": "backlog-open.txt",
+      "claim": "Overlay anchors remain correct through zoom, reflow, pagination, section insertion/reordering/deletion and supported remote revision updates. Overlays do not obstruct editing or appear in saved text, print or PDFs.",
+      "status": "gap",
+      "owner": "P6",
+      "evidence": [
+        "inspect:web/tests/quote-collaboration.spec.ts"
+      ],
+      "reason": "The complete criterion needs an integrated test or operator inspection."
+    },
+    {
+      "id": "PAI-1067.AC04",
+      "source": "backlog-open.txt",
+      "claim": "A cohesive control next to or combined with the save state distinguishes local save status from newer remote revisions and exposes an obvious Reload/update action; own saves do not create false alerts.",
+      "status": "gap",
+      "owner": "P6",
+      "evidence": [
+        "inspect:web/tests/quote-collaboration.spec.ts"
+      ],
+      "reason": "The complete criterion needs an integrated test or operator inspection."
+    },
+    {
+      "id": "PAI-1067.AC05",
+      "source": "backlog-open.txt",
+      "claim": "Clean-document reload applies the latest revision. Pending local edits, saves in flight or conflicts are protected: no silent discard or overwrite, and a clear preservation/reconciliation path is available.",
+      "status": "pass",
+      "owner": "P6",
+      "evidence": [
+        "test:web/tests/quote-collaboration.spec.ts::dirty reload preserves local text"
+      ],
+      "reason": "Direct assertion in the named test."
+    },
+    {
+      "id": "PAI-1067.AC06",
+      "source": "backlog-open.txt",
+      "claim": "Two independent authenticated sessions can work concurrently without losing acknowledged changes; unsupported simultaneous-edit cases are surfaced rather than overwritten. The chosen presence/refresh versus full text-sync scope is documented before implementation.",
+      "status": "pass",
+      "owner": "P6",
+      "evidence": [
+        "test:web/tests/quote-collaboration.spec.ts::two browser contexts preserve both concurrent edits"
+      ],
+      "reason": "The cited passing check covers this criterion."
+    },
+    {
+      "id": "PAI-1067.AC07",
+      "source": "backlog-open.txt",
+      "claim": "Document permissions govern collaborator identity/presence and update events. Read-only users cannot write via the collaboration channel; reconnects and expired permissions are handled safely.",
+      "status": "pass",
+      "owner": "P6",
+      "evidence": [
+        "test:internal/business/quotes/collaboration/module_test.go::TestLeasesAndAuthorization"
+      ],
+      "reason": "The cited passing check covers this criterion."
+    },
+    {
+      "id": "PAI-1067.AC08",
+      "source": "backlog-open.txt",
+      "claim": "Collaboration colours are paired with names/labels, keyboard-accessible collaborator/status controls, readable contrast and reduced-motion treatment for blinking cursors.",
+      "status": "gap",
+      "owner": "P6",
+      "evidence": [
+        "inspect:web/tests/quote-collaboration.spec.ts"
+      ],
+      "reason": "The complete criterion needs an integrated test or operator inspection."
+    },
+    {
+      "id": "PAI-1067.AC09",
+      "source": "backlog-open.txt",
+      "claim": "Multi-session end-to-end checks cover join/leave, concurrent saves, remote updates while clean and dirty, lost connections/reconnect, section changes, permission boundaries and unchanged PDF output. Representative document size and collaborator-count performance targets are agreed and verified.",
+      "status": "gap",
+      "owner": "P6",
+      "evidence": [
+        "inspect:web/tests/quote-collaboration.spec.ts"
+      ],
+      "reason": "The complete criterion needs an integrated test or operator inspection."
+    },
+    {
+      "id": "PAI-1071.AC01",
+      "source": "backlog-open.txt",
+      "claim": "A change in another session produces an Extern geändert indicator and Aktualisieren control near save state.",
+      "status": "pass",
+      "owner": "P6",
+      "evidence": [
+        "test:web/tests/quote-collaboration.spec.ts::dirty reload preserves local text"
+      ],
+      "reason": "The cited passing check covers this criterion."
+    },
+    {
+      "id": "PAI-1071.AC02",
+      "source": "backlog-open.txt",
+      "claim": "Clean reload loads the new revision; dirty/conflicting/in-flight local edits are never silently discarded.",
+      "status": "pass",
+      "owner": "P6",
+      "evidence": [
+        "test:web/tests/quote-collaboration.spec.ts::dirty reload preserves local text"
+      ],
+      "reason": "Direct assertion in the named test."
+    },
+    {
+      "id": "PAI-1071.AC03",
+      "source": "backlog-open.txt",
+      "claim": "Own saves and stale responses do not raise false warnings; polling/focus checks are bounded and cleaned up.",
+      "status": "pass",
+      "owner": "P6",
+      "evidence": [
+        "test:web/tests/quote-collaboration.spec.ts::dirty reload preserves local text"
+      ],
+      "reason": "The cited passing check covers this criterion."
+    },
+    {
+      "id": "PAI-1071.AC04",
+      "source": "backlog-open.txt",
+      "claim": "Revision conflict protection stays intact; read-only/finalized modes handled.",
+      "status": "pass",
+      "owner": "P6",
+      "evidence": [
+        "test:web/tests/quote-collaboration.spec.ts::two browser contexts preserve both concurrent edits"
+      ],
+      "reason": "The cited passing check covers this criterion."
+    },
+    {
+      "id": "PAI-1071.AC05",
+      "source": "backlog-open.txt",
+      "claim": "Two-session tests cover external edits, own save, safe reload and unsaved local content.",
+      "status": "pass",
+      "owner": "P6",
+      "evidence": [
+        "test:web/tests/quote-collaboration.spec.ts::dirty reload preserves local text"
+      ],
+      "reason": "The cited passing check covers this criterion."
+    },
+    {
+      "id": "PAI-1071.AC06",
+      "source": "backlog-open.txt",
+      "claim": "No collaborator presence, avatar or cursor feature shipped.",
+      "status": "deferred",
+      "owner": "P6",
+      "evidence": [
+        "inspect:web/tests/quote-collaboration.spec.ts"
+      ],
+      "reason": "Classic narrow slice excluded presence; Aeon PAI-1067 explicitly includes it."
+    },
+    {
+      "id": "PAI-1064.AC01",
+      "source": "backlog-open.txt",
+      "claim": "500% and 700% are removed from the preset list; the supported zoom range remains 25–800%.",
+      "status": "pass",
+      "owner": "P4",
+      "evidence": [
+        "test:web/tests/quote-inspector.spec.ts::the title bar: compact zoom"
+      ],
+      "reason": "The cited passing check covers this criterion."
+    },
+    {
+      "id": "PAI-1064.AC02",
+      "source": "backlog-open.txt",
+      "claim": "Common zoom choices, current percentage and fit-to-width/fit-page are available in a compact control without internal scrolling at a normal desktop viewport (including 1280×800).",
+      "status": "pass",
+      "owner": "P4",
+      "evidence": [
+        "test:web/tests/quote-inspector.spec.ts::the title bar: compact zoom"
+      ],
+      "reason": "The cited passing check covers this criterion."
+    },
+    {
+      "id": "PAI-1064.AC03",
+      "source": "backlog-open.txt",
+      "claim": "The popover stays within the available viewport; opening it does not cover or displace the main header unexpectedly.",
+      "status": "pass",
+      "owner": "P4",
+      "evidence": [
+        "test:web/tests/quote-inspector.spec.ts::the title bar: compact zoom"
+      ],
+      "reason": "The cited passing check covers this criterion."
+    },
+    {
+      "id": "PAI-1064.AC04",
+      "source": "backlog-open.txt",
+      "claim": "The current value is clear; keyboard selection, Escape/outside-click dismissal and accessible labelling work.",
+      "status": "pass",
+      "owner": "P4",
+      "evidence": [
+        "test:web/tests/quote-inspector.spec.ts::the title bar: compact zoom"
+      ],
+      "reason": "The cited passing check covers this criterion."
+    },
+    {
+      "id": "PAI-1064.AC05",
+      "source": "backlog-open.txt",
+      "claim": "Zoom remains centred in the main title bar, with minus/plus together on one side; no duplicate zoom control is introduced elsewhere.",
+      "status": "pass",
+      "owner": "P4",
+      "evidence": [
+        "test:web/tests/quote-inspector.spec.ts::the title bar: compact zoom"
+      ],
+      "reason": "The cited passing check covers this criterion."
+    },
+    {
+      "id": "PAI-1064.AC06",
+      "source": "backlog-open.txt",
+      "claim": "Document scroll/caret behaviour, inspector visibility, printing and offer data remain unaffected; browser checks cover fit modes, 25%, 800% and a narrow viewport.",
+      "status": "gap",
+      "owner": "P4",
+      "evidence": [
+        "inspect:web/tests/quote-inspector.spec.ts"
+      ],
+      "reason": "The complete criterion needs an integrated test or operator inspection."
+    },
+    {
+      "id": "PAI-1065.AC01",
+      "source": "backlog-open.txt",
+      "claim": "A subtle ^/v chevron control sits immediately to the right of the print/PDF symbol in the main title bar.",
+      "status": "pass",
+      "owner": "P4",
+      "evidence": [
+        "test:web/tests/quote-inspector.spec.ts::the title bar: compact zoom"
+      ],
+      "reason": "The cited passing check covers this criterion."
+    },
+    {
+      "id": "PAI-1065.AC02",
+      "source": "backlog-open.txt",
+      "claim": "The icon and hint correctly switch between “Kopfzeilen einklappen” and “Kopfzeilen ausklappen”; keyboard activation and accessible expanded-state semantics work.",
+      "status": "pass",
+      "owner": "P4",
+      "evidence": [
+        "test:web/tests/quote-inspector.spec.ts::the title bar: compact zoom"
+      ],
+      "reason": "The cited passing check covers this criterion."
+    },
+    {
+      "id": "PAI-1065.AC03",
+      "source": "backlog-open.txt",
+      "claim": "The control remains visible and usable with the application headers collapsed, so restoring them takes one click.",
+      "status": "pass",
+      "owner": "P4",
+      "evidence": [
+        "test:web/tests/quote-inspector.spec.ts::the title bar: compact zoom"
+      ],
+      "reason": "The cited passing check covers this criterion."
+    },
+    {
+      "id": "PAI-1065.AC04",
+      "source": "backlog-open.txt",
+      "claim": "The equivalent action is removed from the More (…) menu; there is one control for this function.",
+      "status": "pass",
+      "owner": "P4",
+      "evidence": [
+        "test:web/tests/quote-inspector.spec.ts::the title bar: compact zoom"
+      ],
+      "reason": "The cited passing check covers this criterion."
+    },
+    {
+      "id": "PAI-1065.AC05",
+      "source": "backlog-open.txt",
+      "claim": "Existing collapse behaviour is retained, without toggling the inspector, changing document contents or moving the centred zoom control.",
+      "status": "pass",
+      "owner": "P4",
+      "evidence": [
+        "test:web/tests/quote-inspector.spec.ts::the title bar: compact zoom"
+      ],
+      "reason": "The cited passing check covers this criterion."
+    },
+    {
+      "id": "PAI-1065.AC06",
+      "source": "backlog-open.txt",
+      "claim": "Browser smoke checks cover both states, a narrow viewport and interaction with the neighbouring print/PDF control.",
+      "status": "pass",
+      "owner": "P4",
+      "evidence": [
+        "test:web/tests/quote-inspector.spec.ts::the title bar: compact zoom"
+      ],
+      "reason": "The cited passing check covers this criterion."
+    },
+    {
+      "id": "PAI-1066.AC01",
+      "source": "backlog-open.txt",
+      "claim": "Text-only inspector action buttons have semantically appropriate SVG icons alongside their existing labels, including section actions, list types, indentation, insertion and template editing.",
+      "status": "gap",
+      "owner": "P4",
+      "evidence": [
+        "inspect:web/tests/quote-inspector.spec.ts"
+      ],
+      "reason": "The complete criterion needs an integrated test or operator inspection."
+    },
+    {
+      "id": "PAI-1066.AC02",
+      "source": "backlog-open.txt",
+      "claim": "Remaining numbering/reset actions are reviewed for consistency; existing icon-bearing and glyph-only controls are not duplicated or cluttered.",
+      "status": "gap",
+      "owner": "P4",
+      "evidence": [
+        "inspect:web/tests/quote-inspector.spec.ts"
+      ],
+      "reason": "The complete criterion needs an integrated test or operator inspection."
+    },
+    {
+      "id": "PAI-1066.AC03",
+      "source": "backlog-open.txt",
+      "claim": "Icons use the existing product library and match Undo/Redo in size, stroke, alignment and spacing; disabled and selected states remain clear.",
+      "status": "gap",
+      "owner": "P4",
+      "evidence": [
+        "inspect:web/tests/quote-inspector.spec.ts"
+      ],
+      "reason": "The complete criterion needs an integrated test or operator inspection."
+    },
+    {
+      "id": "PAI-1066.AC04",
+      "source": "backlog-open.txt",
+      "claim": "Text remains readable at the normal sidebar width and narrow supported layouts, with no overlap, unnecessary wrapping or added horizontal scrolling.",
+      "status": "gap",
+      "owner": "P4",
+      "evidence": [
+        "inspect:web/tests/quote-inspector.spec.ts"
+      ],
+      "reason": "The complete criterion needs an integrated test or operator inspection."
+    },
+    {
+      "id": "PAI-1066.AC05",
+      "source": "backlog-open.txt",
+      "claim": "Button accessible names remain meaningful; decorative SVGs are hidden from assistive technology. Keyboard/focus behaviour is unchanged.",
+      "status": "gap",
+      "owner": "P4",
+      "evidence": [
+        "inspect:web/tests/quote-inspector.spec.ts"
+      ],
+      "reason": "The complete criterion needs an integrated test or operator inspection."
+    },
+    {
+      "id": "PAI-1066.AC06",
+      "source": "backlog-open.txt",
+      "claim": "Browser smoke check covers all inspector contexts and confirms unchanged action behaviour; no change to saved offers or PDF output.",
+      "status": "gap",
+      "owner": "P4",
+      "evidence": [
+        "inspect:web/tests/quote-inspector.spec.ts"
+      ],
+      "reason": "The complete criterion needs an integrated test or operator inspection."
+    },
+    {
+      "id": "PAI-1068.AC01",
+      "source": "backlog-open.txt",
+      "claim": "Selected words or character ranges can independently toggle Bold and Italic on/off, including combined bold-italic; surrounding unselected text remains unchanged.",
+      "status": "pass",
+      "owner": "P4",
+      "evidence": [
+        "test:web/tests/quote-inspector.spec.ts::bold and italic toggle on the selection"
+      ],
+      "reason": "Direct assertion in the named test."
+    },
+    {
+      "id": "PAI-1068.AC02",
+      "source": "backlog-open.txt",
+      "claim": "Regular clears both inline marks for the selected passage without changing text, list depth/numbering, paragraph structure or other document settings.",
+      "status": "pass",
+      "owner": "P4",
+      "evidence": [
+        "test:web/tests/quote-inspector.spec.ts::bold and italic toggle on the selection"
+      ],
+      "reason": "Direct assertion in the named test."
+    },
+    {
+      "id": "PAI-1068.AC03",
+      "source": "backlog-open.txt",
+      "claim": "The right inspector exposes discoverable controls with SVG icons, meaningful labels/tooltips, active states and mixed-selection states; selection survives focus transfer to the controls.",
+      "status": "pass",
+      "owner": "P4",
+      "evidence": [
+        "test:web/tests/quote-inspector.spec.ts::bold and italic toggle on the selection"
+      ],
+      "reason": "The cited passing check covers this criterion."
+    },
+    {
+      "id": "PAI-1068.AC04",
+      "source": "backlog-open.txt",
+      "claim": "Cmd/Ctrl+B and Cmd/Ctrl+I behave conventionally in editable prose; undo/redo restores both formatting and text selection appropriately.",
+      "status": "pass",
+      "owner": "P4",
+      "evidence": [
+        "test:web/tests/quote-inspector.spec.ts::bold and italic toggle on the selection"
+      ],
+      "reason": "The cited passing check covers this criterion."
+    },
+    {
+      "id": "PAI-1068.AC05",
+      "source": "backlog-open.txt",
+      "claim": "Formatting persists after save/reload and matches in the editor, read-only/customer view and generated PDF/print, using the proper available font styles.",
+      "status": "gap",
+      "owner": "P4/P5",
+      "evidence": [
+        "inspect:web/tests/quote-inspector.spec.ts"
+      ],
+      "reason": "The complete criterion needs an integrated test or operator inspection."
+    },
+    {
+      "id": "PAI-1068.AC06",
+      "source": "backlog-open.txt",
+      "claim": "Existing unformatted documents remain compatible. Stored inline styles cannot be silently stripped by an older writer; pasted content is handled safely and cannot introduce executable markup.",
+      "status": "gap",
+      "owner": "P1/P3",
+      "evidence": [
+        "inspect:web/tests/quote-inspector.spec.ts"
+      ],
+      "reason": "The complete criterion needs an integrated test or operator inspection."
+    },
+    {
+      "id": "PAI-1068.AC07",
+      "source": "backlog-open.txt",
+      "claim": "Tests cover partial-word and multi-paragraph selections, mixed styles, removing one style while keeping the other, Unicode, list items, undo/redo, save/reload and PDF wrapping.",
+      "status": "gap",
+      "owner": "P3/P4/P5",
+      "evidence": [
+        "inspect:web/tests/quote-inspector.spec.ts"
+      ],
+      "reason": "The complete criterion needs an integrated test or operator inspection."
+    },
+    {
+      "id": "PAI-1070.AC01",
+      "source": "backlog-open.txt",
+      "claim": "Approved compact design implemented with Text / Section / Document tabs and context-aware, nonduplicated controls.",
+      "status": "pass",
+      "owner": "P4",
+      "evidence": [
+        "test:web/tests/quote-inspector.spec.ts::the inspector follows the selection"
+      ],
+      "reason": "Direct assertion in the named test."
+    },
+    {
+      "id": "PAI-1070.AC02",
+      "source": "backlog-open.txt",
+      "claim": "Regular/bold/italic component integrated, list depth and numbering semantics retained, glyph choices only in relevant contexts.",
+      "status": "pass",
+      "owner": "P4",
+      "evidence": [
+        "test:web/tests/quote-inspector.spec.ts::the list type is one segmented control"
+      ],
+      "reason": "The cited passing check covers this criterion."
+    },
+    {
+      "id": "PAI-1070.AC03",
+      "source": "backlog-open.txt",
+      "claim": "Section add/delete/reorder and position actions remain reachable; logo mm controls and templates clearly distinguished.",
+      "status": "pass",
+      "owner": "P4",
+      "evidence": [
+        "test:web/tests/quote-inspector.spec.ts::section actions live on the section"
+      ],
+      "reason": "The cited passing check covers this criterion."
+    },
+    {
+      "id": "PAI-1070.AC04",
+      "source": "backlog-open.txt",
+      "claim": "PAI-1064/1065/1066 integrated; no collaboration UI from the image.",
+      "status": "deferred",
+      "owner": "coordinator",
+      "evidence": [
+        "inspect:web/tests/quote-inspector.spec.ts"
+      ],
+      "reason": "Classic design image excluded awareness; Aeon PAI-1067 explicitly includes it."
+    },
+    {
+      "id": "PAI-1070.AC05",
+      "source": "backlog-open.txt",
+      "claim": "Existing first-item indent, selection retention, Home/End, undo/redo and PDF behaviour preserved.",
+      "status": "pass",
+      "owner": "P4",
+      "evidence": [
+        "test:web/tests/quote-editor-input.spec.ts::wrapped Home/End"
+      ],
+      "reason": "The cited passing check covers this criterion."
+    },
+    {
+      "id": "PAI-1070.AC06",
+      "source": "backlog-open.txt",
+      "claim": "Signed integrated revision reviewed independently and delivered; actual UI compared visually against approved image.",
+      "status": "deferred",
+      "owner": "coordinator",
+      "evidence": [
+        "inspect:web/tests/quote-inspector.spec.ts"
+      ],
+      "reason": "Integrated visual comparison and release review belong to coordinator; package rule 9 bars per-package model reviews."
+    },
+    {
+      "id": "PAI-991.AC01",
+      "source": "backlog-open.txt",
+      "claim": "Stufe 1: Absenderdaten sind admin-seitig gepflegt (PMA-Voreinstellung ohne UID/IBAN), Kundenkontakte mit genau einem Hauptkontakt existieren, `customer_no` im Format `K<YYMM><monthly counter>` wird vergeben und angezeigt; Go-Tests für Validierung, Eindeutigkeit und Monatszähler.",
+      "status": "gap",
+      "owner": "P1/P2",
+      "evidence": [
+        "inspect:web/tests/quotes/parity-flow.spec.ts"
+      ],
+      "reason": "The complete criterion needs an integrated test or operator inspection."
+    },
+    {
+      "id": "PAI-991.AC02",
+      "source": "backlog-open.txt",
+      "claim": "Stufe 2: Angebot anlegen, Positionen bearbeiten, Nettosumme korrekt gerundet (Testfälle: 2×1450 = 2.900,00; 16×165 = 2.640,00; 1,5×99,99 = 149,99), Nummer `A<YYMMDD>-<NN>` unveränderlich, Status-Übergänge draft→sent→accepted/declined/expired, Snapshots beim Versand; Druckansicht ergibt ein A4-PDF mit zusätzlichen Seiten bei längeren Inhalten, das dem Prototyp v8 pixelnah entspricht (Sichtprüfung durch den Operator, Screenshot im Ticket).",
+      "status": "gap",
+      "owner": "P1/P5/P7",
+      "evidence": [
+        "inspect:web/tests/quotes/parity-flow.spec.ts"
+      ],
+      "reason": "The complete criterion needs an integrated test or operator inspection."
+    },
+    {
+      "id": "PAI-991.AC03",
+      "source": "backlog-open.txt",
+      "claim": "Layout-Regeln nachweisbar: nur `#55d0c0` als Schmuckfarbe, Anta für ANGEBOT/LEISTUNGSAUFSTELLUNG/Titel, Fußmarke grau, keine abgeschnittenen Texte in der Tabelle (Vitest mit langen Einheiten), Grundlinie der Tabellenzellen einheitlich.",
+      "status": "deferred",
+      "owner": "coordinator",
+      "evidence": [
+        "inspect:web/tests/quotes/parity-flow.spec.ts"
+      ],
+      "reason": "Business-specific v8 brand/font content is excluded from this public synthetic port."
+    },
+    {
+      "id": "PAI-991.AC04",
+      "source": "backlog-open.txt",
+      "claim": "Stufe 3: Kundenlink mit Token zeigt das Angebot ohne Login, Annahme setzt `accepted` mit Zeit, Name und Audit-Eintrag, Entwurf-Angebote sind nicht öffentlich erreichbar; abgelaufene Angebote bleiben lesbar und können nicht angenommen werden; QR-Code auf der letzten Seite dekodiert exakt zur Kundenlink-URL; Rate-Limit-Test.",
+      "status": "gap",
+      "owner": "P5",
+      "evidence": [
+        "inspect:web/tests/quotes/parity-flow.spec.ts"
+      ],
+      "reason": "The complete criterion needs an integrated test or operator inspection."
+    },
+    {
+      "id": "PAI-991.AC05",
+      "source": "backlog-open.txt",
+      "claim": "CRM-Door-Regeln: alles nur bei `crm_enabled`; Router-, Component- und Handler-Tests wie PAI-980.",
+      "status": "pass",
+      "owner": "P1/P2/P5/P7",
+      "evidence": [
+        "test:web/tests/crm.spec.ts::gate states: a digest mismatch or missing permissions"
+      ],
+      "reason": "The cited passing check covers this criterion."
+    },
+    {
+      "id": "PAI-991.AC06",
+      "source": "backlog-open.txt",
+      "claim": "Legacy release script, pin and deployment with backup and live customer-quote checks. The legacy destination and customer particulars are intentionally omitted.",
+      "status": "deferred",
+      "owner": "coordinator",
+      "evidence": [
+        "inspect:web/tests/quotes/parity-flow.spec.ts"
+      ],
+      "reason": "Legacy PMA release and business-owned docs are outside AEON-98 and require owner authorization."
+    },
+    {
+      "id": "PAI-991.AC07",
+      "source": "backlog-open.txt",
+      "claim": "Doku: CHANGELOG-Eintrag, `CRM_PROVIDERS.md`/CRM-Doku ergänzt, PPM-Knowledge-Eintrag „Angebot: Nummernkreise, Status, Layout v8“.",
+      "status": "deferred",
+      "owner": "coordinator",
+      "evidence": [
+        "inspect:web/tests/quotes/parity-flow.spec.ts"
+      ],
+      "reason": "Legacy PMA release and business-owned docs are outside AEON-98 and require owner authorization."
+    }
+  ],
+  "release_checks": [
+    {
+      "id": "QP8.IMPORT-DESIGN",
+      "status": "pass",
+      "owner": "QP8",
+      "evidence": [
+        "test:internal/importer/quotecrm_plan_test.go::TestSyntheticQuoteCRMMapping"
+      ],
+      "reason": "Synthetic source-instance, links, number and original-evidence mapping tested without writes."
+    },
+    {
+      "id": "QP8.IMPORT-ADAPTER",
+      "status": "gap",
+      "owner": "future import package/coordinator",
+      "evidence": [
+        "inspect:internal/importer/source.go::Snapshot"
+      ],
+      "reason": "Source API snapshot lacks customers, contacts, offers and historical acceptance receipts; migration execution is not authorized."
+    },
+    {
+      "id": "QP8.PDF-GEOMETRY",
+      "status": "pass",
+      "owner": "QP8",
+      "evidence": [
+        "test:internal/quotepdf/render_test.go::TestSyntheticPDFGoldenTextAndGeometry"
+      ],
+      "reason": "Chromium emitted A4 MediaBox is checked against the JSON golden."
+    },
+    {
+      "id": "QP8.PDF-TEXT",
+      "status": "pass",
+      "owner": "QP8",
+      "evidence": [
+        "test:scripts/smoke-image.sh::public quote PDF text and A4 geometry"
+      ],
+      "reason": "A disposable Poppler reader extracted required text from the public PDF emitted by the runtime image."
+    },
+    {
+      "id": "QP8.RUNTIME-LICENSES",
+      "status": "pass",
+      "owner": "QP8",
+      "evidence": [
+        "test:scripts/check-quote-evidence.mjs",
+        "inspect:NOTICE"
+      ],
+      "reason": "Pinned Chromium, tini, qrcode-generator and x/image identifiers and license notices are checked at build; image smoke checks installed APK metadata."
+    },
+    {
+      "id": "QP8.SHELL-WIRING",
+      "status": "gap",
+      "owner": "P7/coordinator",
+      "evidence": [
+        "inspect:web/src/router.ts",
+        "test:web/tests/quotes/parity-flow.spec.ts"
+      ],
+      "reason": "Customer creation is routed; quote create/issue still needs P7 shell UI and coordinator route/manifest wiring."
+    }
+  ]
+}

@@ -101,6 +101,16 @@
 // records with the same classic key from a different source ID are rejected
 // in one tenant, while the same numeric ID remains independent in another.
 //
+// QP8's PlanQuoteCRMMapping is an offline specification over synthetic
+// customer/contact/quote records. It validates source-instance namespaces,
+// links, numbers and integer minor-unit money, and flags missing original
+// document/PDF evidence. It is deliberately separate from Source and Writer:
+// the current PMA API snapshot does not include these records or acceptance
+// receipts. The coordinator cannot wire a CRM/quote import from this plan.
+// Any future adapter must use a confirmed read-only source API, persist rows
+// inside db.InTenant with an event for every change, and preserve original
+// accepted evidence instead of synthesizing it in Aeon.
+//
 // B3 repairs: future imports normalize known state spellings and persist safe
 // classic user presentation fields in import.user_* events. The durable mapping
 // remains identities(issuer=paimos-classic, subject=source_id:classic_user_id)
