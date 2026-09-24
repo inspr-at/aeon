@@ -23,6 +23,7 @@ import (
 	"github.com/inspr-at/aeon/internal/attachments"
 	"github.com/inspr-at/aeon/internal/embedding"
 	"github.com/inspr-at/aeon/internal/events"
+	"github.com/inspr-at/aeon/internal/greetings"
 	"github.com/inspr-at/aeon/internal/harness"
 	"github.com/inspr-at/aeon/internal/imports"
 	"github.com/inspr-at/aeon/internal/inbox"
@@ -101,7 +102,7 @@ func serveListener(ctx context.Context, cfg config.Config, ln net.Listener) erro
 		return err
 	}
 	// R1: embeddings are optional; without AEON_EMBEDDING_URL search is lexical only.
-	extraPlugins := []func() (plugins.Plugin, error){costunits.Plugin, crm.Plugin, quotes.ManifestPlugin, hours.Plugin}
+	extraPlugins := []func() (plugins.Plugin, error){costunits.Plugin, crm.Plugin, quotes.ManifestPlugin, hours.Plugin, greetings.ManifestPlugin}
 	var messagingMod httpapi.Module
 	if cfg.MessagingKey != nil {
 		m, err := inbox.NewMessaging(pool, cfg.MessagingKey)
@@ -113,6 +114,10 @@ func serveListener(ctx context.Context, cfg config.Config, ln net.Listener) erro
 		extraPlugins = append(extraPlugins, inbox.MessagingPlugin)
 	} else {
 		slog.Warn("messaging disabled: AEON_MESSAGING_KEY_FILE is not set")
+	}
+	greetingsMod, err := greetings.New(pool)
+	if err != nil {
+		return fmt.Errorf("greetings: %w", err)
 	}
 	pluginRegistry, err := plugins.Builtin(extraPlugins...)
 	if err != nil {
@@ -146,6 +151,7 @@ func serveListener(ctx context.Context, cfg config.Config, ln net.Listener) erro
 			views.New(pool),
 			activity.New(pool),
 			attachments.New(pool, attachments.Store{FilesDir: cfg.FilesDir}),
+			greetingsMod,
 			imports.New(pool),
 			// R2: agents
 			inbox.New(pool),
