@@ -7,7 +7,7 @@ import { message, subscribeAgents, type AgentAccount, type Approval, type Sessio
 import { controlBlocked, decidedApprovals, type Resource } from '../lib/agentState'
 import { confirmAction } from '../lib/confirm'
 import { toast } from '../lib/toast'
-import { useAgents, type SessionView } from '../stores/agents'
+import { useAgents, type HeldRequest, type SessionView } from '../stores/agents'
 import { useProjects } from '../stores/projects'
 import { useSession } from '../stores/session'
 import AppIcon from '../components/AppIcon.vue'
@@ -72,6 +72,15 @@ async function decide(approval: Approval, decision: 'approved' | 'denied', reaso
   const next = agents.pending[0]
   cursor.value = next ? `a:${next.id}` : ''
   if (next) focusRow(cursor.value)
+}
+async function resolveHeld(request: HeldRequest, decision: 'resolved' | 'dismissed', note: string) {
+  await agents.resolve(request, decision, note)
+  toast(`${decision === 'resolved' ? 'Resolved' : 'Dismissed'}: the request from ${agents.askerName(request.sender_principal_id).name} is answered.`)
+  await nextTick()
+  const next = agents.pending[0] ?? null
+  const nextHeld = agents.held[0] ?? null
+  cursor.value = next ? `a:${next.id}` : nextHeld ? `m:${nextHeld.id}` : ''
+  if (cursor.value) focusRow(cursor.value)
 }
 const controlBlock = (view: SessionView, kind: SessionControl['kind']) => controlBlocked(view.session, kind, view.name, writable.value, agents.controls[view.session.id])
 async function control(view: SessionView, kind: SessionControl['kind']) {
@@ -143,6 +152,7 @@ function keydown(event: KeyboardEvent) {
     case 'k': case 'ArrowUp': event.preventDefault(); move(-1); break
     case 'a': case 'd':
       if (kind === 'a') { event.preventDefault(); void queue.value?.begin(id, event.key === 'a' ? 'approve' : 'deny') }
+      else if (kind === 'm') { event.preventDefault(); void queue.value?.begin(id, event.key === 'a' ? 'resolve' : 'dismiss') }
       break
     case 'Enter': case 'o':
       if ((event.target as HTMLElement).closest('a, button')) return
@@ -195,7 +205,7 @@ watch(sessionId, id => { if (id) cursor.value = `s:${id}` }, { immediate: true }
       <div class="main-col">
         <ApprovalQueue
           ref="queue" :pending="agents.pending" :held="agents.held" :history="history" :now="agents.now"
-          :cursor="cursor" :can-decide="writable" :asker="agents.askerName" :resource="resource" :decide="decide" :revoke="agents.revoke"
+          :cursor="cursor" :can-decide="writable" :asker="agents.askerName" :resource="resource" :decide="decide" :revoke="agents.revoke" :resolve="resolveHeld"
           @focus-row="id => cursor = id" @open-agent="openAgent"
         />
         <p v-if="agents.approvalsState === 'error'" class="inline-error" role="alert"><AppIcon name="alert" :size="14" />Permission requests could not be loaded: {{ agents.approvalsError }} <button type="button" class="btn sm" @click="agents.refreshApprovals()">Try again</button></p>

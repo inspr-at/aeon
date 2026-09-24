@@ -7,6 +7,11 @@ const world: AgentWorld = {
   me: me.id,
   projects: { pharos: 'p-pharos', aeon: 'p-aeon', pai: 'p-frozen' },
   tickets: { fleet: 'n-1', restore: 'n-2', web: 'n-a1', release: 'n-5', approvals: 'n-6' },
+  nodes: {
+    'p-pharos': { key: 'PRJ-17', title: 'Pharos' }, 'p-aeon': { key: 'PRJ-35', title: 'Aeon' }, 'p-frozen': { key: 'PRJ-26', title: 'Studio infrastructure' },
+    'n-1': { key: 'PHAROS-11', title: 'Connect Hetzner Cloud for managed provisioning' }, 'n-2': { key: 'PHAROS-12', title: 'Add an Oracle Cloud connector' },
+    'n-a1': { key: 'AEON-1', title: 'Aeon foundation' }, 'n-5': { key: 'PHAROS-15', title: 'Beacon health probes' }, 'n-6': { key: 'PHAROS-16', title: 'Retire the old dashboard' },
+  },
 }
 const session = (n: number) => `5e000000-0000-4000-8000-0000000000${String(n).padStart(2, '0')}`
 const camy = session(1), nova = session(2), kite = session(4)
@@ -69,6 +74,7 @@ test('approvals: j and k move, a opens a reason, Enter records the decision', as
   await expect(first).toHaveClass(/active/)
   await expect(first).toContainText('Interrupt or stop agent sessions')
   await expect(first).toContainText('High risk')
+  await expect(queue(page).locator('.item').nth(2)).toContainText('Low risk')
   await expect(first).toContainText(/Expires in \d+m/)
   // Only the selected request's Approve is the filled primary; the emphasis moves with j and k.
   await expect(first.getByRole('button', { name: 'Approve' })).toHaveClass(/primary/)
@@ -130,6 +136,9 @@ test('the session panel shows the ticket, runs, telemetry and the thread, and se
   await expect(details.locator('.msg')).toHaveCount(4)
   await expect(details.locator('.msg.mine')).toHaveCount(2)
   await expect(details.locator('.msg').last()).toContainText('Awaiting reply')
+  // Messages show when they were sent: relative, with the exact time on hover.
+  await expect(details.locator('.msg .msg-time')).toHaveText(['52m ago', '47m ago', '31m ago', '6m ago'])
+  await expect(details.locator('.msg .msg-time').first()).toHaveAttribute('data-tip', /\d{2}:\d{2}/)
   await details.getByRole('button', { name: 'Reply' }).last().click()
   await expect(details.locator('.replying')).toContainText('Counts are in')
   await details.getByRole('radio', { name: 'Steer' }).click()
@@ -139,6 +148,10 @@ test('the session panel shows the ticket, runs, telemetry and the thread, and se
   const sent = calls.find(c => c.method === 'POST' && c.path.endsWith('/messages'))?.body as Record<string, unknown>
   expect(sent).toMatchObject({ to: 'claude:camy', body: 'Sort stale hosts last.', delivery_level: 'steer', expects_reply: false, is_action_request: false, reply_to: '3e000000-0000-4000-8000-000000000004' })
   expect(typeof sent.idempotency_key).toBe('string')
+  // B7: runs by agent, messages newest first in one page, sessions tenant-wide.
+  expect(calls.some(c => c.path === '/api/runs' && c.query?.get('agent') === 'a0000000-0000-4000-8000-000000000001')).toBe(true)
+  expect(calls.some(c => c.path === '/api/projects/p-pharos/messages' && c.method === 'GET' && c.query?.get('newest_first') === 'true' && c.query?.get('limit') === '200')).toBe(true)
+  expect(calls.some(c => /\/api\/projects\/[^/]+\/harness-sessions$/.test(c.path))).toBe(false)
 })
 
 test('interrupt goes straight out, stop asks first, and sessions outside Aeon cannot be controlled', async ({ page }) => {
@@ -186,8 +199,34 @@ test('a held action request opens the asking agent’s conversation', async ({ p
   const held = queue(page).locator('.item.held')
   await expect(held).toContainText('Held for you')
   await expect(held).toContainText('Please merge the release fix once CI is green')
+  await expect(held).toContainText('Sent 9 min ago')
   await held.getByRole('button', { name: 'Answer' }).click()
   await expect(page).toHaveURL(`/agents/${kite}`)
+})
+
+test('held action requests resolve or dismiss with an optional note, by button or keyboard', async ({ page }) => {
+  const { calls, data } = await setup(page)
+  await openAgents(page)
+  const held = queue(page).locator('.item.held')
+  // j reaches the held request after the three permission requests; a resolves, d dismisses.
+  for (let i = 0; i < 4; i++) await page.keyboard.press('j')
+  await expect(held).toHaveClass(/active/)
+  await expect(held.getByRole('button', { name: 'Resolve' })).toHaveClass(/primary/)
+  await page.keyboard.press('d')
+  const note = held.getByLabel('Note (optional)')
+  await expect(note).toBeFocused()
+  await expect(held).toContainText('The held message is not delivered.')
+  await page.keyboard.press('Escape')
+  await expect(note).toHaveCount(0)
+  await held.getByRole('button', { name: 'Resolve' }).click()
+  await held.getByLabel('Note (optional)').fill('Merged it myself after CI.')
+  await held.getByRole('button', { name: 'Mark resolved' }).click()
+  await expect(page.locator('.toast').filter({ hasText: 'Resolved: the request from kite is answered.' })).toBeVisible()
+  await expect(queue(page).locator('.item.held')).toHaveCount(0)
+  const resolution = calls.find(c => c.path.endsWith('/resolution'))!
+  expect(resolution.path).toBe(`/api/projects/p-frozen/messages/${data.messages[4].id}/resolution`)
+  expect(resolution.body).toEqual({ decision: 'resolved', note: 'Merged it myself after CI.' })
+  await expect(page.getByRole('link', { name: 'Agents, 3 need you' })).toBeVisible()
 })
 
 test('accounts show what is left and the pace; admins can drain and resume', async ({ page }) => {

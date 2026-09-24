@@ -19,7 +19,7 @@ const sections: { title: string; rows: { keys: Key[][]; label: string; joiner?: 
   ] },
   { title: 'Agents', rows: [
     { keys: [['j'], ['k']], label: 'Next and previous request or session' },
-    { keys: [['a'], ['d']], label: 'Approve or deny the selected request' },
+    { keys: [['a'], ['d']], label: 'Approve or deny a permission; resolve or dismiss a held request' },
     { keys: [[{ icon: 'enter', label: 'Enter' }]], label: 'Open the selected session' },
   ] },
   { title: 'Ticket list', rows: [

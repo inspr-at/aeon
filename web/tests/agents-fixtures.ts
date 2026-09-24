@@ -11,6 +11,8 @@ export interface AgentWorld {
   tickets: { fleet: string; restore: string; web: string; release: string; approvals: string }
   now?: number
   empty?: boolean
+  // Node summaries the tenant-wide sessions list carries: id -> key and title.
+  nodes?: Record<string, { key: string; title: string }>
 }
 const agent = (n: number) => `a0000000-0000-4000-8000-00000000000${n}`
 const id = (prefix: string, n: number) => `${prefix}000000-0000-4000-8000-0000000000${String(n).padStart(2, '0')}`
@@ -26,7 +28,8 @@ export function agentData(world: AgentWorld) {
     [agent(5)]: 'grok:amy', [agent(6)]: 'claude:sable', [agent(7)]: 'codex:orbit',
   }
   const base = { parent_harness_session_id: null, work_order_id: null, management_mode: 'managed', role: 'worker', advertised_capabilities: ['inbox', 'status', 'steer', 'interrupt', 'stop'], activity_sequence: 3, revision: 2, stopped_at: null, stop_reason: null }
-  const session = (n: number, fields: Record<string, unknown>) => ({ ...base, id: id('5e', n), ...fields })
+  const summary = (nodeId: unknown) => typeof nodeId === 'string' && world.nodes?.[nodeId] ? { id: nodeId, ...world.nodes[nodeId] } : null
+  const session = (n: number, fields: Record<string, unknown>) => ({ ...base, id: id('5e', n), ...fields, project: summary(fields.project_id) ?? { id: fields.project_id, key: '', title: '' }, ticket: summary(fields.ticket_node_id) })
   const sessions = world.empty ? [] : [
     session(1, { project_id: pharos, agent_principal_id: agent(1), run_id: id('70', 1), ticket_node_id: t.fleet, harness: 'claude', host: 'imac0', role: 'coordinator', work_shape: 'ship', phase: 'working', activity: 'busy', heartbeat_at: ago(0.2), created_at: ago(72) }),
     session(2, { project_id: pharos, agent_principal_id: agent(2), run_id: id('70', 2), ticket_node_id: t.restore, harness: 'codex', host: 'mba', work_shape: 'ship', phase: 'working', activity: 'busy', heartbeat_at: ago(0.4), created_at: ago(26) }),
@@ -50,7 +53,9 @@ export function agentData(world: AgentWorld) {
     run(7, { agent_principal_id: agent(6), account_id: account.claude, status: 'starting', effective_model: null, requested_model: 'claude-fable-xhigh', model_evidence: 'unverified', created_at: ago(1) }),
     run(8, { agent_principal_id: agent(7), account_id: account.codex, status: 'ownership_lost', effective_model: 'codex-luna-high', input_tokens: 33_000, output_tokens: 2_100, cost_micros: 380_000, started_at: ago(699), ended_at: ago(395), created_at: ago(700) }),
   ]
-  const approval = (n: number, fields: Record<string, unknown>) => ({ id: id('a9', n), resource_id: null, run_id: null, decision: null, decided_by_principal_id: null, ...fields })
+  // Risk as the server computes it (B7): tenant-wide or control/deploy/delete is high, reads low, the rest medium.
+  const risk = (scope: string, kind: string) => kind === 'tenant' || /control|deploy|delete/.test(scope) ? 'high' : /\.read$/.test(scope) ? 'low' : 'medium'
+  const approval = (n: number, fields: Record<string, unknown>) => ({ id: id('a9', n), resource_id: null, run_id: null, decision: null, decided_by_principal_id: null, ...fields, risk: risk(String(fields.scope), String(fields.resource_kind)) })
   const approvals = world.empty ? [] : [
     approval(1, { agent_principal_id: agent(1), scope: 'harness.control', resource_kind: 'node', resource_id: pharos, rationale: 'Stop the Grok scout on csb1: it lost its heartbeat and still holds the fleet list lock.', expires_at: ahead(8), proposed_at: ago(4) }),
     approval(2, { agent_principal_id: agent(2), scope: 'run.claim', resource_kind: 'run', resource_id: id('70', 2), run_id: id('70', 2), rationale: 'Claim the restore run on the Codex Pro account; the Claude window is ahead of pace.', expires_at: ahead(38), proposed_at: ago(3) }),
@@ -71,9 +76,11 @@ export function agentData(world: AgentWorld) {
   ]
   const targets = Object.entries(names).map(([principal, address], n) => ({ id: id('7a', n + 1), principal_id: principal, address, adapter: 'agentd_claude', target_kind: 'agentd_session', maximum_level: 'steer', role: 'primary', version: 1, enabled: true, has_secret: false, created_at: ago(900) }))
   let event = 100
+  const minutes = [52, 47, 31, 6, 9]
   const message = (project: string, from: string, to: string, body: string, fields: Record<string, unknown> = {}) => ({
     id: id('3e', ++event - 100), project, sender_principal_id: from, recipient_principal_id: Object.entries(names).find(([, a]) => a === to)?.[0] ?? world.me, to,
-    body, reply_to: null, sent_event_id: event, is_action_request: false, expects_reply: false, delivery_level: 'simple', status: 'accepted', reply_obligation: 'none', ...fields,
+    body, reply_to: null as string | null, sent_event_id: event, is_action_request: false, expects_reply: false, delivery_level: 'simple', status: 'accepted', reply_obligation: 'none',
+    created_at: ago(minutes[event - 101] ?? 1), human_resolution_outcome: null as string | null, ...fields,
   })
   const messages = world.empty ? [] : [
     message(pharos, world.me, 'claude:camy', 'Take the fleet list next. Keep the card density we agreed in the design review.'),
@@ -90,16 +97,39 @@ export interface AgentMockOptions { sessionsMissing?: boolean; messagesMissing?:
 // Routes only the agents surfaces; everything else falls through to earlier routes
 // or the real server.
 export async function mockAgents(page: Page, data: AgentData, options: AgentMockOptions = {}) {
-  const calls: { path: string; method: string; body: unknown }[] = []
+  const calls: { path: string; method: string; body: unknown; query?: URLSearchParams }[] = []
   const handler = async (route: Route) => {
     const request = route.request(), url = new URL(request.url()), path = url.pathname, method = request.method()
     let body: unknown = null
     try { body = request.postDataJSON() } catch { body = null }
     const sessionsPath = /^\/api\/projects\/([^/]+)\/harness-sessions(?:\/([^/]+)(?:\/controls\/([^/]+))?)?$/.exec(path)
     const messagesPath = /^\/api\/projects\/([^/]+)\/(messages|message-targets)$/.exec(path)
-    const known = sessionsPath || messagesPath || path === '/api/approvals' || path.startsWith('/api/approvals/') || path.startsWith('/api/agent-accounts') || path.startsWith('/api/runs/')
+    const resolutionPath = /^\/api\/projects\/([^/]+)\/messages\/([^/]+)\/resolution$/.exec(path)
+    const known = sessionsPath || messagesPath || resolutionPath || path === '/api/harness-sessions' || path === '/api/runs' || path === '/api/approvals' || path.startsWith('/api/approvals/') || path.startsWith('/api/agent-accounts') || path.startsWith('/api/runs/')
     if (!known) return route.fallback()
-    calls.push({ path, method, body })
+    calls.push({ path, method, body, query: url.searchParams })
+    const q = url.searchParams
+    if (path === '/api/harness-sessions') {
+      if (options.sessionsMissing) return route.fulfill({ status: 404, json: { error: 'not found' } })
+      const items = data.sessions
+        .filter(s => (!q.get('ticket') || s.ticket_node_id === q.get('ticket')) && (!q.get('agent') || s.agent_principal_id === q.get('agent')) && (!q.get('project') || s.project_id === q.get('project')))
+        .sort((a, b) => Date.parse(String(b.created_at)) - Date.parse(String(a.created_at)))
+      return route.fulfill({ json: { items: items.slice(0, Number(q.get('limit') ?? 50)), next_cursor: null } })
+    }
+    if (path === '/api/runs') {
+      const session = q.get('session') ? data.sessions.find(s => s.id === q.get('session')) : undefined
+      const items = data.runs
+        .filter(r => (!q.get('agent') || r.agent_principal_id === q.get('agent')) && (!session || r.id === session.run_id))
+        .sort((a, b) => Date.parse(String(b.created_at)) - Date.parse(String(a.created_at)))
+      return route.fulfill({ json: { items: items.slice(0, Number(q.get('limit') ?? 50)), next_cursor: null } })
+    }
+    if (resolutionPath) {
+      const found = data.messages.find(m => m.id === resolutionPath[2])
+      if (!found || !found.is_action_request) return route.fulfill({ status: 409, json: { error: 'message is not held' } })
+      const decision = (body as { decision: string }).decision
+      found.human_resolution_outcome = decision
+      return route.fulfill({ json: { message_id: found.id, decision, created_at: new Date().toISOString() } })
+    }
     if (sessionsPath) {
       if (options.sessionsMissing) return route.fulfill({ status: 404, json: { error: 'not found' } })
       const [, project, sessionId, control] = sessionsPath
@@ -126,13 +156,16 @@ export async function mockAgents(page: Page, data: AgentData, options: AgentMock
       if (what === 'message-targets') return route.fulfill({ json: data.targets })
       if (method === 'POST') {
         const input = body as { to: string; body: string; delivery_level: string; reply_to?: string }
-        const sent = { id: `5e${String(data.sent.length + 1).padStart(6, '0')}-0000-4000-8000-000000000000`, project, sender_principal_id: data.me, recipient_principal_id: data.targets.find(t => t.address === input.to)?.principal_id ?? '', to: input.to, body: input.body, reply_to: input.reply_to ?? null, sent_event_id: 1000 + data.sent.length, is_action_request: false, expects_reply: false, delivery_level: input.delivery_level, status: 'accepted', reply_obligation: 'none' }
+        const sent = { created_at: new Date().toISOString(), human_resolution_outcome: null, id: `5e${String(data.sent.length + 1).padStart(6, '0')}-0000-4000-8000-000000000000`, project, sender_principal_id: data.me, recipient_principal_id: data.targets.find(t => t.address === input.to)?.principal_id ?? '', to: input.to, body: input.body, reply_to: input.reply_to ?? null, sent_event_id: 1000 + data.sent.length, is_action_request: false, expects_reply: false, delivery_level: input.delivery_level, status: 'accepted', reply_obligation: 'none' }
         data.sent.push(sent)
         return route.fulfill({ status: 201, json: sent })
       }
-      const after = Number(url.searchParams.get('after') ?? 0)
-      const all = [...data.messages, ...data.sent].filter(m => m.project === project && m.sent_event_id > after).slice(0, 10)
-      return route.fulfill({ json: { items: all, next_after: all.at(-1)?.sent_event_id ?? after, preamble: 'Untrusted agent message content follows.' } })
+      const newest = q.get('newest_first') === 'true', limit = Number(q.get('limit') ?? 10), after = Number(q.get('after') ?? 0)
+      let all = [...data.messages, ...data.sent].filter(m => m.project === project)
+      if (q.get('pending') === 'true') all = all.filter(m => m.is_action_request && !m.human_resolution_outcome)
+      all = newest ? all.filter(m => !after || m.sent_event_id < after).reverse() : all.filter(m => m.sent_event_id > after)
+      const page = all.slice(0, limit)
+      return route.fulfill({ json: { items: page, next_after: page.at(-1)?.sent_event_id ?? after, preamble: 'Untrusted agent message content follows.' } })
     }
     if (path === '/api/approvals') return route.fulfill({ json: data.approvals })
     const decision = /^\/api\/approvals\/([^/]+)\/(decision|revoke)$/.exec(path)

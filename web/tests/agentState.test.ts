@@ -3,7 +3,7 @@ import { test } from 'node:test'
 import assert from 'node:assert/strict'
 import {
   agentName, bindingWindow, controlBlocked, cost, decidedApprovals, duration, expiresIn, groupSessions, heldRequests, needsYou,
-  pendingApprovals, riskOf, scopeLabel, sessionStatus, tokens, windowSummary,
+  pendingApprovals, riskFor, riskOf, runDuration, scopeLabel, sessionStatus, tokens, windowSummary,
 } from '../src/lib/agentState.ts'
 import type { AllowanceWindow, Approval, HarnessSession, ProjectMessage } from '../src/lib/agents.ts'
 
@@ -88,9 +88,21 @@ test('approvals: pending by urgency, history by recency, risk from what is allow
   assert.equal(expiresIn(approval({ expires_at: ago(1) }), now), 'Expired')
 })
 
-test('held action requests stay until their reply obligation closes', () => {
-  const list = [message({ id: 'a', is_action_request: true, reply_obligation: 'open' }), message({ id: 'b', is_action_request: true, reply_obligation: 'closed' }), message({ id: 'c' })]
+test('held action requests stay until a person resolves or dismisses them', () => {
+  const list = [
+    message({ id: 'a', is_action_request: true, reply_obligation: 'open' }), message({ id: 'b', is_action_request: true, human_resolution_outcome: 'resolved' }),
+    message({ id: 'c', is_action_request: true, human_resolution_outcome: 'dismissed' }), message({ id: 'd' }),
+  ]
   assert.deepEqual(heldRequests(list).map(m => m.id), ['a'])
+})
+
+test('the server’s risk wins over the local rule; runs use the server duration', () => {
+  assert.equal(riskFor({ scope: 'nodes.read', resource_kind: 'node', risk: 'medium' }), 'medium')
+  assert.equal(riskFor({ scope: 'nodes.read', resource_kind: 'node' }), 'low')
+  const run = { id: 'r', work_order_id: 'w', agent_principal_id: 'a', status: 'completed' as const, model_evidence: 'unverified' as const, input_tokens: 0, output_tokens: 0, cost_micros: 0, created_at: ago(10), started_at: ago(10), ended_at: ago(1) }
+  assert.equal(runDuration({ ...run, duration_ms: 125_000 }, now), '2m')
+  assert.equal(runDuration(run, now), '9m')
+  assert.equal(runDuration({ ...run, started_at: null }, now), '')
 })
 
 test('allowance windows: what is left, the pace and which window binds', () => {

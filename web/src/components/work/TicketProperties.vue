@@ -39,8 +39,8 @@ const release = computed(() => {
 const agents = useAgents()
 const bound = computed(() => agents.forTicket(props.item.id))
 let refresh: ReturnType<typeof setInterval> | undefined
-watch(() => props.item.project?.id, id => { if (id) void agents.ensureProject(id) }, { immediate: true })
-onMounted(() => { refresh = setInterval(() => { if (props.item.project?.id) void agents.ensureProject(props.item.project.id) }, 20_000) })
+watch(() => props.item.id, id => { void agents.ensureTicket(id) }, { immediate: true })
+onMounted(() => { refresh = setInterval(() => void agents.ensureTicket(props.item.id), 20_000) })
 onBeforeUnmount(() => clearInterval(refresh))
 const epicParent = computed(() => props.item.parent && props.item.parent.kind_slug !== 'project' ? props.item.parent : null)
 const target = (event: Event) => event.currentTarget as HTMLElement

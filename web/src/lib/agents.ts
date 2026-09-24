@@ -12,7 +12,11 @@ export interface HarnessSession {
   work_shape: 'unknown' | 'ship' | 'scout'; advertised_capabilities: string[]
   phase: 'starting' | 'working' | 'yielded' | 'stopping' | 'stopped'; activity: 'unknown' | 'busy' | 'idle'
   activity_sequence: number; revision: number; heartbeat_at: string | null; stopped_at: string | null; stop_reason: string | null; created_at: string
+  // The tenant-wide list adds node summaries (B7).
+  project?: NodeSummary; ticket?: NodeSummary | null
 }
+export interface NodeSummary { id: string; key: string; title: string }
+export interface Paged<T> { items: T[]; next_cursor: string | null }
 export interface SessionControl {
   id: string; session_id: string; kind: 'interrupt' | 'stop'; state: 'pending' | 'claimed' | 'completed'; sequence: number
   outcome: 'applied' | 'rejected' | null; reason: string | null; created_at: string; claimed_at: string | null; completed_at: string | null
@@ -33,12 +37,14 @@ export interface AgentRun {
   account_id?: string | null; status: 'queued' | 'starting' | 'running' | 'waiting' | 'completed' | 'failed' | 'cancelled' | 'ownership_lost'
   requested_model?: string | null; effective_model?: string | null; model_evidence: 'unverified' | 'vendor_reported'
   input_tokens: number; output_tokens: number; cost_micros: number
+  outcome?: 'completed' | 'failed' | 'cancelled' | 'ownership_lost' | null; duration_ms?: number | null
   started_at?: string | null; ended_at?: string | null; created_at: string
 }
 export interface Approval {
   id: string; agent_principal_id: string; scope: string; resource_kind: 'tenant' | 'node' | 'run'
   resource_id?: string | null; run_id?: string | null; rationale: string; expires_at: string; proposed_at: string
   decision: 'approved' | 'denied' | null; decided_by_principal_id?: string | null
+  risk?: 'low' | 'medium' | 'high'
 }
 export interface ModelProfile { id: string; slug: string; harness: string; family: string; model: string; effort: string; tier: string; enabled: boolean }
 export interface MessageTarget { id: string; principal_id: string; address: string; adapter: string; target_kind: string; maximum_level: string; role: string; enabled: boolean }
@@ -46,7 +52,9 @@ export interface ProjectMessage {
   id: string; sender_principal_id: string; recipient_principal_id: string; to: string; body: string; reply_to?: string | null
   sent_event_id: number; is_action_request: boolean; expects_reply: boolean; delivery_level: 'simple' | 'steer'
   status: 'accepted' | 'held'; reply_obligation: 'none' | 'open' | 'closed'
+  created_at?: string; human_resolution_outcome?: 'resolved' | 'dismissed' | null
 }
+export interface HeldResolution { message_id: string; decision: 'resolved' | 'dismissed'; created_at: string }
 export interface MessagePage { items: ProjectMessage[]; next_after: number; preamble?: string }
 export interface MessageSend { to: string; body: string; idempotency_key: string; reply_to?: string; expects_reply: boolean; is_action_request: boolean; delivery_level: 'simple' | 'steer' }
 
@@ -63,8 +71,17 @@ async function request<T>(path: string, method = 'GET', body?: unknown): Promise
 const enc = encodeURIComponent
 const sessionPath = (projectId: string, sessionId = '') => `/projects/${enc(projectId)}/harness-sessions${sessionId ? `/${enc(sessionId)}` : ''}`
 
-export const listSessions = (projectId: string) => request<HarnessSession[]>(sessionPath(projectId))
-export const getSession = (projectId: string, sessionId: string) => request<HarnessSession>(sessionPath(projectId, sessionId))
+const query = (params: Record<string, string | number | boolean | undefined>) => {
+  const q = new URLSearchParams()
+  for (const [key, value] of Object.entries(params)) if (value !== undefined && value !== '') q.set(key, String(value))
+  const text = q.toString()
+  return text ? `?${text}` : ''
+}
+// Tenant-wide sessions, newest first, with project and ticket summaries.
+export const listAllSessions = (params: { ticket?: string; agent?: string; project?: string; state?: string; cursor?: string; limit?: number } = {}) =>
+  request<Paged<HarnessSession>>(`/harness-sessions${query({ limit: 200, ...params })}`)
+export const listRuns = (params: { session?: string; agent?: string; work_order?: string; cursor?: string; limit?: number } = {}) =>
+  request<Paged<AgentRun>>(`/runs${query({ limit: 50, ...params })}`)
 export const requestControl = (projectId: string, sessionId: string, kind: SessionControl['kind']) => request<SessionControl>(`${sessionPath(projectId, sessionId)}/controls/${kind}`, 'POST', {})
 export const getControl = (projectId: string, sessionId: string, controlId: string) => request<SessionControl>(`${sessionPath(projectId, sessionId)}/controls/${enc(controlId)}`)
 export const listAccounts = () => request<AgentAccount[]>('/agent-accounts')
@@ -76,12 +93,13 @@ export const revokeApproval = (id: string) => request<Approval>(`/approvals/${en
 export const createWindow = (id: string, body: AllowanceWrite) => request<AllowanceWindow>(`/agent-accounts/${enc(id)}/windows`, 'POST', body)
 export const listModels = () => request<ModelProfile[]>('/models')
 export const listTargets = (projectId: string) => request<MessageTarget[]>(`/projects/${enc(projectId)}/message-targets`)
-export const listMessages = (projectId: string, after = 0) => request<MessagePage>(`/projects/${enc(projectId)}/messages?after=${after}&limit=10`)
+export const listMessages = (projectId: string, params: { newest_first?: boolean; pending?: boolean; address?: string; thread?: string; after?: number; limit?: number } = {}) =>
+  request<MessagePage>(`/projects/${enc(projectId)}/messages${query({ limit: 200, newest_first: true, ...params })}`)
+export const resolveMessage = (projectId: string, messageId: string, decision: HeldResolution['decision'], note: string) =>
+  request<HeldResolution>(`/projects/${enc(projectId)}/messages/${enc(messageId)}/resolution`, 'POST', { decision, note })
 export const sendMessage = (projectId: string, body: MessageSend) => request<ProjectMessage>(`/projects/${enc(projectId)}/messages`, 'POST', body)
 
 export const message = (error: unknown) => error instanceof Error ? error.message : 'Request failed. Please retry.'
-export const timestamp = (value?: string | null) => value ? new Date(value).toLocaleString() : 'Not reported'
-export const uuidPattern = '[0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{12}'
 
 // The cumulative pacing model from internal/agents/doc.go, bounded by the hard allowance.
 export function paceFraction(model: AllowanceWrite['pace_model'], elapsed: number, burst: number) {
@@ -94,7 +112,7 @@ export function paceFraction(model: AllowanceWrite['pace_model'], elapsed: numbe
 // hints only: the caller re-reads the authorized projections. Heartbeats are left
 // out: they are frequent, and the page's clock and poll keep them current.
 const HARNESS_EVENTS = ['registered', 'bound', 'yielded', 'stopped', 'control_requested', 'control_claimed', 'control_completed']
-const OTHER_EVENTS = ['approval.proposed', 'approval.approved', 'approval.denied', 'approval.revoked', 'run.created', 'run.claimed', 'run.telemetry', 'work_order.started', 'work_order.updated', 'inbox.compat_sent', 'inbox.delivery_queued', 'inbox.reply_obligation_closed']
+const OTHER_EVENTS = ['approval.proposed', 'approval.approved', 'approval.denied', 'approval.revoked', 'run.created', 'run.claimed', 'run.telemetry', 'work_order.started', 'work_order.updated', 'inbox.compat_sent', 'inbox.delivery_queued', 'inbox.reply_obligation_closed', 'inbox.action_resolved']
 export function subscribeAgents(changed: () => void, connection: (live: boolean) => void = () => {}): () => void {
   if (typeof EventSource === 'undefined') return () => {}
   const stream = new EventSource('/api/events/stream')

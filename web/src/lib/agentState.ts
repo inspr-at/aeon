@@ -80,6 +80,7 @@ export function elapsed(session: HarnessSession, now: number) {
   return duration(Date.parse(session.stopped_at ?? new Date(now).toISOString()) - Date.parse(session.created_at))
 }
 export function runDuration(run: AgentRun, now: number) {
+  if (typeof run.duration_ms === 'number') return duration(run.duration_ms)
   if (!run.started_at) return ''
   return duration(Date.parse(run.ended_at ?? new Date(now).toISOString()) - Date.parse(run.started_at))
 }
@@ -132,6 +133,8 @@ export function riskOf(approval: Pick<Approval, 'scope' | 'resource_kind'>): Ris
   if (/^read$|\.read$|^read/.test(verbs)) return 'low'
   return 'medium'
 }
+// The server computes risk (B7); the local rule only covers older servers.
+export const riskFor = (approval: Pick<Approval, 'scope' | 'resource_kind' | 'risk'>): Risk => approval.risk ?? riskOf(approval)
 export const RISK_LABEL: Record<Risk, string> = { low: 'Low risk', medium: 'Medium risk', high: 'High risk' }
 
 export function expiresIn(approval: Approval, now: number) {
@@ -141,7 +144,7 @@ export function expiresIn(approval: Approval, now: number) {
 export const expiresSoon = (approval: Approval, now: number) => Date.parse(approval.expires_at) - now < 10 * 60_000
 
 // ---------- Held action requests ----------
-export const heldRequests = (messages: ProjectMessage[]) => messages.filter(m => m.is_action_request && m.reply_obligation !== 'closed')
+export const heldRequests = (messages: ProjectMessage[]) => messages.filter(m => m.is_action_request && !m.human_resolution_outcome)
 
 // ---------- Allowance windows ----------
 export type Pace = 'ahead' | 'on' | 'under'

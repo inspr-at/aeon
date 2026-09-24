@@ -2,7 +2,7 @@
 <script setup lang="ts">
 import { computed, nextTick, ref } from 'vue'
 import type { Approval, ProjectMessage } from '../../lib/agents'
-import { RISK_LABEL, expiresIn, expiresSoon, riskOf, scopeLabel, type Asker, type Resource } from '../../lib/agentState'
+import { RISK_LABEL, expiresIn, expiresSoon, riskFor, scopeLabel, type Asker, type Resource } from '../../lib/agentState'
 import { confirmAction } from '../../lib/confirm'
 import { relativeTime } from '../../lib/work'
 import AppIcon from '../AppIcon.vue'
@@ -15,10 +15,12 @@ const props = defineProps<{
   asker: (principalId: string) => Asker; resource: (approval: Approval) => Resource
   decide: (approval: Approval, decision: 'approved' | 'denied', reason: string) => Promise<void>
   revoke: (approval: Approval) => Promise<void>
+  resolve: (request: Held, decision: 'resolved' | 'dismissed', note: string) => Promise<void>
 }>()
 const emit = defineEmits<{ focusRow: [id: string]; openAgent: [principalId: string] }>()
 
-const open = ref<{ id: string; mode: 'approve' | 'deny' } | null>(null)
+type Mode = 'approve' | 'deny' | 'resolve' | 'dismiss'
+const open = ref<{ id: string; mode: Mode } | null>(null)
 const reason = ref('')
 const busy = ref(false)
 const error = ref('')
@@ -26,18 +28,18 @@ const showHistory = ref(false)
 const revoked = ref(new Set<string>())
 const reasonField = ref<HTMLTextAreaElement[]>()
 
-async function begin(id: string, mode: 'approve' | 'deny') {
+async function begin(id: string, mode: Mode) {
   if (!props.canDecide || busy.value) return
   if (open.value?.id !== id) { reason.value = ''; error.value = '' }
   open.value = { id, mode }
-  emit('focusRow', `a:${id}`)
+  emit('focusRow', `${mode === 'resolve' || mode === 'dismiss' ? 'm' : 'a'}:${id}`)
   await nextTick()
   reasonField.value?.[0]?.focus()
 }
 function cancel() {
-  const id = open.value?.id
+  const current = open.value
   open.value = null; reason.value = ''; error.value = ''
-  if (id) void nextTick(() => document.querySelector<HTMLElement>(`[data-row="a:${id}"]`)?.focus())
+  if (current) void nextTick(() => document.querySelector<HTMLElement>(`[data-row="${current.mode === 'resolve' || current.mode === 'dismiss' ? 'm' : 'a'}:${current.id}"]`)?.focus())
 }
 async function submit(approval: Approval) {
   if (!open.value || busy.value) return
@@ -47,6 +49,19 @@ async function submit(approval: Approval) {
     open.value = null; reason.value = ''
   } catch (e) { error.value = e instanceof Error ? e.message : 'The decision was not recorded. Please try again.' }
   finally { busy.value = false }
+}
+async function settle(request: Held) {
+  if (!open.value || busy.value) return
+  busy.value = true; error.value = ''
+  try {
+    await props.resolve(request, open.value.mode === 'dismiss' ? 'dismissed' : 'resolved', reason.value.trim())
+    open.value = null; reason.value = ''
+  } catch (e) { error.value = e instanceof Error ? e.message : 'Your answer was not recorded. Please try again.' }
+  finally { busy.value = false }
+}
+function noteKeys(event: KeyboardEvent, request: Held) {
+  if (event.key === 'Enter' && !event.shiftKey) { event.preventDefault(); void settle(request) }
+  else if (event.key === 'Escape') { event.preventDefault(); event.stopPropagation(); cancel() }
 }
 function reasonKeys(event: KeyboardEvent, approval: Approval) {
   if (event.key === 'Enter' && !event.shiftKey) { event.preventDefault(); void submit(approval) }
@@ -69,14 +84,14 @@ defineExpose({ begin, cancel, isOpen: () => !!open.value })
       <h2 id="needs-title">Needs you</h2>
       <span v-if="count" class="count-badge">{{ count }}</span>
       <span class="spacer" />
-      <p v-if="count && canDecide" class="keys" aria-hidden="true"><kbd class="keycap">j</kbd><kbd class="keycap">k</kbd> move · <kbd class="keycap">a</kbd> approve · <kbd class="keycap">d</kbd> deny</p>
+      <p v-if="count && canDecide" class="keys" aria-hidden="true"><kbd class="keycap">j</kbd><kbd class="keycap">k</kbd> move · <kbd class="keycap">a</kbd> approve or resolve · <kbd class="keycap">d</kbd> deny or dismiss</p>
     </header>
 
     <p v-if="!count" class="all-clear"><AppIcon name="check" :size="15" />Nothing waits on you. New permission requests appear here the moment an agent asks.</p>
 
     <ul v-else class="items" aria-label="Requests waiting for you">
       <li
-        v-for="approval in pending" :key="approval.id" class="item" :class="[riskOf(approval), { active: cursor === `a:${approval.id}`, open: open?.id === approval.id }]"
+        v-for="approval in pending" :key="approval.id" class="item" :class="[riskFor(approval), { active: cursor === `a:${approval.id}`, open: open?.id === approval.id }]"
         :data-row="`a:${approval.id}`" tabindex="-1" :aria-label="`${scopeLabel(approval.scope)}, asked by ${asker(approval.agent_principal_id).name}`"
         @click="emit('focusRow', `a:${approval.id}`)" @focusin="emit('focusRow', `a:${approval.id}`)"
       >
@@ -84,7 +99,7 @@ defineExpose({ begin, cancel, isOpen: () => !!open.value })
         <div class="body">
           <p class="line1">
             <strong class="what">{{ scopeLabel(approval.scope) }}</strong>
-            <span class="risk-chip" :class="riskOf(approval)">{{ RISK_LABEL[riskOf(approval)] }}</span>
+            <span class="risk-chip" :class="riskFor(approval)">{{ RISK_LABEL[riskFor(approval)] }}</span>
             <span class="expiry" :class="{ soon: expiresSoon(approval, now) }"><AppIcon name="clock" :size="12" />{{ expiresIn(approval, now) }}</span>
           </p>
           <p class="line2">
@@ -121,8 +136,8 @@ defineExpose({ begin, cancel, isOpen: () => !!open.value })
         </div>
       </li>
       <li
-        v-for="request in held" :key="request.id" class="item held" :class="{ active: cursor === `m:${request.id}` }" :data-row="`m:${request.id}`" tabindex="-1"
-        :aria-label="`Action request from ${asker(request.sender_principal_id).name}`" @click="emit('focusRow', `m:${request.id}`)"
+        v-for="request in held" :key="request.id" class="item held" :class="{ active: cursor === `m:${request.id}`, open: open?.id === request.id }" :data-row="`m:${request.id}`" tabindex="-1"
+        :aria-label="`Action request from ${asker(request.sender_principal_id).name}`" @click="emit('focusRow', `m:${request.id}`)" @focusin="emit('focusRow', `m:${request.id}`)"
       >
         <span class="mark"><AppIcon name="inbox" :size="15" /></span>
         <div class="body">
@@ -134,9 +149,30 @@ defineExpose({ begin, cancel, isOpen: () => !!open.value })
             <span class="asks">to</span><code class="scope">{{ request.to }}</code>
           </p>
           <p class="why body-text">{{ request.body }}</p>
+          <p v-if="request.created_at" class="sent-at"><time :datetime="request.created_at">Sent {{ relativeTime(request.created_at, { now, long: true }) }}</time></p>
+          <form v-if="open?.id === request.id" class="decision" @submit.prevent="settle(request)" @click.stop>
+            <label :for="`note-${request.id}`">Note (optional)</label>
+            <textarea
+              :id="`note-${request.id}`" ref="reasonField" v-model="reason" class="field" rows="2" maxlength="8000"
+              :placeholder="open.mode === 'resolve' ? 'Merged it myself after CI.' : 'Not needed; camy already has the lock.'" :disabled="busy" @keydown="noteKeys($event, request)"
+            />
+            <p class="fine-print">Resolving records your answer. The held message is not delivered.</p>
+            <p v-if="error" class="error" role="alert"><AppIcon name="alert" :size="13" />{{ error }}</p>
+            <div class="decision-actions">
+              <span class="hint"><kbd class="keycap"><AppIcon name="enter" /></kbd> to {{ open.mode }} · <kbd class="keycap">esc</kbd> to cancel</span>
+              <button type="button" class="btn sm ghost" :disabled="busy" @click="cancel">Cancel</button>
+              <button type="submit" class="btn sm" :class="open.mode === 'resolve' ? 'primary' : ''" :disabled="busy">
+                <AppIcon :name="open.mode === 'resolve' ? 'check' : 'close'" :size="13" />{{ busy ? 'Saving…' : open.mode === 'resolve' ? 'Mark resolved' : 'Dismiss request' }}
+              </button>
+            </div>
+          </form>
         </div>
-        <div class="row-actions">
-          <button type="button" class="btn sm" @click.stop="emit('openAgent', request.sender_principal_id)"><AppIcon name="send" :size="13" />Answer</button>
+        <div v-if="open?.id !== request.id" class="row-actions">
+          <button type="button" class="btn sm ghost answer" @click.stop="emit('openAgent', request.sender_principal_id)"><AppIcon name="send" :size="13" />Answer</button>
+          <template v-if="canDecide">
+            <button type="button" class="btn sm" aria-keyshortcuts="d" @click.stop="begin(request.id, 'dismiss')"><AppIcon name="close" :size="13" />Dismiss</button>
+            <button type="button" class="btn sm" :class="cursor === `m:${request.id}` ? 'primary' : 'approve-soft'" aria-keyshortcuts="a" @click.stop="begin(request.id, 'resolve')"><AppIcon name="check" :size="13" />Resolve</button>
+          </template>
         </div>
       </li>
     </ul>
@@ -210,6 +246,9 @@ defineExpose({ begin, cancel, isOpen: () => !!open.value })
 .btn.approve-soft:hover { background: var(--row-selected); box-shadow: inset 0 0 0 1px var(--teal); }
 .btn.deny { color: #fff; background: var(--danger); border-color: transparent; }
 .btn.deny:hover { filter: brightness(1.06); background: var(--danger); }
+.sent-at { font-size: 11.5px; color: var(--ink-3); }
+.fine-print { font-size: 11.5px; color: var(--ink-3); }
+.answer { color: var(--teal-ink); }
 .error { display: flex; align-items: center; gap: 6px; font-size: 12.5px; color: var(--danger); }
 .history { border-top: 1px solid var(--line); padding: 6px 10px 8px; }
 .history-toggle { display: inline-flex; align-items: center; gap: 6px; height: 30px; padding: 0 8px; border: 0; border-radius: 8px; background: transparent; color: var(--ink-2); font-size: 12.5px; font-weight: 600; }

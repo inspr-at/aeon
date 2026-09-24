@@ -26,11 +26,7 @@ const thread = ref<HTMLElement>()
 const s = computed(() => props.view?.session)
 const me = computed(() => session.identity?.principal.id ?? '')
 const pending = computed(() => s.value ? agents.pending.filter(a => a.agent_principal_id === s.value!.agent_principal_id) : [])
-const siblings = computed(() => s.value ? agents.byAgent(s.value.agent_principal_id) : [])
-const recentRuns = computed(() => {
-  const ids = [...new Set(siblings.value.map(v => v.session.run_id).filter((id): id is string => !!id))]
-  return ids.map(id => agents.runs[id]).filter(Boolean).sort((a, b) => Date.parse(b.created_at) - Date.parse(a.created_at)).slice(0, 8)
-})
+const recentRuns = computed(() => s.value ? agents.recentRuns(s.value.agent_principal_id).slice(0, 8) : [])
 const run = computed(() => props.view?.run)
 const messages = computed(() => s.value ? agents.thread(s.value).slice(-40) : [])
 const address = computed(() => s.value ? agents.addressOf(s.value.agent_principal_id) : '')
@@ -48,9 +44,8 @@ const fromAgent = (m: ProjectMessage) => m.sender_principal_id === s.value?.agen
 watch(() => s.value?.id, async id => {
   if (!id || !s.value) return
   draft.value = ''; replyTo.value = null; sendError.value = ''
-  const ids = siblings.value.map(v => v.session.run_id).filter((x): x is string => !!x)
   thread.value?.scrollTo({ top: 0 })
-  await Promise.all([agents.runsFor(ids), agents.refreshThread(s.value.project_id)])
+  await Promise.all([agents.refreshAgentRuns(s.value.agent_principal_id), agents.refreshThread(s.value.project_id)])
 }, { immediate: true })
 onMounted(() => root.value?.focus({ preventScroll: true }))
 
@@ -149,15 +144,19 @@ defineExpose({ focus: () => root.value?.focus({ preventScroll: true }) })
       <section class="block" aria-labelledby="runs-title">
         <h3 id="runs-title" class="eyebrow">Recent runs</h3>
         <p v-if="!recentRuns.length" class="empty-line">No runs reported for this agent yet.</p>
-        <ul v-else class="runs">
-          <li v-for="item in recentRuns" :key="item.id" class="run-row">
-            <span class="run-chip" :class="RUN_OUTCOME[item.status].tone">{{ RUN_OUTCOME[item.status].label }}</span>
-            <span class="run-model mono">{{ runModel(item) || 'model not reported' }}</span>
-            <span class="run-tokens mono">{{ tokens(item.input_tokens + item.output_tokens) }} tok</span>
-            <span class="run-duration mono">{{ runDuration(item, now) || '—' }}</span>
-            <time class="run-when" :datetime="item.created_at">{{ relativeTime(item.started_at ?? item.created_at, { now }) }}</time>
-          </li>
-        </ul>
+        <div v-else class="runs" role="table" aria-label="Recent runs">
+          <div class="run-row run-head" role="row">
+            <span role="columnheader">Outcome</span><span role="columnheader">Model</span><span role="columnheader" class="run-tokens">Tokens</span>
+            <span role="columnheader" class="run-duration">Took</span><span role="columnheader" class="run-when">Started</span>
+          </div>
+          <div v-for="item in recentRuns" :key="item.id" class="run-row" role="row">
+            <span role="cell"><span class="run-chip" :class="RUN_OUTCOME[item.status].tone">{{ RUN_OUTCOME[item.status].label }}</span></span>
+            <span role="cell" class="run-model mono" :data-tip="runModel(item) || undefined">{{ runModel(item) || 'not reported' }}</span>
+            <span role="cell" class="run-tokens mono" :data-tip="`${item.input_tokens.toLocaleString()} in · ${item.output_tokens.toLocaleString()} out`">{{ tokens(item.input_tokens + item.output_tokens) }}</span>
+            <span role="cell" class="run-duration mono">{{ runDuration(item, now) || '—' }}</span>
+            <time role="cell" class="run-when" :datetime="item.created_at" :data-tip="absoluteTime(item.started_at ?? item.created_at)">{{ relativeTime(item.started_at ?? item.created_at, { now }) }}</time>
+          </div>
+        </div>
       </section>
 
       <section class="block" aria-labelledby="messages-title">
@@ -171,6 +170,8 @@ defineExpose({ focus: () => root.value?.focus({ preventScroll: true }) })
               <span v-if="m.delivery_level === 'steer'" class="msg-chip steer"><AppIcon name="bolt" :size="10" />Steer</span>
               <span v-if="m.is_action_request" class="msg-chip held">Action request</span>
               <span v-if="m.reply_obligation === 'open'" class="msg-chip open">Awaiting reply</span>
+              <span v-if="m.human_resolution_outcome" class="msg-chip">{{ m.human_resolution_outcome === 'resolved' ? 'Resolved' : 'Dismissed' }}</span>
+              <time v-if="m.created_at" class="msg-time" :datetime="m.created_at" :data-tip="absoluteTime(m.created_at)">{{ relativeTime(m.created_at, { now }) }}</time>
             </p>
             <p class="msg-body">{{ m.body }}</p>
             <button v-if="fromAgent(m) && canWrite && !composeBlock" type="button" class="reply" @click="replyTo = m">Reply</button>
@@ -253,17 +254,20 @@ defineExpose({ focus: () => root.value?.focus({ preventScroll: true }) })
 .run-chip.busy { background: var(--chip-teal-bg); color: var(--teal-ink); box-shadow: inset 0 0 0 1px var(--chip-teal-line); }
 .run-chip.bad { background: var(--danger-bg); color: var(--danger); box-shadow: inset 0 0 0 1px var(--danger-line); }
 .empty-line { font-size: 13px; color: var(--ink-3); }
-.runs { margin: 0; padding: 0; list-style: none; }
-.run-row { display: grid; grid-template-columns: 96px minmax(0, 1fr) 70px 64px 70px; align-items: center; gap: 10px; min-height: 36px; border-bottom: 1px solid var(--line); font-size: 12.5px; }
+.runs { display: grid; grid-template-columns: minmax(0, 1fr); }
+.run-row { display: grid; grid-template-columns: 92px minmax(0, 1fr) 48px 56px 68px; align-items: center; gap: 10px; min-height: 36px; border-bottom: 1px solid var(--line); font-size: 12.5px; }
+.run-head { min-height: 24px; font: 500 9.5px/1 var(--mono); letter-spacing: .12em; text-transform: uppercase; color: var(--ink-3); font-variant-ligatures: none; }
 .run-row:last-child { border-bottom: 0; }
 .run-model { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; font-size: 12px; color: var(--ink); }
 .run-tokens, .run-duration { font-size: 12px; color: var(--ink-2); text-align: right; font-variant-numeric: tabular-nums; }
 .run-when { font-size: 12px; color: var(--ink-3); text-align: right; white-space: nowrap; }
+.run-head .run-tokens, .run-head .run-duration, .run-head .run-when { font: inherit; color: inherit; }
 .thread { display: grid; grid-template-columns: minmax(0, 1fr); gap: 10px; margin: 0; padding: 0; list-style: none; }
 .msg { position: relative; max-width: 88%; padding: 10px 12px; border-radius: 12px 12px 12px 4px; background: var(--comment-bg, var(--code-bg)); box-shadow: inset 0 0 0 1px var(--line); }
 .msg.mine { justify-self: end; border-radius: 12px 12px 4px 12px; background: var(--chip-teal-bg); box-shadow: inset 0 0 0 1px var(--chip-teal-line); }
 .msg-meta { display: flex; align-items: center; flex-wrap: wrap; gap: 6px; margin-bottom: 4px; font-size: 11.5px; }
 .msg-author { font-weight: 650; color: var(--ink); }
+.msg-time { margin-left: auto; padding-left: 8px; font-size: 11px; color: var(--ink-3); white-space: nowrap; }
 .msg-chip { display: inline-flex; align-items: center; gap: 3px; height: 17px; padding: 0 6px; border-radius: 999px; font: 600 9.5px/1 var(--mono); letter-spacing: .06em; text-transform: uppercase; font-variant-ligatures: none; background: var(--chip-bg); color: var(--ink-2); }
 .msg-chip.steer { background: var(--gold-wash); color: var(--gold-ink); }
 .msg-chip.open { background: var(--chip-teal-bg); color: var(--teal-ink); }
@@ -297,7 +301,7 @@ defineExpose({ focus: () => root.value?.focus({ preventScroll: true }) })
   .head-account { margin-left: 0; padding-left: 0; box-shadow: none; width: 100%; }
   .scroll { padding: 16px 18px 24px; }
   .telemetry { grid-template-columns: 1fr 1fr; }
-  .run-row { grid-template-columns: 88px minmax(0, 1fr) 60px; }
+  .run-row { grid-template-columns: 88px minmax(0, 1fr) 56px; }
   .run-tokens, .run-when { display: none; }
   .composer { border-radius: 0; padding: 8px 12px calc(8px + env(safe-area-inset-bottom)); background: var(--surface-raised); }
   .compose-hint { display: none; }
