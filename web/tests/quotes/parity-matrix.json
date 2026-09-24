@@ -9,7 +9,7 @@
   "scope_note": "Each nonempty feature-list line and each open-ticket acceptance criterion has one result. Synthetic fixtures only. No classic instance, business data, migration execution, cutover or deployment. A pass applies only to its exact cited assertion.",
   "counts": {
     "pass": 88,
-    "gap": 10,
+    "gap": 0,
     "deferred": 33
   },
   "features": [
