@@ -1,6 +1,7 @@
 <!-- SPDX-License-Identifier: AGPL-3.0-only -->
 <!-- Parked (AEON-70, 2026-09-24): quotes and organisations will be ported from Markus's current classic Paimos quote builder; this file is not routed or linked. -->
 <script setup lang="ts">
+import { setPageTitle } from '../../lib/brand'
 import { computed, nextTick, onBeforeUnmount, onMounted, ref, watch } from 'vue'
 import { useRoute, useRouter } from 'vue-router'
 import { getQuote, type Quote, type QuoteState } from '../../lib/business'
@@ -209,7 +210,7 @@ watch(stickMark, element => {
   stick.observe(element)
 }, { flush: 'post' })
 onBeforeUnmount(() => { window.removeEventListener('keydown', keydown); clearInterval(clock); clearTimeout(searchTimer); stick?.disconnect() })
-watch(selected, value => { document.title = value ? `${value.key} ${value.title} · PAIMOS AEON` : 'Quotes · PAIMOS AEON' })
+watch(selected, value => { setPageTitle(value ? `${value.key} ${value.title}` : 'Quotes') })
 function rowClick(event: MouseEvent, quote: Quote) {
   if ((event.target as HTMLElement).closest('button')) return
   if (event.metaKey || event.ctrlKey) { window.open(`/business/quotes/${encodeURIComponent(quote.key)}`, '_blank', 'noopener'); return }

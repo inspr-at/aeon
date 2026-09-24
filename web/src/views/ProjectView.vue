@@ -1,5 +1,6 @@
 <!-- SPDX-License-Identifier: AGPL-3.0-only -->
 <script setup lang="ts">
+import { setPageTitle } from '../lib/brand'
 import { computed, nextTick, onBeforeUnmount, onMounted, ref, watch } from 'vue'
 import { onBeforeRouteLeave, onBeforeRouteUpdate, useRoute, useRouter } from 'vue-router'
 import { createNode, listNodes, type ListItem } from '../lib/api'
@@ -573,7 +574,7 @@ onBeforeUnmount(() => {
 // ---------- Document title ----------
 watch([project, panelItem], ([current, item]) => {
   if (!current) return
-  document.title = item ? `${item.key} ${item.title} · PAIMOS AEON` : `${current.routeKey} ${current.title} · PAIMOS AEON`
+  setPageTitle(item ? `${item.key} ${item.title}` : `${current.routeKey} ${current.title}`)
 }, { immediate: true })
 
 

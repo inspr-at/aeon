@@ -14,7 +14,7 @@ export function accountEmail(identity: Identity) {
   return identity.identity?.email?.trim() || identity.principal.email || ''
 }
 
-export interface Version { version: string; scheme: string }
+export interface Version { version: string; scheme: string; brand?: import('./brand').Brand }
 
 export async function api(path: string, init: RequestInit = {}) {
   return fetch(`/api${path}`, {

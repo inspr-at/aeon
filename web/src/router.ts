@@ -1,5 +1,6 @@
 // SPDX-License-Identifier: AGPL-3.0-only
 import { createRouter, createWebHistory } from 'vue-router'
+import { setPageTitle } from './lib/brand'
 import { useProjects } from './stores/projects'
 import { useSession } from './stores/session'
 import ProjectsView from './views/ProjectsView.vue'
@@ -55,4 +56,4 @@ router.beforeEach(async (to) => {
   if (!session.identity && to.path !== '/signin') return wasSignedIn ? { path: '/signin', query: { error: 'expired' } } : '/signin'
   if (session.identity && to.path === '/signin') return '/'
 })
-router.afterEach((to) => { document.title = `${to.meta.title} · PAIMOS AEON` })
+router.afterEach((to) => { setPageTitle(String(to.meta.title ?? '')) })

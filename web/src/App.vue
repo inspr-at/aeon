@@ -14,6 +14,7 @@ import AppIcon from './components/AppIcon.vue'
 import { command, consume } from './lib/commands'
 import { clearFatal, fatal } from './lib/fatal'
 import { useSession } from './stores/session'
+import { brand } from './lib/brand'
 
 const session = useSession()
 const route = useRoute()
@@ -58,7 +59,7 @@ watch(() => [route.path, route.params.projectKey, route.params.ticketKey] as con
         </StatusPage>
         <RouterView v-else />
         <footer v-if="!bare && (!route.meta.fill || session.error || fatal)" class="app-footer">
-          <span class="footer-name">PAIMOS AEON</span>
+          <span class="footer-name">{{ brand.wordmark }}</span>
           <VersionDisplay />
         </footer>
       </div>

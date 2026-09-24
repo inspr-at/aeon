@@ -127,7 +127,7 @@ test('the session panel shows the ticket, runs, telemetry and the thread, and se
   const details = panel(page)
   await expect(details.getByRole('heading', { name: /camy/ })).toBeVisible()
   await expect(details.locator('.head-sub')).toContainText('Claude Max')
-  await expect(details).toContainText('lead session · owned by Aeon')
+  await expect(details).toContainText('lead session · owned by AEON')
   await expect(details.getByRole('link', { name: /PHAROS-11/ })).toHaveAttribute('href', '/p/PHAROS/PHAROS-11')
   await expect(details).toContainText('Claude Max')
   await expect(details.locator('.metric')).toHaveText([/Running/, /184k/, /22k/, /\$3\.84/])
@@ -154,7 +154,7 @@ test('the session panel shows the ticket, runs, telemetry and the thread, and se
   expect(calls.some(c => /\/api\/projects\/[^/]+\/harness-sessions$/.test(c.path))).toBe(false)
 })
 
-test('interrupt goes straight out, stop asks first, and sessions outside Aeon cannot be controlled', async ({ page }) => {
+test('interrupt goes straight out, stop asks first, and sessions outside AEON cannot be controlled', async ({ page }) => {
   const { calls } = await setup(page)
   await openAgents(page)
   await row(page, nova).getByRole('button', { name: 'Interrupt nova' }).click()
@@ -171,7 +171,7 @@ test('interrupt goes straight out, stop asks first, and sessions outside Aeon ca
   await expect.poll(() => calls.some(c => c.path.endsWith(`/harness-sessions/${camy}/controls/stop`))).toBe(true)
   const unmanaged = row(page, session(5)).getByRole('button', { name: 'Interrupt amy' })
   await expect(unmanaged).toHaveAttribute('aria-disabled', 'true')
-  await expect(unmanaged).toHaveAttribute('data-tip', /outside Aeon/)
+  await expect(unmanaged).toHaveAttribute('data-tip', /outside AEON/)
 })
 
 test('Enter opens a session, j and k move the panel along, Escape closes it', async ({ page }) => {

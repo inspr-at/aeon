@@ -1,5 +1,6 @@
 <!-- SPDX-License-Identifier: AGPL-3.0-only -->
 <script setup lang="ts">
+import { brand } from '../../lib/brand'
 import { computed, onBeforeUnmount, onMounted, provide, ref, watch, type Component } from 'vue'
 import '../../styles/journey.css'
 import {
@@ -228,7 +229,7 @@ onBeforeUnmount(() => { window.removeEventListener('keydown', keydown); clearInt
         </div>
         <p class="subtitle">{{ subtitle }}</p>
         <span class="spacer" />
-        <span class="owner mono" :data-tip="`${STAGE_LABEL[viewed]} is carried by ${STAGE_OWNER[viewed]}`">{{ STAGE_OWNER[viewed] }}</span>
+        <span class="owner mono" :data-tip="`${STAGE_LABEL[viewed]} is carried by ${STAGE_OWNER[viewed] ?? brand.short_name}`">{{ STAGE_OWNER[viewed] ?? brand.short_name }}</span>
       </header>
       <component :is="STAGE_VIEW[viewed]" :key="viewed" />
       <p class="journey-hint">

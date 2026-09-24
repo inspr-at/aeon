@@ -1,5 +1,6 @@
 <!-- SPDX-License-Identifier: AGPL-3.0-only -->
 <script setup lang="ts">
+import { brand } from '../lib/brand'
 import { computed, ref } from 'vue'
 import { useRoute, useRouter } from 'vue-router'
 import hero from '../assets/brand/paimos-hero.jpg'
@@ -64,7 +65,7 @@ function dismiss() { const { error: _error, ...rest } = route.query; void router
     <div class="signin-card" :class="{ dev: session.devMode }">
       <div class="brand">
         <span class="mark-backing"><img :src="mark" width="34" height="34" alt="" /></span>
-        <span class="wordmark">PAIMOS<sup>AEON</sup></span>
+        <span class="wordmark">{{ brand.product }}<sup>{{ brand.release_name }}</sup></span>
       </div>
       <h1 id="signin-title">Sign in</h1>
       <p class="intro">Your projects, tickets and agents in one calm place.</p>
@@ -103,7 +104,7 @@ function dismiss() { const { error: _error, ...rest } = route.query; void router
       </form>
 
       <footer class="card-foot">
-        <span class="foot-name">PAIMOS AEON</span>
+        <span class="foot-name">{{ brand.wordmark }}</span>
         <VersionDisplay />
         <button class="icon-btn sm flat theme" type="button" :aria-label="dark ? 'Switch to light theme' : 'Switch to dark theme'" :data-tip="dark ? 'Light theme' : 'Dark theme'" @click="toggleTheme"><AppIcon :name="dark ? 'sun' : 'moon'" :size="14" /></button>
       </footer>

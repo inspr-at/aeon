@@ -1,6 +1,7 @@
 <!-- SPDX-License-Identifier: AGPL-3.0-only -->
 <!-- Parked (AEON-70, 2026-09-24): quotes and organisations will be ported from Markus's current classic Paimos quote builder; this file is not routed or linked. -->
 <script setup lang="ts">
+import { setPageTitle } from '../../lib/brand'
 import { computed, nextTick, onBeforeUnmount, onMounted, ref, watch } from 'vue'
 import { useRoute, useRouter } from 'vue-router'
 import type { ListItem } from '../../lib/api'
@@ -57,7 +58,7 @@ const position = computed(() => {
   const index = selected.value ? rows.value.findIndex(r => r.id === selected.value!.id) : -1
   return index === -1 ? null : { index, count: rows.value.length }
 })
-watch(selected, org => { if (org) cursor.value = org.id; document.title = org ? `${org.title} · PAIMOS AEON` : 'Organisations · PAIMOS AEON' })
+watch(selected, org => { if (org) cursor.value = org.id; setPageTitle(org ? org.title : 'Organisations') })
 
 // ---------- Panel ----------
 let openedFromList = false

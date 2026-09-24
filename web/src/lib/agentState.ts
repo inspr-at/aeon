@@ -2,6 +2,7 @@
 // Pure rules for the agents workspace: what state a session is in, which group it
 // belongs to, what an approval asks for and how risky it is, and how an account's
 // allowance window is pacing. Free of Vue so it can be unit tested.
+import { brand } from './brand.ts'
 import { paceFraction, type AgentRun, type AllowanceWindow, type Approval, type HarnessSession, type ProjectMessage } from './agents.ts'
 
 export const HEARTBEAT_STALE_MS = 2 * 60_000
@@ -170,7 +171,7 @@ export const UNIT_LABEL: Record<AllowanceWindow['unit'], string> = { requests: '
 export function controlBlocked(session: HarnessSession, kind: 'interrupt' | 'stop', name: string, canControl: boolean, current?: { kind: string; state: string } | null) {
   if (!canControl) return 'Only people who may write can control sessions'
   if (session.phase === 'stopped') return 'This session has stopped'
-  if (session.management_mode !== 'managed') return 'This session runs outside Aeon, so it cannot be controlled from here'
+  if (session.management_mode !== 'managed') return `This session runs outside ${brand.value.short_name}, so it cannot be controlled from here`
   if (!session.advertised_capabilities.includes(kind)) return `${name} does not accept ${kind === 'stop' ? 'a stop' : 'interrupts'}`
   if (current && current.state !== 'completed') return `${current.kind === 'stop' ? 'A stop' : 'An interrupt'} is on its way`
   return ''

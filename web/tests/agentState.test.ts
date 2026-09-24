@@ -65,7 +65,7 @@ test('agent names come from the message address, else the host', () => {
 test('controls are blocked with a reason people can act on', () => {
   assert.equal(controlBlocked(session(), 'stop', 'camy', true), '')
   assert.match(controlBlocked(session(), 'stop', 'camy', false), /may write/)
-  assert.match(controlBlocked(session({ management_mode: 'unmanaged' }), 'interrupt', 'amy', true), /outside Aeon/)
+  assert.match(controlBlocked(session({ management_mode: 'unmanaged' }), 'interrupt', 'amy', true), /outside AEON/)
   assert.match(controlBlocked(session({ advertised_capabilities: ['stop'] }), 'interrupt', 'camy', true), /does not accept interrupts/)
   assert.match(controlBlocked(session(), 'interrupt', 'camy', true, { kind: 'stop', state: 'pending' }), /stop is on its way/)
   assert.equal(controlBlocked(session(), 'interrupt', 'camy', true, { kind: 'stop', state: 'completed' }), '')
