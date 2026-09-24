@@ -199,7 +199,12 @@ onBeforeUnmount(() => {
 
 const timeOf = (r: Release) => { const at = releasedAt(r); return at ? new Date(at).toLocaleTimeString('en-GB', { hour: '2-digit', minute: '2-digit' }) : '—' }
 const ageOf = (r: Release) => { const at = releasedAt(r); return at ? relativeTime(at, { now: now.value }) : '' }
-const countsOf = (r: Release) => { const g = groupChanges(r.changes); return { features: g.features.length, fixes: g.fixes.length, other: g.other.length } }
+// Per-row counts and ticket keys, worked out once per history rather than on every render.
+const summaries = computed(() => new Map(releases.value.map(r => {
+  const g = groupChanges(r.changes)
+  return [r.version, { features: g.features.length, fixes: g.fixes.length, other: g.other.length, tickets: ticketsOf(r) }]
+})))
+const countsOf = (r: Release) => summaries.value.get(r.version) ?? { features: 0, fixes: 0, other: 0, tickets: [] as string[] }
 function reload() { window.location.reload() }
 </script>
 
@@ -309,7 +314,7 @@ function reload() { window.location.reload() }
                     <span v-if="countsOf(r).features" class="count"><AppIcon name="sparkle" :size="11" />{{ countsOf(r).features }}<span class="sr"> features</span></span>
                     <span v-if="countsOf(r).fixes" class="count"><AppIcon name="wrench" :size="11" />{{ countsOf(r).fixes }}<span class="sr"> fixes</span></span>
                     <span v-if="countsOf(r).other" class="count"><AppIcon name="commit" :size="11" />{{ countsOf(r).other }}<span class="sr"> other changes</span></span>
-                    <span v-if="ticketsOf(r).length" class="count keys mono">{{ ticketsOf(r).slice(0, 2).join(' ') }}<template v-if="ticketsOf(r).length > 2"> +{{ ticketsOf(r).length - 2 }}</template></span>
+                    <span v-if="countsOf(r).tickets.length" class="count keys mono">{{ countsOf(r).tickets.slice(0, 2).join(' ') }}<template v-if="countsOf(r).tickets.length > 2"> +{{ countsOf(r).tickets.length - 2 }}</template></span>
                   </span>
                 </span>
                 <AppIcon name="chevron-right" :size="14" class="row-chev" />
