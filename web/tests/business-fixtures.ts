@@ -3,6 +3,9 @@
 // directory) layered over mockWork, for the Business specs. Money goes over the
 // wire as JSON number tokens, the way the server writes numeric(18,4), so the
 // specs exercise exact parsing. Times are fixed to Thursday 24 Sep 2026 in Vienna.
+// Entry corrections follow the server: an If-Unmodified-Since precondition (412
+// with the current entry), 409 once the period is approved, and events that
+// POST /events/{id}/undo reverses.
 import type { Page, Route } from '@playwright/test'
 import { me } from './work-fixtures'
 
@@ -24,7 +27,12 @@ export const WEEK39 = { starts_at: local('2026-09-21'), ends_at: local('2026-09-
 export interface BusinessMockOptions { role?: 'admin' | 'member'; enabled?: string[]; approveConflict?: boolean; noDirectory?: boolean }
 type Rate = { id: string; cost_unit_node_id: string; unit: string; currency: string; internal_amount: string; bill_amount: string; effective_from: string; effective_until: string | null; created_by_principal_id: string; created_at: string }
 type Period = { id: string; principal_id: string; starts_at: string; ends_at: string; state: 'open' | 'approved'; revision: number; approval: { approved_by_principal_id: string; entries_sha256: string; total_seconds: number; event_id: number } | null }
-type Entry = { id: string; period_id: string; principal_id: string; node_id: string; cost_unit_node_id: string; source: string; agent_run_id: string | null; started_at: string; ended_at: string; duration_seconds: number; rate_amount: string; currency: string; amount: string; note: string }
+type Entry = { id: string; period_id: string; principal_id: string; node_id: string; cost_unit_node_id: string; source: string; agent_run_id: string | null; started_at: string; ended_at: string; duration_seconds: number; rate_amount: string; currency: string; amount: string; note: string; updated_at: string }
+type EntryEvent = { id: number; actor_principal_id: string; node_id: string; type: string; before: Entry | null; after: Entry | null; at: string; undo_of: number | null }
+// Microsecond revisions, so the specs check the precondition is echoed exactly.
+export const REVISION = '2026-09-24T06:00:00.123456Z'
+let revisions = 0
+const nextRevision = () => `2026-09-24T08:00:${String(++revisions % 60).padStart(2, '0')}.654321Z`
 
 function costUnit(id: string, key: string, title: string, state = 'new') {
   return {
@@ -45,7 +53,7 @@ function amountFor(bill: string, seconds: number) {
 function entry(id: string, period: string, principal: string, node: string, cost: string, bill: string, day: string, from: string, to: string, note: string): Entry {
   const started = local(day, from), ended = local(day, to)
   const seconds = (Date.parse(ended) - Date.parse(started)) / 1000
-  return { id, period_id: period, principal_id: principal, node_id: node, cost_unit_node_id: cost, source: 'manual', agent_run_id: null, started_at: started, ended_at: ended, duration_seconds: seconds, rate_amount: bill, currency: 'EUR', amount: amountFor(bill, seconds), note }
+  return { id, period_id: period, principal_id: principal, node_id: node, cost_unit_node_id: cost, source: 'manual', agent_run_id: null, started_at: started, ended_at: ended, duration_seconds: seconds, rate_amount: bill, currency: 'EUR', amount: amountFor(bill, seconds), note, updated_at: REVISION }
 }
 
 export function businessData(options: BusinessMockOptions = {}) {
@@ -84,7 +92,10 @@ export function businessData(options: BusinessMockOptions = {}) {
     { id: 'p-system', kind: 'agent', name: 'System', roles: ['system'] },
   ]
   const kinds = ['epic', 'ticket', 'task', 'project', 'cost_unit'].map(slug => ({ id: `k-${slug}`, slug, label: slug === 'cost_unit' ? 'Cost unit' : slug[0].toUpperCase() + slug.slice(1), short_prefix: slug === 'cost_unit' ? 'CU' : slug.slice(0, 3).toUpperCase(), icon: slug, allowed_child_kinds: null, field_schema: {} }))
-  return { plugins, units, rates, periods, entries, principals, kinds, counter: { next: 1 } }
+  // Changes another session makes to an entry just before this page's next correction.
+  const meanwhile: Record<string, Partial<Entry>> = {}
+  const events: EntryEvent[] = []
+  return { plugins, units, rates, periods, entries, principals, kinds, meanwhile, events, counter: { next: 1 } }
 }
 export type BusinessData = ReturnType<typeof businessData>
 export interface BusinessCall { path: string; method: string; body: unknown; query: URLSearchParams }
@@ -107,6 +118,7 @@ export async function mockBusiness(page: Page, data: BusinessData, options: Busi
     const isCostNodes = path === '/api/nodes' && ((method === 'GET' && q.get('kind') === 'cost_unit') || (method === 'POST' && (body as { kind_id?: string })?.kind_id === 'k-cost_unit'))
     const known = path === '/api/me' || path === '/api/plugins' || path.startsWith('/api/plugins/') || path === '/api/kinds' || path === '/api/business/principals'
       || path.startsWith('/api/cost-units/') || path.startsWith('/api/time-') || path.endsWith('/time-totals') || isCostNodes
+      || (path === '/api/events' && data.events.length > 0) || (/^\/api\/events\/\d+\/undo$/.test(path) && data.events.some(e => path === `/api/events/${e.id}/undo`))
     if (!known) return route.fallback()
     calls.push({ path, method, body, query: q })
     if (path === '/api/me') return route.fulfill({ json: { principal: { id: me.id, name: me.name, kind: 'person', roles: [options.role ?? 'admin'] }, tenant: { id: 't1', name: 'INSPR Studio' } } })
@@ -177,13 +189,69 @@ export async function mockBusiness(page: Page, data: BusinessData, options: Busi
         if (period.state !== 'open' || write.started_at < period.starts_at || write.ended_at > period.ends_at) return route.fulfill({ status: 409, json: { error: 'entry must fit its principal\'s open period' } })
         const bill = data.rates.find(r => r.cost_unit_node_id === write.cost_unit_node_id && r.unit === 'hour' && !r.effective_until)!.bill_amount
         const seconds = (Date.parse(write.ended_at) - Date.parse(write.started_at)) / 1000
-        const created: Entry = { id: `e-new-${data.counter.next++}`, ...write, source: 'manual', agent_run_id: null, duration_seconds: seconds, rate_amount: bill, amount: amountFor(bill, seconds) }
+        const created: Entry = { id: `e-new-${data.counter.next++}`, ...write, source: 'manual', agent_run_id: null, duration_seconds: seconds, rate_amount: bill, amount: amountFor(bill, seconds), updated_at: nextRevision() }
         data.entries.push(created)
         period.revision += 1
         return json(route, 201, created)
       }
       const list = data.entries.filter(e => (!q.get('period_id') || e.period_id === q.get('period_id')) && (!q.get('principal_id') || e.principal_id === q.get('principal_id')) && (!q.get('node_id') || e.node_id === q.get('node_id')))
       return json(route, 200, list)
+    }
+    const oneEntry = /^\/api\/time-entries\/([^/]+)$/.exec(path)
+    if (oneEntry) {
+      const current = data.entries.find(e => e.id === oneEntry[1])
+      if (!current) return route.fulfill({ status: 404, json: { error: 'not found' } })
+      const period = data.periods.find(p => p.id === current.period_id)!
+      if (current.principal_id !== me.id && (options.role ?? 'admin') !== 'admin') return route.fulfill({ status: 403, json: { error: 'entry author or admin required' } })
+      if (period.state !== 'open') return route.fulfill({ status: 409, json: { error: 'approved periods are immutable; time entries cannot be changed' } })
+      const other = data.meanwhile[current.id]
+      if (other) { Object.assign(current, other, { updated_at: nextRevision() }); delete data.meanwhile[current.id]; period.revision += 1 }
+      const since = request.headers()['if-unmodified-since']
+      if (since !== undefined && since !== current.updated_at) return json(route, 412, { error: 'time entry changed; reload before correcting', current }, { ETag: `"${current.updated_at}"` })
+      const event = (type: string, before: Entry | null, after: Entry | null) => data.events.push({ id: 500 + data.events.length, actor_principal_id: me.id, node_id: current.node_id, type, before, after, at: NOW.toISOString(), undo_of: null })
+      if (method === 'DELETE') {
+        data.entries.splice(data.entries.indexOf(current), 1)
+        event('time_entry.deleted', { ...current }, null)
+        period.revision += 1
+        return route.fulfill({ status: 204, body: '' })
+      }
+      const patch = body as { node_id?: string; cost_unit_node_id?: string; started_at?: string; ended_at?: string; duration_seconds?: number; note?: string }
+      const next = { ...current }
+      if (patch.node_id) next.node_id = patch.node_id
+      if (patch.note !== undefined) next.note = patch.note
+      if (patch.cost_unit_node_id) next.cost_unit_node_id = patch.cost_unit_node_id
+      const seconds = patch.duration_seconds ?? current.duration_seconds
+      if (patch.started_at) next.started_at = new Date(patch.started_at).toISOString()
+      next.ended_at = new Date(Date.parse(next.started_at) + seconds * 1000).toISOString()
+      if (next.started_at < period.starts_at || next.ended_at > period.ends_at) return route.fulfill({ status: 409, json: { error: 'entry must fit its open period' } })
+      if (next.cost_unit_node_id !== current.cost_unit_node_id || next.started_at.slice(0, 10) !== current.started_at.slice(0, 10)) {
+        const day = next.started_at.slice(0, 10)
+        const found = data.rates.filter(r => r.cost_unit_node_id === next.cost_unit_node_id && r.unit === 'hour' && r.currency === next.currency && r.effective_from <= day && (!r.effective_until || r.effective_until > day))
+        if (found.length !== 1) return route.fulfill({ status: 409, json: { error: 'exactly one effective hourly rate is required' } })
+        next.rate_amount = found[0].bill_amount
+      }
+      Object.assign(next, { duration_seconds: seconds, amount: amountFor(next.rate_amount, seconds), updated_at: nextRevision() })
+      event('time_entry.updated', { ...current }, { ...next })
+      Object.assign(current, next)
+      period.revision += 1
+      return json(route, 200, current, { ETag: `"${current.updated_at}"` })
+    }
+    if (path === '/api/events') {
+      const after = Number(q.get('after') ?? 0), node = q.get('node_id')
+      return json(route, 200, { items: data.events.filter(e => e.id > after && (!node || e.node_id === node)), next_after: null })
+    }
+    const undo = /^\/api\/events\/(\d+)\/undo$/.exec(path)
+    if (undo) {
+      const original = data.events.find(e => e.id === Number(undo[1]))!
+      if (original.undo_of !== null || data.events.some(e => e.undo_of === original.id) || original.type !== 'time_entry.deleted' || !original.before) return route.fulfill({ status: 409, json: { code: 'conflict', message: 'conflict' } })
+      const period = data.periods.find(p => p.id === original.before!.period_id)!
+      if (period.state !== 'open') return route.fulfill({ status: 409, json: { code: 'conflict', message: 'conflict' } })
+      const restored = { ...original.before, updated_at: nextRevision() }
+      data.entries.push(restored)
+      period.revision += 1
+      const undone: EntryEvent = { id: 500 + data.events.length, actor_principal_id: me.id, node_id: original.node_id, type: original.type, before: null, after: restored, at: NOW.toISOString(), undo_of: original.id }
+      data.events.push(undone)
+      return json(route, 201, undone)
     }
     const totals = /^\/api\/nodes\/([^/]+)\/time-totals$/.exec(path)
     if (totals) {

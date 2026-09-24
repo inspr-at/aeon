@@ -6,11 +6,12 @@ export interface LogRequest { ticket: LogTicket; costUnitId: string; currency: s
 let lastCostUnit = ''
 </script>
 <script setup lang="ts">
-import { computed, nextTick, ref, watch } from 'vue'
+import { computed, nextTick, onMounted, ref, watch } from 'vue'
 import { listNodes } from '../../lib/api'
+import type { EntryPatch, TimeEntry } from '../../lib/business'
 import { recents } from '../../lib/recents'
-import { dayKey, parseTimeInput, WEEKDAYS } from '../../lib/week'
-import { formatSpan, parseDurationInput } from './duration'
+import { dayKey, parseTimeInput, periodLabel, timeOfDay, WEEKDAYS } from '../../lib/week'
+import { formatClock, formatSpan, parseDurationInput } from './duration'
 import { formatAmount } from './money'
 import { useBusiness } from '../../stores/business'
 import AppIcon from './BizIcon.vue'
@@ -19,50 +20,105 @@ import PickerMenu, { type PickOption } from './PickerMenu.vue'
 // One line to log time: a ticket, the cost unit that prices it, the day, and a
 // duration typed the way people say it ("1h30", "90m", "1.5"). Enter logs it and
 // keeps ticket, cost unit and day for the next entry.
-const props = defineProps<{ days: Date[]; suggestions: LogTicket[]; busy: boolean; preset?: LogTicket | null }>()
-const emit = defineEmits<{ log: [request: LogRequest] }>()
+// With an entry, the same line corrects it in place: prefilled, Enter saves only
+// what changed, Escape cancels. An agent run's ticket and time stay as measured.
+const props = defineProps<{
+  days: Date[]; suggestions: LogTicket[]; busy: boolean; preset?: LogTicket | null
+  entry?: TimeEntry | null; entryTicket?: LogTicket | null; bounds?: { starts_at: string; ends_at: string } | null
+  // Another form on the page holds the primary action.
+  quiet?: boolean; saveLabel?: string
+}>()
+const emit = defineEmits<{ log: [request: LogRequest]; save: [patch: EntryPatch, ticket: LogTicket]; cancel: []; remove: [] }>()
 const business = useBusiness()
-const ticket = ref<LogTicket | null>(null)
-const costUnitId = ref(lastCostUnit)
+// The entry is fixed for the component's life: a draft survives a conflict.
+const seed = props.entry ?? null
+const seedStart = seed ? new Date(seed.started_at) : null
+const seedClock = seed ? timeOfDay(seed.started_at) : ''
+const seedDuration = seed ? formatClock(seed.duration_seconds) : ''
+const measured = seed?.source === 'agent_run'
+const ticket = ref<LogTicket | null>(seed ? props.entryTicket ?? null : null)
+const costUnitId = ref(seed ? seed.cost_unit_node_id : lastCostUnit)
 const dayIndex = ref(0)
-const duration = ref('')
-const start = ref('')
-const note = ref('')
+const duration = ref(seedDuration)
+const start = ref(seedClock)
+const note = ref(seed?.note ?? '')
 const picker = ref<HTMLElement | null>(null)
 const pickButton = ref<HTMLButtonElement>()
 const durationInput = ref<HTMLInputElement>()
+const noteInput = ref<HTMLInputElement>()
 const tried = ref(false)
 
 const todayKey = dayKey(new Date())
 watch(() => props.days, days => {
-  const today = days.findIndex(day => dayKey(day) === todayKey)
-  dayIndex.value = today === -1 ? 0 : today
+  const wanted = seedStart ? dayKey(seedStart) : todayKey
+  const found = days.findIndex(day => dayKey(day) === wanted)
+  dayIndex.value = found === -1 ? 0 : found
 }, { immediate: true })
-watch(() => props.preset, value => { if (value) ticket.value = value }, { immediate: true })
+watch(() => props.preset, value => { if (value && !seed) ticket.value = value }, { immediate: true })
 const day = computed(() => props.days[dayIndex.value])
-const utcDay = computed(() => day.value ? new Date(Date.UTC(day.value.getFullYear(), day.value.getMonth(), day.value.getDate())).toISOString().slice(0, 10) : '')
-// Hourly cost units with a rate on that day, in any currency.
-const hourly = computed(() => business.costUnits.filter(unit => !['cancelled', 'archived', 'done'].includes(unit.node.state) && unit.rates.some(rate => rate.unit === 'hour' && rate.effective_from <= utcDay.value && (!rate.effective_until || rate.effective_until > utcDay.value))))
-watch(hourly, units => { if (!units.some(unit => unit.node.id === costUnitId.value)) costUnitId.value = units.length === 1 ? units[0].node.id : '' }, { immediate: true })
-watch(costUnitId, value => { if (value) lastCostUnit = value })
-const rate = computed(() => {
+// A correction stays inside the entry's period.
+function dayOutside(d: Date) {
+  if (!props.bounds) return false
+  const from = new Date(d.getFullYear(), d.getMonth(), d.getDate()).getTime()
+  return from + 86_400_000 <= Date.parse(props.bounds.starts_at) || from >= Date.parse(props.bounds.ends_at)
+}
+
+const seconds = computed(() => parseDurationInput(duration.value))
+const startMinutes = computed(() => start.value.trim() ? parseTimeInput(start.value) : null)
+const startChanged = computed(() => !!seed && start.value.trim() !== seedClock)
+const durationChanged = computed(() => !!seed && duration.value.trim() !== seedDuration)
+// The corrected start and length; untouched fields keep their exact stored values.
+const newStart = computed<Date | null>(() => {
+  if (!seed || !seedStart || !day.value) return null
+  if (dayKey(day.value) === dayKey(seedStart) && !startChanged.value) return seedStart
+  const minutes = startChanged.value ? startMinutes.value : seedStart.getHours() * 60 + seedStart.getMinutes()
+  if (minutes === null) return null
+  return new Date(day.value.getFullYear(), day.value.getMonth(), day.value.getDate(), 0, minutes, startChanged.value ? 0 : seedStart.getSeconds())
+})
+const newSeconds = computed(() => seed ? (durationChanged.value ? seconds.value : seed.duration_seconds) : seconds.value)
+// The server prices a new entry and re-prices a correction on the start's UTC date.
+const utcDay = computed(() => {
+  if (seed) return newStart.value ? newStart.value.toISOString().slice(0, 10) : seed.started_at.slice(0, 10)
+  return day.value ? new Date(Date.UTC(day.value.getFullYear(), day.value.getMonth(), day.value.getDate())).toISOString().slice(0, 10) : ''
+})
+const inForce = (r: { unit: string; currency: string; effective_from: string; effective_until: string | null }) =>
+  r.unit === 'hour' && (!seed || r.currency === seed.currency) && r.effective_from <= utcDay.value && (!r.effective_until || r.effective_until > utcDay.value)
+// Hourly cost units with a rate on that day (in the entry's currency when correcting).
+const hourly = computed(() => business.costUnits.filter(unit => unit.node.id === seed?.cost_unit_node_id || (!['cancelled', 'archived', 'done'].includes(unit.node.state) && unit.rates.some(inForce))))
+watch(hourly, units => { if (!seed && !units.some(unit => unit.node.id === costUnitId.value)) costUnitId.value = units.length === 1 ? units[0].node.id : '' }, { immediate: true })
+watch(costUnitId, value => { if (value && !seed) lastCostUnit = value })
+const rate = computed<{ bill_amount: string; currency: string } | null>(() => {
+  if (seed) {
+    const repriced = costUnitId.value !== seed.cost_unit_node_id || utcDay.value !== new Date(seed.started_at).toISOString().slice(0, 10)
+    return repriced ? business.rateOn(costUnitId.value, 'hour', seed.currency, utcDay.value) : { bill_amount: seed.rate_amount, currency: seed.currency }
+  }
   const unit = business.costUnit(costUnitId.value)
   const currencies = [...new Set(unit?.rates.filter(r => r.unit === 'hour').map(r => r.currency) ?? [])].sort((a, b) => (a === 'EUR' ? -1 : b === 'EUR' ? 1 : a.localeCompare(b)))
   for (const currency of currencies) { const found = business.rateOn(costUnitId.value, 'hour', currency, utcDay.value); if (found) return found }
   return null
 })
-const seconds = computed(() => parseDurationInput(duration.value))
-const startMinutes = computed(() => start.value.trim() ? parseTimeInput(start.value) : null)
 const problem = computed(() => {
   if (!ticket.value) return 'Choose a ticket.'
   if (!costUnitId.value) return hourly.value.length ? 'Choose a cost unit.' : 'No cost unit has an hourly rate on this day. Add one under Rates.'
-  if (!rate.value) return 'This cost unit has no hourly rate on this day.'
+  if (!rate.value) return seed ? `This cost unit has no hourly rate in ${seed.currency} on that day.` : 'This cost unit has no hourly rate on this day.'
   if (!duration.value.trim()) return 'Enter how long, like 1h30 or 90m.'
-  if (!seconds.value) return 'Use a duration like 1h30, 90m or 1.5 (up to 24h).'
-  if (start.value.trim() && startMinutes.value === null) return 'Start is a time like 9:30.'
+  if ((!seed || durationChanged.value) && !seconds.value) return 'Use a duration like 1h30, 90m or 1.5 (up to 24h).'
+  if (seed && !start.value.trim()) return 'Enter a start time, like 9:30.'
+  if (start.value.trim() && (!seed || startChanged.value) && startMinutes.value === null) return 'Start is a time like 9:30.'
+  if (seed && newStart.value && newSeconds.value) {
+    const end = new Date(newStart.value.getTime() + newSeconds.value * 1000)
+    if (dayKey(end) !== dayKey(newStart.value) && end.getHours() + end.getMinutes() + end.getSeconds() > 0) return 'That would run past midnight. Split it across two days.'
+    if (props.bounds && (newStart.value.getTime() < Date.parse(props.bounds.starts_at) || end.getTime() > Date.parse(props.bounds.ends_at))) return `That falls outside its period, ${periodLabel(props.bounds.starts_at, props.bounds.ends_at)}.`
+  }
   return ''
 })
-const preview = computed(() => seconds.value && rate.value ? `${formatSpan(seconds.value)} · ${formatAmount(multiply(rate.value.bill_amount, seconds.value), rate.value.currency)} ${rate.value.currency}` : '')
+const preview = computed(() => newSeconds.value && rate.value ? `${formatSpan(newSeconds.value)} · ${formatAmount(multiply(rate.value.bill_amount, newSeconds.value), rate.value.currency)} ${rate.value.currency}` : '')
+const status = computed(() => {
+  if (tried.value && problem.value) return problem.value
+  if (!seed) return preview.value || 'Enter logs it. Ticket, cost unit and day stay for the next entry.'
+  const note = measured ? 'The ticket and time come from the agent run.' : ''
+  return [preview.value, note].filter(Boolean).join(' · ')
+})
 // Exact amount the server will book: rate × seconds / 3600, rounded half up to four places.
 function multiply(amount: string, secs: number) {
   const [whole, frac = ''] = amount.split('.')
@@ -99,21 +155,42 @@ async function chooseTicket(option: PickOption) {
   await nextTick(); durationInput.value?.focus()
 }
 function closePicker(restore: boolean) { picker.value = null; if (restore) pickButton.value?.focus() }
+// Only what differs from the stored entry; an empty patch means nothing changed.
+function changes(): EntryPatch {
+  const out: EntryPatch = {}
+  if (!seed || !ticket.value) return out
+  if (ticket.value.id !== seed.node_id) out.node_id = ticket.value.id
+  if (costUnitId.value !== seed.cost_unit_node_id) out.cost_unit_node_id = costUnitId.value
+  if (note.value.trim() !== seed.note.trim()) out.note = note.value.trim()
+  if (newStart.value && seedStart && newStart.value.getTime() !== seedStart.getTime()) out.started_at = newStart.value.toISOString()
+  if (durationChanged.value && seconds.value && seconds.value !== seed.duration_seconds) out.duration_seconds = seconds.value
+  return out
+}
 function submit() {
   tried.value = true
-  if (problem.value || props.busy || !ticket.value || !rate.value || !seconds.value || !day.value) return
-  emit('log', { ticket: ticket.value, costUnitId: costUnitId.value, currency: rate.value.currency, day: day.value, seconds: seconds.value, startMinutes: startMinutes.value, note: note.value.trim() })
+  if (problem.value || props.busy || !ticket.value || !rate.value || !newSeconds.value || !day.value) return
+  if (seed) { emit('save', changes(), ticket.value); return }
+  emit('log', { ticket: ticket.value, costUnitId: costUnitId.value, currency: rate.value.currency, day: day.value, seconds: newSeconds.value, startMinutes: startMinutes.value, note: note.value.trim() })
 }
 function reset() { duration.value = ''; start.value = ''; note.value = ''; tried.value = false; void nextTick(() => durationInput.value?.focus()) }
-function keys(event: KeyboardEvent) { if (event.key === 'Enter' && (event.target as HTMLElement).tagName === 'INPUT') { event.preventDefault(); submit() } }
-defineExpose({ reset, focus: () => (ticket.value ? durationInput.value : pickButton.value)?.focus(), openPicker: () => { picker.value = pickButton.value ?? null } })
+function keys(event: KeyboardEvent) {
+  if (event.key === 'Enter' && (event.target as HTMLElement).tagName === 'INPUT') { event.preventDefault(); submit() }
+  else if (event.key === 'Escape' && seed && !event.defaultPrevented) { event.preventDefault(); event.stopPropagation(); emit('cancel') }
+}
+function focusFirst() {
+  const field = measured ? noteInput.value : ticket.value ? durationInput.value : pickButton.value
+  field?.focus()
+  if (seed && field instanceof HTMLInputElement) field.select()
+}
+onMounted(() => { if (seed) void nextTick(focusFirst) })
+defineExpose({ reset, focus: focusFirst, openPicker: () => { picker.value = pickButton.value ?? null } })
 </script>
 
 <template>
-  <form class="log-bar" aria-label="Log time" @submit.prevent="submit" @keydown="keys">
-    <button ref="pickButton" type="button" class="pick ticket-pick" :class="{ unset: !ticket }" aria-haspopup="dialog" :aria-expanded="!!picker" :aria-label="ticket ? `Ticket: ${ticket.key} ${ticket.title}` : 'Ticket: choose a ticket'" @click="picker = picker ? null : ($event.currentTarget as HTMLElement)">
+  <form class="log-bar" :class="{ editing: !!seed }" :aria-label="seed ? 'Edit entry' : 'Log time'" @submit.prevent="submit" @keydown="keys">
+    <button ref="pickButton" type="button" class="pick ticket-pick" :class="{ unset: !ticket }" :disabled="measured" aria-haspopup="dialog" :aria-expanded="!!picker" :aria-label="ticket ? `Ticket: ${ticket.key} ${ticket.title}` : 'Ticket: choose a ticket'" @click="picker = picker ? null : ($event.currentTarget as HTMLElement)">
       <span v-if="ticket" class="key-badge">{{ ticket.key }}</span><AppIcon v-else name="ticket" :size="14" />
-      <span class="pick-text">{{ ticket?.title ?? 'Ticket' }}</span><AppIcon name="chevron" :size="12" class="chev" />
+      <span class="pick-text">{{ ticket?.title ?? 'Ticket' }}</span><AppIcon :name="measured ? 'lock' : 'chevron'" :size="12" class="chev" />
     </button>
     <label class="select-wrap">
       <span class="sr-only">Cost unit</span>
@@ -124,13 +201,23 @@ defineExpose({ reset, focus: () => (ticket.value ? durationInput.value : pickBut
       <AppIcon name="chevron" :size="12" class="select-chev" />
     </label>
     <div class="seg days" role="radiogroup" aria-label="Day">
-      <button v-for="(d, i) in days" :key="i" type="button" role="radio" :aria-checked="dayIndex === i" :aria-label="`${WEEKDAYS[i]} ${d.getDate()}`" :class="{ today: dayKey(d) === todayKey }" @click="dayIndex = i">{{ WEEKDAYS[i].slice(0, 2) }}</button>
+      <button v-for="(d, i) in days" :key="i" type="button" role="radio" :aria-checked="dayIndex === i" :aria-label="`${WEEKDAYS[i]} ${d.getDate()}`" :class="{ today: dayKey(d) === todayKey }" :disabled="measured || dayOutside(d)" @click="dayIndex = i">{{ WEEKDAYS[i].slice(0, 2) }}</button>
     </div>
-    <input v-model="start" class="field start" inputmode="numeric" placeholder="Start" aria-label="Start time (optional)" autocomplete="off" :data-tip="'Optional, like 9:30. Empty: after the day’s last entry'" />
-    <input ref="durationInput" v-model="duration" class="field duration" :class="{ bad: tried && !!duration.trim() && !seconds }" placeholder="1h30" aria-label="Duration" autocomplete="off" />
-    <input v-model="note" class="field note" placeholder="Note" aria-label="Note (optional)" maxlength="500" autocomplete="off" />
-    <button type="submit" class="btn primary log-btn" :disabled="busy"><AppIcon name="plus" :size="13" />{{ busy ? 'Logging…' : 'Log' }}</button>
-    <p class="log-status" :class="{ warn: tried && !!problem }" aria-live="polite">{{ tried && problem ? problem : preview || 'Enter logs it. Ticket, cost unit and day stay for the next entry.' }}</p>
+    <input v-model="start" class="field start" inputmode="numeric" placeholder="Start" :aria-label="seed ? 'Start time' : 'Start time (optional)'" autocomplete="off" :disabled="measured" :data-tip="seed ? undefined : 'Optional, like 9:30. Empty: after the day’s last entry'" />
+    <input ref="durationInput" v-model="duration" class="field duration" :class="{ bad: tried && !!duration.trim() && (!seed || durationChanged) && !seconds }" placeholder="1h30" aria-label="Duration" autocomplete="off" :disabled="measured" />
+    <input ref="noteInput" v-model="note" class="field note" placeholder="Note" aria-label="Note (optional)" maxlength="500" autocomplete="off" />
+    <template v-if="seed">
+      <button type="button" class="btn cancel-btn" aria-keyshortcuts="Escape" @click="emit('cancel')">Cancel</button>
+      <button type="submit" class="btn primary log-btn" :disabled="busy"><AppIcon name="check" :size="13" />{{ busy ? 'Saving…' : saveLabel ?? 'Save' }}</button>
+    </template>
+    <button v-else type="submit" class="btn log-btn" :class="{ primary: !quiet }" :disabled="busy"><AppIcon name="plus" :size="13" />{{ busy ? 'Logging…' : 'Log' }}</button>
+    <div class="log-foot">
+      <p class="log-status" :class="{ warn: tried && !!problem }" aria-live="polite">{{ status }}</p>
+      <template v-if="seed">
+        <span class="edit-keys"><kbd class="keycap">Enter</kbd> saves · <kbd class="keycap">Esc</kbd> cancels</span>
+        <button type="button" class="btn sm ghost danger remove-btn" @click="emit('remove')"><AppIcon name="trash" :size="13" />Delete entry</button>
+      </template>
+    </div>
     <PickerMenu v-if="picker" :anchor="picker" title="Ticket" :options="ticketOptions" :search="searchTickets" :current="ticket?.id" placeholder="Search tickets by key or title…" :width="380" empty="No ticket matches." @choose="chooseTicket" @close="closePicker" />
   </form>
 </template>
@@ -153,13 +240,23 @@ defineExpose({ reset, focus: () => (ticket.value ? durationInput.value : pickBut
 .start, .duration { font-family: var(--mono); font-size: 13px; font-variant-ligatures: none; }
 .duration.bad { box-shadow: var(--field-inset), 0 0 0 1px var(--danger-line); color: var(--danger); }
 .log-btn { height: 34px; }
-.log-status { grid-column: 1 / -1; min-height: 18px; font-size: 12px; color: var(--ink-3); }
+.pick:disabled, .field:disabled, .days button:disabled { cursor: not-allowed; opacity: .55; }
+.log-foot { grid-column: 1 / -1; display: flex; align-items: center; gap: 12px; min-height: 18px; }
+.log-status { flex: 1; min-width: 0; font-size: 12px; color: var(--ink-3); }
 .log-status.warn { color: var(--gold-ink); }
+.edit-keys { display: inline-flex; align-items: center; gap: 4px; font-size: 11.5px; color: var(--ink-3); white-space: nowrap; }
+.remove-btn { gap: 6px; }
+/* Correcting an entry: the same line plus Cancel beside Save. */
+.editing { grid-template-columns: minmax(170px, 1.4fr) minmax(120px, .8fr) auto 64px 72px minmax(90px, 1fr) auto auto; }
+.cancel-btn { height: 34px; }
 @container (max-width: 980px) {
   .log-bar { grid-template-columns: minmax(0, 1fr) minmax(0, 1fr); }
   .days { grid-column: 1 / -1; justify-self: start; }
   .note { grid-column: 1 / -1; }
   .log-btn { grid-column: 2; justify-self: end; }
+  .editing .cancel-btn { grid-column: 1; justify-self: end; }
+  .editing .log-btn { grid-column: 2; justify-self: start; }
+  .edit-keys { display: none; }
 }
 @media (max-width: 720px) {
   .log-bar { grid-template-columns: minmax(0, 1fr) minmax(0, 1fr); }
@@ -168,5 +265,10 @@ defineExpose({ reset, focus: () => (ticket.value ? durationInput.value : pickBut
   .days button { height: 36px; }
   .pick, .field, .log-btn { height: 44px; font-size: 16px; }
   .log-btn { grid-column: 1 / -1; justify-self: stretch; }
+  .cancel-btn { height: 44px; font-size: 16px; }
+  .editing .cancel-btn { grid-column: 1; justify-self: stretch; }
+  .editing .log-btn { grid-column: 2; justify-self: stretch; }
+  .log-foot { flex-wrap: wrap; }
+  .remove-btn { height: 40px; }
 }
 </style>

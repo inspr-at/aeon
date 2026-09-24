@@ -3,9 +3,9 @@
 import { computed, nextTick, onBeforeUnmount, onMounted, ref, watch } from 'vue'
 import { useRoute, useRouter } from 'vue-router'
 import { APIError, getNode, listNodes } from '../../lib/api'
-import { createEntry, createPeriod, listEntries, listPeriods, type TimeEntry, type TimePeriod } from '../../lib/business'
+import { conflictEntry, createEntry, createPeriod, deleteEntry, findEntryEvent, listEntries, listPeriods, undoEntryEvent, updateEntry, type EntryPatch, type TimeEntry, type TimePeriod } from '../../lib/business'
 import { command, consume } from '../../lib/commands'
-import { toast } from '../../lib/toast'
+import { dismiss, toast } from '../../lib/toast'
 import { absoluteTime, plural } from '../../lib/work'
 import { addDays, dayKey, isoWeek, parseDayKey, periodLabel, startOfWeek, timeOfDay, weekDays, weekLabel, WEEKDAYS } from '../../lib/week'
 import { formatClock, formatSpan } from '../../components/business/duration'
@@ -153,6 +153,173 @@ async function log(request: LogRequest) {
     else toast(`Not logged: ${e instanceof Error ? e.message : 'unknown error'}`, { tone: 'error' })
   } finally { logging.value = false }
 }
+
+// ---------- Corrections ----------
+// An entry changes while its period is open: its author or an admin corrects it
+// in place (only what changed is sent, against the revision it was read at) or
+// deletes it with a short server-side undo. Approved periods stay as approved.
+const UNDO_MS = 6000
+const editing = ref<string | null>(null)
+// The version the draft corrects; after a conflict, the newer entry.
+const editBase = ref<TimeEntry | null>(null)
+const conflict = ref<TimeEntry | null>(null)
+const saving = ref(false)
+const cursor = ref<string | null>(null)
+const entriesCard = ref<HTMLElement>()
+const byStart = (a: TimeEntry, b: TimeEntry) => a.started_at.localeCompare(b.started_at)
+const periodOf = (e: TimeEntry) => periods.value.find(p => p.id === e.period_id) ?? allPeriods.value.find(p => p.id === e.period_id)
+const keyOf = (e: TimeEntry) => nodes.value.get(e.node_id)?.key ?? 'the ticket'
+// Why an entry can't change, or '' when it can.
+function lockReason(e: TimeEntry): string {
+  const period = periodOf(e)
+  if (period?.state === 'approved') return `Locked: approved${period.approval ? ` by ${business.nameOf(period.approval.approved_by_principal_id)}` : ''}.`
+  if (!business.staff) return 'Locked: only team members correct hours.'
+  if (e.principal_id !== me.value && !business.admin) {
+    return business.principals.find(p => p.id === e.principal_id)?.kind === 'agent' ? 'Locked: only an admin corrects an agent’s entries.' : `Locked: only ${business.nameOf(e.principal_id)} or an admin can change it.`
+  }
+  return ''
+}
+// When every entry shares one lock, the card says it once, in full.
+const lockedAll = computed(() => {
+  const reasons = new Set(entries.value.map(lockReason))
+  const only = reasons.size === 1 ? [...reasons][0] : ''
+  return only.startsWith('Locked: approved') ? `${only.slice(0, -1)}, so these entries can’t change.` : only
+})
+const editable = computed(() => entries.value.some(e => !lockReason(e)))
+const flat = computed(() => byDay.value.flatMap(group => group.list))
+const tabStop = computed(() => flat.value.some(e => e.id === cursor.value) ? cursor.value : flat.value[0]?.id ?? null)
+async function focusEntry(id: string | null) {
+  if (!id) return
+  cursor.value = id
+  await nextTick()
+  entriesCard.value?.querySelector<HTMLElement>(`[data-entry="${CSS.escape(id)}"]`)?.focus()
+}
+function syncPeriod(periodId: string, change: (list: TimeEntry[]) => TimeEntry[]) {
+  const list = periodEntries.value.get(periodId)
+  if (list) periodEntries.value = new Map(periodEntries.value).set(periodId, change(list))
+}
+// Every correction bumps its period's revision on the server; mirror it so an
+// open review re-reads the entries digest.
+function bump(periodId: string) {
+  const up = (p: TimePeriod) => p.id === periodId ? { ...p, revision: p.revision + 1 } : p
+  periods.value = periods.value.map(up); allPeriods.value = allPeriods.value.map(up)
+}
+function putEntry(next: TimeEntry) {
+  const inWeek = Date.parse(next.started_at) >= weekStart.value.getTime() && Date.parse(next.started_at) < weekEnd.value.getTime() && next.principal_id === person.value
+  entries.value = [...entries.value.filter(x => x.id !== next.id), ...(inWeek ? [next] : [])].sort(byStart)
+  syncPeriod(next.period_id, list => [...list.filter(x => x.id !== next.id), next].sort(byStart))
+}
+function dropEntry(e: TimeEntry) {
+  entries.value = entries.value.filter(x => x.id !== e.id)
+  syncPeriod(e.period_id, list => list.filter(x => x.id !== e.id))
+}
+function correctionProblem(e: unknown): string {
+  if (!(e instanceof APIError)) return e instanceof Error ? e.message : 'unknown error'
+  if (e.status === 403) return 'only the author or an admin can change this entry.'
+  if (/rate/.test(e.message)) return 'this cost unit needs exactly one hourly rate on that day.'
+  if (/telemetry|agent-run/.test(e.message)) return 'an agent run’s ticket and time come from the run.'
+  if (/period|interval/.test(e.message)) return 'the time has to fit inside the entry’s period.'
+  return e.message
+}
+const approvedMeanwhile = (e: unknown) => e instanceof APIError && e.status === 409 && /approved|immutable/.test(e.message)
+function startEdit(e: TimeEntry) {
+  const reason = lockReason(e)
+  if (reason) { toast(reason); return }
+  editing.value = e.id; editBase.value = e; conflict.value = null; cursor.value = e.id
+}
+// Leaving the draft after a conflict shows the newer entry.
+function stopEdit() {
+  const id = editing.value
+  if (conflict.value) putEntry(conflict.value)
+  editing.value = null; editBase.value = null; conflict.value = null
+  void focusEntry(id)
+}
+async function save(patch: EntryPatch, ticket: LogTicket) {
+  const base = editBase.value
+  if (!base || saving.value) return
+  if (!Object.keys(patch).length) { stopEdit(); return }
+  saving.value = true
+  try {
+    const next = await updateEntry(base, patch)
+    nodes.value = new Map(nodes.value).set(ticket.id, { key: ticket.key, title: ticket.title })
+    conflict.value = null
+    putEntry(next); bump(next.period_id)
+    editing.value = null; editBase.value = null
+    toast(`Saved ${formatSpan(next.duration_seconds)} on ${ticket.key}.`)
+    void focusEntry(next.id)
+  } catch (e) {
+    const newer = conflictEntry(e)
+    if (newer) { await resolveNodes([newer.node_id]); conflict.value = newer; editBase.value = newer; return }
+    if (e instanceof APIError && e.status === 404) { dropEntry(base); editing.value = null; editBase.value = null; toast('This entry was deleted meanwhile.', { tone: 'error' }); return }
+    if (approvedMeanwhile(e)) { editing.value = null; editBase.value = null; toast('The period was approved meanwhile, so this entry is locked now.', { tone: 'error' }); void loadWeek(); return }
+    toast(`Not saved: ${correctionProblem(e)}`, { tone: 'error' })
+  } finally { saving.value = false }
+}
+type Deletion = 'deleted' | 'gone' | 'failed'
+function remove(listed: TimeEntry) {
+  const base = editing.value === listed.id && editBase.value ? editBase.value : listed
+  const reason = lockReason(base)
+  if (reason) { toast(reason); return }
+  const order = flat.value, at = order.findIndex(x => x.id === base.id)
+  const after = order[at + 1]?.id ?? order[at - 1]?.id ?? null
+  if (editing.value === base.id) { editing.value = null; editBase.value = null; conflict.value = null }
+  dropEntry(base)
+  const key = keyOf(base)
+  let toastId = 0
+  const done: Promise<Deletion> = deleteEntry(base).then(() => { bump(base.period_id); return 'deleted' as const }, err => {
+    dismiss(toastId)
+    if (err instanceof APIError && err.status === 404) return 'gone' as const
+    const newer = conflictEntry(err)
+    if (newer) { putEntry(newer); toast('This entry changed meanwhile, so it was not deleted. The newer version is shown.', { tone: 'error' }); return 'failed' as const }
+    putEntry(base)
+    if (approvedMeanwhile(err)) { toast('The period was approved meanwhile, so this entry is locked.', { tone: 'error' }); void loadWeek() }
+    else toast(`Not deleted: ${correctionProblem(err)}`, { tone: 'error' })
+    return 'failed' as const
+  })
+  toastId = toast(`Deleted ${formatSpan(base.duration_seconds)} on ${key}.`, { timeout: UNDO_MS, action: { label: 'Undo', run: () => void undoRemove(base, done, toastId) } })
+  void focusEntry(after)
+}
+// Undo shows the entry again at once and reverses the deletion on the server.
+async function undoRemove(e: TimeEntry, done: Promise<Deletion>, toastId: number) {
+  dismiss(toastId)
+  putEntry(e)
+  try {
+    const outcome = await done
+    if (outcome === 'gone') { dropEntry(e); return }
+    if (outcome === 'failed') return
+    const event = await findEntryEvent(e.node_id, e.id, 'time_entry.deleted')
+    if (event === null) throw new Error('no deletion to undo')
+    const restored = await undoEntryEvent(event)
+    putEntry(restored ?? e); bump(e.period_id)
+    toast(`Restored ${formatSpan(e.duration_seconds)} on ${keyOf(e)}.`)
+    void focusEntry(e.id)
+  } catch (err) {
+    dropEntry(e)
+    toast(err instanceof APIError && err.status === 409 ? 'The entry could not be restored: its period was approved or it changed meanwhile.' : 'The entry could not be restored.', { tone: 'error' })
+    void loadWeek()
+  }
+}
+function rowKey(event: KeyboardEvent, e: TimeEntry) {
+  if (event.defaultPrevented) return
+  // Escape from the conflict notice leaves the draft too (the form handles its own).
+  if (editing.value === e.id) { if (event.key === 'Escape') { event.preventDefault(); stopEdit() } return }
+  if (event.target !== event.currentTarget || event.metaKey || event.ctrlKey || event.altKey) return
+  const order = flat.value, at = order.findIndex(x => x.id === e.id)
+  const move = (id: string | undefined) => { event.preventDefault(); void focusEntry(id ?? e.id) }
+  if (event.key === 'e' || event.key === 'Enter') { event.preventDefault(); startEdit(e) }
+  else if (event.key === 'Delete' || event.key === 'Backspace') { event.preventDefault(); remove(e) }
+  else if (event.key === 'ArrowDown' || event.key === 'j') move(order[at + 1]?.id)
+  else if (event.key === 'ArrowUp' || event.key === 'k') move(order[at - 1]?.id)
+  else if (event.key === 'Home') move(order[0]?.id)
+  else if (event.key === 'End') move(order[order.length - 1]?.id)
+}
+function rowClick(event: MouseEvent, e: TimeEntry) {
+  if ((event.target as HTMLElement).closest('a, button, input, select, form') || editing.value === e.id) return
+  if (window.getSelection()?.toString()) return
+  if (lockReason(e)) { cursor.value = e.id; toast(lockReason(e)); return }
+  startEdit(e)
+}
+watch([person, weekStart], () => { editing.value = null; editBase.value = null; conflict.value = null; cursor.value = null })
 
 // ---------- People ----------
 const personMenu = ref<HTMLElement | null>(null)
@@ -302,14 +469,14 @@ const waitingCount = computed(() => allPeriods.value.filter(p => p.state === 'op
           <template v-else>
             <template v-for="p in weekPeriods" :key="p.id">
               <span class="period-chip" :class="p.state"><AppIcon :name="p.state === 'approved' ? 'lock' : 'calendar'" :size="12" />{{ periodLabel(p.starts_at, p.ends_at) }}</span>
-              <span v-if="p.state === 'approved'" class="strip-text">Approved{{ p.approval ? ` by ${business.nameOf(p.approval.approved_by_principal_id)}` : '' }}. Closed for new entries.</span>
+              <span v-if="p.state === 'approved'" class="strip-text">Approved{{ p.approval ? ` by ${business.nameOf(p.approval.approved_by_principal_id)}` : '' }}. Closed for new entries and corrections.</span>
               <span v-else class="strip-text">Open · waiting for an admin’s approval once the week is done.</span>
               <button v-if="business.admin" type="button" class="link-btn" @click="go({ period: p.id })">{{ p.state === 'approved' ? 'View' : 'Review' }}</button>
             </template>
           </template>
         </div>
 
-        <div v-if="canLog && (logOpen || !phone)" class="log-wrap"><LogTimeBar ref="logBar" :days="days" :suggestions="suggestions" :busy="logging" :preset="preset" @log="log" /></div>
+        <div v-if="canLog && (logOpen || !phone)" class="log-wrap"><LogTimeBar ref="logBar" :days="days" :suggestions="suggestions" :busy="logging" :preset="preset" :quiet="!!editing" @log="log" /></div>
         <div v-else-if="canLog" class="log-closed"><button type="button" class="btn log-open" @click="openLog"><AppIcon name="plus" :size="14" />Log time</button></div>
         <p v-else-if="isAgent" class="agent-note"><AppIcon name="agent" :size="14" />An agent’s time comes from its finished runs, one entry per run.</p>
 
@@ -348,24 +515,54 @@ const waitingCount = computed(() => allPeriods.value.filter(p => p.state === 'op
         <footer v-if="amounts.length" class="week-foot"><span class="foot-label">Billable at the day’s rates</span><MoneyText v-for="row in amounts" :key="row.currency" :amount="row.amount" :currency="row.currency" strong /></footer>
       </section>
 
-      <section v-if="byDay.length" class="card glass-card entries-card" aria-labelledby="entries-title">
-        <header class="card-head"><h2 id="entries-title">Entries</h2><span class="sub">Entries are final once logged; a correction is a new entry.</span></header>
+      <section v-if="byDay.length" ref="entriesCard" class="card glass-card entries-card" aria-labelledby="entries-title">
+        <header class="card-head">
+          <h2 id="entries-title">Entries</h2>
+          <span v-if="lockedAll" class="sub lock-note"><AppIcon name="lock" :size="12" />{{ lockedAll }}</span>
+          <span v-else class="sub">Click an entry to correct it while its period is open.</span>
+        </header>
         <div v-for="group in byDay" :key="group.i" class="day-group">
           <p class="day-head"><span>{{ WEEKDAYS[group.i] }} {{ group.day.getDate() }}</span><span class="mono">{{ formatClock(perDay[group.i]) }}</span></p>
-          <ul class="entries">
-            <li v-for="e in group.list" :key="e.id" class="entry">
-              <span class="e-time mono" :data-tip="absoluteTime(e.started_at)">{{ timeOfDay(e.started_at) }}–{{ timeOfDay(e.ended_at) }}</span>
-              <RouterLink v-if="ticketHref(e.node_id)" class="ticket-chip" :to="ticketHref(e.node_id)">{{ nodes.get(e.node_id)?.key }}</RouterLink>
-              <span v-else class="ticket-chip plain">{{ nodes.get(e.node_id)?.key }}</span>
-              <span class="e-text"><span class="e-title">{{ nodes.get(e.node_id)?.title }}</span><span class="e-meta"><AppIcon name="tag" :size="11" />{{ business.costUnit(e.cost_unit_node_id)?.node.title ?? 'Cost unit' }}<template v-if="e.note"> · {{ e.note }}</template></span></span>
-              <span v-if="e.source === 'agent_run'" class="agent-chip">Agent run</span>
-              <span class="e-dur mono">{{ formatClock(e.duration_seconds) }}</span>
-              <span class="e-amount"><MoneyText :amount="e.amount" :currency="e.currency" /></span>
+          <ul class="entries" :aria-label="`${WEEKDAYS[group.i]} ${group.day.getDate()}`">
+            <li
+              v-for="e in group.list" :key="e.id" class="entry" :class="{ editing: editing === e.id, locked: !!lockReason(e) }" :data-entry="e.id"
+              :tabindex="editing !== e.id && tabStop === e.id ? 0 : -1" :aria-describedby="editing === e.id ? undefined : `entry-help-${e.id}`"
+              @keydown="rowKey($event, e)" @click="rowClick($event, e)" @focus="cursor = e.id"
+            >
+              <template v-if="editing === e.id && editBase">
+                <div v-if="conflict" class="conflict" role="alert">
+                  <AppIcon name="alert" :size="14" />
+                  <p class="c-text">
+                    <b>This entry changed while you were editing.</b>
+                    Now <span class="mono">{{ timeOfDay(conflict.started_at) }}–{{ timeOfDay(conflict.ended_at) }}</span> · {{ keyOf(conflict) }} · {{ business.costUnit(conflict.cost_unit_node_id)?.node.title ?? 'Cost unit' }} · <span class="mono">{{ formatClock(conflict.duration_seconds) }}</span><template v-if="conflict.note"> · {{ conflict.note }}</template>.
+                    Saving again applies only what you changed.
+                  </p>
+                  <button type="button" class="btn sm" @click="stopEdit">Use the newer entry</button>
+                </div>
+                <LogTimeBar :days="days" :suggestions="suggestions" :busy="saving" :entry="e" :entry-ticket="{ id: e.node_id, key: keyOf(e), title: nodes.get(e.node_id)?.title ?? '' }" :bounds="periodOf(e)" :save-label="conflict ? 'Save mine' : 'Save'" @save="save" @cancel="stopEdit" @remove="remove(e)" />
+              </template>
+              <template v-else>
+                <span class="e-time mono" :data-tip="absoluteTime(e.started_at)">{{ timeOfDay(e.started_at) }}–{{ timeOfDay(e.ended_at) }}</span>
+                <RouterLink v-if="ticketHref(e.node_id)" class="ticket-chip" :to="ticketHref(e.node_id)" tabindex="-1">{{ nodes.get(e.node_id)?.key }}</RouterLink>
+                <span v-else class="ticket-chip plain">{{ nodes.get(e.node_id)?.key }}</span>
+                <span class="e-text"><span class="e-title">{{ nodes.get(e.node_id)?.title }}</span><span class="e-meta"><AppIcon name="tag" :size="11" />{{ business.costUnit(e.cost_unit_node_id)?.node.title ?? 'Cost unit' }}<template v-if="e.note"> · {{ e.note }}</template></span></span>
+                <span v-if="e.source === 'agent_run'" class="agent-chip">Agent run</span>
+                <span class="e-dur mono">{{ formatClock(e.duration_seconds) }}</span>
+                <span class="e-amount"><MoneyText :amount="e.amount" :currency="e.currency" /></span>
+                <span class="e-act">
+                  <span v-if="lockReason(e)" class="lock" :data-tip="lockReason(e)"><AppIcon name="lock" :size="13" /></span>
+                  <template v-else>
+                    <button type="button" class="icon-btn sm flat" tabindex="-1" :aria-label="`Edit ${timeOfDay(e.started_at)} on ${keyOf(e)}`" data-tip="Edit · e" @click="startEdit(e)"><AppIcon name="edit" :size="13" /></button>
+                    <button type="button" class="icon-btn sm flat del" tabindex="-1" :aria-label="`Delete ${timeOfDay(e.started_at)} on ${keyOf(e)}`" data-tip="Delete · Del" @click="remove(e)"><AppIcon name="trash" :size="13" /></button>
+                  </template>
+                </span>
+                <span :id="`entry-help-${e.id}`" class="sr-only">{{ lockReason(e) || 'Press e to edit, Delete to delete.' }}</span>
+              </template>
             </li>
           </ul>
         </div>
       </section>
-      <p class="hint"><kbd class="keycap">l</kbd> log time · <kbd class="keycap"><AppIcon name="arrow-left" /></kbd><kbd class="keycap"><AppIcon name="arrow" /></kbd> week · <kbd class="keycap">t</kbd> this week</p>
+      <p class="hint"><kbd class="keycap">l</kbd> log time · <kbd class="keycap"><AppIcon name="arrow-left" /></kbd><kbd class="keycap"><AppIcon name="arrow" /></kbd> week · <kbd class="keycap">t</kbd> this week<template v-if="editable"> · <kbd class="keycap">e</kbd> edit entry · <kbd class="keycap">Del</kbd> delete</template></p>
     </template>
 
     <!-- ---------- Approvals ---------- -->
@@ -460,8 +657,27 @@ tfoot th.c-ticket { font: 500 10px/1 var(--mono); letter-spacing: .12em; text-tr
 .day-group { padding: 0 18px 10px; }
 .day-head { display: flex; justify-content: space-between; padding: 8px 2px 6px; border-bottom: 1px solid var(--line-2); font-size: 12px; font-weight: 650; color: var(--ink-2); }
 .entries { margin: 0; padding: 0; list-style: none; }
-.entry { display: grid; grid-template-columns: 96px max-content minmax(0, 1fr) auto 56px 130px; align-items: center; gap: 12px; min-height: 44px; border-bottom: 1px solid var(--line); font-size: 13px; }
+.entry { position: relative; display: grid; grid-template-columns: 96px max-content minmax(0, 1fr) auto 56px 130px 60px; grid-template-areas: "time chip text agent dur amount act"; align-items: center; gap: 12px; min-height: 44px; border-bottom: 1px solid var(--line); font-size: 13px; }
 .entry:last-child { border-bottom: 0; }
+.entry:focus { outline: none; }
+.entry:focus-visible { border-radius: 8px; box-shadow: var(--focus-ring); }
+.entry:not(.locked):not(.editing) { cursor: pointer; }
+@media (hover: hover) { .entry:not(.editing):not(.locked):hover { background: var(--row-hover); } }
+.entry > .e-time { grid-area: time; } .entry > .ticket-chip { grid-area: chip; } .entry > .e-text { grid-area: text; } .entry > .agent-chip { grid-area: agent; }
+.entry > .e-dur { grid-area: dur; } .entry > .e-amount { grid-area: amount; } .entry > .e-act { grid-area: act; }
+.e-act { display: inline-flex; align-items: center; justify-content: flex-end; gap: 2px; }
+.e-act .icon-btn { display: inline-grid; place-items: center; opacity: 0; transition: opacity .12s; }
+.entry:hover .e-act .icon-btn, .entry:focus-visible .e-act .icon-btn, .entry:focus-within .e-act .icon-btn { opacity: 1; }
+@media (hover: none) { .e-act .icon-btn { opacity: 1; } }
+.e-act .del:hover { color: var(--danger); }
+.lock { display: inline-grid; place-items: center; width: 28px; height: 28px; color: var(--ink-3); }
+.lock-note { display: inline-flex; align-items: center; gap: 6px; }
+.lock-note svg { color: var(--ink-3); }
+.entry.editing { display: block; margin: 0 -18px; padding: 12px 18px 8px; background: var(--surface-sunken); box-shadow: inset 3px 0 0 var(--row-accent); }
+.conflict { display: flex; align-items: flex-start; gap: 10px; margin-bottom: 12px; padding: 10px 12px; border-radius: 10px; background: var(--gold-wash); box-shadow: inset 0 0 0 1px rgba(214, 155, 49, .35); color: var(--ink); font-size: 12.5px; }
+.conflict > svg { flex-shrink: 0; margin-top: 2px; color: var(--gold-ink); }
+.c-text { flex: 1; min-width: 0; line-height: 1.5; }
+.c-text b { font-weight: 650; }
 .e-time { font-size: 12px; color: var(--ink-2); }
 .e-text { display: grid; min-width: 0; }
 .e-title { min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
@@ -484,7 +700,7 @@ tfoot th.c-ticket { font: 500 10px/1 var(--mono); letter-spacing: .12em; text-tr
 .p-time { text-align: right; }
 .p-amount { display: grid; justify-items: end; }
 .go { color: var(--ink-3); }
-@container (max-width: 760px) { .entry { grid-template-columns: 88px max-content minmax(0, 1fr) 48px; } .entry .agent-chip, .e-amount { display: none; } }
+@container (max-width: 760px) { .entry { grid-template-columns: 88px max-content minmax(0, 1fr) 48px 60px; grid-template-areas: "time chip text dur act"; } .entry .agent-chip, .e-amount { display: none; } }
 @container (max-width: 720px) { .period-row { grid-template-columns: minmax(0, 1fr) auto 14px; grid-template-areas: "who time go" "when amount go"; row-gap: 2px; } .p-who { grid-area: who; } .p-when { grid-area: when; } .p-time { grid-area: time; } .p-amount { grid-area: amount; } .p-count { display: none; } .go { grid-area: go; } }
 @media (max-width: 720px) {
   .toolbar { gap: 8px; }
@@ -502,8 +718,13 @@ tfoot th.c-ticket { font: 500 10px/1 var(--mono); letter-spacing: .12em; text-tr
   .d-date { font-size: 10.5px; }
   .c-total { width: 56px; padding-right: 10px !important; }
   .day-group { padding: 0 12px 8px; }
-  .entry { grid-template-columns: max-content minmax(0, 1fr) 48px; grid-template-areas: "time title dur" "chip title dur"; padding: 6px 0; }
-  .e-time { grid-area: time; } .entry .ticket-chip { grid-area: chip; justify-self: start; } .e-text { grid-area: title; } .e-dur { grid-area: dur; }
+  .entry { grid-template-columns: max-content minmax(0, 1fr) 48px 28px; grid-template-areas: "time text dur act" "chip text dur act"; padding: 6px 0; }
+  .entry > .ticket-chip { justify-self: start; }
+  .e-act .del { display: none; }
+  .entry.editing { margin: 0 -12px; padding: 12px; }
+  .conflict { flex-wrap: wrap; }
+  .c-text { flex: 1 1 calc(100% - 30px); }
+  .conflict .btn { margin-left: 24px; }
   .hint { display: none; }
 }
 </style>

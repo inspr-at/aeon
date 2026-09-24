@@ -4,7 +4,7 @@ import { test, expect, type Page } from '@playwright/test'
 import AxeBuilder from '@axe-core/playwright'
 import { fixtures, me, mockWork } from './work-fixtures'
 import { agentData, mockAgents } from './agents-fixtures'
-import { businessData, mockBusiness, type BusinessMockOptions } from './business-fixtures'
+import { businessData, mira, mockBusiness, type BusinessMockOptions } from './business-fixtures'
 import { journeyWorld, mockJourney, type JourneyStart, type WorldOptions } from './journey-fixtures'
 
 const world = {
@@ -27,6 +27,20 @@ function business(options: BusinessMockOptions = {}) {
     await mockAgents(page, agentData({ ...world, empty: true }))
     await mockBusiness(page, businessData(options), options)
   }
+}
+// Another session changes the Thursday entry before this page's correction lands.
+async function businessConflict(page: Page) {
+  await mockWork(page, fixtures())
+  await mockAgents(page, agentData({ ...world, empty: true }))
+  const data = businessData()
+  data.meanwhile['e-4'] = { note: 'Sketch v2 by Mira' }
+  await mockBusiness(page, data)
+}
+async function editEntry(page: Page) {
+  await expect(page.locator('[data-entry="e-4"]')).toBeVisible()
+  await page.locator('[data-entry="e-4"]').focus()
+  await page.keyboard.press('e')
+  await expect(page.getByRole('form', { name: 'Edit entry' })).toBeVisible()
 }
 async function signedOut(page: Page) {
   await page.route('**/api/**', route => {
@@ -80,6 +94,14 @@ const screens: [string, (page: Page) => Promise<void>, string, (page: Page) => P
     await page.getByRole('combobox', { name: 'Ticket' }).fill('pharos')
     await expect(page.getByRole('listbox', { name: 'Ticket' }).getByRole('option').first()).toBeVisible()
   }],
+  ['hours editing an entry', business(), '/business/hours', editEntry],
+  ['hours entry conflict', businessConflict, '/business/hours', async page => {
+    await editEntry(page)
+    await page.keyboard.type('2h')
+    await page.keyboard.press('Enter')
+    await expect(page.getByRole('alert').filter({ hasText: 'This entry changed while you were editing.' })).toBeVisible()
+  }],
+  ['hours locked week', business(), `/business/hours?person=${mira.id}&week=2026-09-14`, async page => { await expect(page.locator('[data-entry="e-7"] .lock')).toBeVisible() }],
   ['hours approvals', business(), '/business/hours?view=approvals&period=p-me-38', async page => { await expect(page.getByRole('complementary', { name: 'Period review' }).locator('.t-row').first()).toBeVisible() }],
   ['rates', business(), '/business/rates', async page => { await expect(page.getByRole('table', { name: 'Rates of Development' })).toBeVisible() }],
   ['rates add form', business(), '/business/rates', async page => {
