@@ -72,6 +72,8 @@ func TestResolveWeb(t *testing.T) {
 }
 
 func TestServeShutdownAndBootstrap(t *testing.T) {
+	// Auth reads AEON_ENV itself and no longer treats an unset value as dev.
+	t.Setenv("AEON_ENV", "dev")
 	fresh := dbtest.Open(t)
 	ln, err := net.Listen("tcp", "127.0.0.1:0")
 	if err != nil {
