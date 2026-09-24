@@ -207,7 +207,7 @@ defineExpose({ begin, cancel, isOpen: () => !!open.value })
 .items { margin: 0; padding: 0 8px 8px; list-style: none; display: grid; grid-template-columns: minmax(0, 1fr); gap: 4px; }
 .item { display: grid; grid-template-columns: 30px minmax(0, 1fr) auto; gap: 12px; align-items: start; padding: 12px 12px 12px 10px; border-radius: 12px; outline: none; cursor: default; }
 @media (hover: hover) { .item:hover { background: var(--row-hover); } }
-.item.active { background: var(--row-selected); box-shadow: inset 3px 0 0 var(--row-accent), 0 0 0 1px var(--glass-rim); }
+.item.active { background: var(--row-selected); box-shadow: inset 0 0 0 1px var(--chip-teal-line); }
 .item.open { background: var(--row-selected); }
 .mark { display: grid; place-items: center; width: 30px; height: 30px; border-radius: 9px; background: var(--chip-teal-bg); box-shadow: inset 0 0 0 1px var(--chip-teal-line); color: var(--teal-ink); }
 .item.medium .mark { background: var(--gold-wash); box-shadow: inset 0 0 0 1px rgba(214, 155, 49, .35); color: var(--gold-ink); }

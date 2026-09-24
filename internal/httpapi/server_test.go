@@ -10,6 +10,7 @@ import (
 	"testing"
 	"testing/fstest"
 
+	"github.com/inspr-at/aeon/internal/brand"
 	"github.com/inspr-at/aeon/internal/dbtest"
 	"github.com/inspr-at/aeon/internal/version"
 )
@@ -28,8 +29,14 @@ func TestHandlersAndMiddleware(t *testing.T) {
 		if err := json.Unmarshal(rec.Body.Bytes(), &body); err != nil {
 			t.Fatal(err)
 		}
-		if body.Version != version.Version || body.Scheme != version.Scheme {
+		if body.Version != version.Version || body.Scheme != version.Scheme || body.Brand != brand.Default() {
 			t.Fatalf("%+v", body)
+		}
+		// A deployment's brand replaces the embedded one.
+		custom := brand.Brand{Schema: brand.Schema, Product: "NOVA", Generation: "1", ReleaseName: "DAWN", Wordmark: "NOVA DAWN", ShortName: "DAWN"}
+		var branded versionBody
+		if err := json.Unmarshal(get(t, (&Server{Brand: &custom}).Handler(), "/api/version", "").Body.Bytes(), &branded); err != nil || branded.Brand != custom {
+			t.Fatalf("custom brand %+v %v", branded, err)
 		}
 		if rec.Header().Get("Content-Security-Policy") != "default-src 'self'" {
 			t.Fatalf("csp %q", rec.Header().Get("Content-Security-Policy"))
@@ -75,11 +82,16 @@ func TestHandlersAndMiddleware(t *testing.T) {
 		if rec.Code != http.StatusOK {
 			t.Fatalf("status %d body %s", rec.Code, rec.Body.String())
 		}
-		if !strings.Contains(rec.Body.String(), "<title>PAIMOS AEON</title>") {
+		if !strings.Contains(rec.Body.String(), "<title>"+brand.Default().Wordmark+"</title>") {
 			t.Fatalf("body %s", rec.Body.String())
 		}
 		if rec.Header().Get("Content-Security-Policy") != "default-src 'self'" {
 			t.Fatal("csp missing on placeholder")
+		}
+		// The deployment's brand names the placeholder too.
+		custom := brand.Brand{Schema: brand.Schema, Product: "NOVA", Generation: "1", ReleaseName: "DAWN", Wordmark: "NOVA DAWN", ShortName: "DAWN"}
+		if body := get(t, (&Server{Brand: &custom}).Handler(), "/", "").Body.String(); !strings.Contains(body, "<title>NOVA DAWN</title>") || strings.Contains(body, "AEON") {
+			t.Fatalf("branded placeholder %s", body)
 		}
 	})
 

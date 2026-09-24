@@ -65,7 +65,7 @@ onBeforeUnmount(() => { dragging.value = false })
 
 <style scoped>
 .splitter {
-  position: fixed; z-index: 16; top: calc(var(--header-h) + 10px); bottom: 10px; right: calc(var(--panel-w) + 10px);
+  position: fixed; z-index: 16; top: calc(var(--header-h) + 10px); bottom: calc(var(--footer-h) + 10px); right: calc(var(--panel-w) + 10px);
   width: 12px; margin-right: 1px; cursor: col-resize; touch-action: none; outline: none; display: grid; place-items: center;
 }
 .grip { width: 4px; height: 44px; border-radius: 999px; background: var(--line-2); opacity: 0; transition: opacity .15s ease, background .15s ease, height .15s ease; }

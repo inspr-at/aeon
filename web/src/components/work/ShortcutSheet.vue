@@ -36,6 +36,13 @@ const sections: { title: string; rows: { keys: Key[][]; label: string; joiner?: 
     { keys: [['Space']], label: 'In the walker: include in the release or defer' },
     { keys: [['c'], ['z'], ['i']], joiner: '·', label: 'In the walker: compare, 100 %, details' },
   ] },
+  { title: 'Release history', rows: [
+    { keys: [['j'], ['k']], label: 'Next and previous release' },
+    { keys: [[{ icon: 'enter', label: 'Enter' }]], label: 'Open the release' },
+    { keys: [['c']], label: 'Compare two releases' },
+    { keys: [['e']], label: 'Show or hide the evidence' },
+    { keys: [['/']], label: 'Search headlines, changes and ticket keys' },
+  ] },
   { title: 'Ticket list', rows: [
     { keys: [['j'], [{ icon: 'arrow-down', label: 'Down arrow' }]], label: 'Next ticket' },
     { keys: [['k'], [{ icon: 'arrow-up', label: 'Up arrow' }]], label: 'Previous ticket' },

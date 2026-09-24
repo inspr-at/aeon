@@ -263,7 +263,7 @@ a.ticket-chip:hover { text-decoration: underline; }
 .period-rows, .rate-rows { margin: 0; padding: 0 6px 8px; list-style: none; border-top: 1px solid var(--line); }
 .period-row { display: grid; grid-template-columns: minmax(0, 1fr) auto 80px 14px; align-items: center; gap: 14px; min-height: 46px; margin-top: 4px; padding: 6px 12px; border-radius: 10px; color: var(--ink); text-decoration: none; font-size: 13px; }
 @media (hover: hover) { .period-row:hover { background: var(--row-hover); } }
-.period-row:focus-visible { background: var(--row-selected); box-shadow: inset 3px 0 0 var(--row-accent), 0 0 0 1px var(--glass-rim); }
+.period-row:focus-visible { background: var(--row-selected); box-shadow: var(--focus-ring); }
 .p-who { display: inline-flex; align-items: center; gap: 8px; min-width: 0; font-weight: 650; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 .p-who svg, .go { color: var(--ink-3); flex-shrink: 0; }
 .p-when { color: var(--ink-2); font-size: 12.5px; }

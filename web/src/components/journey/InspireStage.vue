@@ -1,5 +1,6 @@
 <!-- SPDX-License-Identifier: AGPL-3.0-only -->
 <script setup lang="ts">
+import { brand } from '../../lib/brand'
 import { computed, ref } from 'vue'
 import { acceptDraft, ACTION_LONG, type IntakeDraft } from '../../lib/journey'
 import { useJourneyContext } from '../../lib/journeyContext'
@@ -28,7 +29,7 @@ const sourceLabel = (id: string) => intake.value.sources.find(s => s.id === id)?
 const summary = computed(() => {
   const sources = intake.value.sources.length, accepted = intake.value.drafts.filter(d => d.status === 'accepted').length
   if (sources || intake.value.drafts.length) return `${plural(sources, 'source')} recorded · ${plural(accepted, 'draft')} accepted.`
-  return ctx.journey.value.stage_source === 'derived' ? 'Nothing was recorded here: the project came to Aeon with its history.' : 'No conversation or sources were recorded.'
+  return ctx.journey.value.stage_source === 'derived' ? `Nothing was recorded here: the project came to ${brand.value.short_name} with its history.` : 'No conversation or sources were recorded.'
 })
 async function accept(draft: IntakeDraft) {
   accepting.value = draft.id

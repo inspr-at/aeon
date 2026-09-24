@@ -1,5 +1,6 @@
 <!-- SPDX-License-Identifier: AGPL-3.0-only -->
 <script setup lang="ts">
+import { brand } from '../../lib/brand'
 import { computed, ref } from 'vue'
 import { useBusiness, type AreaId } from '../../stores/business'
 import { confirmAction } from '../../lib/confirm'
@@ -66,7 +67,7 @@ void props
       <div>
         <h2 id="setup-title">{{ variant === 'intro' ? 'Set up Business' : 'Business parts' }}</h2>
         <p>{{ variant === 'intro'
-          ? 'Hours on tickets, priced by cost unit rates, with an admin’s approval per period. Each part is a first-party plugin: enabling it pins it to this version of Aeon. Your projects and tickets stay as they are.'
+          ? `Hours on tickets, priced by cost unit rates, with an admin’s approval per period. Each part is a first-party plugin: enabling it pins it to this version of ${brand.short_name}. Your projects and tickets stay as they are.`
           : 'Enable or disable each part for everyone in this workspace. Disabling closes a part; nothing is deleted.' }}</p>
       </div>
     </header>

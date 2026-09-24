@@ -2,6 +2,7 @@
 // Pure rules for the agents workspace: what state a session is in, which group it
 // belongs to, what an approval asks for and how risky it is, and how an account's
 // allowance window is pacing. Free of Vue so it can be unit tested.
+import { brand } from './brand.ts'
 import { paceFraction, type AgentRun, type AllowanceWindow, type Approval, type HarnessSession, type ProjectMessage } from './agents.ts'
 
 export const HEARTBEAT_STALE_MS = 2 * 60_000
@@ -40,12 +41,13 @@ export function stopReasonLabel(reason: string | null | undefined) {
   return reason.replace(/[_-]+/g, ' ').replace(/^./, c => c.toUpperCase())
 }
 
-// The agent's name is the name part of its message address ("claude:camy" is camy);
-// without one, the machine it runs on.
-export function agentName(session: Pick<HarnessSession, 'agent_principal_id' | 'host'>, addresses: Record<string, string>) {
+// The agent's name: the name part of its message address ("claude:camy" is camy),
+// else the agent principal's own name (aeon-coordinator); the machine it runs on
+// only as a last resort, since a host name is not who the agent is.
+export function agentName(session: Pick<HarnessSession, 'agent_principal_id' | 'host' | 'agent'>, addresses: Record<string, string>) {
   const address = addresses[session.agent_principal_id]
   const name = address?.split(':')[1]
-  return name || session.host
+  return name || session.agent?.name || session.host
 }
 
 export function needsYou(session: HarnessSession, pending: Approval[], held: ProjectMessage[]) {
@@ -169,7 +171,7 @@ export const UNIT_LABEL: Record<AllowanceWindow['unit'], string> = { requests: '
 export function controlBlocked(session: HarnessSession, kind: 'interrupt' | 'stop', name: string, canControl: boolean, current?: { kind: string; state: string } | null) {
   if (!canControl) return 'Only people who may write can control sessions'
   if (session.phase === 'stopped') return 'This session has stopped'
-  if (session.management_mode !== 'managed') return 'This session runs outside Aeon, so it cannot be controlled from here'
+  if (session.management_mode !== 'managed') return `This session runs outside ${brand.value.short_name}, so it cannot be controlled from here`
   if (!session.advertised_capabilities.includes(kind)) return `${name} does not accept ${kind === 'stop' ? 'a stop' : 'interrupts'}`
   if (current && current.state !== 'completed') return `${current.kind === 'stop' ? 'A stop' : 'An interrupt'} is on its way`
   return ''

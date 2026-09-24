@@ -124,9 +124,9 @@ for (const colorScheme of ['light', 'dark'] as const) {
       await page.goto(path)
       await ready(page)
       await page.waitForTimeout(250)
-      // The version coordinate is the vendored INSPR calendar-version display (pinned presentation);
+      // The version coordinate (and the footer's calendar version) is the vendored INSPR calendar-version display (pinned presentation);
       // its digit colours are reported to its owner rather than restyled here.
-      const results = await new AxeBuilder({ page }).withTags(['wcag2a', 'wcag2aa', 'wcag21a', 'wcag21aa']).exclude('.version-coordinate').analyze()
+      const results = await new AxeBuilder({ page }).withTags(['wcag2a', 'wcag2aa', 'wcag21a', 'wcag21aa']).exclude('.version-coordinate').exclude('.calendar-version').analyze()
       const summary = results.violations.map(v => `${v.id} (${v.impact}): ${v.help}\n${v.nodes.slice(0, 4).map(n => `    ${n.target.join(' ')} — ${n.failureSummary?.split('\n').slice(1, 2).join(' ').trim()}`).join('\n')}`)
       expect(summary, summary.join('\n')).toEqual([])
     })
@@ -166,7 +166,7 @@ for (const colorScheme of ['light', 'dark'] as const) {
       await page.goto(path)
       await ready(page)
       await page.waitForTimeout(250)
-      const results = await new AxeBuilder({ page }).withTags(['wcag2a', 'wcag2aa', 'wcag21a', 'wcag21aa']).exclude('.version-coordinate').analyze()
+      const results = await new AxeBuilder({ page }).withTags(['wcag2a', 'wcag2aa', 'wcag21a', 'wcag21aa']).exclude('.version-coordinate').exclude('.calendar-version').analyze()
       const summary = results.violations.map(v => `${v.id} (${v.impact}): ${v.help}\n${v.nodes.slice(0, 4).map(n => `    ${n.target.join(' ')} — ${n.failureSummary?.split('\n').slice(1, 2).join(' ').trim()}`).join('\n')}`)
       expect(summary, summary.join('\n')).toEqual([])
     })
@@ -211,7 +211,7 @@ for (const colorScheme of ['light', 'dark'] as const) {
       await page.goto(path)
       await ready(page)
       await page.waitForTimeout(250)
-      const results = await new AxeBuilder({ page }).withTags(['wcag2a', 'wcag2aa', 'wcag21a', 'wcag21aa']).exclude('.version-coordinate').analyze()
+      const results = await new AxeBuilder({ page }).withTags(['wcag2a', 'wcag2aa', 'wcag21a', 'wcag21aa']).exclude('.version-coordinate').exclude('.calendar-version').analyze()
       const summary = results.violations.map(v => `${v.id} (${v.impact}): ${v.help}\n${v.nodes.slice(0, 4).map(n => `    ${n.target.join(' ')} — ${n.failureSummary?.split('\n').slice(1, 2).join(' ').trim()}`).join('\n')}`)
       expect(summary, summary.join('\n')).toEqual([])
     })

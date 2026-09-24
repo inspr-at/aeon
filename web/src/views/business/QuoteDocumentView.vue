@@ -1,6 +1,7 @@
 <!-- SPDX-License-Identifier: AGPL-3.0-only -->
 <!-- Parked (AEON-70, 2026-09-24): quotes and organisations will be ported from Markus's current classic Paimos quote builder; this file is not routed or linked. -->
 <script setup lang="ts">
+import { brand, setPageTitle } from '../../lib/brand'
 import { computed, onMounted, ref, watch } from 'vue'
 import { useRoute, useRouter } from 'vue-router'
 import { exportURL, listVersions, type QuoteVersion } from '../../lib/business'
@@ -61,7 +62,7 @@ async function load() {
 }
 watch(key, load)
 onMounted(load)
-watch([quote, chosen], ([q, v]) => { if (q) document.title = `${q.key}${v ? ` v${v.version}` : ''} ${q.title} · PAIMOS AEON` })
+watch([quote, chosen], ([q, v]) => { if (q) setPageTitle(`${q.key}${v ? ` v${v.version}` : ''} ${q.title}`) })
 function choose(version: number) { void router.replace({ query: { ...route.query, v: String(version) } }) }
 function download(format: 'pdf' | 'markdown') { if (quote.value && chosen.value) window.open(exportURL(quote.value.quote_node_id, chosen.value.version, format), '_blank', 'noopener') }
 function print() { window.print() }
@@ -156,7 +157,7 @@ function print() { window.print() }
         </template>
         <template v-else-if="chosen.issue">
           <p class="label">Acceptance</p>
-          <p>{{ recipient?.title ?? 'The recipient' }} accepts this offer by signing in to PAIMOS AEON and accepting version {{ chosen.version }} of {{ quote.key }}.</p>
+          <p>{{ recipient?.title ?? 'The recipient' }} accepts this offer by signing in to {{ brand.wordmark }} and accepting version {{ chosen.version }} of {{ quote.key }}.</p>
         </template>
         <template v-else>
           <p class="label">Draft</p>

@@ -1,5 +1,6 @@
 <!-- SPDX-License-Identifier: AGPL-3.0-only -->
 <script setup lang="ts">
+import { brand } from '../../lib/brand'
 import { computed, onMounted, ref, watch } from 'vue'
 import type { Approval, ProjectMessage, SessionControl } from '../../lib/agents'
 import { RUN_OUTCOME, cost, elapsed, runDuration, runModel, scopeLabel, stopReasonLabel, tokens } from '../../lib/agentState'
@@ -120,7 +121,7 @@ defineExpose({ focus: () => root.value?.focus({ preventScroll: true }) })
           <RouterLink v-if="view.projectKey" class="project-link" :to="`/p/${encodeURIComponent(view.projectKey)}`"><span class="key-badge">{{ view.projectKey }}</span>{{ view.projectTitle }}</RouterLink>
           <span v-else class="muted">—</span>
         </dd></div>
-        <div class="fact"><dt>Runs on</dt><dd><span class="mono">{{ view.session.host }}</span><span class="muted">{{ view.session.role === 'coordinator' ? 'lead session' : 'worker' }} · {{ view.session.management_mode === 'managed' ? 'owned by Aeon' : 'runs on its own' }}</span></dd></div>
+        <div class="fact"><dt>Runs on</dt><dd><span class="mono">{{ view.session.host }}</span><span class="muted">{{ view.session.role === 'coordinator' ? 'lead session' : 'worker' }} · {{ view.session.management_mode === 'managed' ? `owned by ${brand.short_name}` : 'runs on its own' }}</span></dd></div>
         <div class="fact"><dt>Model</dt><dd class="mono" :class="{ muted: !view.model }">{{ view.model || 'Not reported' }}<span v-if="run && run.model_evidence === 'vendor_reported'" class="evidence" data-tip="Reported by the vendor, not only requested"><AppIcon name="check" :size="11" /></span></dd></div>
         <div class="fact"><dt>Heartbeat</dt><dd>
           <time v-if="view.session.heartbeat_at" :datetime="view.session.heartbeat_at" :data-tip="absoluteTime(view.session.heartbeat_at)">{{ relativeTime(view.session.heartbeat_at, { now, long: true }) }}</time>
@@ -202,7 +203,7 @@ defineExpose({ focus: () => root.value?.focus({ preventScroll: true }) })
 
 <style scoped>
 .session-panel {
-  position: fixed; z-index: 15; top: calc(var(--header-h) + 10px); right: 10px; bottom: 10px; width: min(560px, calc(100vw - 20px));
+  position: fixed; z-index: 15; top: calc(var(--header-h) + 10px); right: 10px; bottom: calc(var(--footer-h) + 10px); width: min(560px, calc(100vw - 20px));
   display: flex; flex-direction: column; min-height: 0; outline: none;
   border-radius: var(--radius); border: 1px solid var(--glass-edge);
   background: linear-gradient(165deg, var(--surface-raised), var(--surface-raised-2)); box-shadow: var(--shadow-pop), var(--shadow);

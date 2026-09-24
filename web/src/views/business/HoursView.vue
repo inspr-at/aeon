@@ -673,7 +673,7 @@ tfoot th.c-ticket { font: 500 10px/1 var(--mono); letter-spacing: .12em; text-tr
 .lock { display: inline-grid; place-items: center; width: 28px; height: 28px; color: var(--ink-3); }
 .lock-note { display: inline-flex; align-items: center; gap: 6px; }
 .lock-note svg { color: var(--ink-3); }
-.entry.editing { display: block; margin: 0 -18px; padding: 12px 18px 8px; background: var(--surface-sunken); box-shadow: inset 3px 0 0 var(--row-accent); }
+.entry.editing { display: block; margin: 0 -8px; padding: 12px 8px 8px; border-radius: 12px; background: var(--surface-sunken); box-shadow: inset 0 0 0 1px var(--line-2); }
 .conflict { display: flex; align-items: flex-start; gap: 10px; margin-bottom: 12px; padding: 10px 12px; border-radius: 10px; background: var(--gold-wash); box-shadow: inset 0 0 0 1px rgba(214, 155, 49, .35); color: var(--ink); font-size: 12.5px; }
 .conflict > svg { flex-shrink: 0; margin-top: 2px; color: var(--gold-ink); }
 .c-text { flex: 1; min-width: 0; line-height: 1.5; }
@@ -692,7 +692,7 @@ tfoot th.c-ticket { font: 500 10px/1 var(--mono); letter-spacing: .12em; text-tr
 .period-rows { margin: 0; padding: 0 6px 8px; list-style: none; border-top: 1px solid var(--line); }
 .period-row { display: grid; grid-template-columns: minmax(150px, 1.2fr) minmax(140px, 1fr) 90px 80px minmax(120px, auto) 14px; align-items: center; gap: 12px; width: 100%; min-height: 48px; margin-top: 4px; padding: 6px 12px; border: 0; border-radius: 10px; background: transparent; color: var(--ink); font-size: 13px; text-align: left; }
 @media (hover: hover) { .period-row:hover { background: var(--row-hover); } }
-.period-row.open { background: var(--row-selected); box-shadow: inset 3px 0 0 var(--row-accent); }
+.period-row.open { background: var(--row-selected); box-shadow: inset 0 0 0 1px var(--chip-teal-line); }
 .period-row:focus-visible { box-shadow: var(--focus-ring); }
 .p-who { display: inline-flex; align-items: center; gap: 8px; font-weight: 650; min-width: 0; overflow: hidden; white-space: nowrap; text-overflow: ellipsis; }
 .p-who svg { color: var(--ink-3); flex-shrink: 0; }

@@ -1,5 +1,6 @@
 <!-- SPDX-License-Identifier: AGPL-3.0-only -->
 <script setup lang="ts">
+import { brand } from '../lib/brand'
 import { computed, nextTick, onBeforeUnmount, onMounted, ref, watch } from 'vue'
 import { useRoute, useRouter } from 'vue-router'
 import mark from '../assets/brand/aeon-mark.svg'
@@ -74,6 +75,7 @@ function themeKeys(event: KeyboardEvent) {
   void nextTick(focusTheme)
 }
 function showShortcuts() { closeMenu(); run({ name: 'shortcuts' }) }
+function showReleases() { closeMenu(); run({ name: 'releases' }) }
 watch(command, value => { if (value?.command.name === 'palette') { consume(); palette.value?.open() } })
 function closeMenu(restoreFocus = false) {
   open.value = false
@@ -123,9 +125,9 @@ onBeforeUnmount(() => { document.removeEventListener('pointerdown', outside); wi
 
 <template>
   <header class="app-header">
-    <RouterLink class="lockup" to="/" aria-label="PAIMOS AEON home" :class="{ compact: !!projectKey || !!pageTitle || business.anyOpen }">
+    <RouterLink class="lockup" to="/" :aria-label="`${brand.wordmark} home`" :class="{ compact: !!projectKey || !!pageTitle || business.anyOpen }">
       <span class="mark-backing"><img :src="mark" width="26" height="26" alt="" /></span>
-      <span class="wordmark">PAIMOS<sup>AEON</sup></span>
+      <span class="wordmark">{{ brand.product }}<sup>{{ brand.release_name }}</sup></span>
     </RouterLink>
     <nav v-if="session.identity && !fatal" class="crumbs" :class="{ deep: !!projectKey || !!pageTitle, biz: businessPage }" aria-label="Breadcrumb">
       <RouterLink v-if="!agentsPage && !businessPage" class="crumb home-crumb" to="/" :aria-current="onProjects ? 'page' : undefined">Projects</RouterLink>
@@ -193,10 +195,11 @@ onBeforeUnmount(() => { document.removeEventListener('pointerdown', outside); wi
             <button v-for="option in themes" :key="option.value" type="button" role="radio" :aria-checked="themeChoice === option.value" :tabindex="themeChoice === option.value ? 0 : -1" @click="setTheme(option.value)"><AppIcon :name="option.icon" :size="13" />{{ option.label }}</button>
           </div>
         </div>
+        <button class="menu-row" type="button" @click="showReleases"><AppIcon name="history" />Release history</button>
         <button class="menu-row" type="button" aria-keyshortcuts="?" @click="showShortcuts"><AppIcon name="keyboard" />Keyboard shortcuts<kbd class="keycap row-key" aria-hidden="true">?</kbd></button>
         <button class="menu-row" type="button" :disabled="busy" @click="signOut"><AppIcon name="logout" />{{ busy ? 'Signing out…' : 'Sign out' }}</button>
         <p v-if="error" class="error" role="alert">{{ error }}</p>
-        <div class="menu-version"><span class="eyebrow">PAIMOS AEON</span><VersionDisplay /></div>
+        <div class="menu-version"><span class="eyebrow">{{ brand.wordmark }}</span><VersionDisplay /></div>
       </div>
     </div>
     <CommandPalette v-if="globalSearch" ref="palette" :can-write="writable" />

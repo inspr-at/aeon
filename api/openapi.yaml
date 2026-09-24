@@ -30,10 +30,37 @@ paths:
             application/json:
               schema:
                 type: object
-                required: [version, scheme]
+                required: [version, scheme, brand]
                 properties:
                   version: {type: string, description: "YYMMDDhhmmss.0.0 or dev"}
                   scheme: {type: string, enum: [inspr-calendar-v2]}
+                  brand: {$ref: '#/components/schemas/Brand'}
+  /releases:
+    get:
+      operationId: listReleases
+      summary: The release history embedded in this build (inspr.release-history.v1)
+      responses:
+        '200':
+          description: History, newest first
+          content:
+            application/json:
+              schema: {$ref: '#/components/schemas/ReleaseHistory'}
+        '401': {description: Authentication required}
+  /releases/{version}:
+    get:
+      operationId: getRelease
+      summary: One release of the embedded history
+      parameters:
+        - {name: version, in: path, required: true, schema: {type: string}, description: The calendar version, with or without the leading v}
+      responses:
+        '200':
+          description: The release
+          content:
+            application/json:
+              schema: {$ref: '#/components/schemas/Release'}
+        '400': {description: Not an inspr-calendar-v2 version}
+        '401': {description: Authentication required}
+        '404': {description: No such release in this build's history}
   /auth/login:
     get:
       operationId: authLogin
@@ -1919,6 +1946,75 @@ components:
       required: [errors]
       properties:
         errors: {type: object, additionalProperties: {type: string}}
+    Brand:
+      description: The product's names (brand.json, schema inspr.brand.v1; AEON_BRAND_FILE overrides it). generation is a label, never a version.
+      type: object
+      additionalProperties: false
+      required: [schema, product, generation, release_name, wordmark, short_name]
+      properties:
+        schema: {type: string, enum: [inspr.brand.v1]}
+        product: {type: string, maxLength: 48}
+        generation: {type: string, maxLength: 48}
+        release_name: {type: string, maxLength: 48}
+        wordmark: {type: string, maxLength: 48}
+        short_name: {type: string, maxLength: 48}
+    ReleaseHistory:
+      description: inspr.release-history.v1 (see internal/releasehistory), newest release first, plus the running version.
+      type: object
+      required: [schema, product, repository, version_scheme, generated_at, source, releases, current, live_since]
+      properties:
+        schema: {type: string, enum: [inspr.release-history.v1]}
+        product: {type: string}
+        repository: {type: string}
+        version_scheme: {type: string}
+        generated_at: {type: string, format: date-time}
+        source: {type: string, enum: [git+github, git, none]}
+        current: {type: string, description: The running build's version or dev}
+        live_since: {type: string, format: date-time, description: When this server started running the current version}
+        releases: {type: array, items: {$ref: '#/components/schemas/Release'}}
+    Release:
+      type: object
+      required: [version, tag, release_channel, release_sequence, state, reserved_at, tagged_at, published_at, headline, tickets, changes, changes_omitted, evidence]
+      properties:
+        version: {type: string}
+        tag: {type: string}
+        release_channel: {type: string}
+        release_sequence: {type: integer}
+        state: {type: string, enum: [published, reserved]}
+        reserved_at: {type: [string, 'null'], format: date-time}
+        tagged_at: {type: [string, 'null'], format: date-time}
+        published_at: {type: [string, 'null'], format: date-time}
+        headline: {type: string}
+        tickets: {type: array, items: {type: string}}
+        changes:
+          type: array
+          items:
+            type: object
+            required: [commit, subject, type, scope, tickets, at]
+            properties:
+              commit: {type: string}
+              subject: {type: string}
+              type: {type: string, enum: [feat, fix, test, docs, release, refactor, chore, other]}
+              scope: {type: string}
+              tickets: {type: array, items: {type: string}}
+              at: {type: string, format: date-time}
+        changes_omitted: {type: integer, minimum: 0}
+        evidence:
+          type: object
+          required: [source_commit, source_url, image, ci, release_run, release_url, unavailable]
+          properties:
+            source_commit: {type: string}
+            source_url: {type: string}
+            image:
+              type: [object, 'null']
+              properties: {reference: {type: string}, digest: {type: string}}
+            ci: {$ref: '#/components/schemas/ReleaseRun'}
+            release_run: {$ref: '#/components/schemas/ReleaseRun'}
+            release_url: {type: string}
+            unavailable: {type: array, items: {type: string}, description: What could not be established, in plain words}
+    ReleaseRun:
+      type: [object, 'null']
+      properties: {name: {type: string}, url: {type: string}, status: {type: string}, conclusion: {type: string}}
     Journey:
       type: object
       required: [project_node_id, profile, revision, stage, stage_source, stages, next_action, requirements_revision, requirements_digest_sha256, requirements_approval_scope, launch_readiness]
@@ -2751,13 +2847,19 @@ components:
       allOf:
         - {$ref: '#/components/schemas/HarnessSession'}
         - type: object
-          required: [project, ticket]
+          required: [project, ticket, agent]
           properties:
             project: {$ref: '#/components/schemas/NodeSummary'}
             ticket:
               oneOf:
                 - {$ref: '#/components/schemas/NodeSummary'}
                 - {type: 'null'}
+            agent:
+              description: The agent principal running the session (its name, not the host)
+              type: [object, 'null']
+              properties:
+                id: {type: string, format: uuid}
+                name: {type: string}
     ProjectMessage:
       allOf:
         - {$ref: './openapi-messaging.yaml#/components/schemas/Message'}

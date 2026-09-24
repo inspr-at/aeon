@@ -86,7 +86,8 @@ function rowClick(event: MouseEvent, id: string) {
           <span role="cell" class="c-state"><LiveDot :tone="view.status.tone" /><span class="state-label">{{ pendingLabel(view) || view.status.label }}</span></span>
           <span role="cell" class="c-agent">
             <RouterLink class="agent-link" :to="`/agents/${view.session.id}`" :aria-label="`${view.harness} ${view.name}, ${view.status.label}`">
-              <span class="harness" :class="view.session.harness">{{ view.harness }}</span><span class="agent-name">{{ view.name }}</span>
+              <span class="harness" :class="view.session.harness">{{ view.harness }}</span>
+              <span class="who"><span class="agent-name">{{ view.name }}</span><span v-if="view.session.host && view.session.host !== view.name" class="host mono">on {{ view.session.host }}</span></span>
             </RouterLink>
             <span v-if="view.session.role === 'coordinator'" class="role" data-tip="Coordinates other sessions">Lead</span>
           </span>
@@ -134,11 +135,13 @@ function rowClick(event: MouseEvent, id: string) {
 </template>
 
 <style scoped>
+/* The machine a session runs on, secondary to the agent's name. */
+.host { min-width: 0; overflow: hidden; white-space: nowrap; text-overflow: ellipsis; font-size: 11px; color: var(--ink-3); font-variant-ligatures: none; }
 .sessions { overflow: clip; container: sessions / inline-size; }
 .card-head { display: flex; align-items: baseline; gap: 10px; padding: 14px 18px 10px; }
 .card-head h2 { font-size: 15px; font-weight: 650; }
 .sub { font-size: 12.5px; color: var(--ink-3); }
-.table { display: grid; grid-template-columns: 132px minmax(170px, 1.3fr) minmax(96px, .8fr) minmax(90px, .8fr) minmax(110px, .9fr) 84px 72px 76px; padding: 0 0 8px; }
+.table { display: grid; grid-template-columns: 132px minmax(210px, 1.5fr) minmax(96px, .8fr) minmax(90px, .8fr) minmax(110px, .9fr) 84px 72px 76px; padding: 0 0 8px; }
 .thead, .row, .group-row { display: grid; grid-template-columns: subgrid; grid-column: 1 / -1; align-items: center; column-gap: 0; }
 .thead { height: 32px; padding: 0 12px; border-top: 1px solid var(--line); border-bottom: 1px solid var(--line); font: 500 10.5px/1 var(--mono); letter-spacing: .14em; text-transform: uppercase; color: var(--ink-3); font-variant-ligatures: none; white-space: nowrap; }
 .thead > span, .row > span { padding: 0 8px; min-width: 0; }
@@ -153,15 +156,16 @@ function rowClick(event: MouseEvent, id: string) {
 .chev.turned { transform: rotate(90deg); }
 .row { position: relative; min-height: 48px; margin: 0 6px; padding: 0 4px; border-radius: 10px; outline: none; cursor: pointer; font-size: 13px; }
 @media (hover: hover) { .row:hover { background: var(--row-hover); } }
-.row.active { background: var(--row-selected); box-shadow: inset 3px 0 0 var(--row-accent), 0 0 0 1px var(--glass-rim); }
+.row.active { background: var(--row-selected); box-shadow: inset 0 0 0 1px var(--chip-teal-line); }
 .row.selected { background: var(--row-selected); }
 .row.stopped { color: var(--ink-2); }
 .c-state { display: inline-flex; align-items: center; gap: 9px; }
 .state-label { font-size: 12.5px; color: var(--ink-2); white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
 .row.needs .state-label { color: var(--gold-ink); font-weight: 600; }
-.c-agent { display: inline-flex; align-items: center; gap: 8px; }
+.c-agent { display: inline-flex; align-items: center; gap: 8px; min-width: 0; }
 .agent-link { display: inline-flex; align-items: center; gap: 8px; min-width: 0; color: var(--ink); text-decoration: none; }
 .agent-link:focus-visible { box-shadow: var(--focus-ring); border-radius: 6px; }
+.who { display: grid; min-width: 0; line-height: 1.25; }
 .agent-name { font-weight: 600; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 .row:hover .agent-name { color: var(--teal-ink); }
 .harness { flex-shrink: 0; display: inline-flex; align-items: center; height: 20px; padding: 0 7px; border-radius: 6px; background: var(--chip-bg); box-shadow: inset 0 0 0 1px var(--chip-line); font: 500 10.5px/1 var(--mono); letter-spacing: .03em; color: var(--ink-2); font-variant-ligatures: none; }

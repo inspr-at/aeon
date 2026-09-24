@@ -51,7 +51,6 @@
   --seg-on: linear-gradient(180deg, #fff, var(--aqua-3));
   --row-hover: rgba(14, 111, 108, 0.055);
   --row-selected: rgba(164, 229, 223, 0.3);
-  --row-accent: var(--teal);
   --danger-bg: rgba(178, 74, 68, 0.08);
   --danger-line: rgba(178, 74, 68, 0.3);
   --mark-hl: rgba(232, 192, 122, 0.45);
@@ -103,6 +102,8 @@
 
   /* Shell metrics */
   --header-h: 56px;
+  /* The footer bar: a row of the shell, so pages, docked panels and toasts end above it. */
+  --footer-h: 40px;
   /* Page gutter: 28px at 1440 growing to about 48px at 2560. */
   --gutter: clamp(28px, calc(28px + (100vw - 1440px) / 56), 48px);
   /* Docked panel: ~560px at 1440 growing towards 40% on wide screens (two columns
@@ -138,7 +139,7 @@
   --keycap-bg: linear-gradient(180deg, rgba(237, 244, 240, 0.14), rgba(237, 244, 240, 0.07)); --keycap-line: rgba(237, 244, 240, 0.2); --keycap-ink: var(--ink);
   --btn-bg: linear-gradient(180deg, rgba(237, 244, 240, 0.1), rgba(237, 244, 240, 0.04)); --btn-bg-hover: linear-gradient(180deg, rgba(164, 229, 223, 0.18), rgba(164, 229, 223, 0.08));
   --seg-bg: rgba(4, 14, 16, 0.3); --seg-on: linear-gradient(180deg, rgba(164, 229, 223, 0.24), rgba(164, 229, 223, 0.12));
-  --row-hover: rgba(164, 229, 223, 0.06); --row-selected: rgba(164, 229, 223, 0.11); --row-accent: #a4e5df;
+  --row-hover: rgba(164, 229, 223, 0.06); --row-selected: rgba(164, 229, 223, 0.11);
   --danger-bg: rgba(239, 157, 149, 0.1); --danger-line: rgba(239, 157, 149, 0.35);
   --mark-hl: rgba(214, 155, 49, 0.38);
   --tip-bg: rgba(6, 18, 20, 0.96); --tip-ink: #edf4f0;
@@ -177,7 +178,7 @@
     --keycap-bg: linear-gradient(180deg, rgba(237, 244, 240, 0.14), rgba(237, 244, 240, 0.07)); --keycap-line: rgba(237, 244, 240, 0.2); --keycap-ink: var(--ink);
     --btn-bg: linear-gradient(180deg, rgba(237, 244, 240, 0.1), rgba(237, 244, 240, 0.04)); --btn-bg-hover: linear-gradient(180deg, rgba(164, 229, 223, 0.18), rgba(164, 229, 223, 0.08));
     --seg-bg: rgba(4, 14, 16, 0.3); --seg-on: linear-gradient(180deg, rgba(164, 229, 223, 0.24), rgba(164, 229, 223, 0.12));
-    --row-hover: rgba(164, 229, 223, 0.06); --row-selected: rgba(164, 229, 223, 0.11); --row-accent: #a4e5df;
+    --row-hover: rgba(164, 229, 223, 0.06); --row-selected: rgba(164, 229, 223, 0.11);
     --danger-bg: rgba(239, 157, 149, 0.1); --danger-line: rgba(239, 157, 149, 0.35);
     --mark-hl: rgba(214, 155, 49, 0.38);
     --tip-bg: rgba(6, 18, 20, 0.96); --tip-ink: #edf4f0;
@@ -199,3 +200,7 @@
 }
 
 @media (min-width: 1800px) { :root { --panel-default: min(max(40vw, 880px), 1100px); } }
+/* Phones: a full touch target high; the bar folds away while reading down. */
+@media (max-width: 600px) { :root { --footer-h: 44px; } }
+/* Registered, so the phone footer can fold away smoothly on scroll. */
+@property --footer-h { syntax: '<length>'; inherits: true; initial-value: 40px; }

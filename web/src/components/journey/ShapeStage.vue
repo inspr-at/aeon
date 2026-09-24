@@ -1,5 +1,6 @@
 <!-- SPDX-License-Identifier: AGPL-3.0-only -->
 <script setup lang="ts">
+import { brand } from '../../lib/brand'
 import { computed, nextTick, ref } from 'vue'
 import { ACTION_LONG, gateApprovals, offeredApproval, PROFILES, type ActionKey, type Profile } from '../../lib/journey'
 import { useJourneyContext } from '../../lib/journeyContext'
@@ -41,7 +42,7 @@ const noGate = computed(() => !approval.value)
 // Past Shape, the stage is history: one line, folded.
 const past = computed(() => ['done', 'skipped'].includes(state.value) && journey.value.stage !== 'shape')
 const summary = computed(() => state.value === 'skipped' ? 'Not needed on Personal: the conversation went straight to requirements.'
-  : journey.value.stage_source === 'derived' ? 'Decided before the project came to Aeon.' : `Decided${brief.value ? `: ${brief.value.title}` : ''}. The decision is recorded.`)
+  : journey.value.stage_source === 'derived' ? `Decided before the project came to ${brand.value.short_name}.` : `Decided${brief.value ? `: ${brief.value.title}` : ''}. The decision is recorded.`)
 </script>
 
 <template>

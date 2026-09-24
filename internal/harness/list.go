@@ -21,10 +21,18 @@ type NodeSummary struct {
 	Title string `json:"title"`
 }
 
+// PrincipalSummary names the agent principal that runs a session, so a list can
+// show "aeon-coordinator" rather than the machine it happens to run on.
+type PrincipalSummary struct {
+	ID   string `json:"id"`
+	Name string `json:"name"`
+}
+
 type SessionSummary struct {
 	Session
-	Project NodeSummary  `json:"project"`
-	Ticket  *NodeSummary `json:"ticket"`
+	Project NodeSummary       `json:"project"`
+	Ticket  *NodeSummary      `json:"ticket"`
+	Agent   *PrincipalSummary `json:"agent"`
 }
 
 type sessionPage struct {
@@ -121,12 +129,36 @@ func (m *Module) listAll(r *http.Request, tx pgx.Tx, p tenant.Principal) (any, e
 	if err = nodes.Err(); err != nil {
 		return nil, err
 	}
+	// Agent principals' names, in one more bounded query.
+	agents := []string{}
+	for _, s := range out.Items {
+		agents = append(agents, s.AgentPrincipalID)
+	}
+	principals, err := tx.Query(r.Context(), `SELECT id::text,name FROM principals WHERE id=ANY($1::uuid[])`, agents)
+	if err != nil {
+		return nil, err
+	}
+	defer principals.Close()
+	names := map[string]PrincipalSummary{}
+	for principals.Next() {
+		var a PrincipalSummary
+		if err = principals.Scan(&a.ID, &a.Name); err != nil {
+			return nil, err
+		}
+		names[a.ID] = a
+	}
+	if err = principals.Err(); err != nil {
+		return nil, err
+	}
 	for i := range out.Items {
 		s := &out.Items[i]
 		s.Project = summaries[s.ProjectID]
 		if s.TicketNodeID != nil {
 			n := summaries[*s.TicketNodeID]
 			s.Ticket = &n
+		}
+		if a, ok := names[s.AgentPrincipalID]; ok {
+			s.Agent = &a
 		}
 	}
 	return out, nil

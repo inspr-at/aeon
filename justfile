@@ -35,3 +35,7 @@ dev:
 # Release checks (bundle pin and version source)
 release-check:
     node scripts/verify-release.mjs
+
+# Release history manifest (inspr.release-history.v1) embedded in the server; reads the local tags.
+release-history:
+    go run ./internal/releasehistory/generate -repo . -repository inspr-at/aeon -offline

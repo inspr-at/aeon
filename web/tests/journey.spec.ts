@@ -264,7 +264,7 @@ test('a mature project leads with its build: progress, what is left, releases; I
   await expect(page.locator('.release-tickets input[type=checkbox]')).toHaveCount(0)
   await page.goto('/p/PHAROS?view=journey&stage=inspire')
   const history = page.locator('section.history')
-  await expect(history).toContainText('the project came to Aeon with its history')
+  await expect(history).toContainText('the project came to AEON with its history')
   await expect(page.getByText('Sources · stored with the project')).toHaveCount(0)
   await history.getByRole('button', { name: 'Show the sources' }).click()
   await expect(page.getByText('Sources · stored with the project')).toBeVisible()

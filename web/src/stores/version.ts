@@ -2,6 +2,7 @@
 import { defineStore } from 'pinia'
 import { ref } from 'vue'
 import { api, type Version } from '../lib/api'
+import { setBrand } from '../lib/brand'
 
 export const useVersion = defineStore('version', () => {
   const value = ref<Version | null>(null)
@@ -15,6 +16,7 @@ export const useVersion = defineStore('version', () => {
         const body = await response.json()
         if (typeof body.version !== 'string' || typeof body.scheme !== 'string') throw new Error('Invalid version')
         value.value = body
+        setBrand(body.brand)
       } catch { failed.value = true }
     })()
   }

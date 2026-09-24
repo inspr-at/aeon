@@ -1,5 +1,6 @@
 <!-- SPDX-License-Identifier: AGPL-3.0-only -->
 <script setup lang="ts">
+import { brand } from '../lib/brand'
 import { computed } from 'vue'
 import { useRouter } from 'vue-router'
 import { clearFatal, type Fatal } from '../lib/fatal'
@@ -18,7 +19,7 @@ async function home() { clearFatal(); await router.replace('/') }
 </script>
 
 <template>
-  <StatusPage :eyebrow="update ? 'A newer version is ready' : 'Something went wrong'" :title="update ? 'PAIMOS AEON was updated.' : 'This page stumbled.'" tone="problem">
+  <StatusPage :eyebrow="update ? 'A newer version is ready' : 'Something went wrong'" :title="update ? `${brand.wordmark} was updated.` : 'This page stumbled.'" tone="problem">
     <p v-if="update">A newer version was released while this page was open. Reload to continue; nothing you saved is lost.</p>
     <p v-else>The page ran into a problem it could not recover from. Your work is saved on the server; reloading usually helps.</p>
     <template #actions>

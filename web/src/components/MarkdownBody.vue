@@ -71,7 +71,9 @@ function click(event: MouseEvent) {
 /* Inline code is a quiet tint; only code blocks keep a frame. */
 .markdown-body :deep(:not(pre) > code) { padding: .5px 4px; border-radius: 4px; background: var(--code-bg); color: var(--ink); }
 .markdown-body :deep(pre code) { font-size: .88em; }
-.markdown-body :deep(blockquote) { margin: 0 0 1em; border-left: 3px solid var(--aqua); padding: 2px 0 2px 14px; color: var(--ink-2); }
+/* A quote reads as typography: indented on a quiet tint, no coloured rule (rule 11). */
+.markdown-body :deep(blockquote) { margin: 0 0 1em 12px; padding: 8px 14px; border-radius: 10px; background: var(--surface-2); color: var(--ink-2); }
+.markdown-body :deep(blockquote > :last-child) { margin-bottom: 0; }
 .markdown-body :deep(blockquote p) { color: var(--ink-2); }
 .markdown-body :deep(hr) { height: 1px; margin: 1.4em 0; border: 0; background: linear-gradient(90deg, transparent, var(--line-2), transparent); }
 .markdown-body :deep(table) { display: block; overflow: auto; margin: 0 0 1em; border-collapse: collapse; font-size: 13px; }

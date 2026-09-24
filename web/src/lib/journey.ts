@@ -11,9 +11,10 @@ export const isStage = (value: unknown): value is Stage => typeof value === 'str
 export const STAGE_LABEL: Record<Stage, string> = {
   inspire: 'Inspire', shape: 'Shape', requirements: 'Requirements', plan: 'Plan', build: 'Build', deploy: 'Deploy', access: 'Access', live: 'Live',
 }
-// Who carries each stage: Aithema drafts, Aeon plans and builds, Pharos deploys, Janus grants access.
-export const STAGE_OWNER: Record<Stage, string> = {
-  inspire: 'Aithema', shape: 'Aithema', requirements: 'Aithema', plan: 'Aeon', build: 'Aeon', deploy: 'Pharos', access: 'Janus', live: 'INSPR',
+// Who carries each stage: Aithema drafts, this product plans and builds (null:
+// its brand's short name), Pharos deploys, Janus grants access.
+export const STAGE_OWNER: Record<Stage, string | null> = {
+  inspire: 'Aithema', shape: 'Aithema', requirements: 'Aithema', plan: null, build: null, deploy: 'Pharos', access: 'Janus', live: 'INSPR',
 }
 export type Profile = 'personal' | 'professional' | 'enterprise'
 export const PROFILES: Record<Profile, { label: string; line: string }> = {

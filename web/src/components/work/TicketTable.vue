@@ -596,7 +596,8 @@ thead th:hover .col-resize::after { opacity: 1; }
 .c-updated .cell, .c-created .cell, .c-estimate .cell { justify-content: flex-end; }
 @media (hover: hover) { .ticket-row:hover td { background: var(--row-hover); } }
 .ticket-row.cursor td, .ticket-row.open td { background: var(--row-selected); }
-.ticket-row.cursor td:first-child, .ticket-row.open td:first-child { box-shadow: inset 3px 0 0 var(--row-accent); }
+/* The ticket shown in the panel also carries a hairline ring in the row's own shape (no edge accents, rule 11). */
+.ticket-row.open { outline: 1px solid var(--chip-teal-line); outline-offset: -1px; }
 tbody.dim { opacity: .55; }
 tbody:last-of-type .ticket-row:last-child td { border-bottom: 0; }
 
@@ -620,8 +621,10 @@ tbody .ticket-row.top:first-child td { border-top: 0; }
 .epic-progress .mono { min-width: 38px; font-size: 11px; color: var(--ink-2); text-align: right; }
 .ticket-row[draggable="true"] { cursor: grab; }
 .ticket-row.dragging td { opacity: .45; }
-.ticket-row.drop-target td, .outline-group.drop-target th { background: var(--row-selected); box-shadow: inset 0 2px 0 var(--teal), inset 0 -2px 0 var(--teal); }
-.ticket-row.drop-target td:first-child { box-shadow: inset 3px 0 0 var(--teal), inset 0 2px 0 var(--teal), inset 0 -2px 0 var(--teal); }
+/* A drop target is outlined all round. */
+.ticket-row.drop-target td, .outline-group.drop-target th { background: var(--row-selected); }
+.ticket-row.drop-target { outline: 2px solid var(--teal); outline-offset: -2px; }
+.outline-group.drop-target th { box-shadow: inset 0 0 0 2px var(--teal); }
 .drop-pill { display: inline-flex; align-items: center; gap: 5px; flex-shrink: 0; height: 22px; margin-left: auto; padding: 0 10px; border-radius: 999px; background: linear-gradient(180deg, #1a8683, #0e6f6c); color: #fff; font-size: 11.5px; font-weight: 600; box-shadow: 0 6px 14px -8px rgba(14, 111, 108, .8); }
 .outline-group th { top: calc(var(--toolbar-h, 0px) + 35px); }
 .more-row td { height: 34px; padding: 0 12px; border-bottom: 1px solid var(--line); }
@@ -703,7 +706,8 @@ td.c-title { position: relative; overflow: hidden; }
 .epic-glyph { color: var(--gold); }
 .group-epic { display: inline-flex; align-items: center; gap: 10px; min-width: 0; height: 26px; padding: 0 8px; margin-left: -4px; border: 0; border-radius: 6px; background: transparent; }
 .group-epic:hover { background: var(--row-hover); }
-.group-epic.cursor, .group-epic.open { background: var(--row-selected); box-shadow: inset 3px 0 0 var(--row-accent); }
+.group-epic.cursor, .group-epic.open { background: var(--row-selected); }
+.group-epic.open { box-shadow: inset 0 0 0 1px var(--chip-teal-line); }
 .group-epic .key { color: var(--ink-2); }
 
 .ghost td { border-bottom-color: var(--line); }
@@ -750,7 +754,7 @@ td.c-title { position: relative; overflow: hidden; }
   .ticket-row td { display: block !important; height: auto; padding: 0; border: 0; background: none !important; box-shadow: none !important; }
   .ticket-row td:first-child { padding-left: 0; }
   .ticket-row .cell { height: auto; }
-  .ticket-row.cursor, .ticket-row.open { background: var(--row-selected); box-shadow: inset 3px 0 0 var(--row-accent); }
+  .ticket-row.cursor, .ticket-row.open { background: var(--row-selected); }
   .tickets colgroup { display: none; }
   .c-key { grid-area: key; } .c-status { grid-area: status; } .c-prio { grid-area: prio; } .c-updated { grid-area: updated; }
   .c-title { grid-area: title; }

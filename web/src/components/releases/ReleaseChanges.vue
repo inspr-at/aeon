@@ -1,0 +1,70 @@
+<!-- SPDX-License-Identifier: AGPL-3.0-only -->
+<script setup lang="ts">
+import { computed } from 'vue'
+import { plainSubject, shortCommit, type ChangeGroup, type ReleaseChange } from '../../lib/releases'
+import AppIcon, { type IconName } from '../AppIcon.vue'
+
+// A release's changes, grouped: features, fixes, and everything else.
+const props = defineProps<{ groups: Record<ChangeGroup, ReleaseChange[]>; repository: string; query?: string }>()
+const GROUPS: { key: ChangeGroup; label: string; icon: IconName }[] = [
+  { key: 'features', label: 'Features', icon: 'sparkle' },
+  { key: 'fixes', label: 'Fixes', icon: 'bug' },
+  { key: 'other', label: 'Other changes', icon: 'gear' },
+]
+const TYPE_LABEL: Record<ReleaseChange['type'], string> = { feat: 'feature', fix: 'fix', test: 'tests', docs: 'docs', refactor: 'refactor', chore: 'chore', release: 'release', other: '' }
+const shown = computed(() => GROUPS.filter(g => props.groups[g.key].length))
+const commitUrl = (sha: string) => props.repository ? `https://github.com/${props.repository}/commit/${sha}` : ''
+// Search terms stay marked in the list of changes.
+function parts(text: string) {
+  const q = props.query?.trim()
+  if (!q) return [{ text, hit: false }]
+  const out: { text: string; hit: boolean }[] = []
+  const lower = text.toLowerCase(), needle = q.toLowerCase()
+  let at = 0
+  for (let i = lower.indexOf(needle); i !== -1; i = lower.indexOf(needle, at)) {
+    if (i > at) out.push({ text: text.slice(at, i), hit: false })
+    out.push({ text: text.slice(i, i + needle.length), hit: true })
+    at = i + needle.length
+  }
+  if (at < text.length) out.push({ text: text.slice(at), hit: false })
+  return out
+}
+</script>
+
+<template>
+  <div class="changes">
+    <section v-for="g in shown" :key="g.key" class="group" :class="g.key" :aria-label="`${g.label}, ${groups[g.key].length}`">
+      <h3 class="group-h"><span class="g-icon"><AppIcon :name="g.icon" :size="13" /></span>{{ g.label }}<span class="count mono">{{ groups[g.key].length }}</span></h3>
+      <ul>
+        <li v-for="c in groups[g.key]" :key="c.commit">
+          <p class="subject"><template v-for="(p, i) in parts(plainSubject(c.subject, c.tickets))" :key="i"><mark v-if="p.hit">{{ p.text }}</mark><template v-else>{{ p.text }}</template></template></p>
+          <p class="meta">
+            <span v-if="g.key === 'other' && TYPE_LABEL[c.type]" class="type">{{ TYPE_LABEL[c.type] }}</span>
+            <span v-for="t in c.tickets" :key="t" class="mono ticket">{{ t }}</span>
+            <a v-if="commitUrl(c.commit)" class="mono commit" :href="commitUrl(c.commit)" target="_blank" rel="noopener" :aria-label="`Commit ${shortCommit(c.commit)} on GitHub`">{{ shortCommit(c.commit) }}</a>
+            <span v-else class="mono commit">{{ shortCommit(c.commit) }}</span>
+          </p>
+        </li>
+      </ul>
+    </section>
+  </div>
+</template>
+
+<style scoped>
+.changes { display: grid; gap: 18px; }
+.group-h { display: flex; align-items: center; gap: 9px; margin-bottom: 6px; font: 650 13px/1.4 var(--font); color: var(--ink); letter-spacing: 0; }
+.g-icon { display: grid; place-items: center; width: 24px; height: 24px; border-radius: 8px; background: var(--surface-2); color: var(--ink-2); }
+.features .g-icon { background: var(--chip-teal-bg); box-shadow: inset 0 0 0 1px var(--chip-teal-line); color: var(--teal-ink); }
+.fixes .g-icon { background: var(--gold-wash); box-shadow: inset 0 0 0 1px rgba(214, 155, 49, .35); color: var(--gold-ink); }
+.count { margin-left: 2px; font-size: 11px; font-weight: 500; color: var(--ink-3); }
+ul { margin: 0; padding: 0 0 0 33px; list-style: none; display: grid; gap: 1px; }
+li { padding: 6px 10px 7px; margin-left: -10px; border-radius: 9px; }
+@media (hover: hover) { li:hover { background: var(--row-hover); } }
+.subject { color: var(--ink); font-size: 13.5px; line-height: 1.45; overflow-wrap: anywhere; }
+.meta { display: flex; flex-wrap: wrap; align-items: center; gap: 4px 10px; margin-top: 1px; font-size: 11.5px; color: var(--ink-3); }
+.type { font-size: 11px; text-transform: lowercase; }
+.ticket { font-size: 11px; color: var(--teal-ink); }
+.commit { font-size: 11px; color: var(--ink-3); border-radius: 4px; }
+@media (hover: hover) { a.commit:hover { color: var(--teal-ink); text-decoration: underline; text-underline-offset: 2px; } }
+@media (max-width: 760px) { ul { padding-left: 0; } li { margin-left: 0; padding: 6px 4px 7px; } }
+</style>

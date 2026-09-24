@@ -3,32 +3,41 @@
 package httpapi
 
 import (
+	"html"
 	"io/fs"
 	"net/http"
 	"path"
 	"strings"
+
+	"github.com/inspr-at/aeon/internal/brand"
 )
 
-const placeholderHTML = `<!DOCTYPE html>
+// placeholderHTML is served when the binary has no web build; it carries the
+// deployment's wordmark like every other surface.
+func placeholderHTML(b brand.Brand) []byte {
+	name := html.EscapeString(b.Wordmark)
+	return []byte(`<!DOCTYPE html>
 <html lang="en">
 <head>
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width, initial-scale=1">
-<title>PAIMOS AEON</title>
+<title>` + name + `</title>
 </head>
 <body>
-<p>PAIMOS AEON</p>
+<p>` + name + `</p>
 </body>
 </html>
-`
+`)
+}
 
-func spaHandler(fsys fs.FS) http.Handler {
+func spaHandler(fsys fs.FS, b brand.Brand) http.Handler {
 	if fsys == nil {
+		page := placeholderHTML(b)
 		return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 			if !allowRead(w, r) {
 				return
 			}
-			writeHTML(w, r, []byte(placeholderHTML))
+			writeHTML(w, r, page)
 		})
 	}
 	files := http.FileServer(http.FS(fsys))

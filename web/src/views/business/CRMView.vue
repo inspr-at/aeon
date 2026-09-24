@@ -1,6 +1,7 @@
 <!-- SPDX-License-Identifier: AGPL-3.0-only -->
 <!-- Parked (AEON-70, 2026-09-24): quotes and organisations will be ported from Markus's current classic Paimos quote builder; this file is not routed or linked. -->
 <script setup lang="ts">
+import { setPageTitle } from '../../lib/brand'
 import { computed, nextTick, onBeforeUnmount, onMounted, ref, watch } from 'vue'
 import { useRoute, useRouter } from 'vue-router'
 import type { ListItem } from '../../lib/api'
@@ -57,7 +58,7 @@ const position = computed(() => {
   const index = selected.value ? rows.value.findIndex(r => r.id === selected.value!.id) : -1
   return index === -1 ? null : { index, count: rows.value.length }
 })
-watch(selected, org => { if (org) cursor.value = org.id; document.title = org ? `${org.title} · PAIMOS AEON` : 'Organisations · PAIMOS AEON' })
+watch(selected, org => { if (org) cursor.value = org.id; setPageTitle(org ? org.title : 'Organisations') })
 
 // ---------- Panel ----------
 let openedFromList = false
@@ -259,7 +260,7 @@ tbody .org-row:last-child td { border-bottom: 0; }
 .c-num .cell { font-size: 13px; }
 @media (hover: hover) { .org-row:hover td { background: var(--row-hover); } }
 .org-row.cursor td, .org-row.open td { background: var(--row-selected); }
-.org-row.cursor td:first-child, .org-row.open td:first-child { box-shadow: inset 3px 0 0 var(--row-accent); }
+.org-row.open { outline: 1px solid var(--chip-teal-line); outline-offset: -1px; }
 .org-mark { display: grid; place-items: center; flex-shrink: 0; width: 30px; height: 30px; border-radius: 9px; background: var(--code-bg); color: var(--ink-2); }
 .open .org-mark, .cursor .org-mark { background: var(--chip-teal-bg); color: var(--teal-ink); }
 .name-text { display: grid; min-width: 0; }

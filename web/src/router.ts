@@ -1,5 +1,6 @@
 // SPDX-License-Identifier: AGPL-3.0-only
 import { createRouter, createWebHistory } from 'vue-router'
+import { setPageTitle } from './lib/brand'
 import { useProjects } from './stores/projects'
 import { useSession } from './stores/session'
 import ProjectsView from './views/ProjectsView.vue'
@@ -41,6 +42,8 @@ export const router = createRouter({
     { path: '/runs/:runId?', redirect: '/agents' },
     { path: '/approvals', redirect: '/agents' },
     { path: '/pacing', redirect: '/agents' },
+    // The release history is a sheet over the page (App.vue); its own links open it over Projects.
+    { path: '/releases/:version?', component: ProjectsView, meta: { title: 'Releases' } },
     { path: '/signin', component: SignInView, meta: { title: 'Sign in', bare: true } },
     { path: '/:pathMatch(.*)*', component: NotFoundView, meta: { title: 'Page not found' } },
   ],
@@ -55,4 +58,5 @@ router.beforeEach(async (to) => {
   if (!session.identity && to.path !== '/signin') return wasSignedIn ? { path: '/signin', query: { error: 'expired' } } : '/signin'
   if (session.identity && to.path === '/signin') return '/'
 })
-router.afterEach((to) => { document.title = `${to.meta.title} · PAIMOS AEON` })
+// A new page names the tab; a query change (filters, the release sheet) keeps the page's own title.
+router.afterEach((to, from) => { if (to.path !== from.path || !from.matched.length) setPageTitle(String(to.meta.title ?? '')) })
