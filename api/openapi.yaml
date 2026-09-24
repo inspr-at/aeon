@@ -878,6 +878,111 @@ paths:
         '201': {description: Run, content: {application/json: {schema: {$ref: '#/components/schemas/AgentRun'}}}}
         '403': {$ref: '#/components/responses/Error'}
         '409': {$ref: '#/components/responses/Error'}
+  /harness-sessions:
+    get:
+      operationId: listHarnessSessions
+      summary: Tenant-wide harness sessions, newest first
+      description: Requires a person session or harness.read agent key. Cursor binds tenant, principal and filters. State is stopped when stopped_at is set, otherwise phase. Node summaries retain historical bindings.
+      parameters:
+        - {name: state, in: query, schema: {type: string, enum: [starting, working, yielded, stopping, stopped]}}
+        - {name: harness, in: query, schema: {type: string, enum: [codex, claude, pi, cursor, grok]}}
+        - {name: agent, in: query, schema: {type: string, format: uuid}}
+        - {name: project, in: query, schema: {type: string, format: uuid}}
+        - {name: ticket, in: query, schema: {type: string, format: uuid}}
+        - {name: cursor, in: query, schema: {type: string}}
+        - {name: limit, in: query, schema: {type: integer, minimum: 1, maximum: 200, default: 50}}
+      responses:
+        '200':
+          description: Session page
+          content:
+            application/json:
+              schema:
+                type: object
+                required: [items, next_cursor]
+                properties:
+                  items: {type: array, items: {$ref: '#/components/schemas/HarnessSessionSummary'}}
+                  next_cursor: {type: [string, 'null']}
+        '400': {description: Invalid filter or cursor}
+        '401': {description: Authentication required}
+        '403': {description: Scope required}
+  /runs:
+    get:
+      operationId: listAgentRuns
+      description: Newest first by created_at and ID. Filters intersect; agents can read only their own runs with run.read. Cursor binds tenant, principal and filters. A session selects its explicitly bound run.
+      parameters:
+        - {name: session, in: query, schema: {type: string, format: uuid}}
+        - {name: agent, in: query, schema: {type: string, format: uuid}}
+        - {name: work_order, in: query, schema: {type: string, format: uuid}}
+        - {name: cursor, in: query, schema: {type: string}}
+        - {name: limit, in: query, schema: {type: integer, minimum: 1, maximum: 200, default: 50}}
+      responses:
+        '200':
+          description: Run page
+          content:
+            application/json:
+              schema:
+                type: object
+                required: [items, next_cursor]
+                properties:
+                  items: {type: array, items: {$ref: '#/components/schemas/AgentRun'}}
+                  next_cursor: {type: [string, 'null']}
+        '400': {description: Invalid filter or cursor}
+        '401': {description: Authentication required}
+        '403': {description: Scope required or another agent requested}
+  /projects/{projectId}/messages:
+    parameters:
+      - {name: projectId, in: path, required: true, schema: {type: string, format: uuid}}
+    get:
+      operationId: inspectProjectMessages
+      description: Person admin or super_admin inspection including held messages. Ascending by sent event ID by default. In newest_first mode after is an exclusive upper bound; zero starts at the newest. Thread selects the root and all descendants of the supplied message's reply_to chain within this project. Pending selects unresolved held action requests. Resolution never releases or delivers a held message.
+      parameters:
+        - {name: limit, in: query, schema: {type: integer, minimum: 1, maximum: 200, default: 10}}
+        - {name: after, in: query, schema: {type: integer, minimum: 0, default: 0}}
+        - {name: newest_first, in: query, schema: {type: boolean, default: false}}
+        - {name: address, in: query, schema: {type: string}, description: Recipient address (to is a compatibility alias)}
+        - {name: to, in: query, schema: {type: string}}
+        - {name: thread, in: query, schema: {type: string, format: uuid}}
+        - {name: pending, in: query, schema: {type: boolean, default: false}}
+      responses:
+        '200':
+          description: Project message page
+          content:
+            application/json:
+              schema:
+                type: object
+                required: [items, next_after, preamble]
+                properties:
+                  items: {type: array, items: {$ref: '#/components/schemas/ProjectMessage'}}
+                  next_after: {type: integer, format: int64}
+                  preamble: {type: string}
+        '400': {description: Invalid filter}
+        '403': {description: Human administrator required}
+        '404': {description: Project not found}
+  /projects/{projectId}/messages/{messageId}/resolution:
+    parameters:
+      - {name: projectId, in: path, required: true, schema: {type: string, format: uuid}}
+      - {name: messageId, in: path, required: true, schema: {type: string, format: uuid}}
+    post:
+      operationId: resolveHeldMessage
+      description: Human admin or super_admin session only; Authorization headers and agent attribution are forbidden. Immutable event, serialized per tenant. Exact decision/note retries return the first result; divergent retries conflict. Note is retained only as a digest in the audit event. Message and delivery remain held; pending inspection omits the resolved item.
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              additionalProperties: false
+              required: [decision]
+              properties:
+                decision: {type: string, enum: [resolved, dismissed]}
+                note: {type: string, maxLength: 8000, default: ''}
+      responses:
+        '200': {description: Resolution, content: {application/json: {schema: {$ref: '#/components/schemas/HeldMessageResolution'}}}}
+        '400': {description: Invalid request}
+        '401': {description: Authentication required}
+        '403': {description: Human administrator session required}
+        '404': {description: Project or message not found}
+        '409': {description: Message is not held or resolution differs}
   /runs/queued:
     get:
       operationId: listQueuedRuns
@@ -2048,6 +2153,64 @@ components:
         daemon_id: {type: string, minLength: 1, maxLength: 128}
         daemon_generation: {type: string, minLength: 1, maxLength: 128}
         reservation_ids: {type: array, minItems: 1, items: {type: string, format: uuid}}
+    NodeSummary:
+      type: object
+      required: [id, key, title]
+      properties:
+        id: {type: string, format: uuid}
+        key: {type: string}
+        title: {type: string}
+    HarnessSession:
+      type: object
+      required: [id, project_id, agent_principal_id, harness, host, management_mode, role, work_shape, advertised_capabilities, phase, activity, activity_sequence, revision, created_at]
+      properties:
+        id: {type: string, format: uuid}
+        project_id: {type: string, format: uuid}
+        agent_principal_id: {type: string, format: uuid}
+        run_id: {type: [string, 'null'], format: uuid}
+        ticket_node_id: {type: [string, 'null'], format: uuid}
+        work_order_id: {type: [string, 'null'], format: uuid}
+        parent_harness_session_id: {type: [string, 'null'], format: uuid}
+        harness: {type: string, enum: [codex, claude, pi, cursor, grok]}
+        host: {type: string}
+        management_mode: {type: string, enum: [managed, unmanaged]}
+        role: {type: string, enum: [worker, coordinator]}
+        work_shape: {type: string, enum: [unknown, ship, scout]}
+        advertised_capabilities: {type: array, items: {type: string}}
+        phase: {type: string, enum: [starting, working, yielded, stopping, stopped]}
+        activity: {type: string, enum: [unknown, busy, idle]}
+        activity_sequence: {type: integer, format: int64}
+        revision: {type: integer, format: int64}
+        heartbeat_at: {type: [string, 'null'], format: date-time}
+        stopped_at: {type: [string, 'null'], format: date-time}
+        stop_reason: {type: [string, 'null']}
+        created_at: {type: string, format: date-time}
+    HarnessSessionSummary:
+      allOf:
+        - {$ref: '#/components/schemas/HarnessSession'}
+        - type: object
+          required: [project, ticket]
+          properties:
+            project: {$ref: '#/components/schemas/NodeSummary'}
+            ticket:
+              oneOf:
+                - {$ref: '#/components/schemas/NodeSummary'}
+                - {type: 'null'}
+    ProjectMessage:
+      allOf:
+        - {$ref: './openapi-messaging.yaml#/components/schemas/Message'}
+        - type: object
+          required: [created_at, human_resolution_outcome]
+          properties:
+            created_at: {type: string, format: date-time}
+            human_resolution_outcome: {type: [string, 'null'], enum: [resolved, dismissed, null]}
+    HeldMessageResolution:
+      type: object
+      required: [message_id, decision, created_at]
+      properties:
+        message_id: {type: string, format: uuid}
+        decision: {type: string, enum: [resolved, dismissed]}
+        created_at: {type: string, format: date-time}
     AgentRun:
       type: object
       required: [id, work_order_id, agent_principal_id, status, model_evidence, input_tokens, output_tokens, cost_micros, created_at]
@@ -2060,6 +2223,8 @@ components:
         status: {type: string, enum: [queued, starting, running, waiting, completed, failed, cancelled, ownership_lost]}
         requested_model: {type: [string, 'null']}
         effective_model: {type: [string, 'null']}
+        outcome: {type: [string, 'null'], enum: [completed, failed, cancelled, ownership_lost, null]}
+        duration_ms: {type: [integer, 'null'], format: int64, description: Whole elapsed milliseconds for terminal runs; null until both timestamps exist}
         model_evidence: {type: string, enum: [unverified, vendor_reported]}
         input_tokens: {type: integer, format: int64}
         output_tokens: {type: integer, format: int64}
@@ -2102,10 +2267,11 @@ components:
       allOf:
         - {$ref: '#/components/schemas/ApprovalProposal'}
         - type: object
-          required: [id, agent_principal_id, proposed_at, decision]
+          required: [id, agent_principal_id, proposed_at, decision, risk]
           properties:
             id: {type: string, format: uuid}
             agent_principal_id: {type: string, format: uuid}
+            risk: {type: string, enum: [low, medium, high], readOnly: true, description: "Tenant resource or control/deploy/delete scope segments are high; read-only scopes are low; others medium"}
             proposed_at: {type: string, format: date-time}
             decision: {type: [string, 'null'], enum: [approved, denied, null]}
             decided_by_principal_id: {type: [string, 'null'], format: uuid}

@@ -299,6 +299,7 @@ func lockRequest(ctx context.Context, tx pgx.Tx, id string) (Approval, bool, err
 		&resourceID, &runID, &a.Rationale, &a.ExpiresAt, &a.ProposedAt, &expired)
 	a.ResourceID = resourceID
 	a.RunID = runID
+	a.Risk = Risk(a.Scope, a.ResourceKind)
 	return a, expired, err
 }
 
@@ -315,6 +316,7 @@ func scanApproval(row pgx.Row) (Approval, error) {
 		&decision, &decidedBy)
 	a.ResourceID = resourceID
 	a.RunID = runID
+	a.Risk = Risk(a.Scope, a.ResourceKind)
 	a.Decision = decision
 	a.DecidedByPrincipalID = decidedBy
 	return a, err

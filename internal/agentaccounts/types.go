@@ -108,9 +108,10 @@ func requireAgent(p tenant.Principal) error {
 	return nil
 }
 
+// hasRole reports whether p holds role; super_admin also satisfies admin.
 func hasRole(p tenant.Principal, role string) bool {
 	for _, item := range p.Roles {
-		if item == role {
+		if item == role || (role == "admin" && item == "super_admin") {
 			return true
 		}
 	}
