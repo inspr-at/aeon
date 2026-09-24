@@ -1,7 +1,7 @@
 <!-- SPDX-License-Identifier: AGPL-3.0-only -->
 <script setup lang="ts">
 import { computed, nextTick, ref, watch } from 'vue'
-import { collectTextNodes, glyphTopAtLinear, lineBoundaryTarget, offsetInRoot, pointInTextNodes, type LineEdge } from '../../../lib/quotes/caret'
+import { caretTopAtLinear, collectTextNodes, lineBoundaryTarget, offsetInRoot, pointInTextNodes, type LineEdge } from '../../../lib/quotes/caret'
 import type { QuoteEditor } from '../../../lib/quotes/editor'
 import { boundary, deleteBackward, deleteForward, markRuns, markerLabels, nodesFor, reconcileInput, replaceText } from '../../../lib/quotes/prose'
 import type { TextNode, TextPoint, TextSelection } from '../../../lib/quotes/types'
@@ -102,7 +102,7 @@ function keydown(event: KeyboardEvent) {
   if (!selection || !el || !live) return
   const texts = collectTextNodes(el), value = el.textContent ?? ''
   const remembered = visualEdge?.nodeId === selection.focus.nodeId ? visualEdge.edge : null
-  const result = lineBoundaryTarget(event.key, selection.focus.offset, value, remembered, i => glyphTopAtLinear(texts, i))
+  const result = lineBoundaryTarget(event.key, selection.focus.offset, value, remembered, i => caretTopAtLinear(texts, i))
   const target = pointInTextNodes(texts, result.target)
   if (!target) return
   event.preventDefault()

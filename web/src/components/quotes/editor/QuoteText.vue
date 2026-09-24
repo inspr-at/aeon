@@ -1,7 +1,7 @@
 <!-- SPDX-License-Identifier: AGPL-3.0-only -->
 <script setup lang="ts">
 import { nextTick, ref, watch } from 'vue'
-import { collectTextNodes, glyphTopAtLinear, lineBoundaryTarget, offsetInRoot, pointInTextNodes, type LineEdge } from '../../../lib/quotes/caret'
+import { caretTopAtLinear, collectTextNodes, lineBoundaryTarget, offsetInRoot, pointInTextNodes, type LineEdge } from '../../../lib/quotes/caret'
 const props = withDefaults(defineProps<{ modelValue: string; editable?: boolean; label: string; tag?: string; multiline?: boolean }>(), { editable: false, tag: 'span', multiline: true })
 const emit = defineEmits<{ 'update:modelValue': [value: string]; focus: [] }>()
 const root = ref<HTMLElement>()
@@ -30,7 +30,7 @@ function keydown(event: KeyboardEvent) {
   const texts = collectTextNodes(el)
   const value = el.textContent ?? ''
   const offset = offsetInRoot(el, selection.focusNode, selection.focusOffset)
-  const result = lineBoundaryTarget(event.key, offset, value, edge, i => glyphTopAtLinear(texts, i))
+  const result = lineBoundaryTarget(event.key, offset, value, edge, i => caretTopAtLinear(texts, i))
   const target = pointInTextNodes(texts, result.target)
   if (!target) return
   event.preventDefault()

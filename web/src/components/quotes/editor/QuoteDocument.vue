@@ -1,6 +1,6 @@
 <!-- SPDX-License-Identifier: AGPL-3.0-only -->
 <script setup lang="ts">
-import { computed, nextTick, onBeforeUnmount, onMounted, ref, shallowRef, watch } from 'vue'
+import { computed, nextTick, onBeforeUnmount, onMounted, ref, shallowRef, toRaw, watch } from 'vue'
 import QuoteAcceptance from './QuoteAcceptance.vue'
 import QuoteCover from './QuoteCover.vue'
 import QuotePositions from './QuotePositions.vue'
@@ -15,7 +15,7 @@ const editor = new QuoteEditor(props.document)
 const state = shallowRef(editor.document)
 let lastEmitted: QuoteDocumentData | null = null
 editor.onChange = document => { state.value = document; lastEmitted = document; emit('update:document', document); emit('change', document); schedule() }
-watch(() => props.document, document => { if (document !== lastEmitted) { editor.replaceDocument(document); lastEmitted = editor.document; schedule() } })
+watch(() => props.document, document => { if (toRaw(document) !== lastEmitted) { editor.replaceDocument(document); lastEmitted = editor.document; schedule() } })
 const pages = ref<PagePlan[]>([{ kind: 'cover', sectionIds: [], positionIds: [], acceptance: false }, { kind: 'positions', sectionIds: [], positionIds: [], acceptance: true }])
 const renderState = ref<PaginationResult>({ ready: false, overflow: null, pages: pages.value })
 const measureRoot = ref<HTMLElement>()
