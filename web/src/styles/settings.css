@@ -1,0 +1,24 @@
+/* SPDX-License-Identifier: AGPL-3.0-only */
+/* Shared by the settings sections: read-only facts, honest notes, loading rows. */
+.set-facts { display: grid; margin: 0; }
+.set-facts > div { display: grid; grid-template-columns: 140px 1fr; gap: 12px; align-items: center; min-height: 36px; border-top: 1px solid var(--line); }
+.set-facts > div:first-child { border-top: 0; }
+.set-facts dt { font: 500 10.5px/1.4 var(--mono); letter-spacing: .12em; text-transform: uppercase; color: var(--ink-3); font-variant-ligatures: none; }
+.set-facts dd { margin: 0; font-size: 13.5px; color: var(--ink); overflow-wrap: anywhere; }
+/* Icon, text, and an optional action; the text wraps beside the icon, never under it. */
+.set-note { display: grid; grid-template-columns: auto minmax(0, 1fr) auto; align-items: start; gap: 8px; margin-top: 12px; padding: 10px 12px; border-radius: 10px; background: var(--surface-2); font-size: 13px; line-height: 1.5; color: var(--ink-2); }
+.set-note > svg { margin-top: 2.5px; }
+.set-note:first-child { margin-top: 0; }
+.set-note svg { color: var(--ink-3); }
+.set-note.error { background: var(--danger-bg); color: var(--ink); }
+.set-note.error svg { color: var(--danger); }
+.set-note .btn { align-self: center; }
+.set-skeleton { display: grid; gap: 10px; }
+.set-skeleton .skeleton { height: 30px; border-radius: 8px; }
+@media (max-width: 600px) {
+  .set-facts > div { grid-template-columns: minmax(0, 1fr); gap: 2px; padding: 8px 0; }
+}
+/* A deep link lands on a card: it is ringed for a moment. */
+.settings-page .settings-card, .settings-page .setup { transition: box-shadow .4s ease; }
+.settings-page .arrived { box-shadow: var(--shadow), 0 0 0 2px var(--aqua); }
+@media (prefers-reduced-motion: reduce) { .settings-page .settings-card, .settings-page .setup { transition: none; } }

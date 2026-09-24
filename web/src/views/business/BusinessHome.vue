@@ -13,6 +13,7 @@ import { useProjects } from '../../stores/projects'
 import { useSession } from '../../stores/session'
 import AppIcon from '../../components/business/BizIcon.vue'
 import BusinessPage from '../../components/business/BusinessPage.vue'
+import { settingsLink } from '../../lib/settings'
 import SetupCard from '../../components/business/SetupCard.vue'
 
 // A calm desk for the business side: your week of hours and where it went, the
@@ -110,6 +111,7 @@ const offered = computed(() => business.open.costs || business.open.hours)
     </template>
     <template v-if="business.admin && offered" #actions>
       <button type="button" class="btn sm" :aria-pressed="managing" @click="managing = !managing"><AppIcon name="sliders" :size="14" />Manage parts</button>
+      <RouterLink class="btn sm ghost" :to="settingsLink('business')">Business settings<AppIcon name="arrow" :size="13" /></RouterLink>
     </template>
 
     <div v-if="!offered" class="intro">

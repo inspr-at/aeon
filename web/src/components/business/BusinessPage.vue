@@ -12,8 +12,12 @@ const props = defineProps<{ title: string; area?: AreaId; panelOpen?: boolean; w
 const business = useBusiness()
 const session = useSession()
 const route = useRoute()
+// Overview · Customers · Quotes · Hours · Rates. Customers and Quotes always show:
+// until the CRM port and the quote editor land they say what arrives.
 const tabs: { to: string; label: string; icon: IconName; area?: AreaId }[] = [
   { to: '/business', label: 'Overview', icon: 'briefcase' },
+  { to: '/business/customers', label: 'Customers', icon: 'building' },
+  { to: '/business/quotes', label: 'Quotes', icon: 'document' },
   { to: '/business/hours', label: 'Hours', icon: 'clock', area: 'hours' },
   { to: '/business/rates', label: 'Rates', icon: 'tag', area: 'costs' },
 ]
@@ -94,5 +98,11 @@ onMounted(() => { void business.loadPlugins() })
   .head-actions { flex-wrap: wrap; }
   .biz-tabs { width: auto; margin-bottom: 14px; }
   .biz-tab { height: 36px; }
+}
+/* Phones: every tab in one row, icon over label; nothing scrolls sideways or is cut. */
+@media (max-width: 600px) {
+  .biz-tabs { display: grid; grid-auto-flow: column; grid-auto-columns: minmax(0, 1fr); gap: 2px; width: auto; overflow: visible; border-radius: 16px; }
+  .biz-tab { flex-direction: column; justify-content: center; gap: 3px; height: 50px; padding: 0 2px; border-radius: 13px; font-size: 11px; }
+  .biz-tab span { max-width: 100%; }
 }
 </style>
