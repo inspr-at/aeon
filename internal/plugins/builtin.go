@@ -16,12 +16,6 @@ import (
 // first-party plugins. Extra plugins live in packages that import this one, so
 // cmd/aeon passes their constructors in.
 func Builtin(extra ...func() (Plugin, error)) (*Registry, error) {
-	return BuiltinWithRegistration(nil, extra...)
-}
-
-// BuiltinWithRegistration runs after the first-party manifests are registered
-// and before sealing. It lets a dependent job provider bind the same registry.
-func BuiltinWithRegistration(register func(*Registry) error, extra ...func() (Plugin, error)) (*Registry, error) {
 	reg := NewRegistry()
 	for _, build := range append([]func() (Plugin, error){pharosPlugin, janusPlugin}, extra...) {
 		plug, err := build()
@@ -29,11 +23,6 @@ func BuiltinWithRegistration(register func(*Registry) error, extra ...func() (Pl
 			return nil, err
 		}
 		if err := reg.Register(plug); err != nil {
-			return nil, err
-		}
-	}
-	if register != nil {
-		if err := register(reg); err != nil {
 			return nil, err
 		}
 	}

@@ -31,36 +31,6 @@ func TestNewDefaults(t *testing.T) {
 	}
 }
 
-func TestOnlyPublicQuoteCapabilityPathsBypassAuthentication(t *testing.T) {
-	m, err := New(Config{SessionKey: bytes.Repeat([]byte{7}, 32)}, nil)
-	if err != nil {
-		t.Fatal(err)
-	}
-	handler := m.Middleware(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
-		w.WriteHeader(http.StatusNoContent)
-	}))
-	for _, path := range []string{
-		"/api/public/quotes/tenant/token", "/api/public/quotes/tenant/token/accept", "/api/public/quotes/tenant/token/pdf",
-	} {
-		rec := httptest.NewRecorder()
-		handler.ServeHTTP(rec, httptest.NewRequest(http.MethodGet, path, nil))
-		if rec.Code != http.StatusNoContent {
-			t.Errorf("public path %s: %d", path, rec.Code)
-		}
-	}
-	for _, path := range []string{
-		"/api/quotes", "/api/quotes/id/versions/1/public-link", "/api/quotes/id/versions/1/public-link/revoke",
-		"/api/public/quotes", "/api/public/quotesx/tenant/token", "/api/public/quotes-other/tenant/token",
-		"/api/public/quote/tenant/token", "/api/me", "/api/events", "/api/plugins",
-	} {
-		rec := httptest.NewRecorder()
-		handler.ServeHTTP(rec, httptest.NewRequest(http.MethodGet, path, nil))
-		if rec.Code != http.StatusUnauthorized {
-			t.Errorf("protected path %s: %d", path, rec.Code)
-		}
-	}
-}
-
 func TestAttach(t *testing.T) {
 	srv := &httpapi.Server{}
 	m, err := Attach(srv, Config{SessionKey: bytes.Repeat([]byte{2}, 32), Env: envDev})

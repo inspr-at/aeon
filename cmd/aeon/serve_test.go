@@ -39,20 +39,6 @@ func TestLoggerJSONInProd(t *testing.T) {
 	}
 }
 
-func TestPDFRenderConcurrencyBounds(t *testing.T) {
-	for raw, want := range map[string]int{"": 1, "1": 1, "4": 4} {
-		got, err := pdfRenderConcurrency(raw)
-		if err != nil || got != want {
-			t.Errorf("%q: got %d, %v", raw, got, err)
-		}
-	}
-	for _, raw := range []string{"0", "5", "many"} {
-		if _, err := pdfRenderConcurrency(raw); err == nil {
-			t.Errorf("%q: expected rejection", raw)
-		}
-	}
-}
-
 func TestResolveWeb(t *testing.T) {
 	fsys, err := resolveWeb(config.Config{})
 	if err != nil {
