@@ -91,7 +91,7 @@ defineExpose({ isDirty })
             </div>
           </li>
           <li v-else class="entry comment">
-            <PersonAvatar :name="entry.author.name" :size="26" class="node avatar" />
+            <PersonAvatar :id="entry.author.id" :name="entry.author.name" :size="26" class="node avatar" />
             <div class="comment-card">
               <header class="comment-head">
                 <strong>{{ entry.author.name }}</strong>

@@ -8,10 +8,11 @@ import { useSession } from '../stores/session'
 import { useProjects } from '../stores/projects'
 import { useAgents } from '../stores/agents'
 import { useBusiness } from '../stores/business'
+import { useProfile } from '../stores/profile'
+import Avatar from './Avatar.vue'
 import { dark, setTheme, themeChoice, toggleTheme, type ThemeChoice } from '../lib/theme'
 import { canWrite } from '../lib/activity'
 import { command, consume, run } from '../lib/commands'
-import { initials } from '../lib/work'
 import { fatal } from '../lib/fatal'
 import { accountEmail, accountName } from '../lib/api'
 import { placeOf, sequence, visiblePlaces, type PlaceId } from '../lib/places'
@@ -25,6 +26,7 @@ const session = useSession()
 const projects = useProjects()
 const agents = useAgents()
 const business = useBusiness()
+const profile = useProfile()
 const route = useRoute()
 const router = useRouter()
 const open = ref(false)
@@ -130,7 +132,8 @@ function placeKeys(event: KeyboardEvent) {
 // The Agents badge: permission requests and held action requests, checked each minute.
 let needsPoll: ReturnType<typeof setInterval> | undefined
 watch(() => session.identity?.principal.id, id => {
-  if (!id) { business.reset(); return }
+  if (!id) { business.reset(); profile.reset(); return }
+  void profile.load(true)
   void agents.loadNeeds(true)
   void business.loadPlugins(true)
 }, { immediate: true })
@@ -195,11 +198,11 @@ onBeforeUnmount(() => { document.removeEventListener('pointerdown', outside); wi
     </button>
     <div v-if="session.identity" ref="account" class="account" @keydown.esc.stop.prevent="closeMenu(true)" @focusout="focusOut">
       <button ref="trigger" class="avatar-btn header-btn" type="button" :aria-expanded="open" aria-controls="account-panel" :aria-label="`Account for ${name}`" @click="toggleMenu">
-        {{ initials(name) }}
+        <Avatar :id="session.identity?.principal.id" :name="name" :size="34" />
       </button>
       <div v-if="open" id="account-panel" ref="panel" class="account-panel pop" role="dialog" aria-label="Account" @keydown="menuKeys">
         <div class="who">
-          <span class="who-avatar" aria-hidden="true">{{ initials(name) }}</span>
+          <Avatar :id="session.identity.principal.id" :name="name" :size="40" class="who-avatar" />
           <div class="who-text">
             <p class="account-name">{{ name }}</p>
             <p v-if="email" class="account-email">{{ email }}</p>
@@ -277,17 +280,14 @@ onBeforeUnmount(() => { document.removeEventListener('pointerdown', outside); wi
 .pill-text { flex: 1; text-align: left; }
 .pill-keys { display: inline-flex; gap: 3px; }
 .account { position: relative; }
-.avatar-btn {
-  display: grid; place-items: center; width: 34px; height: 34px; padding: 0; border: 0; border-radius: 50%;
-  background: var(--avatar-bg); color: var(--teal-ink); box-shadow: 0 0 0 1px var(--glass-rim), 0 2px 6px rgba(32, 60, 61, .12);
-  font: 700 12px/1 var(--mono); letter-spacing: .02em; font-variant-ligatures: none;
-}
-.avatar-btn:hover, .avatar-btn[aria-expanded="true"] { box-shadow: 0 0 0 1px var(--teal), 0 2px 8px rgba(32, 60, 61, .18); }
+.avatar-btn { display: grid; place-items: center; width: 34px; height: 34px; padding: 0; border: 0; border-radius: 50%; background: transparent; }
+.avatar-btn :deep(.avatar) { box-shadow: 0 0 0 1px var(--glass-rim), 0 2px 6px rgba(32, 60, 61, .12); transition: box-shadow .15s ease; }
+.avatar-btn:hover :deep(.avatar), .avatar-btn[aria-expanded="true"] :deep(.avatar) { box-shadow: 0 0 0 1.5px var(--teal), 0 2px 8px rgba(32, 60, 61, .18); }
 .avatar-btn:active { filter: brightness(.96); }
 .avatar-btn:focus-visible { box-shadow: var(--focus-ring); }
 .account-panel { position: absolute; right: 0; top: 44px; width: min(300px, calc(100vw - 24px)); padding: 8px; }
 .who { display: flex; align-items: center; gap: 12px; padding: 10px 10px 12px; margin-bottom: 4px; border-bottom: 1px solid var(--line); }
-.who-avatar { display: grid; place-items: center; flex-shrink: 0; width: 40px; height: 40px; border-radius: 50%; background: var(--avatar-bg); color: var(--teal-ink); box-shadow: 0 0 0 1px var(--glass-rim); font: 700 13px/1 var(--mono); font-variant-ligatures: none; }
+.who-avatar { flex-shrink: 0; }
 .who-text { min-width: 0; }
 .account-name { color: var(--ink); font-weight: 650; font-size: 14px; overflow-wrap: anywhere; }
 .account-email { font-size: 12.5px; color: var(--ink-2); overflow-wrap: anywhere; }

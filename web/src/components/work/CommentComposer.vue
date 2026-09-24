@@ -5,7 +5,7 @@ import AppIcon from '../AppIcon.vue'
 import PersonAvatar from './PersonAvatar.vue'
 
 // Write a comment: Markdown, Cmd/Ctrl+Enter posts, c focuses it from the panel.
-const props = defineProps<{ me: string; post: (body: string) => Promise<boolean>; disabled?: boolean }>()
+const props = defineProps<{ me: string; meId?: string | null; post: (body: string) => Promise<boolean>; disabled?: boolean }>()
 const draft = ref('')
 const busy = ref(false)
 const focused = ref(false)
@@ -30,7 +30,7 @@ defineExpose({ focus, isDirty: () => !!draft.value.trim() })
 
 <template>
   <div class="composer" :class="{ open }">
-    <PersonAvatar :name="me" :size="26" class="me" />
+    <PersonAvatar :id="meId" :name="me" :size="26" class="me" />
     <div class="composer-box">
       <textarea
         ref="area" v-model="draft" class="composer-area" rows="1" :placeholder="disabled ? 'You can read this ticket but not comment' : 'Add a comment… Markdown works'"

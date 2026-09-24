@@ -52,8 +52,9 @@ watch(() => [current.value, route.hash] as const, async ([, hash]) => {
       <h1 id="settings-title">Settings</h1>
       <p class="summary">{{ admin ? 'Your own preferences, and the workspace’s for admins.' : 'Your own preferences.' }}</p>
     </header>
+    <!-- One grid for everyone: with only Personal to show, the nav still holds its column. -->
     <div class="layout" :class="{ single: sections.length < 2 }">
-      <nav v-if="sections.length > 1" class="section-nav" aria-label="Settings sections">
+      <nav class="section-nav" aria-label="Settings sections">
         <RouterLink v-for="section in sections" :key="section.id" :to="`/settings/${section.id}`" class="section-link" :aria-current="section.id === current ? 'page' : undefined">
           <span class="link-icon" aria-hidden="true"><BizIcon :name="ICON[section.id]" :size="15" /></span>
           <span class="link-text"><span class="link-label">{{ section.label }}</span><span class="link-summary">{{ section.summary }}</span></span>
@@ -79,7 +80,6 @@ watch(() => [current.value, route.hash] as const, async ([, hash]) => {
 .page-head h1 { margin-top: 6px; }
 .summary { margin-top: 6px; font-size: 13.5px; color: var(--ink-2); }
 .layout { display: grid; grid-template-columns: 240px minmax(0, 1fr); gap: 28px; align-items: start; }
-.layout.single { grid-template-columns: minmax(0, 760px); }
 .section-nav { position: sticky; top: 16px; display: grid; gap: 4px; }
 .section-link { display: grid; grid-template-columns: 30px minmax(0, 1fr) auto; align-items: center; gap: 10px; min-height: 52px; padding: 8px 10px; border-radius: 12px; color: var(--ink); text-decoration: none; }
 @media (hover: hover) { .section-link:hover { background: var(--row-hover); } }
@@ -104,6 +104,8 @@ watch(() => [current.value, route.hash] as const, async ([, hash]) => {
   .section-nav { position: static; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 6px; }
   .section-link { grid-template-columns: 28px minmax(0, 1fr) auto; min-height: 48px; padding: 6px 10px; background: var(--glass); box-shadow: 0 0 0 1px var(--line); }
   .link-summary { display: none; }
+  /* Narrow, a single section needs no nav above it. */
+  .single .section-nav { display: none; }
 }
 @media (max-width: 600px) {
   .settings-page { padding: 14px 16px 28px; }

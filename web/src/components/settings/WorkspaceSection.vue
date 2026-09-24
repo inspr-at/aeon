@@ -3,9 +3,10 @@
 import { computed, onMounted, ref } from 'vue'
 import { listPrincipals, type Principal } from '../../lib/business'
 import { keyState, listAgentKeys, statusOf, type AgentKey } from '../../lib/settings'
-import { absoluteTime, initials, relativeTime } from '../../lib/work'
+import { absoluteTime, relativeTime } from '../../lib/work'
 import { useSession } from '../../stores/session'
 import AppIcon from '../AppIcon.vue'
+import Avatar from '../Avatar.vue'
 import SettingsCard from './SettingsCard.vue'
 
 // The workspace as it is today, read-only: who is in it and which agent keys
@@ -56,18 +57,18 @@ onMounted(() => { void loadMembers(); void loadKeys() })
       <template v-else>
         <p class="group-h">People <span class="count">{{ people.length }}</span></p>
         <ul class="people">
-          <li v-for="p in people" :key="p.id"><span class="avatar" aria-hidden="true">{{ initials(p.name) }}</span><span class="person-name">{{ p.name }}</span><span class="role">{{ roleText(p.roles) }}</span></li>
+          <li v-for="p in people" :key="p.id"><Avatar :id="p.id" :name="p.name" :size="28" /><span class="person-name">{{ p.name }}</span><span class="role">{{ roleText(p.roles) }}</span></li>
         </ul>
         <template v-if="customers.length">
           <p class="group-h">Customer contacts <span class="count">{{ customers.length }}</span></p>
           <ul class="people">
-            <li v-for="p in customers" :key="p.id"><span class="avatar quiet" aria-hidden="true">{{ initials(p.name) }}</span><span class="person-name">{{ p.name }}</span><span class="role">Customer</span></li>
+            <li v-for="p in customers" :key="p.id"><Avatar :id="p.id" :name="p.name" :size="28" /><span class="person-name">{{ p.name }}</span><span class="role">Customer</span></li>
           </ul>
         </template>
         <template v-if="agentsIn.length">
           <p class="group-h">Agents <span class="count">{{ agentsIn.length }}</span></p>
           <ul class="people">
-            <li v-for="p in agentsIn" :key="p.id"><span class="avatar agent" aria-hidden="true"><AppIcon name="agent" :size="14" /></span><span class="person-name mono">{{ p.name }}</span><span class="role">Agent</span></li>
+            <li v-for="p in agentsIn" :key="p.id"><Avatar :id="p.id" :name="p.name" kind="agent" :size="28" /><span class="person-name mono">{{ p.name }}</span><span class="role">Agent</span></li>
           </ul>
         </template>
         <p class="set-note"><AppIcon name="info" :size="14" />Inviting people and changing their roles arrives here next.</p>
@@ -105,8 +106,6 @@ onMounted(() => { void loadMembers(); void loadKeys() })
 .count { letter-spacing: 0; }
 .people { display: grid; margin: 0; padding: 0; list-style: none; }
 .people li { display: grid; grid-template-columns: 30px minmax(0, 1fr) auto; align-items: center; gap: 10px; min-height: 42px; border-top: 1px solid var(--line); }
-.avatar { display: grid; place-items: center; width: 28px; height: 28px; border-radius: 50%; background: var(--avatar-bg); color: var(--teal-ink); box-shadow: 0 0 0 1px var(--glass-rim); font: 700 10.5px/1 var(--mono); font-variant-ligatures: none; }
-.avatar.agent, .avatar.quiet { background: var(--surface-2); color: var(--ink-2); }
 .person-name { font-size: 13.5px; color: var(--ink); overflow-wrap: anywhere; }
 .person-name.mono { font-size: 12.5px; }
 .role { font-size: 12.5px; color: var(--ink-2); white-space: nowrap; }

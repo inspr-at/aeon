@@ -328,7 +328,7 @@ defineExpose({
             <button
               type="button" class="field field-pick" aria-haspopup="menu" :aria-expanded="editMenu?.kind === 'assignee'" :aria-labelledby="`${uid}-assignee ${uid}-assignee-value`"
               @click="openEditMenu('assignee', $event)" @keydown="editMenuKeys('assignee', $event)"
-            ><PersonAvatar v-if="draftAssignee" :name="draftAssignee.label" :size="18" /><AppIcon v-else name="user" :size="13" class="pick-none" /><span :id="`${uid}-assignee-value`" class="pick-value" :class="{ unset: !draftAssignee }">{{ draftAssignee?.label ?? 'Unassigned' }}</span><AppIcon name="chevron" :size="12" class="pick-chev" /></button>
+            ><PersonAvatar v-if="draftAssignee" :id="draftAssignee.value" :name="draftAssignee.label" :size="18" /><AppIcon v-else name="user" :size="13" class="pick-none" /><span :id="`${uid}-assignee-value`" class="pick-value" :class="{ unset: !draftAssignee }">{{ draftAssignee?.label ?? 'Unassigned' }}</span><AppIcon name="chevron" :size="12" class="pick-chev" /></button>
           </div>
         </div>
         <section class="edit-section" aria-labelledby="edit-desc"><h3 id="edit-desc" class="eyebrow">Description</h3>
@@ -386,7 +386,7 @@ defineExpose({
               :has-older="!!activity.cursor.value" :error="activity.error.value" :me="me?.id" :now="now" :can-write="editable"
               :edit="activity.edit" :remove="activity.remove" @older="activity.loadOlder" @retry="activity.load"
             />
-            <CommentComposer v-if="mode === 'full'" ref="composer" class="ws-block inline-composer" :me="me?.name ?? '?'" :post="activity.add" :disabled="!editable" />
+            <CommentComposer v-if="mode === 'full'" ref="composer" class="ws-block inline-composer" :me="me?.name ?? '?'" :me-id="me?.id ?? null" :post="activity.add" :disabled="!editable" />
           </template>
         </div>
 
@@ -404,7 +404,7 @@ defineExpose({
             :has-older="!!activity.cursor.value" :error="activity.error.value" :me="me?.id" :now="now" :can-write="editable"
             :edit="activity.edit" :remove="activity.remove" @older="activity.loadOlder" @retry="activity.load"
           />
-          <CommentComposer v-if="mode === 'full'" ref="composer" class="ctx-block inline-composer" :me="me?.name ?? '?'" :post="activity.add" :disabled="!editable" />
+          <CommentComposer v-if="mode === 'full'" ref="composer" class="ctx-block inline-composer" :me="me?.name ?? '?'" :me-id="me?.id ?? null" :post="activity.add" :disabled="!editable" />
         </aside>
 
         <aside v-if="mode === 'full'" class="ws-side" aria-label="Properties">
@@ -421,7 +421,7 @@ defineExpose({
     </div>
 
     <footer v-if="mode === 'panel' && item && !ticket.gone.value && !editing" class="ws-composer">
-      <CommentComposer ref="composer" :me="me?.name ?? '?'" :post="activity.add" :disabled="!editable" />
+      <CommentComposer ref="composer" :me="me?.name ?? '?'" :me-id="me?.id ?? null" :post="activity.add" :disabled="!editable" />
     </footer>
 
     <div v-if="dropping" class="drop-overlay" aria-hidden="true">

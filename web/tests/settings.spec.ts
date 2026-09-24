@@ -38,9 +38,8 @@ test('the account menu opens Settings on Personal: theme, greeting and keys', as
   expect(data.patches).toEqual([{ greeting_enabled: false }])
   await expect(page.locator('.toast')).toHaveText(/The greeting is off\./)
 
-  // Profile editing is a clean slot for now, not a form.
-  await expect(page.locator('#profile')).toContainText('Editing your name, photo, time zone and language arrives here next.')
-  await expect(page.locator('#profile input')).toHaveCount(0)
+  // The profile is editable here (profile.spec covers it in depth).
+  await expect(page.getByLabel('First name')).toHaveValue('Markus')
   await page.getByRole('button', { name: 'All shortcuts' }).click()
   await expect(page.getByRole('dialog', { name: 'Keyboard shortcuts' })).toBeVisible()
   expect(errors).toEqual([])
@@ -59,7 +58,8 @@ test('members see only Personal; an admin section explains itself', async ({ pag
   await setup(page, { role: 'member' })
   await page.goto('/settings')
   await expect(page).toHaveURL('/settings/personal')
-  await expect(sections(page)).toHaveCount(0)
+  // Members get the same layout, with Personal as the only section.
+  await expect(sections(page).getByRole('link')).toHaveText([/^Personal/])
   await expect(page.getByRole('heading', { name: 'Greeting' })).toBeVisible()
   await page.goto('/settings/workspace')
   await expect(page.getByRole('heading', { name: 'Workspace settings are for workspace admins' })).toBeVisible()
