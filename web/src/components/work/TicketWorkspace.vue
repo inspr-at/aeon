@@ -1,12 +1,12 @@
 <!-- SPDX-License-Identifier: AGPL-3.0-only -->
 <script setup lang="ts">
-import { computed, nextTick, onBeforeUnmount, onMounted, reactive, ref, toRef, watch } from 'vue'
+import { computed, nextTick, onBeforeUnmount, onMounted, reactive, ref, toRef, useId, watch } from 'vue'
 import type { ListItem } from '../../lib/api'
 import { confirmAction } from '../../lib/confirm'
 import { toast } from '../../lib/toast'
 import { useActivity } from '../../lib/useActivity'
 import { useTicket } from '../../lib/useTicket'
-import { absoluteTime, kindLabel, relativeTime, statusMeta, statusOptions } from '../../lib/work'
+import { absoluteTime, kindLabel, priorityLabel, relativeTime, statusMeta, statusOptions } from '../../lib/work'
 import { useAttachments } from '../../lib/useAttachments'
 import AppIcon from '../AppIcon.vue'
 import ActivityTimeline from './ActivityTimeline.vue'
@@ -19,6 +19,10 @@ import EpicPicker from './EpicPicker.vue'
 import InlineTitle from './InlineTitle.vue'
 import MarkdownSection from './MarkdownSection.vue'
 import OptionMenu, { type MenuOption } from './OptionMenu.vue'
+import PersonAvatar from './PersonAvatar.vue'
+import PriorityIcon from './PriorityIcon.vue'
+import StatusIcon from './StatusIcon.vue'
+import StatusMenu from './StatusMenu.vue'
 import RelationList from './RelationList.vue'
 import TicketHeaderBar from './TicketHeaderBar.vue'
 import TicketProperties from './TicketProperties.vue'
@@ -135,11 +139,31 @@ async function cancelEdit() {
   editing.value = false
   void nextTick(() => root.value?.focus({ preventScroll: true }))
 }
+// Status, priority and assignee in the form: the app's own menus (icons, arrows,
+// digits, a filter for people), styled as form fields; a choice only edits the draft.
+const uid = useId()
+const editMenu = ref<{ kind: 'status' | 'priority' | 'assignee'; anchor: HTMLElement } | null>(null)
+function openEditMenu(kind: 'status' | 'priority' | 'assignee', event: Event) {
+  const anchor = event.currentTarget as HTMLElement
+  editMenu.value = editMenu.value?.kind === kind ? null : { kind, anchor }
+}
+function editMenuKeys(kind: 'status' | 'priority' | 'assignee', event: KeyboardEvent) {
+  if (event.key === 'ArrowDown' || event.key === 'ArrowUp') { event.preventDefault(); if (editMenu.value?.kind !== kind) openEditMenu(kind, event) }
+}
+function closeEditMenu(restore: boolean) { const anchor = editMenu.value?.anchor; editMenu.value = null; if (restore) anchor?.focus() }
+function chooseEdit(kind: 'status' | 'priority' | 'assignee', value: string) {
+  if (kind === 'status') draft.state = value
+  else if (kind === 'priority') draft.priority = value
+  else draft.assignee = value
+  closeEditMenu(true)
+}
+const draftAssignee = computed(() => assigneeOptions.value.find(option => option.value === draft.assignee && option.value))
 function editKeys(event: KeyboardEvent) {
   if ((event.metaKey || event.ctrlKey) && event.key === 'Enter') { event.preventDefault(); event.stopPropagation(); void saveEdit() }
   else if (event.key === 'Escape') { event.preventDefault(); event.stopPropagation(); void cancelEdit() }
 }
 watch(() => props.item?.id, () => { editing.value = false })
+watch(editing, value => { if (!value) editMenu.value = null })
 
 // ---------- Attachments: drop anywhere on the ticket, paste a screenshot ----------
 const dropping = ref(false)
@@ -288,15 +312,24 @@ defineExpose({
         <label class="sr-only" for="edit-title">Title</label>
         <textarea id="edit-title" ref="titleField" v-model="draft.title" class="edit-title" :class="{ large: mode === 'full' }" rows="1" maxlength="500" placeholder="Title" @input="growTitle" @keydown.enter.exact.prevent />
         <div class="edit-props">
-          <label class="edit-prop"><span class="prop-label">Status</span>
-            <select v-model="draft.state" class="field select"><option v-for="option in editStatusOptions" :key="option.value" :value="option.value">{{ option.meta.label }}</option></select>
-          </label>
-          <label class="edit-prop"><span class="prop-label">Priority</span>
-            <select v-model="draft.priority" class="field select"><option v-for="option in priorityOptions" :key="option.value" :value="option.value">{{ option.label }}</option></select>
-          </label>
-          <label class="edit-prop"><span class="prop-label">Assignee</span>
-            <select v-model="draft.assignee" class="field select"><option v-for="option in assigneeOptions" :key="option.value" :value="option.value">{{ option.label }}{{ option.hint ? ` (${option.hint})` : '' }}</option></select>
-          </label>
+          <div class="edit-prop"><span :id="`${uid}-status`" class="prop-label">Status</span>
+            <button
+              type="button" class="field field-pick" aria-haspopup="menu" :aria-expanded="editMenu?.kind === 'status'" :aria-labelledby="`${uid}-status ${uid}-status-value`"
+              @click="openEditMenu('status', $event)" @keydown="editMenuKeys('status', $event)"
+            ><StatusIcon :state="draft.state" /><span :id="`${uid}-status-value`" class="pick-value">{{ statusMeta(draft.state).label }}</span><AppIcon name="chevron" :size="12" class="pick-chev" /></button>
+          </div>
+          <div class="edit-prop"><span :id="`${uid}-priority`" class="prop-label">Priority</span>
+            <button
+              type="button" class="field field-pick" aria-haspopup="menu" :aria-expanded="editMenu?.kind === 'priority'" :aria-labelledby="`${uid}-priority ${uid}-priority-value`"
+              @click="openEditMenu('priority', $event)" @keydown="editMenuKeys('priority', $event)"
+            ><PriorityIcon v-if="draft.priority" :priority="draft.priority" /><span v-else class="pick-none" aria-hidden="true">—</span><span :id="`${uid}-priority-value`" class="pick-value" :class="{ unset: !draft.priority }">{{ draft.priority ? priorityLabel(draft.priority) : 'No priority' }}</span><AppIcon name="chevron" :size="12" class="pick-chev" /></button>
+          </div>
+          <div class="edit-prop"><span :id="`${uid}-assignee`" class="prop-label">Assignee</span>
+            <button
+              type="button" class="field field-pick" aria-haspopup="menu" :aria-expanded="editMenu?.kind === 'assignee'" :aria-labelledby="`${uid}-assignee ${uid}-assignee-value`"
+              @click="openEditMenu('assignee', $event)" @keydown="editMenuKeys('assignee', $event)"
+            ><PersonAvatar v-if="draftAssignee" :name="draftAssignee.label" :size="18" /><AppIcon v-else name="user" :size="13" class="pick-none" /><span :id="`${uid}-assignee-value`" class="pick-value" :class="{ unset: !draftAssignee }">{{ draftAssignee?.label ?? 'Unassigned' }}</span><AppIcon name="chevron" :size="12" class="pick-chev" /></button>
+          </div>
         </div>
         <section class="edit-section" aria-labelledby="edit-desc"><h3 id="edit-desc" class="eyebrow">Description</h3>
           <MarkdownEditor v-model="draft.body" label="Description" bare :split="mode === 'full'" :min-rows="mode === 'full' ? 12 : 7" :attachment-id="attachmentId" placeholder="What is this about? Paste a screenshot to add it inline." @save="saveEdit" @cancel="cancelEdit" />
@@ -398,6 +431,9 @@ defineExpose({
 
     <OptionMenu v-if="menu?.kind === 'priority' && item" :anchor="menu.anchor" title="Priority" :subject="item.key" kind="priority" :options="priorityOptions" :current="item.priority ?? ''" @choose="choosePriority" @close="closeMenu" />
     <OptionMenu v-if="menu?.kind === 'assignee' && item" :anchor="menu.anchor" title="Assignee" :subject="item.key" kind="assignee" :options="assigneeOptions" :current="item.assignee?.id ?? ''" searchable @choose="chooseAssignee" @close="closeMenu" />
+    <StatusMenu v-if="editMenu?.kind === 'status' && item" :anchor="editMenu.anchor" :current="draft.state" :known-states="editStatusOptions.map(option => option.value)" :ticket-key="item.key" @choose="value => chooseEdit('status', value)" @close="closeEditMenu" />
+    <OptionMenu v-if="editMenu?.kind === 'priority' && item" :anchor="editMenu.anchor" title="Priority" :subject="item.key" kind="priority" :options="priorityOptions" :current="draft.priority" @choose="value => chooseEdit('priority', value)" @close="closeEditMenu" />
+    <OptionMenu v-if="editMenu?.kind === 'assignee' && item" :anchor="editMenu.anchor" title="Assignee" :subject="item.key" kind="assignee" :options="assigneeOptions" :current="draft.assignee" searchable @choose="value => chooseEdit('assignee', value)" @close="closeEditMenu" />
     <EpicPicker v-if="menu?.kind === 'epic' && item" :anchor="menu.anchor" :project-id="project.id" :current="item.parent?.kind_slug === 'epic' ? item.parent.id : null" :subject="item.key" @choose="chooseEpic" @close="closeMenu" />
   </component>
 </template>
@@ -457,7 +493,13 @@ defineExpose({
 .edit-props { display: grid; grid-template-columns: repeat(auto-fit, minmax(150px, 1fr)); gap: 10px; }
 .edit-prop { display: grid; gap: 4px; }
 .prop-label { font: 500 10px/1.5 var(--mono); letter-spacing: .14em; text-transform: uppercase; color: var(--ink-3); font-variant-ligatures: none; }
-.select { height: 34px; padding: 0 8px; }
+/* Status, priority and assignee as form fields that open the app's own menus. */
+.field-pick { display: flex; align-items: center; gap: 8px; height: 36px; padding: 0 10px 0 11px; color: var(--ink); font-size: 13.5px; text-align: left; cursor: pointer; }
+.field-pick:hover { border-color: var(--chip-teal-line); }
+.field-pick[aria-expanded="true"] { box-shadow: var(--focus-ring); }
+.pick-value { flex: 1; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.pick-value.unset, .pick-none { color: var(--ink-3); }
+.pick-chev { flex-shrink: 0; color: var(--ink-3); }
 .edit-section { display: grid; gap: 8px; }
 .edit-section .eyebrow { margin: 0; }
 .edit-hint { display: flex; align-items: center; gap: 4px; font-size: 12px; color: var(--ink-3); }

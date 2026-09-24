@@ -1,12 +1,13 @@
 // SPDX-License-Identifier: AGPL-3.0-only
 import { computed, onBeforeUnmount, ref, watch, type Ref } from 'vue'
 import { APIError } from './api'
-import { byPosition, deleteAttachment, listAttachments, patchAttachment, positionBetween, positionOf, uploadAttachment, type Attachment } from './attachments'
+import { byPosition, deleteAttachment, findRemovalEvent, listAttachments, patchAttachment, positionBetween, positionOf, undoEvent, uploadAttachment, type Attachment } from './attachments'
 import { dismiss, toast } from './toast'
 
 // One ticket's attachments. Uploads show at once with their progress (images with
-// a local preview); a delete hides the item and waits for the undo toast before it
-// reaches the server. Reorder and captions use the attachment's precondition.
+// a local preview); a delete reaches the server at once and its toast offers Undo
+// for six seconds, which undoes the removal event on the server. Reorder and
+// captions use the attachment's precondition.
 export interface Upload { key: string; name: string; size: number; type: string; progress: number; preview: string | null; error: string; file: File; controller: AbortController }
 const UNDO_MS = 6000
 
@@ -15,7 +16,8 @@ export function useAttachments(nodeId: Ref<string | null>) {
   const uploads = ref<Upload[]>([])
   const loading = ref(false)
   const error = ref('')
-  const pendingDelete = new Map<string, { item: Attachment; timer: ReturnType<typeof setTimeout>; toast: number }>()
+  // Deletes still on their way, so an early Undo waits for them.
+  const deleting = new Map<string, Promise<boolean>>()
   let generation = 0
 
   async function load() {
@@ -25,7 +27,7 @@ export function useAttachments(nodeId: Ref<string | null>) {
     loading.value = true; error.value = ''
     try {
       const list = await listAttachments(id)
-      if (current === generation) items.value = list.filter(item => !pendingDelete.has(item.id))
+      if (current === generation) items.value = list.filter(item => !deleting.has(item.id))
     } catch (e) {
       if (current !== generation) return
       // A server without the attachments surface simply shows none.
@@ -33,7 +35,7 @@ export function useAttachments(nodeId: Ref<string | null>) {
       else error.value = e instanceof Error ? e.message : 'Attachments could not be loaded'
     } finally { if (current === generation) loading.value = false }
   }
-  watch(nodeId, () => { flushDeletes(); uploads.value = []; void load() }, { immediate: true })
+  watch(nodeId, () => { uploads.value = []; void load() }, { immediate: true })
 
   // Resolves with the new attachment's id, or null when the upload failed.
   function upload(file: File): Promise<Attachment | null> {
@@ -107,34 +109,36 @@ export function useAttachments(nodeId: Ref<string | null>) {
   }
 
   function remove(item: Attachment) {
+    const node = nodeId.value
     items.value = items.value.filter(x => x.id !== item.id)
-    const commit = () => {
-      pendingDelete.delete(item.id)
-      deleteAttachment(item.id).catch(e => {
-        if (e instanceof APIError && e.status === 404) return
-        toast(`${item.name} could not be deleted.`, { tone: 'error' })
-        void load()
-      })
+    const done = deleteAttachment(item.id).then(() => true, e => {
+      if (e instanceof APIError && e.status === 404) return true
+      toast(`${item.name} could not be deleted.`, { tone: 'error' })
+      if (nodeId.value === node) void load()
+      return false
+    }).finally(() => deleting.delete(item.id))
+    deleting.set(item.id, done)
+    const toastId = toast(`Deleted ${item.name}`, { timeout: UNDO_MS, action: { label: 'Undo', run: () => void undo(item, node, done, toastId) } })
+  }
+  // Undo puts the attachment back at once and undoes the removal on the server.
+  async function undo(item: Attachment, node: string | null, done: Promise<boolean>, toastId?: number) {
+    if (toastId !== undefined) dismiss(toastId)
+    const here = () => nodeId.value === node
+    if (here()) items.value = [...items.value.filter(x => x.id !== item.id), item].sort(byPosition)
+    try {
+      if (!(await done)) return
+      const event = node ? await findRemovalEvent(node, item.id) : null
+      if (event === null) throw new Error('no removal to undo')
+      const restored = await undoEvent(event)
+      if (here() && restored) items.value = items.value.map(x => x.id === item.id ? { ...x, ...restored } : x)
+    } catch {
+      toast(`${item.name} could not be restored.`, { tone: 'error' })
+      if (here()) void load()
     }
-    const toastId = toast(`Deleted ${item.name}`, { timeout: UNDO_MS, action: { label: 'Undo', run: () => undo(item.id) } })
-    pendingDelete.set(item.id, { item, toast: toastId, timer: setTimeout(commit, UNDO_MS) })
   }
-  function undo(id: string) {
-    const pending = pendingDelete.get(id)
-    if (!pending) return
-    clearTimeout(pending.timer); dismiss(pending.toast); pendingDelete.delete(id)
-    items.value = [...items.value, pending.item].sort(byPosition)
-  }
-  // Leaving the ticket or the page commits deletes that were not undone.
-  function flushDeletes() {
-    for (const [id, pending] of pendingDelete) { clearTimeout(pending.timer); void deleteAttachment(id, true).catch(() => undefined) }
-    pendingDelete.clear()
-  }
-  const onHide = () => flushDeletes()
-  window.addEventListener('pagehide', onHide)
-  onBeforeUnmount(() => { window.removeEventListener('pagehide', onHide); flushDeletes(); for (const u of uploads.value) if (u.preview) URL.revokeObjectURL(u.preview) })
+  onBeforeUnmount(() => { for (const u of uploads.value) if (u.preview) URL.revokeObjectURL(u.preview) })
 
   const count = computed(() => items.value.length + uploads.value.length)
   const images = computed(() => items.value.filter(item => item.content_type.startsWith('image/')))
-  return { items, uploads, loading, error, count, images, load, add, upload, retry, cancel, setCaption, reorder, remove, undo }
+  return { items, uploads, loading, error, count, images, load, add, upload, retry, cancel, setCaption, reorder, remove }
 }

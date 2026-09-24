@@ -126,6 +126,8 @@ export interface ListProject { id: string; key: string; title: string }
 export interface ListItem extends WorkNode {
   kind_slug: string; kind_label: string; priority: string | null; assignee: ListPerson | null
   parent: ListParent | null; children_count: number; project: ListProject | null
+  // The nearest epic above the item (a task's is its ticket's epic); absent on older servers.
+  epic?: ListProject | null
 }
 export type Facets = Record<string, Record<string, number>>
 export interface ListPage extends Page<ListItem> { facets?: Facets }

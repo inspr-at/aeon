@@ -2,7 +2,7 @@
 <script setup lang="ts">
 import { computed, onBeforeUnmount, onMounted, ref, watch } from 'vue'
 import type { ListItem } from '../../lib/api'
-import { COLUMN_BY_ID, visibleColumns, widthOf, type ColumnId, type ListPrefs } from '../../lib/columns'
+import { COLUMN_BY_ID, layoutWidths, releaseLabel, tagList, visibleColumns, type ColumnId, type ListPrefs, type TagRef } from '../../lib/columns'
 import type { GroupBy, RowGroup, EpicRef } from '../../lib/ticketList'
 import type { OutlineEntry, TreeMeta } from '../../lib/outline'
 import { absoluteTime, highlight, kindLabel, plural, priorityLabel, relativeTime, statusMeta, type SortField, type SortKey } from '../../lib/work'
@@ -72,22 +72,30 @@ const emit = defineEmits<{
   widths: [widths: Partial<Record<ColumnId, number>>]
 }>()
 
-const CLS: Record<ColumnId, string> = { key: 'c-key', title: 'c-title', status: 'c-status', priority: 'c-prio', assignee: 'c-assignee', epic: 'c-epic', estimate: 'c-estimate', created: 'c-created', updated: 'c-updated' }
+const CLS: Record<ColumnId, string> = { key: 'c-key', title: 'c-title', status: 'c-status', priority: 'c-prio', assignee: 'c-assignee', epic: 'c-epic', release: 'c-release', tags: 'c-tags', estimate: 'c-estimate', created: 'c-created', updated: 'c-updated' }
 // Columns follow the table's own width (the docked panel narrows it; wide screens
 // add columns) and the person's saved choice. Decided here rather than in CSS so
 // every colspan matches the visible columns.
 const width = ref(1200)
 const phone = ref(false)
-// Estimate earns its automatic column only when some loaded row has one.
-const anyEstimate = computed(() => [...props.rowsById.values()].some(row => !!estimate(row)))
-const layout = computed(() => visibleColumns(width.value, { phone: phone.value, anyAssigned: props.showAssignee, anyEstimate: anyEstimate.value, prefs: props.prefs }))
+// Release, Tags and Estimate earn their automatic columns only when some loaded row has one.
+const present = computed(() => {
+  const rows = [...props.rowsById.values()]
+  return { assigned: props.showAssignee, estimate: rows.some(row => !!estimate(row)), release: rows.some(row => !!releaseLabel(row.fields)), tags: rows.some(row => tagList(row.fields).length > 0) }
+})
+const layout = computed(() => visibleColumns(width.value, { phone: phone.value, present: present.value, prefs: props.prefs }))
 const columns = computed(() => layout.value.columns.map(def => ({ ...def, field: def.sort, cls: CLS[def.id] })))
 const ids = computed(() => columns.value.map(column => column.id))
 const has = (id: ColumnId) => ids.value.includes(id)
 watch(ids, value => emit('layout', value, layout.value.customised), { immediate: true })
 // Live widths while dragging a column edge; saved when the drag ends.
 const dragWidths = ref<Partial<Record<ColumnId, number>>>({})
-function colWidth(id: ColumnId) { return id === 'title' ? null : dragWidths.value[id] ?? widthOf(id, props.prefs) }
+// Every column but Title has a width; Title takes the rest (about 960px at most on
+// wide tables, where the spare width widens the text columns instead).
+const widths = computed(() => layoutWidths(ids.value, width.value, props.prefs, dragWidths.value))
+function colWidth(id: ColumnId) { return id === 'title' ? null : widths.value[id] ?? null }
+const titleWidth = computed(() => Math.max(0, Math.round(width.value - Object.values(widths.value).reduce((sum, w) => sum + (w ?? 0), 0))))
+const shownWidth = (id: ColumnId) => id === 'title' ? titleWidth.value : colWidth(id) ?? 0
 // Status, priority and epic line up in the quick-create row when they keep their default places.
 const quickAligned = computed(() => ids.value[2] === 'status' && ids.value[3] === 'priority')
 const card = ref<HTMLElement>()
@@ -109,7 +117,7 @@ function resizeStart(event: PointerEvent, id: ColumnId) {
   event.preventDefault(); event.stopPropagation()
   if (lastPress.id === id && event.timeStamp - lastPress.at < 350) { lastPress = { id: '', at: 0 }; autofit(id); return }
   lastPress = { id, at: event.timeStamp }
-  resizing = { id, startX: event.clientX, startWidth: colWidth(id) ?? 0 }
+  resizing = { id, startX: event.clientX, startWidth: shownWidth(id) }
   ;(event.currentTarget as HTMLElement).setPointerCapture(event.pointerId)
 }
 function resizeMove(event: PointerEvent) {
@@ -128,7 +136,7 @@ function resizeKey(event: KeyboardEvent, id: ColumnId) {
   if (event.key !== 'ArrowLeft' && event.key !== 'ArrowRight') return
   event.preventDefault()
   const def = COLUMN_BY_ID.get(id)!
-  const next = Math.max(def.min, Math.min(def.max, (colWidth(id) ?? def.width) + (event.key === 'ArrowRight' ? 16 : -16)))
+  const next = Math.max(def.min, Math.min(def.max, shownWidth(id) + (event.key === 'ArrowRight' ? 16 : -16)))
   dragWidths.value = { ...dragWidths.value, [id]: next }
   emit('widths', { ...(props.prefs?.widths ?? {}), [id]: next })
 }
@@ -233,8 +241,26 @@ function parentOf(row: ListItem) {
   if (!row.parent || row.parent.kind_slug === 'project') return null
   return row.parent
 }
-// Inline chip beside the title, unless the Epic column (or epic grouping) already says it.
-function epicChip(row: ListItem) { return props.group === 'epic' || has('epic') ? null : parentOf(row) }
+// The epic a row belongs to: its own, or for a task its ticket's. The server names
+// it; older servers leave it to the parent (or the parent's row, when loaded).
+function epicOf(row: ListItem): { id: string; key: string; title: string } | null {
+  if (row.epic !== undefined) return row.epic
+  const parent = parentOf(row)
+  if (!parent) return null
+  if (parent.kind_slug === 'epic') return parent
+  const up = props.rowsById.get(parent.id)
+  if (up?.epic) return up.epic
+  return up?.parent?.kind_slug === 'epic' ? up.parent : null
+}
+// Chip beside the title: the direct parent, unless the Epic column (or epic
+// grouping) already says it. A task's ticket always shows here.
+function epicChip(row: ListItem) {
+  const parent = parentOf(row)
+  if (!parent) return null
+  return parent.kind_slug === 'epic' && (props.group === 'epic' || has('epic')) ? null : parent
+}
+const TAG_SHOWN = 3
+function tagTip(tags: TagRef[]) { return tags.map(tag => tag.name).join(', ') }
 function statusClick(event: MouseEvent, row: ListItem) { emit('status', row, event.currentTarget as HTMLElement) }
 function rowClick(event: MouseEvent, row: ListItem) {
   if ((event.target as HTMLElement).closest('button')) return
@@ -291,8 +317,8 @@ defineExpose({
             </button>
             <span v-else class="th-label">{{ column.label }}</span>
             <span
-              v-if="column.id !== 'title' && !phone" class="col-resize" role="separator" aria-orientation="vertical" tabindex="0"
-              :aria-label="`Resize ${column.label} column`" :aria-valuenow="colWidth(column.id) ?? undefined" :aria-valuemin="column.min" :aria-valuemax="column.max"
+              v-if="!phone" class="col-resize" role="separator" aria-orientation="vertical" tabindex="0"
+              :aria-label="`Resize ${column.label} column`" :aria-valuenow="shownWidth(column.id)" :aria-valuemin="column.min" :aria-valuemax="column.max"
               data-tip="Drag to resize · double-click to fit" @pointerdown="resizeStart($event, column.id)" @pointermove="resizeMove" @pointerup="resizeEnd" @pointercancel="resizeEnd"
               @keydown="resizeKey($event, column.id)" @click.stop
             />
@@ -466,12 +492,25 @@ defineExpose({
               </td>
               <td v-else-if="column.id === 'epic'" class="c-epic">
                 <div class="cell">
-                  <span v-if="parentOf(entry.row)" class="epic-cell" :data-tip="`${kindLabel(parentOf(entry.row)!.kind_slug)} ${parentOf(entry.row)!.key}\n${parentOf(entry.row)!.title}`">
-                    <AppIcon :name="parentOf(entry.row)!.kind_slug === 'epic' ? 'epic' : 'ticket'" :size="12" :class="{ 'epic-glyph': parentOf(entry.row)!.kind_slug === 'epic' }" />
-                    <span class="epic-name">{{ parentOf(entry.row)!.kind_slug === 'epic' ? parentOf(entry.row)!.title : parentOf(entry.row)!.key }}</span>
+                  <span v-if="epicOf(entry.row)" class="epic-cell" :data-tip="`Epic ${epicOf(entry.row)!.key}\n${epicOf(entry.row)!.title}`">
+                    <AppIcon name="epic" :size="12" class="epic-glyph" />
+                    <span class="epic-name">{{ epicOf(entry.row)!.title }}</span>
                   </span>
                   <span v-else class="empty" aria-label="No epic">—</span>
                 </div>
+              </td>
+              <td v-else-if="column.id === 'release'" class="c-release">
+                <div class="cell">
+                  <span v-if="releaseLabel(entry.row.fields)" class="release-chip mono" :data-tip="`Release ${releaseLabel(entry.row.fields)}`">{{ releaseLabel(entry.row.fields) }}</span>
+                  <span v-else class="empty" aria-label="No release">—</span>
+                </div>
+              </td>
+              <td v-else-if="column.id === 'tags'" class="c-tags">
+                <div v-if="tagList(entry.row.fields).length" class="cell tag-cell" :data-tip="tagTip(tagList(entry.row.fields))">
+                  <span v-for="tag in tagList(entry.row.fields).slice(0, TAG_SHOWN)" :key="tag.name" class="tag-chip"><i class="tag-dot" :data-color="tag.color || undefined" aria-hidden="true" />{{ tag.name }}</span>
+                  <span v-if="tagList(entry.row.fields).length > TAG_SHOWN" class="tag-more mono">+{{ tagList(entry.row.fields).length - TAG_SHOWN }}</span>
+                </div>
+                <div v-else class="cell"><span class="empty" aria-label="No tags">—</span></div>
               </td>
               <td v-else-if="column.id === 'estimate'" class="c-estimate"><div class="cell"><span v-if="estimate(entry.row)" class="mono">{{ estimate(entry.row) }}</span><span v-else class="empty" aria-label="No estimate">—</span></div></td>
               <td v-else-if="column.id === 'created'" class="c-created"><div class="cell"><time :datetime="entry.row.created_at" :data-tip="absoluteTime(entry.row.created_at)">{{ relativeTime(entry.row.created_at, { now }) }}</time></div></td>
@@ -637,6 +676,19 @@ td.c-title { position: relative; overflow: hidden; }
 .c-estimate .mono { font-size: 12px; color: var(--ink-2); font-variant-numeric: tabular-nums; }
 .epic-cell { display: inline-flex; align-items: center; gap: 6px; min-width: 0; color: var(--ink-2); font-size: 12.5px; }
 .epic-name { overflow: hidden; text-overflow: ellipsis; }
+.release-chip { overflow: hidden; text-overflow: ellipsis; padding: 2px 7px; border-radius: 6px; background: var(--chip-bg); box-shadow: inset 0 0 0 1px var(--chip-line); color: var(--ink-2); font-size: 11.5px; font-variant-ligatures: none; }
+.tag-cell { gap: 4px; overflow: hidden; }
+.tag-chip { display: inline-flex; flex-shrink: 1; align-items: center; gap: 5px; min-width: 0; max-width: 100%; height: 20px; padding: 0 7px; border-radius: 999px; background: var(--chip-bg); box-shadow: inset 0 0 0 1px var(--chip-line); color: var(--ink-2); font-size: 11.5px; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+/* The classic tag colours as a small dot; the name carries the meaning. */
+.tag-dot { flex-shrink: 0; width: 6px; height: 6px; border-radius: 50%; background: var(--ink-3); }
+.tag-dot[data-color="blue"] { background: #4f86c6; }
+.tag-dot[data-color="red"] { background: #d0625b; }
+.tag-dot[data-color="green"] { background: #4f9e6f; }
+.tag-dot[data-color="yellow"], .tag-dot[data-color="orange"] { background: var(--gold); }
+.tag-dot[data-color="purple"] { background: #8a6cc2; }
+.tag-dot[data-color="teal"], .tag-dot[data-color="cyan"] { background: var(--teal); }
+.tag-dot[data-color="pink"] { background: #c7679a; }
+.tag-more { flex-shrink: 0; color: var(--ink-3); font-size: 11px; }
 .c-prio.narrow .prio-label { display: none; }
 
 .group-row th { position: sticky; top: calc(var(--toolbar-h, 0px) + 35px); z-index: 1; height: 36px; padding: 0 12px 0 8px; text-align: left; font-weight: 400; background: var(--surface-raised-2); border-bottom: 1px solid var(--line); backdrop-filter: blur(12px); -webkit-backdrop-filter: blur(12px); }

@@ -2849,7 +2849,7 @@ components:
       allOf:
         - $ref: '#/components/schemas/Node'
         - type: object
-          required: [kind_slug, kind_label, priority, assignee, parent, children_count, project]
+          required: [kind_slug, kind_label, priority, assignee, parent, children_count, project, epic]
           properties:
             kind_slug: {type: string}
             kind_label: {type: string}
@@ -2868,6 +2868,13 @@ components:
                 kind_slug: {type: string}
             children_count: {type: integer, minimum: 0}
             project:
+              type: [object, 'null']
+              properties:
+                id: {type: string, format: uuid}
+                key: {type: string}
+                title: {type: string}
+            epic:
+              description: The nearest epic above the item (a task's is its ticket's epic); null under no epic.
               type: [object, 'null']
               properties:
                 id: {type: string, format: uuid}

@@ -11,19 +11,40 @@ const puts = (calls: Call[], key: string) => calls.filter(c => c.method === 'PUT
 const patches = (calls: Call[]) => calls.filter(c => c.method === 'PATCH' && c.path.startsWith('/api/nodes/'))
 
 test.describe('wide lists', () => {
-  test('columns grow with the width: Epic and Created join from about 1800px', async ({ page }) => {
+  test('columns grow with the width: Epic, Release, Tags and Created join from about 1800px', async ({ page }) => {
     await page.setViewportSize({ width: 1440, height: 900 })
     await mockWork(page, fixtures())
     await page.goto('/p/PHAROS')
     await expect(rows(page)).toHaveCount(5)
     await expect(headers(page)).toHaveText(['Key', 'Title', 'Status', 'Priority', 'Assignee', 'Updated'])
     await page.setViewportSize({ width: 2560, height: 1440 })
-    await expect(headers(page)).toHaveText(['Key', 'Title', 'Status', 'Priority', 'Assignee', 'Epic', 'Created', 'Updated'])
-    await expect(rows(page).filter({ hasText: 'PHAROS-11' }).locator('.c-epic')).toContainText('Guarded multi-cloud provisioning')
+    await expect(headers(page)).toHaveText(['Key', 'Title', 'Status', 'Priority', 'Assignee', 'Epic', 'Release', 'Tags', 'Created', 'Updated'])
+    const row = (key: string) => rows(page).filter({ has: page.locator('.key', { hasText: new RegExp(`^${key}$`) }) })
+    await expect(row('PHAROS-11').locator('.c-epic')).toHaveText('Guarded multi-cloud provisioning')
+    await expect(row('PHAROS-11').locator('.c-release')).toHaveText('v4.7.8')
+    await expect(row('PHAROS-11').locator('.c-tags .tag-chip')).toHaveText(['CUSTOMERPORTAL', 'hsb8'])
+    // A task shows its ticket's epic in the column and its ticket as the chip by the title.
+    await expect(row('PHAROS-13').locator('.c-epic')).toHaveText('Guarded multi-cloud provisioning')
+    await expect(row('PHAROS-13').locator('.parent-chip')).toHaveText('PHAROS-12')
+    await expect(row('PHAROS-11').locator('.parent-chip')).toHaveCount(0)
+    await expect(row('PHAROS-14').locator('.c-epic')).toHaveText('—')
+    // Title stops near 960px; the spare width goes to the text columns beside it.
+    const title = (await page.locator('thead th.c-title').boundingBox())!
+    expect(title.width).toBeGreaterThan(900)
+    expect(title.width).toBeLessThan(1140)
+    expect((await page.locator('thead th.c-epic').boundingBox())!.width).toBeGreaterThan(260)
     // The page has no width cap; the gutter grows to 48px.
     const table = (await page.locator('.table-card').boundingBox())!
     expect(table.x).toBeGreaterThanOrEqual(46)
     expect(table.x + table.width).toBeGreaterThan(2560 - 70)
+    // Title resizes too: its width becomes the target, and is saved.
+    const handle = page.getByRole('separator', { name: 'Resize Title column' })
+    const box = (await handle.boundingBox())!
+    await page.mouse.move(box.x + box.width / 2, box.y + box.height / 2)
+    await page.mouse.down()
+    await page.mouse.move(box.x - 200, box.y + box.height / 2, { steps: 4 })
+    await page.mouse.up()
+    await expect.poll(async () => Math.round((await page.locator('thead th.c-title').boundingBox())!.width)).toBeLessThan(title.width - 150)
   })
 
   test('the Display menu shows, hides and reorders columns, saved per project on the server', async ({ page }) => {
@@ -38,7 +59,7 @@ test.describe('wide lists', () => {
     await expect(headers(page)).toHaveText(['Key', 'Title', 'Status', 'Assignee', 'Updated'])
     // Alt+Up moves Updated before Assignee.
     await menu.getByRole('checkbox', { name: 'Updated' }).focus()
-    for (let i = 0; i < 4; i++) await page.keyboard.press('Alt+ArrowUp')
+    for (let i = 0; i < 6; i++) await page.keyboard.press('Alt+ArrowUp')
     await expect(headers(page)).toHaveText(['Key', 'Title', 'Status', 'Updated', 'Assignee'])
     await menu.getByRole('checkbox', { name: 'Estimate' }).check()
     await expect(headers(page)).toHaveText(['Key', 'Title', 'Status', 'Updated', 'Assignee', 'Estimate'])
@@ -119,8 +140,26 @@ test.describe('edit mode', () => {
     const form = ws.getByRole('form', { name: 'Edit PHAROS-12' })
     await expect(form.getByLabel('Title')).toBeFocused()
     await form.getByLabel('Title').fill('Add an Oracle Cloud Always Free connector')
-    await form.getByLabel('Priority').selectOption('high')
-    await form.getByLabel('Status').selectOption('in_progress')
+    // Status, priority and assignee use the app's own menus, styled as fields.
+    await expect(form.locator('select')).toHaveCount(0)
+    await form.getByRole('button', { name: 'Priority Medium' }).click()
+    await page.getByRole('menu', { name: 'Priority of PHAROS-12' }).getByRole('menuitemradio', { name: 'High' }).click()
+    await expect(form.getByRole('button', { name: 'Priority High' })).toBeFocused()
+    // From the keyboard: ArrowDown opens, digits pick.
+    await form.getByRole('button', { name: 'Status Backlog' }).focus()
+    await page.keyboard.press('ArrowDown')
+    await expect(page.getByRole('menu', { name: 'Status of PHAROS-12' })).toBeVisible()
+    await page.keyboard.press('3')
+    await expect(form.getByRole('button', { name: 'Status In progress' })).toBeFocused()
+    await form.getByRole('button', { name: 'Assignee Unassigned' }).click()
+    await page.getByRole('textbox', { name: 'Find assignee' }).fill('mira')
+    await page.keyboard.press('Enter')
+    await expect(form.getByRole('button', { name: 'Assignee Mira Holm' })).toBeVisible()
+    // Escape in a menu closes only the menu.
+    await form.getByRole('button', { name: 'Assignee Mira Holm' }).click()
+    await page.keyboard.press('Escape')
+    await expect(page.getByRole('menu', { name: 'Assignee of PHAROS-12' })).toHaveCount(0)
+    await expect(form).toBeVisible()
     await form.getByLabel('Description, Markdown').fill('Use the **Always Free** tier.')
     await form.getByLabel('Acceptance criteria, Markdown').fill('- [ ] Connector registered')
     await expect(ws.getByText('Unsaved')).toBeVisible()
@@ -128,7 +167,7 @@ test.describe('edit mode', () => {
     await expect(ws.getByRole('heading', { name: 'Add an Oracle Cloud Always Free connector' })).toBeVisible()
     const writes = patches(calls)
     expect(writes).toHaveLength(1)
-    expect(writes[0].body).toMatchObject({ title: 'Add an Oracle Cloud Always Free connector', body: 'Use the **Always Free** tier.', state: 'in_progress', fields: { priority: 'high', acceptance_criteria: '- [ ] Connector registered' } })
+    expect(writes[0].body).toMatchObject({ title: 'Add an Oracle Cloud Always Free connector', body: 'Use the **Always Free** tier.', state: 'in_progress', fields: { priority: 'high', assignee: '22222222-2222-4222-8222-222222222222', acceptance_criteria: '- [ ] Connector registered' } })
     expect(writes[0].headers['if-unmodified-since']).toBeTruthy()
     await expect(ws.locator('.md-section').first()).toContainText('Use the Always Free tier.')
     // e opens it again; Escape without changes simply leaves.

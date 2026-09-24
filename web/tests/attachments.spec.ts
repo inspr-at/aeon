@@ -77,22 +77,27 @@ test('a failed upload says why and can be retried or removed', async ({ page }) 
   await expect(strip(page).locator('.item.failed')).toHaveCount(0)
 })
 
-test('delete waits for the undo toast; Undo keeps the attachment', async ({ page }) => {
-  const { calls } = await open(page)
+test('delete reaches the server at once; Undo in the toast undoes it on the server', async ({ page }) => {
+  const { calls, data } = await open(page)
   await tiles(page).first().hover()
   await strip(page).getByRole('button', { name: 'Delete fleet-list-before.png' }).click()
   await expect(tiles(page)).toHaveCount(3)
+  await expect.poll(() => writes(calls, 'DELETE', '/api/attachments/').length).toBe(1)
+  expect(writes(calls, 'DELETE', '/api/attachments/')[0].path).toBe('/api/attachments/att-1')
   const toast = page.locator('.toast').filter({ hasText: 'Deleted fleet-list-before.png' })
   await toast.getByRole('button', { name: 'Undo' }).click()
   await expect(tiles(page)).toHaveCount(4)
-  await page.waitForTimeout(300)
-  expect(writes(calls, 'DELETE', '/api/attachments/')).toHaveLength(0)
-  // Delete from the keyboard, and let the toast run out: now it reaches the server.
+  await expect(tiles(page).first()).toHaveAttribute('data-attachment-id', 'att-1')
+  await expect.poll(() => writes(calls, 'POST', '/api/events/').map(c => c.path)).toEqual(['/api/events/1/undo'])
+  expect(data.attachments['n-1'].map(a => a.id)).toContain('att-1')
+  // From the keyboard, and without Undo: the delete stands.
   await tiles(page).nth(2).focus()
   await page.keyboard.press('Delete')
   await expect(tiles(page)).toHaveCount(3)
-  await expect.poll(() => writes(calls, 'DELETE', '/api/attachments/').length, { timeout: 9000 }).toBe(1)
-  expect(writes(calls, 'DELETE', '/api/attachments/')[0].path).toBe('/api/attachments/att-3')
+  await expect.poll(() => writes(calls, 'DELETE', '/api/attachments/').length).toBe(2)
+  expect(writes(calls, 'DELETE', '/api/attachments/')[1].path).toBe('/api/attachments/att-3')
+  await expect(page.locator('.toast').filter({ hasText: 'Deleted phone.png' })).toBeHidden({ timeout: 9000 })
+  expect(writes(calls, 'POST', '/api/events/')).toHaveLength(1)
 })
 
 test('Alt+arrows reorder with the attachment precondition', async ({ page }) => {

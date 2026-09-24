@@ -87,6 +87,25 @@ export async function deleteAttachment(id: string, keepalive = false): Promise<v
   await json(await api(`/attachments/${encodeURIComponent(id)}`, { method: 'DELETE', keepalive }))
 }
 
+// Server undo: the removal is an event; its undo restores the attachment. The
+// DELETE answers without the event, so the ticket's events are read (oldest
+// first, in pages) for the newest removal of this attachment.
+interface EventRow { id: number; type: string; after: { id?: string } | null; undo_of: number | null }
+export async function findRemovalEvent(nodeId: string, attachmentId: string): Promise<number | null> {
+  let after = 0, found: number | null = null
+  for (let page = 0; page < 50; page++) {
+    const body = await json<{ items: EventRow[]; next_after: number | null }>(await api(`/events?node_id=${encodeURIComponent(nodeId)}&limit=200${after ? `&after=${after}` : ''}`))
+    for (const event of body.items) if (event.type === 'attachment.removed' && event.after?.id === attachmentId && event.undo_of == null) found = event.id
+    if (!body.next_after) break
+    after = body.next_after
+  }
+  return found
+}
+export async function undoEvent(eventId: number): Promise<Attachment | null> {
+  const event = await json<{ after: Attachment | null }>(await api(`/events/${eventId}/undo`, { method: 'POST' }))
+  return event?.after ?? null
+}
+
 // The position between two neighbours, so one PATCH moves an item; a decimal
 // string the server accepts (at most 15 places, no exponent).
 export function positionBetween(before: number | undefined, after: number | undefined): string {
