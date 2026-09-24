@@ -14,7 +14,7 @@ const copy = <T>(v: T): T => structuredClone(v)
 
 export function mergeQuote(base: QuoteDocumentData, mine: QuoteDocumentData, theirs: QuoteDocumentData, choices: ConflictChoices = {}): MergePreview {
   const conflicts: MergeConflict[] = []
-  if ([base, mine, theirs].some(d => d.schema_version !== 1 || d.minimum_writer_version > 1)) {
+  if ([base, mine, theirs].some(d => d.schema_version !== 1 || d.minimum_writer_version > 2)) {
     return { document: null, conflicts: [{ path: '$', reason: 'incompatible schema', mine, theirs }], changed: false }
   }
   function resolve(path: string, reason: string, m: Value, t: Value): Value {

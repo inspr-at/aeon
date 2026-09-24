@@ -77,7 +77,7 @@ test('customer → quote → inspector save → issue → public acceptance race
   await page.getByRole('button', { name: 'Save draft' }).click()
   await expect.poll(() => draftRevision).toBe(2)
   expect(document.title).toBe('Synthetic service proposal revised')
-  expect(calls.find(call => call.method === 'PATCH' && call.path.endsWith('/draft'))?.body).toMatchObject({ writer_version: 1 })
+  expect(calls.find(call => call.method === 'PATCH' && call.path.endsWith('/draft'))?.body).toMatchObject({ writer_version: 2 })
 
   const issued = await page.evaluate(async ({ quoteId, quoteRevision, draftRevision, digest }) => {
     const response = await fetch(`/api/quotes/${quoteId}/finalize`, { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ expected_quote_revision: quoteRevision, expected_draft_revision: draftRevision, expected_document_sha256: digest }) })

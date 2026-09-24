@@ -113,3 +113,44 @@ test('same-person tabs keep distinct mutation sessions after window.open clones 
     expect(external).toBe('newer')
   }finally{await context.close()}
 })
+
+test('collaborator list combines tabs, labels idle people and clears expired sessions',async({page})=>{
+  await page.route('**/api/**',route=>route.fulfill({status:200,contentType:'application/json',body:'{}'}));await page.goto('/')
+  await page.evaluate(async()=>{const {mountCollaborationBar}=await import('/tests/quote-collaboration-harness.ts');mountCollaborationBar()})
+  const bar=page.getByLabel('Quote collaboration status')
+  await page.evaluate(()=>{const fixture=(window as any).quoteBarTest;fixture.presence.value={...fixture.presence.value,sessions:[
+    {session_id:'one',principal_id:'riley',name:'Riley Example',mode:'editing',observed_revision:1,expires_at:'2099-01-01'},
+    {session_id:'two',principal_id:'riley',name:'Riley Example',mode:'idle',observed_revision:1,expires_at:'2099-01-01'},
+  ]}})
+  const toggle=bar.getByRole('button',{name:'1 collaborators'})
+  await expect(toggle).toBeVisible()
+  const initialColor=await toggle.locator('.avatar').evaluate(el=>getComputedStyle(el).backgroundColor)
+  await toggle.focus();await page.keyboard.press('Enter')
+  await expect(toggle).toHaveAttribute('aria-expanded','true')
+  await expect(bar.getByRole('list',{name:'Collaborators'}).getByRole('listitem')).toHaveText(['RRiley Example · editing · 2 tabs'])
+  await page.evaluate(()=>{const fixture=(window as any).quoteBarTest;fixture.presence.value={...fixture.presence.value,sessions:[
+    {session_id:'reconnected',principal_id:'riley',name:'Riley Example',mode:'idle',observed_revision:1,expires_at:'2099-01-01'},
+  ]}})
+  await expect(bar.getByRole('list',{name:'Collaborators'}).getByRole('listitem')).toHaveText(['RRiley Example · idle'])
+  expect(await toggle.locator('.avatar').evaluate(el=>getComputedStyle(el).backgroundColor)).toBe(initialColor)
+  await page.evaluate(()=>{const fixture=(window as any).quoteBarTest;fixture.presence.value={...fixture.presence.value,sessions:[]}})
+  await expect(bar.getByRole('button',{name:'Only you here'})).toBeVisible()
+  await expect(bar.getByRole('list',{name:'Collaborators'}).getByRole('listitem')).toHaveText(['No other collaborators are present.'])
+})
+
+test('save status keeps remote updates separate and offers keyboard-accessible actions',async({page})=>{
+  await page.emulateMedia({reducedMotion:'reduce'})
+  await page.route('**/api/**',route=>route.fulfill({status:200,contentType:'application/json',body:'{}'}));await page.goto('/')
+  await page.evaluate(async()=>{const {mountCollaborationBar}=await import('/tests/quote-collaboration-harness.ts');mountCollaborationBar()})
+  const bar=page.getByLabel('Quote collaboration status')
+  await expect(bar.getByRole('status')).toHaveText('Saved')
+  await page.evaluate(()=>{const fixture=(window as any).quoteBarTest;fixture.view.value={...fixture.view.value,remote:'newer'}})
+  await expect(bar.getByRole('status')).toContainText('SavedChanged by Riley ExampleUpdate')
+  await bar.getByRole('button',{name:'Update'}).focus();await page.keyboard.press('Enter')
+  await page.evaluate(()=>{const fixture=(window as any).quoteBarTest;fixture.view.value={...fixture.view.value,local:'dirty'}})
+  await expect(bar.getByRole('status')).toContainText('Unsaved changesChanged by Riley ExampleReview changes')
+  await bar.getByRole('button',{name:'Review changes'}).focus();await page.keyboard.press('Enter')
+  expect(await page.evaluate(()=>(window as any).quoteBarTest.actions)).toEqual(['reload','review'])
+  await page.emulateMedia({media:'print'})
+  await expect(bar).toBeHidden()
+})

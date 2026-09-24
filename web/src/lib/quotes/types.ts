@@ -41,7 +41,7 @@ export interface QuoteLayout {
   logo_width_mm?: string; logo_offset_mm?: string; logo_file_id?: string; logo_sha256?: string; page_style?: string
 }
 export interface QuoteDocumentData {
-  schema_version: 1; minimum_writer_version: 1; title: string; subtitle: string; project_ref: string
+  schema_version: 1; minimum_writer_version: 1 | 2; title: string; subtitle: string; project_ref: string
   offer_date: string; valid_until: string; currency: string; sender: QuoteSender; recipient: QuoteRecipient
   legal: QuoteLegal; layout: QuoteLayout; sections: QuoteSection[]; positions: QuotePosition[]; net_total_cents: number
 }

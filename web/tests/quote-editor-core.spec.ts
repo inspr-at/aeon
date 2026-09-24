@@ -95,6 +95,7 @@ test('typed P1 client sends CAS and stable document to the mocked draft API', as
   expect(result.saved.acknowledged_revision).toBe(4)
   expect(requests[0]?.method).toBe('PATCH')
   expect(requests[0]?.headers['if-match']).toBe('"qd-3"')
+  expect((requests[0]?.body as { writer_version: number }).writer_version).toBe(2)
   expect((requests[0]?.body as { document: unknown }).document).toEqual(document)
 })
 

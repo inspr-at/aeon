@@ -8,9 +8,9 @@
   },
   "scope_note": "Each nonempty feature-list line and each open-ticket acceptance criterion has one result. Synthetic fixtures only. No classic instance, business data, migration execution, cutover or deployment. A pass applies only to its exact cited assertion.",
   "counts": {
-    "pass": 67,
-    "gap": 43,
-    "deferred": 11
+    "pass": 70,
+    "gap": 29,
+    "deferred": 22
   },
   "features": [
     {
@@ -198,48 +198,48 @@
       "source": "feature-list.txt",
       "heading": "Save, version and conflict behaviour",
       "claim": "Autosave is debounced about 700 ms; explicit Save and saved-at/saving/unsaved/error feedback are available. Save uses expected revision and only succeeds on a draft; stale writes or already finalized documents return 409. The UI keeps the local draft on conflict, permits a local draft download, and offers an explicit server reload that discards local changes. Save-before-navigation, before-unload warning and save-before-print/finalize protect local work. Invalid numeric inputs block save/print.",
-      "status": "gap",
+      "status": "deferred",
       "owner": "P1/P6",
       "evidence": [
         "inspect:web/tests/quote-collaboration.spec.ts"
       ],
-      "reason": "The complete source claim needs direct integrated evidence."
+      "reason": "Autosave timing, navigation protection and save-state feedback need the P7 editor UI integration check."
     },
     {
       "id": "F05.02",
       "source": "feature-list.txt",
       "heading": "Save, version and conflict behaviour",
       "claim": "Revision is a monotonically increasing concurrency counter, NOT a retained series of draft snapshots or a user-selectable version history. Undo/redo is in the current document session. Finalized content is revised by duplication, not by editing or opening a newer version on the same offer.",
-      "status": "gap",
+      "status": "deferred",
       "owner": "P1/P6",
       "evidence": [
         "inspect:web/tests/quote-collaboration.spec.ts"
       ],
-      "reason": "The complete source claim needs direct integrated evidence."
+      "reason": "The local history and duplicate flow need a routed editor test; P7 owns that UI."
     },
     {
       "id": "F05.03",
       "source": "feature-list.txt",
       "heading": "Save, version and conflict behaviour",
       "claim": "PAI-1070 suppresses saves while loading/reloading, fences async responses to the current document and retains edits/selection through inspector interaction. Server prose writer guards protect newer structured/inline text from older editor versions, including settings writes inside a transaction.",
-      "status": "gap",
+      "status": "deferred",
       "owner": "P1/P6",
       "evidence": [
         "inspect:web/tests/quote-collaboration.spec.ts"
       ],
-      "reason": "The complete source claim needs direct integrated evidence."
+      "reason": "The older-writer guard is fixed; load, selection and async-response races still need P7 editor evidence."
     },
     {
       "id": "F06.01",
       "source": "feature-list.txt",
       "heading": "Document content and pricing",
       "claim": "Users edit title, subtitle, project reference, date, expiry, recipient snapshot/address/contact, own contact person, introduction, ordered sections, positions, acceptance text and VAT wording directly on the page. The customer number remains immutable. The document uses an offer number and page X of Y footers.",
-      "status": "gap",
+      "status": "deferred",
       "owner": "P1/P3",
       "evidence": [
         "inspect:web/tests/quote-editor-core.spec.ts"
       ],
-      "reason": "The complete source claim needs direct integrated evidence."
+      "reason": "Document fields exist in the engine; complete direct-page editing needs the P7 editor UI check."
     },
     {
       "id": "F06.02",
@@ -270,12 +270,12 @@
       "source": "feature-list.txt",
       "heading": "Sections, lists and inline styles",
       "claim": "A document has up to 20 text sections with editable headings/body. Sections can be added, selected, reordered and deleted with modal confirmation. Heading/section numbering follows document order; the editor keeps selection and history associated with a section through moves/repagination.",
-      "status": "gap",
+      "status": "deferred",
       "owner": "P3/P4",
       "evidence": [
         "inspect:web/tests/quote-inspector.spec.ts"
       ],
-      "reason": "The complete source claim needs direct integrated evidence."
+      "reason": "Section persistence exists; the required modal delete and selection-through-repagination belong to P4/P7 UI."
     },
     {
       "id": "F07.02",
@@ -415,12 +415,12 @@
       "source": "feature-list.txt",
       "heading": "Zoom, pagination and PDF",
       "claim": "Draft/finalized ordinary PDF export uses browser print from the dedicated print view. Public readers can print too. Accepted confirmation PDF is separately rendered server-side by headless Chromium/chromedp using the same Vue OfferDocument entry and stored durably; download becomes available when prepared. It includes an acceptance stamp, signer/company/time and hash reference. The old reports_pdf.go/fpdf engine is not the commercial offer renderer.",
-      "status": "gap",
+      "status": "deferred",
       "owner": "P3/P5",
       "evidence": [
         "inspect:internal/quotepdf/render_test.go"
       ],
-      "reason": "The complete source claim needs direct integrated evidence."
+      "reason": "A4 output is tested; ordinary print and accepted confirmation require a P5/P7 integrated PDF check."
     },
     {
       "id": "F10.04",
@@ -748,12 +748,12 @@
       "source": "feature-list.txt",
       "heading": "Accepted port scope and backlog traceability",
       "claim": "NEW implementation required: named stable-colour viewing/editing/idle presence, truthful block/caret overlays, expiry/reconnect and permissions; combine with protected saves and review/recovery. Full concurrent text synchronization is not implied by presence; the selected design uses cursor awareness plus optimistic saves and explicit conflict reconciliation.",
-      "status": "gap",
+      "status": "deferred",
       "owner": "P6",
       "evidence": [
         "inspect:web/tests/quote-inspector.spec.ts"
       ],
-      "reason": "The complete source claim needs direct integrated evidence."
+      "reason": "Presence and protected saves have passing slices; full overlay, accessibility and performance criteria remain open."
     },
     {
       "id": "F15.16",
@@ -846,12 +846,14 @@
       "id": "PAI-1067.AC01",
       "source": "backlog-open.txt",
       "claim": "The editor shows authorised collaborators on the current document with names/avatars or initials, consistent colours, and meaningful active/idle presence; disconnected sessions expire and reconnect without stale ghosts or duplicate users.",
-      "status": "gap",
+      "status": "pass",
       "owner": "P6",
       "evidence": [
-        "inspect:web/tests/quote-collaboration.spec.ts"
+        "test:web/tests/quote-collaboration.spec.ts::collaborator list combines tabs, labels idle people and clears expired sessions",
+        "test:web/tests/quotes/two-user-presence.spec.ts::two editors see named presence",
+        "test:internal/business/quotes/collaboration/module_test.go::TestLeasesAndAuthorization"
       ],
-      "reason": "The complete criterion needs an integrated test or operator inspection."
+      "reason": "Names, stable colours, idle state, tab grouping and expiry have browser and server assertions."
     },
     {
       "id": "PAI-1067.AC02",
@@ -868,23 +870,24 @@
       "id": "PAI-1067.AC03",
       "source": "backlog-open.txt",
       "claim": "Overlay anchors remain correct through zoom, reflow, pagination, section insertion/reordering/deletion and supported remote revision updates. Overlays do not obstruct editing or appear in saved text, print or PDFs.",
-      "status": "gap",
+      "status": "deferred",
       "owner": "P6",
       "evidence": [
         "inspect:web/tests/quote-collaboration.spec.ts"
       ],
-      "reason": "The complete criterion needs an integrated test or operator inspection."
+      "reason": "Overlay tests cover stable anchors and print hiding; zoom, repagination and unchanged PDF need P7 UI checks."
     },
     {
       "id": "PAI-1067.AC04",
       "source": "backlog-open.txt",
       "claim": "A cohesive control next to or combined with the save state distinguishes local save status from newer remote revisions and exposes an obvious Reload/update action; own saves do not create false alerts.",
-      "status": "gap",
+      "status": "pass",
       "owner": "P6",
       "evidence": [
-        "inspect:web/tests/quote-collaboration.spec.ts"
+        "test:web/tests/quote-collaboration.spec.ts::save status keeps remote updates separate and offers keyboard-accessible actions",
+        "test:web/tests/quote-collaboration.spec.ts::dirty reload preserves local text"
       ],
-      "reason": "The complete criterion needs an integrated test or operator inspection."
+      "reason": "The shared control distinguishes clean and dirty remote changes; keyboard actions and protected reload are tested."
     },
     {
       "id": "PAI-1067.AC05",
@@ -923,23 +926,23 @@
       "id": "PAI-1067.AC08",
       "source": "backlog-open.txt",
       "claim": "Collaboration colours are paired with names/labels, keyboard-accessible collaborator/status controls, readable contrast and reduced-motion treatment for blinking cursors.",
-      "status": "gap",
+      "status": "deferred",
       "owner": "P6",
       "evidence": [
         "inspect:web/tests/quote-collaboration.spec.ts"
       ],
-      "reason": "The complete criterion needs an integrated test or operator inspection."
+      "reason": "The collaborator bar is keyboard usable, but axe reports insufficient contrast on its Changed by text; P7 owns the style."
     },
     {
       "id": "PAI-1067.AC09",
       "source": "backlog-open.txt",
       "claim": "Multi-session end-to-end checks cover join/leave, concurrent saves, remote updates while clean and dirty, lost connections/reconnect, section changes, permission boundaries and unchanged PDF output. Representative document size and collaborator-count performance targets are agreed and verified.",
-      "status": "gap",
+      "status": "deferred",
       "owner": "P6",
       "evidence": [
         "inspect:web/tests/quote-collaboration.spec.ts"
       ],
-      "reason": "The complete criterion needs an integrated test or operator inspection."
+      "reason": "A second-tenant browser run and measured document-size/collaborator performance target are still needed."
     },
     {
       "id": "PAI-1071.AC01",
@@ -1264,23 +1267,25 @@
       "id": "PAI-1068.AC06",
       "source": "backlog-open.txt",
       "claim": "Existing unformatted documents remain compatible. Stored inline styles cannot be silently stripped by an older writer; pasted content is handled safely and cannot introduce executable markup.",
-      "status": "gap",
+      "status": "pass",
       "owner": "P1/P3",
       "evidence": [
-        "inspect:web/tests/quote-inspector.spec.ts"
+        "test:internal/business/quotes/quotes_test.go::TestQuoteFlowAndGates",
+        "test:web/tests/quote-editor-core.spec.ts::typed P1 client sends CAS and stable document",
+        "test:web/tests/quote-editor-input.spec.ts::plain paste, Unicode composition and history keep stable prose IDs"
       ],
-      "reason": "The complete criterion needs an integrated test or operator inspection."
+      "reason": "Version-1 drafts remain writable; writer 1 cannot introduce or strip marks after a version-2 save; plain paste stays inert."
     },
     {
       "id": "PAI-1068.AC07",
       "source": "backlog-open.txt",
       "claim": "Tests cover partial-word and multi-paragraph selections, mixed styles, removing one style while keeping the other, Unicode, list items, undo/redo, save/reload and PDF wrapping.",
-      "status": "gap",
+      "status": "deferred",
       "owner": "P3/P4/P5",
       "evidence": [
         "inspect:web/tests/quote-inspector.spec.ts"
       ],
-      "reason": "The complete criterion needs an integrated test or operator inspection."
+      "reason": "P3 writer safety passes; multi-paragraph formatting and emitted PDF wrapping need P4/P5 UI tests."
     },
     {
       "id": "PAI-1070.AC01",

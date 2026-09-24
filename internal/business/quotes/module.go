@@ -439,7 +439,7 @@ func (m *Module) create(w http.ResponseWriter, r *http.Request) {
 			if err != nil {
 				return err
 			}
-			_, err = tx.Exec(r.Context(), `INSERT INTO quote_drafts(tenant_id,quote_node_id,document,schema_version,minimum_writer_version,updated_by_principal_id) VALUES($1::uuid,$2::uuid,$3::jsonb,1,1,$4::uuid)`, p.TenantID, out.QuoteNodeID, string(raw), p.ID)
+			_, err = tx.Exec(r.Context(), `INSERT INTO quote_drafts(tenant_id,quote_node_id,document,schema_version,minimum_writer_version,updated_by_principal_id) VALUES($1::uuid,$2::uuid,$3::jsonb,1,$4,$5::uuid)`, p.TenantID, out.QuoteNodeID, string(raw), doc.MinimumWriterVersion, p.ID)
 			if err != nil {
 				return err
 			}

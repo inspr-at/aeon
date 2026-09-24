@@ -100,7 +100,7 @@ func decodeDocument(raw []byte) (quoteDocument, error) {
 	if err := dec.Decode(&d); err != nil {
 		return d, bad("invalid document schema")
 	}
-	if d.SchemaVersion != 1 || d.MinimumWriterVersion != 1 {
+	if d.SchemaVersion != 1 || d.MinimumWriterVersion < 1 || d.MinimumWriterVersion > 2 {
 		return d, conflict("unsupported document writer")
 	}
 	if !jsonObject(d.Sender) || !jsonObject(d.Recipient) || !jsonObject(d.Legal) || !jsonObject(d.Layout) {
@@ -119,6 +119,23 @@ func decodeDocument(raw []byte) (quoteDocument, error) {
 		return d, err
 	}
 	return d, nil
+}
+
+// Inline marks are part of the full-document write contract introduced by
+// writer 2. Keep the requirement after all marks are removed so a stale older
+// editor cannot later replace a marked document with an unformatted copy.
+func documentMinimumWriterVersion(d quoteDocument) int {
+	if d.MinimumWriterVersion > 1 {
+		return d.MinimumWriterVersion
+	}
+	for _, section := range d.Sections {
+		for _, node := range section.Nodes {
+			if len(node.Marks) > 0 {
+				return 2
+			}
+		}
+	}
+	return 1
 }
 
 var senderFields = map[string]bool{"company": true, "street": true, "postal_code": true, "city": true, "country": true, "register_no": true, "register_court": true, "email": true, "phone": true, "website": true, "uid": true, "bank_name": true, "iban": true, "bic": true, "contact_person": true, "logo_file_id": true, "logo_sha256": true}
@@ -407,5 +424,6 @@ func makeDocument(ctx context.Context, tx pgx.Tx, settings quoteSettings, org, t
 		}
 		d.Sections = append(d.Sections, section)
 	}
+	d.MinimumWriterVersion = documentMinimumWriterVersion(d)
 	return d, nil
 }

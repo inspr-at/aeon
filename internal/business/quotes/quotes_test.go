@@ -388,6 +388,65 @@ func TestQuoteFlowAndGates(t *testing.T) {
 	if !((raceStatuses[0] == 200 && raceStatuses[1] == 412) || (raceStatuses[1] == 200 && raceStatuses[0] == 412)) {
 		t.Fatalf("concurrent draft saves %v %v", raceStatuses, raceResponses)
 	}
+	// A version-1 client may keep editing plain documents, but cannot strip
+	// marks after a version-2 writer has saved them, even after marks are removed.
+	markedID := created[3]["quote_node_id"].(string)
+	status, markedDraft := call("admin", "GET", "/api/quotes/"+markedID+"/draft", "")
+	if status != 200 {
+		t.Fatalf("marked draft read %d %v", status, markedDraft)
+	}
+	markedDoc := markedDraft["document"].(map[string]any)
+	writeMarked := func(writer, revision, mutation int, document map[string]any) (int, map[string]any) {
+		t.Helper()
+		body, err := json.Marshal(map[string]any{
+			"client_session_id": "55555555-5555-4555-8555-555555555555",
+			"mutation_id":       fmt.Sprintf("66666666-6666-4666-8666-%012d", mutation),
+			"writer_version":    writer,
+			"document":          document,
+		})
+		if err != nil {
+			t.Fatal(err)
+		}
+		req := httptest.NewRequest("PATCH", "/api/quotes/"+markedID+"/draft", strings.NewReader(string(body)))
+		req.Header.Set("If-Match", fmt.Sprintf(`"qd-%d"`, revision))
+		req = req.WithContext(tenant.WithPrincipal(req.Context(), as("admin")))
+		rec := httptest.NewRecorder()
+		mux.ServeHTTP(rec, req)
+		var value map[string]any
+		dec := json.NewDecoder(strings.NewReader(rec.Body.String()))
+		dec.UseNumber()
+		_ = dec.Decode(&value)
+		return rec.Code, value
+	}
+	markedDoc["title"] = "Plain edit"
+	if code, value := writeMarked(1, 1, 1, markedDoc); code != 200 {
+		t.Fatalf("plain writer-1 edit %d %v", code, value)
+	}
+	markedDoc["sections"] = []any{map[string]any{
+		"id": "77777777-7777-4777-8777-777777777777", "heading": "Scope", "body": "Hello",
+		"nodes": []any{map[string]any{"id": "88888888-8888-4888-8888-888888888888", "kind": "paragraph", "text": "Hello", "marks": []any{map[string]any{"start": 0, "end": 5, "bold": true}}}},
+	}}
+	if code, value := writeMarked(1, 2, 2, markedDoc); code != 409 {
+		t.Fatalf("old writer introduced marks %d %v", code, value)
+	}
+	if code, value := writeMarked(2, 2, 3, markedDoc); code != 200 || value["document"].(map[string]any)["minimum_writer_version"] != json.Number("2") {
+		t.Fatalf("marked writer-2 edit %d %v", code, value)
+	}
+	status, markedDraft = call("admin", "GET", "/api/quotes/"+markedID+"/draft", "")
+	if status != 200 || markedDraft["minimum_writer_version"] != json.Number("2") {
+		t.Fatalf("writer floor not advertised %d %v", status, markedDraft)
+	}
+	unmarkedDoc := markedDraft["document"].(map[string]any)
+	delete(unmarkedDoc["sections"].([]any)[0].(map[string]any)["nodes"].([]any)[0].(map[string]any), "marks")
+	if code, value := writeMarked(1, 3, 4, unmarkedDoc); code != 409 {
+		t.Fatalf("old writer stripped marks %d %v", code, value)
+	}
+	if code, value := writeMarked(2, 3, 5, unmarkedDoc); code != 200 || value["document"].(map[string]any)["minimum_writer_version"] != json.Number("2") {
+		t.Fatalf("writer-2 regular formatting %d %v", code, value)
+	}
+	if code, value := writeMarked(1, 4, 6, unmarkedDoc); code != 409 {
+		t.Fatalf("writer floor regressed after removing marks %d %v", code, value)
+	}
 	var customerCount int
 	e = db.InTenant(ctx, database.App, tenantID, func(tx pgx.Tx) error {
 		return tx.QueryRow(ctx, `SELECT count(*) FROM crm_customer_numbers WHERE organisation_node_id=$1::uuid`, ids["org"]).Scan(&customerCount)

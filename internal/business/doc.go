@@ -257,6 +257,9 @@
 //
 // Draft PATCH requires If-Match "qd-<draft_revision>" and writer_version plus
 // UUID client_session_id/mutation_id. Missing/stale preconditions fail 428/412.
+// Writer 2 preserves inline marks. A draft gains minimum_writer_version=2 on
+// its first marked save and keeps that floor after formatting is removed;
+// unformatted writer-1 drafts remain writable by older clients.
 // Receipts are durable with no silent expiry; exact replay acknowledges the
 // original result revision, while a reused ID with changed payload conflicts.
 // The aggregate business_quotes.revision fences lifecycle/visibility and is
