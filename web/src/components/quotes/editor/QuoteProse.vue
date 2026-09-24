@@ -10,6 +10,20 @@ const emit = defineEmits<{ select: [selection: TextSelection]; moveSection: [dir
 const root = ref<HTMLElement>()
 const shown = computed(() => nodesFor(props.body, props.nodes))
 const markers = computed(() => markerLabels(shown.value, props.sectionNumber))
+// Hanging indent: each level's markers share one column, as wide as its longest
+// label ("2.10" needs more than "•"), so the text of one level lines up.
+const INDENT_EM = 1.35
+const columns = computed(() => {
+  const widest = new Map<number, number>()
+  shown.value.forEach((node, index) => {
+    if (node.kind !== 'item') return
+    const depth = node.depth ?? 0, label = markers.value[index] ?? ''
+    widest.set(depth, Math.max(widest.get(depth) ?? 0, Math.max(1.5, label.length * .6 + .7)))
+  })
+  return widest
+})
+const rowStyle = (node: TextNode) => node.kind === 'item' ? { paddingLeft: `${(node.depth ?? 0) * INDENT_EM + (columns.value.get(node.depth ?? 0) ?? 1.5)}em` } : undefined
+const markerStyle = (node: TextNode) => ({ left: `${(node.depth ?? 0) * INDENT_EM}em`, transform: `translate(${node.marker_x_mm ?? '0'}mm, ${node.marker_y_mm ?? '0'}mm)` })
 const composing = ref(false)
 let pending: TextPoint | null = null
 let visualEdge: { nodeId: string; edge: LineEdge } | null = null
@@ -42,7 +56,20 @@ function place(point: TextPoint) {
   if (target) live.collapse(target.node, target.offset)
   else live.collapse(el, 0)
 }
-watch(() => [props.body, props.nodes], () => { if (pending && !composing.value) { const at = pending; pending = null; void nextTick(() => { place(at); select(true) }) } }, { deep: true })
+// A command from the inspector or the title bar (style, list, undo) re-renders the
+// text while it keeps focus: put the kept selection back so it stays visible.
+function placeRange(selection: TextSelection) {
+  const point = (p: TextPoint) => { const el = textRoot(p.nodeId); return el ? pointInTextNodes(collectTextNodes(el), p.offset) ?? { node: el, offset: 0 } : null }
+  const a = point(selection.anchor), f = point(selection.focus)
+  if (a && f) window.getSelection()?.setBaseAndExtent(a.node, a.offset, f.node, f.offset)
+}
+watch(() => [props.body, props.nodes], () => {
+  if (pending && !composing.value) { const at = pending; pending = null; void nextTick(() => { place(at); select(true) }) }
+  else if (!pending && !composing.value) {
+    const kept = props.editor.selection.text
+    if (kept && kept.sectionId === props.sectionId && root.value?.contains(document.activeElement)) void nextTick(() => placeRange(kept))
+  }
+}, { deep: true })
 function commit(nodes: TextNode[], caret: TextPoint) {
   pending = caret
   props.editor.editSection(props.sectionId, { nodes })
@@ -118,8 +145,8 @@ function compositionEnd() {
 </script>
 <template>
   <div ref="root" class="quote-prose" :contenteditable="editable ? 'true' : undefined" role="textbox" :aria-label="`Section ${sectionNumber} text`" aria-multiline="true" spellcheck="true" @focus="select()" @keyup="select()" @mouseup="select()" @beforeinput="beforeInput" @input="input" @paste="paste" @keydown="keydown" @compositionstart="composing = true" @compositionend="compositionEnd">
-    <div v-for="(node, index) in shown" :key="node.id" class="quote-prose-row" :data-node-id="node.id" :class="{ item: node.kind === 'item' }" :style="node.kind === 'item' ? { paddingLeft: `${(node.depth ?? 0) * 1.35 + 1.5}em` } : undefined">
-      <span v-if="node.kind === 'item'" class="quote-marker" contenteditable="false" aria-hidden="true" :style="{ transform: `translate(${node.marker_x_mm ?? '0'}mm, ${node.marker_y_mm ?? '0'}mm)` }">{{ markers[index] }}</span>
+    <div v-for="(node, index) in shown" :key="node.id" class="quote-prose-row" :data-node-id="node.id" :class="{ item: node.kind === 'item' }" :style="rowStyle(node)">
+      <span v-if="node.kind === 'item'" class="quote-marker" contenteditable="false" aria-hidden="true" :style="markerStyle(node)">{{ markers[index] }}</span>
       <span class="quote-prose-text" :data-text-id="node.id" :style="node.text_start_mm ? { marginLeft: `${node.text_start_mm}mm` } : undefined"><template v-for="(run, part) in markRuns(node)" :key="part"><strong v-if="run.bold && run.italic"><em>{{ run.text }}</em></strong><strong v-else-if="run.bold">{{ run.text }}</strong><em v-else-if="run.italic">{{ run.text }}</em><template v-else>{{ run.text }}</template></template></span>
     </div>
   </div>
@@ -130,5 +157,6 @@ function compositionEnd() {
 .quote-prose-row.item { break-inside: avoid; }
 .quote-marker { position: absolute; left: 0; min-width: 1.2em; white-space: nowrap; user-select: none; }
 .quote-prose-text { display: inline; }
-.quote-prose:focus-visible { outline: 1px solid var(--teal); outline-offset: 3px; }
+/* The caret shows where you are; the block gets only a faint ring for keyboard focus. */
+.quote-prose:focus-visible { outline: 1px solid rgba(14, 111, 108, .3); outline-offset: 2mm; box-shadow: none; border-radius: 1px; }
 </style>

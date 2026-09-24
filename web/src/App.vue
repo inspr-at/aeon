@@ -18,6 +18,7 @@ import { useReleases } from './stores/releases'
 import { brand } from './lib/brand'
 import { toast } from './lib/toast'
 import { displayHeadline, getRelease } from './lib/releases'
+import { headerFolded } from './lib/chrome'
 
 const ReleasesSheet = defineAsyncComponent(() => import('./components/releases/ReleasesSheet.vue'))
 
@@ -29,6 +30,8 @@ const shortcuts = ref<InstanceType<typeof ShortcutSheet>>()
 const retrying = ref(false)
 // Sign-in is bare: it has no header or footer and shows connection problems itself.
 const bare = computed(() => !!route.meta.bare && !fatal.value)
+// A page that fills the screen (the quote editor) may fold the header away.
+const folded = computed(() => headerFolded.value && !!route.meta.foldHeader && !bare.value && !fatal.value)
 watch(command, value => { if (value?.command.name === 'shortcuts') { consume(); shortcuts.value?.open() } })
 // A new page clears an earlier page error.
 watch(() => route.fullPath, (_path, old) => { if (old !== undefined && fatal.value?.kind !== 'update') clearFatal() })
@@ -125,9 +128,9 @@ watch(() => [route.path, route.params.projectKey, route.params.ticketKey] as con
 </script>
 
 <template>
-  <div class="app-shell" :class="{ bare, 'footer-hidden': footerHidden && !bare }">
+  <div class="app-shell" :class="{ bare, 'footer-hidden': footerHidden && !bare, 'header-folded': folded }">
     <a class="skip-link" href="#main">Skip to content</a>
-    <AppHeader v-if="!bare" />
+    <AppHeader v-if="!bare && !folded" />
     <main id="main" ref="main" tabindex="-1" @scroll.passive="scrolled">
       <div class="page-flow" :class="{ fill: route.meta.fill && !session.error && !fatal }">
         <ErrorPage v-if="fatal" :error="fatal" />
@@ -153,6 +156,7 @@ watch(() => [route.path, route.params.projectKey, route.params.ticketKey] as con
 <style scoped>
 .app-shell { height: 100%; display: grid; grid-template-rows: var(--header-h) minmax(0, 1fr) var(--footer-h); }
 .app-shell.bare { --footer-h: 0px; grid-template-rows: minmax(0, 1fr); }
+.app-shell.header-folded { grid-template-rows: minmax(0, 1fr) var(--footer-h); }
 @media (max-width: 600px) {
   .app-shell { transition: --footer-h .22s ease; }
   .app-shell.footer-hidden { --footer-h: 0px; }
