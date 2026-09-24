@@ -4,7 +4,9 @@ package quotes
 
 import (
 	"context"
+	"crypto/rand"
 	"crypto/sha256"
+	"encoding/base64"
 	"encoding/hex"
 	"encoding/json"
 	"errors"
@@ -16,6 +18,7 @@ import (
 
 	"github.com/inspr-at/aeon/internal/events"
 	"github.com/inspr-at/aeon/internal/plugins/fence"
+	"github.com/inspr-at/aeon/internal/tenant"
 	"github.com/jackc/pgx/v5"
 )
 
@@ -49,6 +52,45 @@ func rateCents(rate decimal, quantity int64) (int64, error) {
 		return 0, bad("rate total too large")
 	}
 	return n.Int64(), nil
+}
+func publicLinkPart(size int) (string, error) {
+	bytes := make([]byte, size)
+	if _, err := rand.Read(bytes); err != nil {
+		return "", err
+	}
+	return base64.RawURLEncoding.EncodeToString(bytes), nil
+}
+
+// createIssuedLink is called after the issue row is written, in the same
+// tenant transaction. The public projection gets only a verifier; the private
+// token row is read solely by the authenticated admin management endpoint.
+func createIssuedLink(ctx context.Context, tx pgx.Tx, p tenant.Principal, id string, version int, digest string) error {
+	token, err := publicLinkPart(32)
+	if err != nil {
+		return err
+	}
+	selector, err := publicLinkPart(24)
+	if err != nil {
+		return err
+	}
+	if _, err = tx.Exec(ctx, `INSERT INTO quote_public_tenant_selectors(tenant_id,selector) VALUES($1::uuid,$2) ON CONFLICT (tenant_id) DO NOTHING`, p.TenantID, selector); err != nil {
+		return err
+	}
+	linkID, err := newID()
+	if err != nil {
+		return err
+	}
+	event, err := events.Append(ctx, tx, p, events.Change{NodeID: &id, Type: "quote.public_link_created", After: map[string]any{"link_id": linkID, "version": version, "target_content_sha256": digest}})
+	if err != nil {
+		return err
+	}
+	verifier := sha256.Sum256([]byte(token))
+	_, err = tx.Exec(ctx, `INSERT INTO quote_public_links(tenant_id,id,quote_node_id,version,token_sha256,target_content_sha256,issued_by_principal_id,issued_event_id,expires_at) VALUES($1::uuid,$2::uuid,$3::uuid,$4,$5,$6,$7::uuid,$8,$9)`, p.TenantID, linkID, id, version, hex.EncodeToString(verifier[:]), digest, p.ID, event.ID, time.Now().Add(30*24*time.Hour))
+	if err != nil {
+		return err
+	}
+	_, err = tx.Exec(ctx, `INSERT INTO quote_public_link_tokens(tenant_id,link_id,token) VALUES($1::uuid,$2::uuid,$3)`, p.TenantID, linkID, token)
+	return err
 }
 func (m *Module) finalize(w http.ResponseWriter, r *http.Request) {
 	p, e := caller(r)
@@ -219,6 +261,9 @@ func (m *Module) finalize(w http.ResponseWriter, r *http.Request) {
 		}
 		_, err = tx.Exec(r.Context(), `UPDATE business_quotes SET state='issued',revision=revision+1 WHERE quote_node_id=$1::uuid`, id)
 		if err != nil {
+			return err
+		}
+		if err = createIssuedLink(r.Context(), tx, p, id, versionNo, digest); err != nil {
 			return err
 		}
 		out, err = readQuote(r.Context(), tx, id, false)

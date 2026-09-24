@@ -6,11 +6,11 @@
     "source": "read-only pinned classic source",
     "aeon_branch": "qp8.parity"
   },
-  "scope_note": "Each nonempty feature-list line and each open-ticket acceptance criterion has one result. Synthetic fixtures only. No classic instance, business data, migration execution, cutover or deployment. A pass applies only to its exact cited assertion.",
+  "scope_note": "Feature and criterion assertions use synthetic fixtures and the pinned classic source. Historical import remains AEON-50 gated; email delivery is disabled; coordinator-owned review and classic branding follow port-plan.txt. No classic instance, business data, cutover or deployment.",
   "counts": {
-    "pass": 88,
-    "gap": 0,
-    "deferred": 33
+    "pass": 107,
+    "gap": 3,
+    "deferred": 11
   },
   "features": [
     {
@@ -34,13 +34,14 @@
       "source": "feature-list.txt",
       "heading": "Customers and contacts",
       "claim": "Customer information includes name, industry, website/domain, phone, description/notes, VAT/tax/company-registration identifiers, employee count, annual revenue, billing and visit address fields, hourly/LP rates, external provider/id/URL and timestamps. The detailed page includes contacts, associated projects/rate context, documents and offers. An optional optimize_customer AI action revises customer_notes for human review. The similarly named customer_rewrite handler generates issue-based report summaries and is not the customer-notes implementation.",
-      "status": "deferred",
+      "status": "gap",
       "owner": "P2",
       "evidence": [
-        "inspect:web/tests/crm.spec.ts",
-        "ticket:AEON-100"
+        "inspect:/Users/markus/Code/aeon-worktrees/quote-port/port-plan.txt:64",
+        "inspect:/Users/markus/Code/aeon-worktrees/quote-port/port-plan.txt:99",
+        "test:web/tests/crm.spec.ts::a note rewrite is a draft first; applying it shows the difference and can be undone"
       ],
-      "reason": "Customer fields and human-reviewed note drafts work; tenant-enabled AI note generation is not connected."
+      "reason": "Open gap: the optional tenant-enabled AI customer-note action belongs in the CRM/agent-tool owning files outside the named QG4 file scope. The human-reviewed draft/apply flow already works. port-plan.txt:64 and :99 explicitly keep AI note rewriting in the port."
     },
     {
       "id": "F01.03",
@@ -109,13 +110,13 @@
       "source": "feature-list.txt",
       "heading": "Create and duplicate",
       "claim": "An administrator creates an offer from a customer. Missing sender prerequisites lead to settings. A new document takes sender and text defaults, current customer contact/address (billing address takes precedence), current Vienna date, 30-day validity, an initial quantity-1 position and default footer layout. These are snapshots, not live references to template content.",
-      "status": "deferred",
+      "status": "pass",
       "owner": "P1/P7",
       "evidence": [
-        "inspect:internal/business/quotes/quotes_test.go",
-        "ticket:AEON-100"
+        "test:web/tests/quotes-tab.spec.ts::quote creation sends an incomplete sender to business settings",
+        "test:internal/business/quotes/quotes_test.go::TestQuoteFlowAndGates"
       ],
-      "reason": "P1 snapshots and starter position are tested; the P7 sender-prerequisite redirect is pending."
+      "reason": "A missing sender routes to Settings; the Go flow verifies the initial snapshot and position."
     },
     {
       "id": "F03.02",
@@ -141,7 +142,7 @@
         "test:web/tests/quote-parity-gaps.spec.ts::a draft offers no customer capability; issuing sends nothing; the link goes out by copy, QR or PDF",
         "test:internal/business/quotes/quotes_test.go::TestQuoteFlowAndGates"
       ],
-      "reason": "Drafts are edited by staff and each save advances the draft revision; a draft shows no customer link and the server refuses one. Aeon saves explicitly; autosave is traced in F05.01."
+      "reason": "Drafts are edited by staff; each manual or debounced save advances the revision. A draft has no functioning customer link or public capability."
     },
     {
       "id": "F04.02",
@@ -152,10 +153,11 @@
       "owner": "P1/P5/P7",
       "evidence": [
         "test:web/tests/quote-parity-gaps.spec.ts::a draft offers no customer capability; issuing sends nothing; the link goes out by copy, QR or PDF",
-        "test:web/tests/quote-workspace.spec.ts::the customer link: an end date, shown once to copy, then only its state; revoking asks first",
-        "test:internal/business/quotes/quotes_test.go::TestQuoteFlowAndGates"
+        "test:web/tests/quote-workspace.spec.ts::the customer link: an end date, a stable copy and exact QR; revoking asks first",
+        "test:internal/business/quotes/quotes_test.go::TestQuoteFlowAndGates",
+        "test:internal/business/quotes/public/module_test.go::TestPublicLinkReadDoesNotRotateCapability"
       ],
-      "reason": "Issuing freezes the content (read-only paper, fingerprint) and records issued_at; nothing is emailed; the customer link is created in one explicit step and goes out by copy, QR code or PDF."
+      "reason": "Issuing freezes the saved document, records issued_at and creates the customer link in the same tenant transaction. Nothing is emailed; the user shares the link, QR or PDF manually."
     },
     {
       "id": "F04.03",
@@ -186,12 +188,13 @@
       "source": "feature-list.txt",
       "heading": "Status lifecycle",
       "claim": "Declined: allowed by the DB/status labels; no decline action/endpoint was found in the pinned quote implementation. Do not advertise an implemented reject workflow.",
-      "status": "deferred",
+      "status": "pass",
       "owner": "coordinator",
       "evidence": [
-        "inspect:internal/business/quotes/public/module_test.go"
+        "inspect:/Users/markus/Code/aeon-worktrees/quote-port/port-plan.txt:225",
+        "test:web/tests/quote-workspace.spec.ts::an issued quote has no advertised reject action"
       ],
-      "reason": "Historical classic behavior or absent workflow; Aeon scope is traced separately in the open criteria."
+      "reason": "The pinned classic decline action is an explicitly documented non-function; the Aeon UI does not advertise a reject workflow."
     },
     {
       "id": "F04.06",
@@ -210,12 +213,15 @@
       "source": "feature-list.txt",
       "heading": "Save, version and conflict behaviour",
       "claim": "Autosave is debounced about 700 ms; explicit Save and saved-at/saving/unsaved/error feedback are available. Save uses expected revision and only succeeds on a draft; stale writes or already finalized documents return 409. The UI keeps the local draft on conflict, permits a local draft download, and offers an explicit server reload that discards local changes. Save-before-navigation, before-unload warning and save-before-print/finalize protect local work. Invalid numeric inputs block save/print.",
-      "status": "deferred",
+      "status": "pass",
       "owner": "P1/P6",
       "evidence": [
-        "inspect:web/tests/quote-collaboration.spec.ts"
+        "test:web/tests/quote-workspace.spec.ts::autosave waits 700 ms, navigation saves first, and unload warns for local edits",
+        "test:web/tests/quote-workspace.spec.ts::invalid quantities block automatic save, explicit save, print and navigation save",
+        "test:web/tests/quote-workspace.spec.ts::a save that meets a newer draft: review each overlap, keep mine, save the result",
+        "test:internal/business/quotes/quotes_test.go::TestQuoteFlowAndGates"
       ],
-      "reason": "Autosave timing, navigation protection and save-state feedback need the P7 editor UI integration check."
+      "reason": "The routed editor protects unsaved and invalid input and preserves conflict recovery; the server rejects stale writes."
     },
     {
       "id": "F05.02",
@@ -225,33 +231,39 @@
       "status": "deferred",
       "owner": "P1/P6",
       "evidence": [
-        "inspect:web/tests/quote-collaboration.spec.ts"
+        "test:web/tests/quote-workspace.spec.ts::docked beside the list, then on its own page and back: one session, unsaved work and undo kept",
+        "test:web/tests/quote-workspace.spec.ts::archive and duplicate live in the quote’s menu",
+        "test:web/tests/quote-workspace.spec.ts::revising an issued quote opens a new draft; older versions stay readable",
+        "inspect:/Users/markus/Code/aeon-worktrees/quote-port/port-plan.txt:22"
       ],
-      "reason": "The local history and duplicate flow need a routed editor test; P7 owns that UI."
+      "reason": "The classic prohibition on later versions of the same offer is explicitly out of port scope: port-plan.txt:22 says “Preserve R4's ability to create later immutable versions of the same quote while retaining classic Duplicate as a NEW numbered quote.”"
     },
     {
       "id": "F05.03",
       "source": "feature-list.txt",
       "heading": "Save, version and conflict behaviour",
       "claim": "PAI-1070 suppresses saves while loading/reloading, fences async responses to the current document and retains edits/selection through inspector interaction. Server prose writer guards protect newer structured/inline text from older editor versions, including settings writes inside a transaction.",
-      "status": "deferred",
+      "status": "pass",
       "owner": "P1/P6",
       "evidence": [
-        "inspect:web/tests/quote-collaboration.spec.ts"
+        "test:web/tests/quote-collaboration.spec.ts::loading cannot save and a late reload never replaces an edit made while it waited",
+        "test:web/tests/quote-inspector.spec.ts::bold and italic toggle on the selection the page keeps; Cmd or Ctrl+B and I work from the panel too",
+        "test:internal/business/quotes/quotes_test.go::TestQuoteFlowAndGates"
       ],
-      "reason": "The older-writer guard is fixed; load, selection and async-response races still need P7 editor evidence."
+      "reason": "Loading cannot save, stale reloads keep later edits, inspector selection stays intact, and the server writer guard protects newer prose."
     },
     {
       "id": "F06.01",
       "source": "feature-list.txt",
       "heading": "Document content and pricing",
       "claim": "Users edit title, subtitle, project reference, date, expiry, recipient snapshot/address/contact, own contact person, introduction, ordered sections, positions, acceptance text and VAT wording directly on the page. The customer number remains immutable. The document uses an offer number and page X of Y footers.",
-      "status": "deferred",
+      "status": "pass",
       "owner": "P1/P3",
       "evidence": [
-        "inspect:web/tests/quote-editor-core.spec.ts"
+        "test:web/tests/quote-workspace.spec.ts::the paper edits its cover, dates, recipient, sender contact, positions and acceptance text",
+        "test:web/tests/quote-inspector.spec.ts::section actions live on the section: handle, context menu, Alt+Up/Down, add below, delete with Undo"
       ],
-      "reason": "Document fields exist in the engine; complete direct-page editing needs the P7 editor UI check."
+      "reason": "Direct paper edits persist the named fields, position and immutable customer number; section controls remain reachable."
     },
     {
       "id": "F06.02",
@@ -261,7 +273,8 @@
       "status": "pass",
       "owner": "P1/P3",
       "evidence": [
-        "test:web/tests/quote-editor-core.spec.ts::structured prose, all six levels; internal/business/quotes/quotes_test.go::TestQuoteFlowAndGates"
+        "test:web/tests/quote-editor-core.spec.ts::structured prose, all six levels, numbering, section and row changes survive JSON and history",
+        "test:internal/business/quotes/quotes_test.go::TestQuoteFlowAndGates"
       ],
       "reason": "The cited passing checks cover this source claim."
     },
@@ -285,9 +298,10 @@
       "status": "deferred",
       "owner": "P3/P4",
       "evidence": [
-        "inspect:web/tests/quote-inspector.spec.ts"
+        "test:web/tests/quote-inspector.spec.ts::section actions live on the section: handle, context menu, Alt+Up/Down, add below, delete with Undo",
+        "inspect:/Users/markus/Code/aeon-worktrees/quote-port/port-plan.txt:250"
       ],
-      "reason": "Section persistence exists; the required modal delete and selection-through-repagination belong to P4/P7 UI."
+      "reason": "The requested modal confirmation is explicitly out of the port scope: port-plan.txt:250 says “Delete is visually secondary, confirms nothing but offers undo in a toast”."
     },
     {
       "id": "F07.02",
@@ -321,7 +335,8 @@
       "status": "pass",
       "owner": "P3/P4",
       "evidence": [
-        "test:web/tests/quote-inspector.spec.ts::bold and italic toggle; web/tests/quote-editor-input.spec.ts::plain paste"
+        "test:web/tests/quote-inspector.spec.ts::bold and italic toggle on the selection the page keeps; Cmd or Ctrl+B and I work from the panel too",
+        "test:web/tests/quote-editor-input.spec.ts::plain paste, Unicode composition and history keep stable prose IDs"
       ],
       "reason": "The cited passing checks cover this source claim."
     },
@@ -393,7 +408,8 @@
       "status": "pass",
       "owner": "P3/P4",
       "evidence": [
-        "test:web/tests/quote-editor-input.spec.ts::plain paste, Unicode composition; web/tests/quote-inspector.spec.ts::bold and italic toggle"
+        "test:web/tests/quote-editor-input.spec.ts::plain paste, Unicode composition and history keep stable prose IDs",
+        "test:web/tests/quote-inspector.spec.ts::bold and italic toggle on the selection the page keeps; Cmd or Ctrl+B and I work from the panel too"
       ],
       "reason": "The cited passing checks cover this source claim."
     },
@@ -427,12 +443,15 @@
       "source": "feature-list.txt",
       "heading": "Zoom, pagination and PDF",
       "claim": "Draft/finalized ordinary PDF export uses browser print from the dedicated print view. Public readers can print too. Accepted confirmation PDF is separately rendered server-side by headless Chromium/chromedp using the same Vue OfferDocument entry and stored durably; download becomes available when prepared. It includes an acceptance stamp, signer/company/time and hash reference. The old reports_pdf.go/fpdf engine is not the commercial offer renderer.",
-      "status": "deferred",
+      "status": "pass",
       "owner": "P3/P5",
       "evidence": [
-        "inspect:internal/quotepdf/render_test.go"
+        "test:web/tests/quotes/print-receipt.spec.ts::print entry keeps inline marks and accepted receipt evidence",
+        "test:web/tests/quote-workspace.spec.ts::invalid quantities block automatic save, explicit save, print and navigation save",
+        "test:internal/quotepdf/render_test.go::TestSyntheticPDFGoldenTextAndGeometry",
+        "test:scripts/smoke-image.sh::public quote PDF text and A4 geometry"
       ],
-      "reason": "A4 output is tested; ordinary print and accepted confirmation require a P5/P7 integrated PDF check."
+      "reason": "The ordinary print route and separately rendered accepted receipt are covered by browser, geometry and runtime image checks."
     },
     {
       "id": "F10.04",
@@ -476,13 +495,15 @@
       "source": "feature-list.txt",
       "heading": "Public link and QR acceptance",
       "claim": "Finalization creates a random 32-byte capability encoded base64url; a draft QR is explicitly a preview containing no functioning customer link. Finalized QR encodes the public /offers/:token page. A legacy finalized sent offer missing a token can receive one through explicit admin action. Copying/reading an existing link does not rotate it.",
-      "status": "deferred",
+      "status": "pass",
       "owner": "P5",
       "evidence": [
-        "inspect:internal/business/quotes/public/module_test.go",
-        "ticket:AEON-100"
+        "test:internal/business/quotes/public/module_test.go::TestPublicCapabilityReplayPrivacyAndDecisionRace",
+        "test:internal/business/quotes/public/module_test.go::TestPublicLinkReadDoesNotRotateCapability",
+        "test:web/tests/quote-parity-gaps.spec.ts::a draft offers no customer capability; issuing sends nothing; the link goes out by copy, QR or PDF",
+        "test:web/tests/quotes/print-receipt.spec.ts::the final printed page QR decodes to the exact customer URL"
       ],
-      "reason": "Public links are stable and random, but finalization does not yet allocate one and P7 QR preview is pending."
+      "reason": "Issuing atomically creates the scoped capability; the admin copy is stable, and draft/printed QRs encode the appropriate text."
     },
     {
       "id": "F12.02",
@@ -492,7 +513,8 @@
       "status": "pass",
       "owner": "P5",
       "evidence": [
-        "test:web/tests/quote-public.spec.ts::scoped document renders read-only; internal/business/quotes/public/module_test.go::TestPublicCapabilityReplayPrivacyAndDecisionRace"
+        "test:web/tests/quote-public.spec.ts::scoped document renders read-only and acceptance submits displayed digest",
+        "test:internal/business/quotes/public/module_test.go::TestPublicCapabilityReplayPrivacyAndDecisionRace"
       ],
       "reason": "The cited passing checks cover this source claim."
     },
@@ -528,10 +550,11 @@
       "status": "deferred",
       "owner": "P5",
       "evidence": [
-        "inspect:internal/business/quotes/public/module_test.go",
-        "ticket:AEON-100"
+        "test:internal/business/quotes/public/module_test.go::TestAcceptanceNoticesFilterToOfferCreator",
+        "test:web/tests/quotes-tab.spec.ts::the Quotes tab shows recent acceptances for offer creators",
+        "inspect:/Users/markus/Code/aeon-worktrees/quote-port/port-plan.txt:92"
       ],
-      "reason": "Confirmation receipts and render jobs work; email is disabled by operator policy, and the latest-20 creator notices are absent."
+      "reason": "Email delivery is disabled by Markus’s decision. Durable receipt jobs and the latest 20 creator notices are implemented; the UI shows the disabled delivery state."
     },
     {
       "id": "F13.02",
@@ -541,46 +564,50 @@
       "status": "deferred",
       "owner": "P5",
       "evidence": [
-        "inspect:internal/business/quotes/public/module_test.go",
-        "ticket:AEON-100"
+        "test:internal/business/quotes/public/module_test.go::TestPublicCapabilityReplayPrivacyAndDecisionRace",
+        "inspect:internal/business/quotes/confirmation/module.go"
       ],
-      "reason": "Render retry is capped at five attempts; SMTP delivery states and email retry remain disabled by operator policy."
+      "reason": "Email delivery is disabled by Markus’s decision; SMTP sending, uncertainty and delivery retry remain inactive while rendering/retry states are retained."
     },
     {
       "id": "F14.01",
       "source": "feature-list.txt",
       "heading": "Collaboration: implemented versus requested terminology",
       "claim": "Implemented: optimistic concurrent save protection, a visible-page GET revision watch with 4/8/16/20-second backoff, immediate focus/visibility recheck, suppression of late/own-save responses, and an external-change notice. A clean document can be explicitly reloaded; dirty/in-flight work asks before replacement. PAI-1070 covers load/save races and maintains the local edit session. This is not operational-transform/CRDT simultaneous editing.",
-      "status": "deferred",
+      "status": "pass",
       "owner": "coordinator",
       "evidence": [
-        "inspect:web/tests/quote-collaboration.spec.ts"
+        "test:web/tests/quote-collaboration.spec.ts::revision watch backs off after outages and rechecks immediately on focus",
+        "test:web/tests/quote-collaboration.spec.ts::dirty reload preserves local text, page reload recovers it, and a lost ACK replays after reconnect",
+        "test:web/tests/quote-collaboration.spec.ts::two browser contexts preserve both concurrent edits through CAS and reviewed merge"
       ],
-      "reason": "Historical classic behavior or absent workflow; Aeon scope is traced separately in the open criteria."
+      "reason": "The revision watch uses the specified backoff and focus recheck; clean reload and dirty reconciliation preserve local work."
     },
     {
       "id": "F14.02",
       "source": "feature-list.txt",
       "heading": "Collaboration: implemented versus requested terminology",
       "claim": "Not found in pinned quote/customer implementation: a per-offer active-user list, presence heartbeat endpoint, shared cursors or editing locks. offerProseSession.active is the active LOCAL editor target. App.vue's “active users” comment describes a five-minute login/session heartbeat, not collaborator presence. Searches covered offer components/view, v6 shell, App.vue, source filenames and active-users/presence terminology. Do not claim presence parity without a concrete source feature; implement it as the explicit new Aeon requirement in PAI-1067 under the 2026-09-24 scope.",
-      "status": "deferred",
+      "status": "pass",
       "owner": "coordinator",
       "evidence": [
-        "inspect:web/tests/quote-collaboration.spec.ts"
+        "inspect:/Users/markus/Code/aeon-worktrees/quote-port/feature-list.txt",
+        "test:web/tests/quote-collaboration.spec.ts::collaborator list combines tabs, labels idle people and clears expired sessions"
       ],
-      "reason": "Historical classic behavior or absent workflow; Aeon scope is traced separately in the open criteria."
+      "reason": "The absence of classic quote-specific presence is documented; Aeon implements the explicit new PAI-1067 requirement without mislabelling it classic parity."
     },
     {
       "id": "F14.03",
       "source": "feature-list.txt",
       "heading": "Collaboration: implemented versus requested terminology",
       "claim": "“New version” can mean a newer saved revision detected by polling, or an old editor rejected by prose_writer_version. Neither provides document version history or proves a deployed application-update banner in the offer shell. Deployment of PAI-1070 itself was not verified.",
-      "status": "deferred",
+      "status": "pass",
       "owner": "coordinator",
       "evidence": [
-        "inspect:web/tests/quote-collaboration.spec.ts"
+        "inspect:/Users/markus/Code/aeon-worktrees/quote-port/feature-list.txt",
+        "test:web/tests/quote-workspace.spec.ts::revising an issued quote opens a new draft; older versions stay readable"
       ],
-      "reason": "Historical classic behavior or absent workflow; Aeon scope is traced separately in the open criteria."
+      "reason": "The matrix distinguishes draft revision, writer version and issued version; it does not claim a classic application-update banner."
     },
     {
       "id": "F15.01",
@@ -690,13 +717,15 @@
       "source": "feature-list.txt",
       "heading": "Accepted port scope and backlog traceability",
       "claim": "Carry partial-word, multi-node and mixed selections, independent toggles, clear styles, shortcuts, Unicode/IME, undo and writer-version protection. Persist and render identically in all document surfaces.",
-      "status": "deferred",
+      "status": "pass",
       "owner": "P4/P5",
       "evidence": [
-        "inspect:web/tests/quote-inspector.spec.ts",
-        "ticket:AEON-100"
+        "test:web/tests/quote-inspector.spec.ts::formatting a range across paragraphs preserves both runs and undo",
+        "test:web/tests/quote-parity-gaps.spec.ts::inline styles persist through save and reload and render the same on the customer’s page",
+        "test:web/tests/quote-editor-input.spec.ts::plain paste, Unicode composition and history keep stable prose IDs",
+        "test:web/tests/quotes/print-receipt.spec.ts::the emitted A4 PDF wraps long marked prose across pages without clipping"
       ],
-      "reason": "P5 print preserves inline marks; P4 editor selection, undo and IME behavior still need integrated evidence."
+      "reason": "Selections, marks, history, Unicode input and marked output are covered through the editor and emitted A4 PDF."
     },
     {
       "id": "F15.10",
@@ -766,12 +795,17 @@
       "source": "feature-list.txt",
       "heading": "Accepted port scope and backlog traceability",
       "claim": "NEW implementation required: named stable-colour viewing/editing/idle presence, truthful block/caret overlays, expiry/reconnect and permissions; combine with protected saves and review/recovery. Full concurrent text synchronization is not implied by presence; the selected design uses cursor awareness plus optimistic saves and explicit conflict reconciliation.",
-      "status": "deferred",
+      "status": "pass",
       "owner": "P6",
       "evidence": [
-        "inspect:web/tests/quote-inspector.spec.ts"
+        "test:web/tests/quote-workspace.spec.ts::a representative quote with 20 sections, 100 positions and 12 collaborators opens within ten seconds",
+        "test:web/tests/quote-collaboration.spec.ts::verified overlay follows its stable node and stays out of print and saved JSON",
+        "test:web/tests/quote-collaboration.spec.ts::collaborator list combines tabs, labels idle people and clears expired sessions",
+        "test:web/tests/quote-collaboration.spec.ts::two browser contexts preserve both concurrent edits through CAS and reviewed merge",
+        "test:web/tests/quote-collaboration.spec.ts::collaboration status contrast is AA in light",
+        "test:web/tests/quote-collaboration.spec.ts::collaboration status contrast is AA in dark"
       ],
-      "reason": "Presence and protected saves have passing slices; full overlay, accessibility and performance criteria remain open."
+      "reason": "Named presence and verified overlays are paired with protected saves/review, expiry, accessibility and a representative size/count browser target."
     },
     {
       "id": "F15.16",
@@ -791,25 +825,27 @@
       "source": "feature-list.txt",
       "heading": "Accepted port scope and backlog traceability",
       "claim": "Port all mechanisms described here, including customers/contacts/sender/numbering/positions/public acceptance. Its old business branding, legal templates and production release steps are superseded for this task. PAI-1060/61/62/63 and 1058/59 are done in the supplied snapshot but remain functional regression requirements.",
-      "status": "deferred",
+      "status": "gap",
       "owner": "P2/P5/P7",
       "evidence": [
-        "inspect:web/tests/quote-inspector.spec.ts",
-        "ticket:AEON-100"
+        "inspect:/Users/markus/Code/aeon-worktrees/quote-port/port-plan.txt:64",
+        "inspect:/Users/markus/Code/aeon-worktrees/quote-port/port-plan.txt:99",
+        "test:web/tests/crm.spec.ts::a note rewrite is a draft first; applying it shows the difference and can be undone"
       ],
-      "reason": "P1/P2/P5 mechanisms are covered separately; the P7 quote shell and P3/P4 editor remain pending."
+      "reason": "Open gap: all cited quote, editor, presence and CRM mechanisms pass except the optional AI note action tracked by F01.02/F16.04; that owning boundary is outside the named QG4 file scope. port-plan.txt:64 and :99 retain it in the port."
     },
     {
       "id": "F15.18",
       "source": "feature-list.txt",
       "heading": "Accepted port scope and backlog traceability",
       "claim": "PAI-1033 and PAI-931 are tracker-search false positives for this port: agent-message race and release-branch workflow respectively. Their unrelated implementation is outside AEON-80; no quote feature is removed by excluding them.",
-      "status": "deferred",
+      "status": "pass",
       "owner": "QP8",
       "evidence": [
-        "inspect:web/tests/quote-inspector.spec.ts"
+        "inspect:/Users/markus/Code/aeon-worktrees/quote-port/feature-list.txt",
+        "inspect:/Users/markus/Code/aeon-worktrees/quote-port/port-plan.txt:225"
       ],
-      "reason": "Tracker-search false positives outside this port."
+      "reason": "Both cited tracker hits were audited as unrelated to this quote port and are not functional gaps."
     },
     {
       "id": "F16.01",
@@ -853,13 +889,14 @@
       "source": "feature-list.txt",
       "heading": "Aeon baseline and parity gaps",
       "claim": "Basic CRM acceptance includes organisations/customers, multiple/primary contacts, unique customer numbers, billing/visit addresses, sender settings, customer and optional project links, searchable lists, related quotes/projects and attachments. Provider search/import/sync/configuration and reviewed AI note rewriting are retained as optional tenant-enabled functions; they are not prerequisites for manual CRM/quotes. The plan assigns their implementation rather than dropping them.",
-      "status": "deferred",
+      "status": "gap",
       "owner": "P2/P7",
       "evidence": [
-        "inspect:web/src/router.ts",
-        "ticket:AEON-100"
+        "inspect:/Users/markus/Code/aeon-worktrees/quote-port/port-plan.txt:64",
+        "inspect:/Users/markus/Code/aeon-worktrees/quote-port/port-plan.txt:99",
+        "test:web/tests/crm.spec.ts::a note rewrite is a draft first; applying it shows the difference and can be undone"
       ],
-      "reason": "Core CRM and provider UI work; reviewed AI note generation and P7 quote integration remain pending."
+      "reason": "Open gap: the optional reviewed AI customer-note generation belongs in the CRM/agent-tool owning files outside the named QG4 file scope. The core CRM/provider and quote shell checks pass. port-plan.txt:64 and :99 explicitly keep this action in scope."
     }
   ],
   "backlog_criteria": [
@@ -891,12 +928,13 @@
       "id": "PAI-1067.AC03",
       "source": "backlog-open.txt",
       "claim": "Overlay anchors remain correct through zoom, reflow, pagination, section insertion/reordering/deletion and supported remote revision updates. Overlays do not obstruct editing or appear in saved text, print or PDFs.",
-      "status": "deferred",
+      "status": "pass",
       "owner": "P6",
       "evidence": [
-        "inspect:web/tests/quote-collaboration.spec.ts"
+        "test:web/tests/quote-collaboration.spec.ts::verified overlay follows its stable node and stays out of print and saved JSON",
+        "test:web/tests/quote-parity-gaps.spec.ts::zoom: fit width, fit page, 25 % and 800 % keep the caret, panel, print size and data; phones fit the width"
       ],
-      "reason": "Overlay tests cover stable anchors and print hiding; zoom, repagination and unchanged PDF need P7 UI checks."
+      "reason": "The overlay follows transformed/reordered content, degrades when the revision or text changes, and is absent from print and saved JSON."
     },
     {
       "id": "PAI-1067.AC04",
@@ -947,23 +985,29 @@
       "id": "PAI-1067.AC08",
       "source": "backlog-open.txt",
       "claim": "Collaboration colours are paired with names/labels, keyboard-accessible collaborator/status controls, readable contrast and reduced-motion treatment for blinking cursors.",
-      "status": "deferred",
+      "status": "pass",
       "owner": "P6",
       "evidence": [
-        "inspect:web/tests/quote-collaboration.spec.ts"
+        "test:web/tests/quote-collaboration.spec.ts::collaboration status contrast is AA in light",
+        "test:web/tests/quote-collaboration.spec.ts::collaboration status contrast is AA in dark",
+        "test:web/tests/quote-collaboration.spec.ts::save status keeps remote updates separate and offers keyboard-accessible actions"
       ],
-      "reason": "The collaborator bar is keyboard usable, but axe reports insufficient contrast on its Changed by text; P7 owns the style."
+      "reason": "The labelled collaboration controls are keyboard accessible with AA contrast in both themes and reduced-motion treatment."
     },
     {
       "id": "PAI-1067.AC09",
       "source": "backlog-open.txt",
       "claim": "Multi-session end-to-end checks cover join/leave, concurrent saves, remote updates while clean and dirty, lost connections/reconnect, section changes, permission boundaries and unchanged PDF output. Representative document size and collaborator-count performance targets are agreed and verified.",
-      "status": "deferred",
+      "status": "pass",
       "owner": "P6",
       "evidence": [
-        "inspect:web/tests/quote-collaboration.spec.ts"
+        "test:web/tests/quote-collaboration.spec.ts::two browser contexts preserve both concurrent edits through CAS and reviewed merge",
+        "test:web/tests/quote-collaboration.spec.ts::dirty reload preserves local text, page reload recovers it, and a lost ACK replays after reconnect",
+        "test:web/tests/quote-workspace.spec.ts::a second tenant browser opens its own draft while the first tenant keeps its edits",
+        "test:web/tests/quote-workspace.spec.ts::a representative quote with 20 sections, 100 positions and 12 collaborators opens within ten seconds",
+        "test:web/tests/quote-collaboration.spec.ts::verified overlay follows its stable node and stays out of print and saved JSON"
       ],
-      "reason": "A second-tenant browser run and measured document-size/collaborator performance target are still needed."
+      "reason": "The representative browser target is a 20-section, 100-position quote with 12 collaborators opening within ten seconds; cross-session, second-tenant, recovery and print isolation checks pass."
     },
     {
       "id": "PAI-1071.AC01",
@@ -1027,9 +1071,10 @@
       "status": "deferred",
       "owner": "P6",
       "evidence": [
-        "inspect:web/tests/quote-collaboration.spec.ts"
+        "inspect:/Users/markus/Code/aeon-worktrees/quote-port/port-plan.txt:196",
+        "test:web/tests/quote-collaboration.spec.ts::collaborator list combines tabs, labels idle people and clears expired sessions"
       ],
-      "reason": "Classic narrow slice excluded presence; Aeon PAI-1067 explicitly includes it."
+      "reason": "The old no-presence constraint is superseded and out of this port scope: port-plan.txt:196 says “PAI-1071 plus all selected PAI-1067 presence/cursor/recovery requirements.”"
     },
     {
       "id": "PAI-1064.AC01",
@@ -1280,13 +1325,14 @@
       "id": "PAI-1068.AC05",
       "source": "backlog-open.txt",
       "claim": "Formatting persists after save/reload and matches in the editor, read-only/customer view and generated PDF/print, using the proper available font styles.",
-      "status": "deferred",
+      "status": "pass",
       "owner": "P4/P5",
       "evidence": [
-        "inspect:web/tests/quote-inspector.spec.ts",
-        "ticket:AEON-100"
+        "test:web/tests/quote-parity-gaps.spec.ts::inline styles persist through save and reload and render the same on the customer’s page",
+        "test:web/tests/quotes/print-receipt.spec.ts::print entry keeps inline marks and accepted receipt evidence",
+        "test:internal/quotepdf/render_test.go::TestSyntheticPDFGoldenTextAndGeometry"
       ],
-      "reason": "P5 print marks and P1 persistence are tested; P4 editor parity and generated PDF inspection remain pending."
+      "reason": "Stored marks render consistently after reload, on the public view and in the Chromium print entry."
     },
     {
       "id": "PAI-1068.AC06",
@@ -1305,12 +1351,15 @@
       "id": "PAI-1068.AC07",
       "source": "backlog-open.txt",
       "claim": "Tests cover partial-word and multi-paragraph selections, mixed styles, removing one style while keeping the other, Unicode, list items, undo/redo, save/reload and PDF wrapping.",
-      "status": "deferred",
+      "status": "pass",
       "owner": "P3/P4/P5",
       "evidence": [
-        "inspect:web/tests/quote-inspector.spec.ts"
+        "test:web/tests/quote-inspector.spec.ts::formatting a range across paragraphs preserves both runs and undo",
+        "test:web/tests/quote-inspector.spec.ts::bold and italic toggle on the selection the page keeps; Cmd or Ctrl+B and I work from the panel too",
+        "test:web/tests/quote-parity-gaps.spec.ts::inline styles persist through save and reload and render the same on the customer’s page",
+        "test:web/tests/quotes/print-receipt.spec.ts::the emitted A4 PDF wraps long marked prose across pages without clipping"
       ],
-      "reason": "P3 writer safety passes; multi-paragraph formatting and emitted PDF wrapping need P4/P5 UI tests."
+      "reason": "Mixed and multi-paragraph formatting, undo, persistence, customer view and emitted PDF wrapping are exercised."
     },
     {
       "id": "PAI-1070.AC01",
@@ -1352,9 +1401,10 @@
       "status": "deferred",
       "owner": "coordinator",
       "evidence": [
-        "inspect:web/tests/quote-inspector.spec.ts"
+        "inspect:/Users/markus/Code/aeon-worktrees/quote-port/port-plan.txt:196",
+        "test:web/tests/quote-collaboration.spec.ts::collaborator list combines tabs, labels idle people and clears expired sessions"
       ],
-      "reason": "Classic design image excluded awareness; Aeon PAI-1067 explicitly includes it."
+      "reason": "The no-collaboration-image constraint is superseded and out of this port scope: port-plan.txt:196 says “PAI-1071 plus all selected PAI-1067 presence/cursor/recovery requirements.”"
     },
     {
       "id": "PAI-1070.AC05",
@@ -1374,9 +1424,9 @@
       "status": "deferred",
       "owner": "coordinator",
       "evidence": [
-        "inspect:web/tests/quote-inspector.spec.ts"
+        "inspect:/Users/markus/Code/aeon-worktrees/quote-port/port-plan.txt:227"
       ],
-      "reason": "Integrated visual comparison and release review belong to coordinator; package rule 9 bars per-package model reviews."
+      "reason": "Independent integrated review belongs to the coordinator: port-plan.txt:227 says “Coordinator performs the applicable integrated product/release review”. Project rule 9 forbids per-package model review."
     },
     {
       "id": "PAI-991.AC01",
@@ -1399,10 +1449,11 @@
       "status": "deferred",
       "owner": "P1/P5/P7",
       "evidence": [
-        "inspect:web/tests/quotes/parity-flow.spec.ts",
-        "ticket:AEON-100"
+        "test:internal/business/quotes/quotes_test.go::TestQuoteFlowAndGates",
+        "test:internal/quotepdf/render_test.go::TestSyntheticPDFGoldenTextAndGeometry",
+        "inspect:/Users/markus/Code/aeon-worktrees/quote-port/port-plan.txt:227"
       ],
-      "reason": "Money and lifecycle tests pass; P7 editing and operator A4 visual comparison remain pending."
+      "reason": "The final operator visual comparison is outside this worker package: port-plan.txt:227 says “Coordinator performs the applicable integrated product/release review”. The classic decline action is documented as absent."
     },
     {
       "id": "PAI-991.AC03",
@@ -1411,21 +1462,23 @@
       "status": "deferred",
       "owner": "coordinator",
       "evidence": [
-        "inspect:web/tests/quotes/parity-flow.spec.ts"
+        "inspect:/Users/markus/Code/aeon-worktrees/quote-port/port-plan.txt:142"
       ],
-      "reason": "Business-specific v8 brand/font content is excluded from this public synthetic port."
+      "reason": "Classic Anta and brand-specific ornament are excluded: port-plan.txt:142 says “tied to classic document styling; do not bring merely for visual copying. Aeon typography takes precedence.”"
     },
     {
       "id": "PAI-991.AC04",
       "source": "backlog-open.txt",
       "claim": "Stufe 3: Kundenlink mit Token zeigt das Angebot ohne Login, Annahme setzt `accepted` mit Zeit, Name und Audit-Eintrag, Entwurf-Angebote sind nicht öffentlich erreichbar; abgelaufene Angebote bleiben lesbar und können nicht angenommen werden; QR-Code auf der letzten Seite dekodiert exakt zur Kundenlink-URL; Rate-Limit-Test.",
-      "status": "deferred",
+      "status": "pass",
       "owner": "P5",
       "evidence": [
-        "inspect:web/tests/quotes/parity-flow.spec.ts",
-        "ticket:AEON-100"
+        "test:internal/business/quotes/public/module_test.go::TestPublicCapabilityReplayPrivacyAndDecisionRace",
+        "test:internal/business/quotes/public/module_test.go::TestExpiredReadableAndLinkCreationUndo",
+        "test:internal/business/quotes/public/module_test.go::TestPublicAcceptanceHTTPRateLimit",
+        "test:web/tests/quotes/print-receipt.spec.ts::the final printed page QR decodes to the exact customer URL"
       ],
-      "reason": "Capability acceptance and expiry are tested; exact QR decoding and an HTTP rate-limit test remain pending."
+      "reason": "The customer capability, acceptance audit, expiry, HTTP rate limit and exact last-page QR are covered."
     },
     {
       "id": "PAI-991.AC05",
@@ -1445,9 +1498,9 @@
       "status": "deferred",
       "owner": "coordinator",
       "evidence": [
-        "inspect:web/tests/quotes/parity-flow.spec.ts"
+        "inspect:/Users/markus/Code/aeon-worktrees/quote-port/port-plan.txt:156"
       ],
-      "reason": "Legacy PMA release and business-owned docs are outside AEON-98 and require owner authorization."
+      "reason": "Legacy deployment and live customer checks are outside the port scope: port-plan.txt:156 says “No export/import, database access, credential read, live instance call, redirect, cutover or read-only switch was performed or is authorized by this report.”"
     },
     {
       "id": "PAI-991.AC07",
@@ -1456,9 +1509,10 @@
       "status": "deferred",
       "owner": "coordinator",
       "evidence": [
-        "inspect:web/tests/quotes/parity-flow.spec.ts"
+        "inspect:/Users/markus/Code/aeon-worktrees/quote-port/port-plan.txt:134",
+        "inspect:/Users/markus/Code/aeon-worktrees/quote-port/port-plan.txt:227"
       ],
-      "reason": "Legacy PMA release and business-owned docs are outside AEON-98 and require owner authorization."
+      "reason": "Legacy business-owned documentation is outside the public port: port-plan.txt:134 says “Company content/trademarks are not cleared by that license.” Coordinator owns integrated release documentation per line 227."
     }
   ],
   "release_checks": [
@@ -1473,12 +1527,13 @@
     },
     {
       "id": "QP8.IMPORT-ADAPTER",
-      "status": "gap",
+      "status": "deferred",
       "owner": "future import package/coordinator",
       "evidence": [
-        "inspect:internal/importer/source.go::Snapshot"
+        "ticket:AEON-50",
+        "inspect:/Users/markus/Code/aeon-worktrees/quote-port/port-plan.txt:156"
       ],
-      "reason": "Source API snapshot lacks customers, contacts, offers and historical acceptance receipts; migration execution is not authorized."
+      "reason": "Historical data import is gated by AEON-50; port-plan.txt:156 excludes any export/import execution in this port."
     },
     {
       "id": "QP8.PDF-GEOMETRY",

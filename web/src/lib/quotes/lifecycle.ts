@@ -28,7 +28,7 @@ export interface ConfirmationJob {
 }
 export interface AcceptanceNotice { quote_node_id: string; version: number; channel: 'authenticated' | 'public'; accepted_at: string; confirmation_state: string }
 export interface Readiness { renderer_available: boolean; smtp_enabled: boolean; smtp_configured: boolean; email_delivery: string }
-export interface SettingsState { revision: number; sender: Record<string, unknown> }
+export interface SettingsState { revision: number; sender: Record<string, unknown>; numbering_time_zone: string; default_currency: string }
 
 const seg = (value: string) => encodeURIComponent(value)
 const quote = (id: string) => `/quotes/${seg(id)}`
@@ -75,7 +75,7 @@ export async function getConfirmation(id: string, version: number): Promise<Conf
 export const retryConfirmation = (id: string, version: number, acknowledgeUncertain: boolean) =>
   send<ConfirmationJob>(`${quote(id)}/versions/${version}/confirmation/retry`, 'POST', { acknowledge_uncertain: acknowledgeUncertain })
 export const receiptUrl = (id: string, version: number) => `/api${quote(id)}/versions/${version}/confirmation/receipt`
-export const acceptanceNotices = () => send<AcceptanceNotice[]>('/quotes/acceptances')
+export const acceptanceNotices = (createdByMe = false) => send<AcceptanceNotice[]>(`/quotes/acceptances${createdByMe ? '?created_by_me=true' : ''}`)
 export const readiness = () => send<Readiness>('/quotes/readiness')
 
 // "3f2a9c…81d0": enough of a digest to compare by eye; the full value is copied.

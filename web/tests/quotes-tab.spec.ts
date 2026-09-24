@@ -192,6 +192,34 @@ test('a new quote from the list: choose the customer by typing, name it, open it
   await expect(page.getByRole('region', { name: 'Quote editor' })).toBeVisible()
 })
 
+test('quote creation sends an incomplete sender to business settings', async ({ page }) => {
+  await page.setViewportSize({ width: 390, height: 844 })
+  const { crm, calls } = await setup(page)
+  crm.quoteSettings.sender.email = ''
+  await page.goto('/business/quotes')
+  await page.getByRole('button', { name: 'New quote' }).click()
+  const dialog = page.getByRole('dialog', { name: 'New quote' })
+  await expect(dialog.getByRole('alert')).toContainText('Set up the sender first')
+  await expect(dialog.getByRole('button', { name: 'Create quote' })).toBeDisabled()
+  await dialog.getByRole('link', { name: 'Open Settings › Business' }).click()
+  await expect(page).toHaveURL(/\/settings\/business/)
+  expect(calls.filter(call => call.method === 'POST' && call.path === '/api/quotes')).toHaveLength(0)
+})
+
+test('the Quotes tab shows recent acceptances for offer creators', async ({ page }) => {
+  await page.setViewportSize({ width: 390, height: 844 })
+  const { calls, world } = await setup(page)
+  await page.goto('/business/quotes')
+  const notices = page.locator('.acceptance-notices')
+  await expect(notices.getByText('Recently accepted offers you created')).toBeVisible()
+  await notices.locator('summary').click()
+  await expect(notices.getByRole('link', { name: /version 1/ })).toHaveAttribute('href', `/business/quotes/${Q.accepted}`)
+  expect(calls.some(call => call.path === '/api/quotes/acceptances' && call.query.get('created_by_me') === 'true')).toBe(true)
+  world.notices.length = 0
+  await page.reload()
+  await expect(notices).toHaveCount(0)
+})
+
 test('a new quote from a customer’s page names the customer and needs no choice', async ({ page }) => {
   await page.setViewportSize({ width: 1440, height: 900 })
   const { calls } = await setup(page)

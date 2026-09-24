@@ -30,8 +30,9 @@ import { sectionActions } from '../../../lib/quotes/sectionActions'
 import { fitWholeBlocks, type PaginationResult, type PagePlan } from '../../../lib/quotes/layout'
 import { MARK_DEFAULT_MM } from '../../../lib/quotes/inspector'
 import { contentUrl } from '../../../lib/attachments'
+import { quoteQr } from '../../../lib/quotes/qr'
 import type { QuoteDocumentData, DocumentSettings, ListMode, MarkName, NumberingOptions, OffsetPatch, QuoteMarker, QuoteSection, SectionSettingsPatch, TextSelection } from '../../../lib/quotes/types'
-const props = withDefaults(defineProps<{ document: QuoteDocumentData; offerNo?: string; editable?: boolean; accepted?: { name: string; company?: string; at: string; digest: string } | null; editor?: QuoteEditor | null }>(), { editable: false, offerNo: '', editor: null })
+const props = withDefaults(defineProps<{ document: QuoteDocumentData; offerNo?: string; editable?: boolean; accepted?: { name: string; company?: string; at: string; digest: string } | null; editor?: QuoteEditor | null; publicLink?: string; draftPreview?: boolean }>(), { editable: false, offerNo: '', editor: null, publicLink: '', draftPreview: false })
 const emit = defineEmits<{ 'update:document': [document: QuoteDocumentData]; change: [document: QuoteDocumentData]; 'render-state': [state: PaginationResult]; overflow: [message: string | null]; mark: [page: number] }>()
 // P7: a workspace may lend its editor (and so its undo history) to this view, so
 // moving the quote between the docked panel and the full page keeps both.
@@ -65,6 +66,9 @@ let resize: ResizeObserver | null = null
 let scheduled = false
 let generation = 0
 const sections = computed(() => state.value.sections)
+const publicQr = computed(() => props.publicLink ? quoteQr(props.publicLink) : null)
+const previewQr = computed(() => props.draftPreview && !props.publicLink ? quoteQr('DRAFT PREVIEW - NO CUSTOMER LINK') : null)
+const finalQr = computed(() => publicQr.value ?? previewQr.value)
 const byId = (id: string) => sections.value.find(s => s.id === id)!
 // Pages are planned after measuring; until then a deleted section may still be listed.
 const exists = (id: string) => sections.value.some(s => s.id === id)
@@ -238,7 +242,13 @@ defineExpose({
           <span v-else-if="markFile && !markMissing" class="quote-mark" :style="{ width: `${markWidth}mm`, transform: `translateY(${markOffset}mm)` }"><img :src="contentUrl(markFile, 'original')" alt="" @error="markMissing = true" /></span>
           <span>{{ state.sender.company }}</span>
         </span>
-        <span>{{ offerNo }} · {{ pageIndex + 1 }} / {{ pages.length }}</span>
+        <span class="quote-footer-end">
+          <span v-if="finalQr && pageIndex === pages.length - 1" class="quote-qr-wrap">
+            <svg class="quote-final-qr" :viewBox="`-2 -2 ${finalQr.size + 4} ${finalQr.size + 4}`" role="img" :aria-label="publicQr ? 'QR code of the customer link' : 'Draft preview QR code; no customer link'" shape-rendering="crispEdges"><rect x="-2" y="-2" :width="finalQr.size + 4" :height="finalQr.size + 4" fill="#fff" /><path :d="finalQr.path" fill="#000" /></svg>
+            <span v-if="previewQr" class="quote-qr-note">Draft preview</span>
+          </span>
+          <span>{{ offerNo }} · {{ pageIndex + 1 }} / {{ pages.length }}</span>
+        </span>
       </footer>
     </article>
     <div ref="measureRoot" class="quote-measure" aria-hidden="true" inert>
@@ -267,6 +277,10 @@ defineExpose({
 .quote-page { position: relative; box-sizing: border-box; width: 210mm; height: 297mm; padding: 20mm 21mm 20mm; margin: 0 auto 12mm; background: var(--quote-paper); box-shadow: var(--shadow); overflow: hidden; }
 .quote-page-content { height: 245mm; }
 .quote-page-footer { position: absolute; bottom: 12mm; left: 21mm; right: 21mm; border-top: 1px solid var(--line-2); padding-top: 3mm; display: flex; justify-content: space-between; align-items: center; gap: 10mm; font-size: 7pt; color: var(--ink-2); }
+.quote-footer-end { display: inline-flex; align-items: center; gap: 4mm; flex-shrink: 0; }
+.quote-qr-wrap { display: grid; justify-items: center; gap: 1mm; }
+.quote-qr-note { font: 600 6pt/1 var(--font); text-transform: uppercase; white-space: nowrap; }
+.quote-final-qr { display: block; width: 18mm; height: 18mm; flex-shrink: 0; }
 .quote-footer-start { display: flex; align-items: center; gap: 4mm; min-width: 0; }
 .quote-mark { display: block; flex-shrink: 0; padding: 0; border: 0; border-radius: 2px; background: transparent; line-height: 0; }
 .quote-mark img { display: block; width: 100%; height: auto; max-height: 14mm; object-fit: contain; object-position: left center; }

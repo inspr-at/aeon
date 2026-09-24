@@ -1,4 +1,5 @@
 // SPDX-License-Identifier: AGPL-3.0-only
+import AxeBuilder from '@axe-core/playwright'
 import { expect, test, type BrowserContext, type Page } from '@playwright/test'
 
 const quoteId='aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa'
@@ -63,6 +64,53 @@ test('dirty reload preserves local text, page reload recovers it, and a lost ACK
   }finally{await a.close();await b.close()}
 })
 
+test('loading cannot save and a late reload never replaces an edit made while it waited',async({page})=>{
+  const doc=documentFixture()
+  let requests=0, writes=0, releaseReload:()=>void=()=>{}
+  const reloadGate=new Promise<void>(resolve=>{releaseReload=resolve})
+  await page.route(`**/api/quotes/${quoteId}/draft`,async route=>{
+    if(route.request().method()==='PATCH'){writes++;await route.fulfill({status:500,body:'unexpected write'});return}
+    requests++
+    if(requests===2)await reloadGate
+    await route.fulfill({json:{document:doc,document_sha256:'a'.repeat(64),draft_revision:1,quote_revision:1,schema_version:1,minimum_writer_version:1,base_version:0,updated_at:'2026-09-24T00:00:00Z',updated_by_principal_id:nodeId}})
+  })
+  await page.goto('/')
+  const first=await page.evaluate(async({quoteId,tenantId})=>{
+    const {QuoteSession}=await import('/src/lib/quoteSession.ts')
+    const s=new QuoteSession({quoteId,tenantId,principalId:'aaaaaaaa-0000-4000-8000-aaaaaaaaaaaa'})
+    ;(window as any).quoteCollab=s
+    s.edit({title:'Never saved while loading'} as any);await s.save()
+    await s.open()
+    return {local:s.view.local,title:s.view.working?.title}
+  },{quoteId,tenantId})
+  expect(first).toEqual({local:'clean',title:'Base'})
+  expect(writes).toBe(0)
+  await page.evaluate(()=>{const s=(window as any).quoteCollab;(window as any).lateReload=s.reload()})
+  await expect.poll(()=>requests).toBe(2)
+  await edit(page,'title','Local edit after reload began')
+  releaseReload()
+  const result=await page.evaluate(async()=>{const s=(window as any).quoteCollab;return {result:await (window as any).lateReload,title:s.view.working.title,local:s.view.local}})
+  expect(result).toEqual({result:'stale',title:'Local edit after reload began',local:'dirty'})
+  expect(writes).toBe(0)
+})
+
+test('revision watch backs off after outages and rechecks immediately on focus',async({page})=>{
+  let reads=0
+  await page.route(`**/api/quotes/${quoteId}/draft`,async route=>{
+    reads++
+    if(reads>1 && reads<5){await route.fulfill({status:503,json:{error:'temporarily unavailable'}});return}
+    await route.fulfill({json:{document:documentFixture(),document_sha256:'a'.repeat(64),draft_revision:reads===1?1:2,quote_revision:2,schema_version:1,minimum_writer_version:1,base_version:0,updated_at:'2026-09-24T00:00:00Z',updated_by_principal_id:nodeId}})
+  })
+  await open(page,'aaaaaaaa-0000-4000-8000-aaaaaaaaaaaa')
+  const delays=[]
+  for(let i=0;i<3;i++)delays.push(await page.evaluate(async()=>{const s=(window as any).quoteCollab;await s.check();return s.checkDelay}))
+  expect(delays).toEqual([8000,16000,20000])
+  await page.evaluate(()=>window.dispatchEvent(new Event('focus')))
+  await expect.poll(()=>reads).toBe(5)
+  const state=await page.evaluate(()=>{const s=(window as any).quoteCollab;return {delay:s.checkDelay,remote:s.view.remote}})
+  expect(state).toEqual({delay:4000,remote:'newer'})
+})
+
 test('verified overlay follows its stable node and stays out of print and saved JSON',async({page})=>{
   await page.route('**/api/**',route=>route.fulfill({status:200,contentType:'application/json',body:'{}'}));await page.goto('/')
   const result=await page.evaluate(async({sectionId,nodeId,doc})=>{
@@ -71,6 +119,14 @@ test('verified overlay follows its stable node and stays out of print and saved 
   },{sectionId,nodeId,doc:documentFixture()})
   await expect(page.locator('.quote-presence-overlays .mark.precise')).toBeVisible()
   expect(result).not.toContain('Alex');expect(result).not.toContain('session-1')
+  const before = await page.locator('.quote-presence-overlays .mark').boundingBox()
+  await page.evaluate(() => { const section = document.querySelector('[data-section-id]')!; section.parentElement!.style.transformOrigin = 'top left'; section.parentElement!.style.transform = 'translate(80px, 50px) scale(1.25)' })
+  await expect.poll(async () => (await page.locator('.quote-presence-overlays .mark').boundingBox())?.x).toBeGreaterThan(before!.x + 70)
+  const moved = await page.locator('.quote-presence-overlays .mark').boundingBox()
+  await page.evaluate(() => { const section = document.querySelector('[data-section-id]')!; const before = document.createElement('section'); before.style.height = '120px'; section.before(before) })
+  await expect.poll(async () => (await page.locator('.quote-presence-overlays .mark').boundingBox())?.y).toBeGreaterThan(moved!.y + 100)
+  await page.evaluate(() => { const section = document.querySelector('[data-section-id]')!; section.parentElement!.append(section) })
+  await expect(page.locator('.quote-presence-overlays .mark.precise')).toBeVisible()
   await page.evaluate(()=>{const model=(window as any).quoteOverlayModel;model.value={...model.value,sections:[{...model.value.sections[0],nodes:[{...model.value.sections[0].nodes[0],text:'A😀B edited locally'}]}]};document.querySelector('[data-text-id]')!.textContent='A😀B edited locally'})
   await expect(page.locator('.quote-presence-overlays .mark.section')).toBeVisible()
   await page.emulateMedia({media:'print'});expect(await page.locator('.quote-presence-overlays').evaluate(el=>getComputedStyle(el).display)).toBe('none')
@@ -153,4 +209,14 @@ test('save status keeps remote updates separate and offers keyboard-accessible a
   expect(await page.evaluate(()=>(window as any).quoteBarTest.actions)).toEqual(['reload','review'])
   await page.emulateMedia({media:'print'})
   await expect(bar).toBeHidden()
+})
+
+for (const colorScheme of ['light', 'dark'] as const) test(`collaboration status contrast is AA in ${colorScheme}`, async ({ page }) => {
+  await page.emulateMedia({ colorScheme, reducedMotion: 'reduce' })
+  await page.route('**/api/**', route => route.fulfill({ status: 200, contentType: 'application/json', body: '{}' }))
+  await page.goto('/')
+  await page.evaluate(async () => { const { mountCollaborationBar } = await import('/tests/quote-collaboration-harness.ts'); mountCollaborationBar() })
+  await page.evaluate(() => { const fixture = (window as any).quoteBarTest; fixture.view.value = { ...fixture.view.value, remote: 'newer' } })
+  const results = await new AxeBuilder({ page }).include('.collab-bar').withTags(['wcag2aa', 'wcag21aa']).analyze()
+  expect(results.violations.map(v => v.id)).toEqual([])
 })

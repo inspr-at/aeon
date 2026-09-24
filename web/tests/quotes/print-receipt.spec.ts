@@ -25,5 +25,48 @@ test('print entry keeps inline marks and accepted receipt evidence', async ({ pa
   await expect(prose.locator(':scope > em')).toHaveText('and')
   await expect(page.locator('.quote-page .quote-stamp')).toContainText('Example Signer')
   await expect(page.locator('.quote-page .quote-stamp')).toContainText(digest)
-  await expect(page.locator('.quote-page .quote-print-qr')).toHaveCount(0)
+  await expect(page.locator('.quote-page .quote-final-qr')).toHaveCount(0)
+})
+
+test('the final printed page QR decodes to the exact customer URL', async ({ page }) => {
+  const publicURL = 'https://example.invalid/offers/synthetic/a-recoverable-capability-token'
+  await page.route('**/payload', route => route.fulfill({ json: { document: fixture, offer_no: 'A260924-01', public_url: publicURL } }))
+  await page.goto('/quote-print.html')
+  await expect(page.locator('html')).toHaveAttribute('data-pdf-ready', 'true')
+  const qr = page.locator('.quote-page').last().locator('.quote-final-qr')
+  await expect(qr).toBeVisible()
+  await expect(page.locator('.quote-final-qr')).toHaveCount(1)
+  const decoded = await page.evaluate(async () => {
+    const { decodeQuoteQr } = await import('/tests/quotes/qr-decode-harness.ts')
+    return decodeQuoteQr('.quote-page .quote-final-qr')
+  })
+  expect(decoded).toBe(publicURL)
+})
+
+test('the emitted A4 PDF wraps long marked prose across pages without clipping', async ({ page }) => {
+  const document = structuredClone(fixture) as any
+  const paragraph = 'A bold opening and an italic continuation with enough words to wrap across the paper width. '
+  document.sections = Array.from({ length: 12 }, (_, index) => ({
+    id: `11111111-1111-4111-8111-${String(index + 1).padStart(12, '0')}`,
+    heading: `Part ${index + 1}`, body: '',
+    nodes: [{
+      id: `22222222-2222-4222-8222-${String(index + 1).padStart(12, '0')}`,
+      kind: 'paragraph', text: paragraph.repeat(3),
+      marks: [{ start: 2, end: 6, bold: true }, { start: 19, end: 25, italic: true }],
+    }],
+  }))
+  await page.route('**/payload', route => route.fulfill({ json: { document, offer_no: 'A260924-01' } }))
+  await page.goto('/quote-print.html')
+  await expect(page.locator('html')).toHaveAttribute('data-pdf-ready', 'true')
+  expect(await page.locator('.quote-page').count()).toBeGreaterThan(1)
+  const clipped = await page.locator('.quote-page .quote-prose-text').evaluateAll(nodes => nodes.some(node => {
+    const text = node.getBoundingClientRect(), sheet = node.closest('.quote-page')!.getBoundingClientRect()
+    return text.right > sheet.right + 1 || text.bottom > sheet.bottom + 1
+  }))
+  expect(clipped).toBe(false)
+  await expect(page.locator('.quote-page strong').first()).toBeVisible()
+  await expect(page.locator('.quote-page em').first()).toBeVisible()
+  const pdf = await page.pdf({ format: 'A4', printBackground: true })
+  expect(pdf.subarray(0, 5).toString()).toBe('%PDF-')
+  expect((pdf.toString('latin1').match(/\/Type\s*\/Page\b/g) ?? []).length).toBeGreaterThan(1)
 })

@@ -6,7 +6,7 @@ import { minorMoney } from '../../lib/crm'
 import { usePreference } from '../../lib/preferences'
 import { settingsLink } from '../../lib/settings'
 import { DEFAULT_SORT, STATUSES, STATUS_META, amountActive, blankFilter, dateActive, firstDir, matchesQuote, narrowed, sortQuotes, statusOf, todayIso, type ColumnId, type QuoteRow, type Sort } from '../../lib/quotes/list'
-import type { QuoteProjection } from '../../lib/quotes/lifecycle'
+import { acceptanceNotices, type AcceptanceNotice, type QuoteProjection } from '../../lib/quotes/lifecycle'
 import { toast } from '../../lib/toast'
 import { plural } from '../../lib/work'
 import { useBusiness } from '../../stores/business'
@@ -39,6 +39,13 @@ const workspace = ref<InstanceType<typeof QuoteWorkspace>>()
 const create = ref<InstanceType<typeof QuoteCreateDialog>>()
 const filter = computed(() => store.filter)
 const today = todayIso()
+const creatorNotices = ref<AcceptanceNotice[]>([])
+async function loadCreatorNotices() {
+  try { creatorNotices.value = await acceptanceNotices(true) }
+  catch { creatorNotices.value = [] }
+}
+const noticeName = (id: string) => all.value.find(q => q.quote_node_id === id)?.offer_no || 'Quote'
+const noticeTime = (at: string) => new Intl.DateTimeFormat('en-GB', { dateStyle: 'medium', timeStyle: 'short' }).format(new Date(at))
 
 const UUID = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i
 const openId = computed(() => typeof route.query.quote === 'string' && UUID.test(route.query.quote) ? route.query.quote : null)
@@ -142,10 +149,11 @@ const scroller = () => document.getElementById('main')
 onMounted(async () => {
   window.addEventListener('keydown', keys)
   await business.loadPlugins()
-  if (business.open.quotes) { await store.load(true); await nextTick(); const el = scroller(); if (el && store.scroll) el.scrollTop = store.scroll }
+  if (business.open.quotes) { await Promise.all([store.load(true), loadCreatorNotices()]); await nextTick(); const el = scroller(); if (el && store.scroll) el.scrollTop = store.scroll }
 })
 onBeforeUnmount(() => { window.removeEventListener('keydown', keys); store.scroll = scroller()?.scrollTop ?? 0 })
-watch(() => business.open.quotes, on => { if (on) void store.load(true) })
+watch(() => business.open.quotes, on => { if (on) { void store.load(true); void loadCreatorNotices() } })
+watch(openId, (id, old) => { if (!id && old) void loadCreatorNotices() })
 watch(openId, id => { if (id) store.cursor = id })
 </script>
 
@@ -167,6 +175,15 @@ watch(openId, id => { if (id) store.cursor = id })
         <button type="button" class="btn primary" aria-keyshortcuts="n" data-tip="New quote · n" @click="openCreate"><AppIcon name="plus" :size="14" />New quote</button>
       </template>
 
+      <details v-if="creatorNotices.length" class="acceptance-notices">
+        <summary>Recently accepted offers you created <span>{{ creatorNotices.length }}</span></summary>
+        <ol>
+          <li v-for="notice in creatorNotices" :key="`${notice.quote_node_id}:${notice.version}`">
+            <RouterLink :to="`/business/quotes/${notice.quote_node_id}`">{{ noticeName(notice.quote_node_id) }} · version {{ notice.version }}</RouterLink>
+            <span>Accepted {{ noticeTime(notice.accepted_at) }}</span>
+          </li>
+        </ol>
+      </details>
       <div class="toolbar" role="search">
         <label class="search-field list-search">
           <AppIcon name="search" :size="14" />
@@ -233,6 +250,14 @@ watch(openId, id => { if (id) store.cursor = id })
 /* Quotes dock a little wider than tickets: a page of paper needs the room. */
 .quotes-view { --panel-default: clamp(560px, calc(640px + (100vw - 1440px) * .4), 48vw); --panel-w: min(var(--panel-user-w, var(--panel-default)), 72vw); }
 .summary-skeleton { display: inline-block; width: 220px; }
+.acceptance-notices { min-width: 0; margin: 0 0 12px; padding: 9px 12px; border-radius: 10px; background: var(--surface-raised-2); box-shadow: inset 0 0 0 1px var(--line-2); color: var(--ink); }
+.acceptance-notices summary { width: fit-content; cursor: pointer; font-size: 13px; font-weight: 600; }
+.acceptance-notices summary:focus-visible { border-radius: 4px; box-shadow: var(--focus-ring); }
+.acceptance-notices summary span { margin-left: 5px; color: var(--ink-2); font-variant-numeric: tabular-nums; }
+.acceptance-notices ol { display: grid; gap: 4px; max-height: 210px; overflow: auto; margin: 8px 0 0; padding: 0; list-style: none; }
+.acceptance-notices li { display: flex; flex-wrap: wrap; gap: 3px 12px; min-width: 0; padding: 4px 0; font-size: 12.5px; }
+.acceptance-notices a { color: var(--teal-ink); font-weight: 600; overflow-wrap: anywhere; }
+.acceptance-notices li span { color: var(--ink-2); }
 .toolbar { display: flex; align-items: center; flex-wrap: wrap; gap: 10px 12px; min-height: 48px; margin-bottom: 12px; }
 .list-search { width: 300px; }
 .list-search .field { height: 32px; padding-right: 34px; font-size: 13.5px; }

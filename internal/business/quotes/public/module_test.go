@@ -208,8 +208,8 @@ func (f *fixture) issued() (string, string, string) {
 		f.t.Fatalf("version %d %s", status, body)
 	}
 	digest := object(f.t, body)["content_sha256"].(string)
-	status, body = f.call(&f.admin, "POST", "/api/quotes/"+id+"/versions/1/public-link", "")
-	if status != 201 {
+	status, body = f.call(&f.admin, "GET", "/api/quotes/"+id+"/versions/1/public-link", "")
+	if status != 200 {
 		f.t.Fatalf("link %d %s", status, body)
 	}
 	return id, digest, object(f.t, body)["path"].(string)
@@ -220,8 +220,8 @@ func TestPublicLinkReadDoesNotRotateCapability(t *testing.T) {
 	id, _, path := f.issued()
 	url := "/api/quotes/" + id + "/versions/1/public-link"
 	status, body := f.call(&f.admin, "GET", url, "")
-	if status != 200 || strings.Contains(body, `"token"`) || strings.Contains(body, path) {
-		t.Fatalf("link metadata leaked or unavailable: %d %s", status, body)
+	if status != 200 || strings.Contains(body, `"token"`) || !strings.Contains(body, path) {
+		t.Fatalf("stable admin copy unavailable: %d %s", status, body)
 	}
 	status, _ = f.call(&f.admin, "POST", url, "")
 	if status != 409 {
@@ -230,6 +230,20 @@ func TestPublicLinkReadDoesNotRotateCapability(t *testing.T) {
 	status, _ = f.call(nil, "GET", "/api/public/quotes/"+strings.TrimPrefix(path, "/offers/"), "")
 	if status != 200 {
 		t.Fatalf("original capability stopped working: %d", status)
+	}
+	var retained, leaked int
+	token := path[strings.LastIndex(path, "/")+1:]
+	err := db.InTenant(t.Context(), f.pool.App, f.tenantID, func(tx pgx.Tx) error {
+		return tx.QueryRow(t.Context(), `SELECT (SELECT count(*) FROM quote_public_link_tokens t JOIN quote_public_links l ON l.tenant_id=t.tenant_id AND l.id=t.link_id WHERE l.quote_node_id=$1::uuid AND t.token=$2),(SELECT count(*) FROM events WHERE node_id=$1::uuid AND after::text LIKE '%' || $2 || '%')`, id, token).Scan(&retained, &leaked)
+	})
+	if err != nil || retained != 1 || leaked != 0 {
+		t.Fatalf("capability storage or event privacy: retained=%d leaked=%d err=%v", retained, leaked, err)
+	}
+	err = db.InTenant(t.Context(), f.pool.App, zeroTenant, func(tx pgx.Tx) error {
+		return tx.QueryRow(t.Context(), `SELECT count(*) FROM quote_public_link_tokens`).Scan(&retained)
+	})
+	if err != nil || retained != 0 {
+		t.Fatalf("capability crossed tenant boundary: count=%d err=%v", retained, err)
 	}
 }
 func acceptanceBody(digest, mutation string) string {
@@ -270,6 +284,13 @@ func TestPublicSelectorUnderForcedRLS(t *testing.T) {
 	status, _ = f.call(nil, "GET", api, "")
 	if status != http.StatusNotFound {
 		t.Fatalf("revoked link readable: %d", status)
+	}
+	var retained int
+	err = db.InTenant(t.Context(), f.pool.App, f.tenantID, func(tx pgx.Tx) error {
+		return tx.QueryRow(t.Context(), `SELECT count(*) FROM quote_public_link_tokens t JOIN quote_public_links l ON l.tenant_id=t.tenant_id AND l.id=t.link_id WHERE l.quote_node_id=$1::uuid`, quoteID).Scan(&retained)
+	})
+	if err != nil || retained != 0 {
+		t.Fatalf("revoked capability retained: count=%d err=%v", retained, err)
 	}
 }
 
@@ -453,6 +474,41 @@ func TestPublicCapabilityReplayPrivacyAndDecisionRace(t *testing.T) {
 	}
 }
 
+func TestAcceptanceNoticesFilterToOfferCreator(t *testing.T) {
+	f := newFixture(t)
+	id, digest, path := f.issued()
+	api := "/api/public/quotes/" + strings.TrimPrefix(path, "/offers/")
+	status, body := f.call(nil, "POST", api+"/accept", acceptanceBody(digest, "77777777-7777-4777-8777-777777777777"))
+	if status != 201 {
+		t.Fatalf("accept %d %s", status, body)
+	}
+	module, err := confirmation.New(f.pool.App, f.reg, nil, f.store)
+	if err != nil {
+		t.Fatal(err)
+	}
+	module.Mount(f.mux)
+	var other tenant.Principal
+	other = tenant.Principal{TenantID: f.tenantID, Kind: tenant.Person, Roles: []string{"admin"}}
+	err = db.InTenant(t.Context(), f.pool.App, f.tenantID, func(tx pgx.Tx) error {
+		return tx.QueryRow(t.Context(), `INSERT INTO principals(tenant_id,kind,name,roles) VALUES($1::uuid,'person','Other creator',$2) RETURNING id::text`, f.tenantID, other.Roles).Scan(&other.ID)
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	status, body = f.call(&f.admin, "GET", "/api/quotes/acceptances?created_by_me=true", "")
+	if status != 200 || !strings.Contains(body, id) {
+		t.Fatalf("creator notices %d %s", status, body)
+	}
+	status, body = f.call(&other, "GET", "/api/quotes/acceptances?created_by_me=true", "")
+	if status != 200 || strings.Contains(body, id) {
+		t.Fatalf("other creator notices %d %s", status, body)
+	}
+	status, body = f.call(&other, "GET", "/api/quotes/acceptances", "")
+	if status != 200 || !strings.Contains(body, id) {
+		t.Fatalf("general notices %d %s", status, body)
+	}
+}
+
 func TestAcceptRejectsCrossSiteAndInvalidToken(t *testing.T) {
 	f := newFixture(t)
 	_, digest, path := f.issued()
@@ -468,6 +524,22 @@ func TestAcceptRejectsCrossSiteAndInvalidToken(t *testing.T) {
 	status, _ := f.call(nil, "GET", api+"wrong", "")
 	if status != 404 {
 		t.Fatalf("invalid token %d", status)
+	}
+}
+
+func TestPublicAcceptanceHTTPRateLimit(t *testing.T) {
+	f := newFixture(t)
+	_, _, path := f.issued()
+	api := "/api/public/quotes/" + strings.TrimPrefix(path, "/offers/") + "/accept"
+	for attempt := 0; attempt < 11; attempt++ {
+		mutation := fmt.Sprintf("44444444-4444-4444-8444-%012d", attempt)
+		status, body := f.call(nil, "POST", api, acceptanceBody(strings.Repeat("b", 64), mutation))
+		if attempt < 10 && status != 409 {
+			t.Fatalf("attempt %d: expected stale acceptance, got %d %s", attempt, status, body)
+		}
+		if attempt == 10 && status != 429 {
+			t.Fatalf("attempt %d: expected rate limit, got %d %s", attempt, status, body)
+		}
 	}
 }
 
