@@ -1,148 +1,509 @@
 <!-- SPDX-License-Identifier: AGPL-3.0-only -->
 <script setup lang="ts">
-import { computed, onMounted, ref } from 'vue'
-import { api, getKinds, getNodes, type WorkNode } from '../../lib/api'
+import { computed, nextTick, onBeforeUnmount, onMounted, ref, watch } from 'vue'
+import { useRoute, useRouter } from 'vue-router'
+import { APIError, getNode, listNodes } from '../../lib/api'
+import { createEntry, createPeriod, listEntries, listPeriods, type TimeEntry, type TimePeriod } from '../../lib/business'
+import { command, consume } from '../../lib/commands'
+import { toast } from '../../lib/toast'
+import { absoluteTime, plural } from '../../lib/work'
+import { addDays, dayKey, isoWeek, parseDayKey, periodLabel, startOfWeek, timeOfDay, weekDays, weekLabel, WEEKDAYS } from '../../lib/week'
+import { formatClock, formatSpan } from '../../components/business/duration'
+import { sumAmounts } from '../../components/business/money'
+import { useBusiness } from '../../stores/business'
+import { useProjects } from '../../stores/projects'
 import { useSession } from '../../stores/session'
+import AppIcon from '../../components/business/BizIcon.vue'
+import BusinessPage from '../../components/business/BusinessPage.vue'
+import LogTimeBar, { type LogRequest, type LogTicket } from '../../components/business/LogTimeBar.vue'
+import MoneyText from '../../components/business/MoneyText.vue'
+import PeriodPanel from '../../components/business/PeriodPanel.vue'
+import PickerMenu, { type PickOption } from '../../components/business/PickerMenu.vue'
 
-type Period = { id: string; principal_id: string; starts_at: string; ends_at: string; state: 'open' | 'approved'; revision: number; approval?: { approved_by_principal_id: string; total_seconds: number } }
-type Entry = { id: string; principal_id: string; node_id: string; source: string; started_at: string; duration_seconds: number; rate_amount: string; amount: string; currency: string; note: string }
-type Totals = { duration_seconds: number; amounts: { currency: string; amount: string }[] }
+// Hours by week for one person (or agent): what was logged on which ticket and
+// day, a fast line to log more, and for admins the periods waiting for approval.
+const business = useBusiness()
+const projects = useProjects()
 const session = useSession()
-const isAdmin = computed(() => session.identity?.principal.kind === 'person' && session.identity.principal.roles?.includes('admin'))
-const isPerson = computed(() => session.identity?.principal.kind === 'person')
-const periods = ref<Period[]>([]), selected = ref<Period | null>(null), entries = ref<Entry[]>([])
-const nodes = ref<WorkNode[]>([]), costs = ref<WorkNode[]>([]), digest = ref('')
-const loading = ref(true), busy = ref(false), error = ref(''), notice = ref(''), ready = ref(false), review = ref(false)
-const principal = ref(''), periodStart = ref(''), periodEnd = ref('')
-const source = ref<'manual' | 'agent_run'>('manual'), node = ref(''), cost = ref(''), currency = ref('EUR')
-const started = ref(''), ended = ref(''), run = ref(''), note = ref('')
-const totalNode = ref(''), approvedOnly = ref(false), totals = ref<Totals | null>(null)
-let selectionSequence = 0
-// Preserve monetary number tokens before JSON.parse; never pass money through
-// JavaScript Number. Other numeric fields (seconds/revision) remain numbers.
-function exactJSON(raw: string) {
-  let money = false
-  return JSON.parse(raw.replace(/"(?:\\.|[^"\\])*"|-?\d+(?:\.\d+)?(?:[eE][+-]?\d+)?/g, (token, offset: number) => {
-    if (token.startsWith('"')) {
-      money = (token === '"amount"' || token === '"rate_amount"') && /^\s*:/.test(raw.slice(offset + token.length))
-      return token
+const route = useRoute()
+const router = useRouter()
+const logBar = ref<InstanceType<typeof LogTimeBar>>()
+const me = computed(() => session.identity?.principal.id ?? '')
+const view = computed<'week' | 'approvals'>(() => route.query.view === 'approvals' && business.admin ? 'approvals' : 'week')
+const person = computed(() => typeof route.query.person === 'string' && business.admin ? route.query.person : me.value)
+const weekStart = computed(() => startOfWeek(typeof route.query.week === 'string' ? parseDayKey(route.query.week) ?? new Date() : new Date()))
+const days = computed(() => weekDays(weekStart.value))
+const weekEnd = computed(() => addDays(weekStart.value, 7))
+const thisWeek = computed(() => dayKey(weekStart.value) === dayKey(startOfWeek(new Date())))
+const todayKey = dayKey(new Date())
+const personInfo = computed(() => business.principals.find(p => p.id === person.value))
+const isAgent = computed(() => personInfo.value?.kind === 'agent')
+const personName = computed(() => person.value === me.value ? 'You' : business.nameOf(person.value))
+function go(patch: Record<string, string | undefined>) {
+  const query = { ...route.query, ...patch }
+  for (const key of Object.keys(query)) if (!query[key]) delete query[key]
+  void router.replace({ query })
+}
+function shiftWeek(step: number) { const next = addDays(weekStart.value, step * 7); go({ week: dayKey(next) === dayKey(startOfWeek(new Date())) ? undefined : dayKey(next) }) }
+
+// ---------- Nodes (tickets) by id ----------
+const nodes = ref(new Map<string, { key: string; title: string }>())
+async function resolveNodes(ids: string[]) {
+  const missing = [...new Set(ids)].filter(id => !nodes.value.has(id))
+  if (!missing.length) return
+  const found = await Promise.all(missing.map(id => getNode(id).then(n => [id, { key: n.key, title: n.title }] as const).catch(() => [id, { key: '—', title: 'Deleted node' }] as const)))
+  const next = new Map(nodes.value)
+  for (const [id, info] of found) next.set(id, info)
+  nodes.value = next
+}
+function ticketHref(nodeId: string) {
+  const key = nodes.value.get(nodeId)?.key ?? ''
+  const project = projects.byRouteKey(key.split('-')[0] ?? '')
+  return project ? `/p/${encodeURIComponent(project.routeKey)}/${encodeURIComponent(key)}` : ''
+}
+
+// ---------- Week ----------
+const periods = ref<TimePeriod[]>([])
+const entries = ref<TimeEntry[]>([])
+const weekState = ref<'loading' | 'ready' | 'error'>('loading')
+const weekError = ref('')
+let generation = 0
+async function loadWeek() {
+  const request = ++generation
+  const principal = person.value
+  if (!principal) return
+  weekState.value = 'loading'
+  try {
+    const list = await listPeriods(principal)
+    const start = weekStart.value.getTime(), end = weekEnd.value.getTime()
+    const inWeek = list.filter(p => Date.parse(p.starts_at) < end && Date.parse(p.ends_at) > start)
+    const found = (await Promise.all(inWeek.map(p => listEntries({ period_id: p.id })))).flat()
+      .filter(e => Date.parse(e.started_at) >= start && Date.parse(e.started_at) < end)
+      .sort((a, b) => a.started_at.localeCompare(b.started_at))
+    await resolveNodes(found.map(e => e.node_id))
+    if (request !== generation) return
+    periods.value = list; entries.value = found; weekState.value = 'ready'
+  } catch (e) {
+    if (request !== generation) return
+    weekState.value = 'error'; weekError.value = e instanceof Error ? e.message : 'Hours could not be loaded.'
+  }
+}
+const weekPeriods = computed(() => periods.value.filter(p => Date.parse(p.starts_at) < weekEnd.value.getTime() && Date.parse(p.ends_at) > weekStart.value.getTime()))
+const closed = computed(() => weekPeriods.value.length > 0 && weekPeriods.value.every(p => p.state === 'approved'))
+const perDay = computed(() => days.value.map(day => entries.value.filter(e => dayKey(new Date(e.started_at)) === dayKey(day)).reduce((s, e) => s + e.duration_seconds, 0)))
+const total = computed(() => perDay.value.reduce((a, b) => a + b, 0))
+const amounts = computed(() => {
+  const by = new Map<string, string[]>()
+  for (const e of entries.value) by.set(e.currency, [...(by.get(e.currency) ?? []), e.amount])
+  return [...by.entries()].sort(([a], [b]) => a.localeCompare(b)).map(([currency, list]) => ({ currency, amount: sumAmounts(list) }))
+})
+const grid = computed(() => {
+  const rows = new Map<string, number[]>()
+  for (const e of entries.value) {
+    const row = rows.get(e.node_id) ?? Array(7).fill(0)
+    row[(new Date(e.started_at).getDay() + 6) % 7] += e.duration_seconds
+    rows.set(e.node_id, row)
+  }
+  return [...rows.entries()].map(([id, cells]) => ({ id, cells, total: cells.reduce((a, b) => a + b, 0) })).sort((a, b) => b.total - a.total)
+})
+const byDay = computed(() => days.value.map((day, i) => ({ day, i, list: entries.value.filter(e => dayKey(new Date(e.started_at)) === dayKey(day)) })).filter(group => group.list.length).reverse())
+const suggestions = computed<LogTicket[]>(() => grid.value.map(row => ({ id: row.id, key: nodes.value.get(row.id)?.key ?? '', title: nodes.value.get(row.id)?.title ?? '' })).filter(t => t.key))
+const canLog = computed(() => !isAgent.value && !closed.value && (person.value === me.value || business.admin) && business.staff)
+
+// ---------- Logging ----------
+const logging = ref(false)
+// Phones keep the entry form folded behind one button until it is needed.
+const phoneQuery = window.matchMedia('(max-width: 720px)')
+const phone = ref(phoneQuery.matches)
+const logOpen = ref(!phone.value)
+const onPhone = (event: MediaQueryListEvent) => { phone.value = event.matches }
+phoneQuery.addEventListener('change', onPhone)
+async function openLog() { logOpen.value = true; await nextTick(); logBar.value?.focus() }
+const preset = ref<LogTicket | null>(null)
+function stackAfter(day: Date) {
+  const same = entries.value.filter(e => dayKey(new Date(e.started_at)) === dayKey(day))
+  const last = same.reduce((max, e) => Math.max(max, Date.parse(e.ended_at)), 0)
+  if (!last) return 9 * 60
+  const end = new Date(last)
+  return end.getHours() * 60 + end.getMinutes() + (end.getSeconds() ? 1 : 0)
+}
+async function log(request: LogRequest) {
+  const principal = person.value
+  const startMinutes = request.startMinutes ?? stackAfter(request.day)
+  const started = new Date(request.day.getFullYear(), request.day.getMonth(), request.day.getDate(), 0, startMinutes, 0, 0)
+  const ended = new Date(started.getTime() + request.seconds * 1000)
+  if (dayKey(ended) !== dayKey(request.day) && ended.getHours() + ended.getMinutes() > 0) { toast('That entry would run past midnight. Split it across two days.', { tone: 'error' }); return }
+  logging.value = true
+  try {
+    let period = periods.value.find(p => p.principal_id === principal && Date.parse(p.starts_at) <= started.getTime() && Date.parse(p.ends_at) >= ended.getTime())
+    if (period?.state === 'approved') { toast(`${periodLabel(period.starts_at, period.ends_at)} is approved and closed. Log it in another period.`, { tone: 'error' }); return }
+    if (!period) {
+      const clash = weekPeriods.value.find(p => Date.parse(p.starts_at) < ended.getTime() && Date.parse(p.ends_at) > started.getTime())
+      if (clash) { toast(`That time falls across the edge of the period ${periodLabel(clash.starts_at, clash.ends_at)}. Choose a time inside it.`, { tone: 'error' }); return }
+      period = await createPeriod({ principal_id: principal, starts_at: weekStart.value.toISOString(), ends_at: weekEnd.value.toISOString() })
+      periods.value = [...periods.value, period]
     }
-    const result = money ? `"${token}"` : token
-    money = false
-    return result
-  }))
+    const entry = await createEntry({ period_id: period.id, cost_unit_node_id: request.costUnitId, currency: request.currency, principal_id: principal, node_id: request.ticket.id, started_at: started.toISOString(), ended_at: ended.toISOString(), note: request.note })
+    nodes.value = new Map(nodes.value).set(request.ticket.id, { key: request.ticket.key, title: request.ticket.title })
+    entries.value = [...entries.value, entry].sort((a, b) => a.started_at.localeCompare(b.started_at))
+    logBar.value?.reset()
+    toast(`Logged ${formatSpan(entry.duration_seconds)} on ${request.ticket.key}.`)
+  } catch (e) {
+    if (e instanceof APIError && e.status === 409) { toast(e.message.includes('rate') ? 'This cost unit needs exactly one hourly rate in force on that day.' : 'The period changed or closed meanwhile. The week is reloaded.', { tone: 'error' }); void loadWeek() }
+    else toast(`Not logged: ${e instanceof Error ? e.message : 'unknown error'}`, { tone: 'error' })
+  } finally { logging.value = false }
 }
-async function request<T>(path: string, body?: unknown): Promise<{ data: T; etag: string }> {
-  const response = await api(path, body === undefined ? {} : { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(body) })
-  const raw = await response.text()
-  const data = raw ? exactJSON(raw) : null
-  if (!response.ok) throw new Error(data?.error || `Request failed (${response.status})`)
-  return { data, etag: response.headers.get('X-Entries-SHA256')?.replace(/^"|"$/g, '') || '' }
-}
-function label(id: string) { const n = nodes.value.find(n => n.id === id); return n ? `${n.key} · ${n.title}` : id }
-function duration(seconds: number) { return `${Math.floor(seconds / 3600)}h ${Math.floor(seconds % 3600 / 60)}m ${seconds % 60}s` }
-function date(value: string) { return new Date(value).toLocaleString() }
-function iso(value: string) { if (!value) throw new Error('Choose start and end times.'); return new Date(value).toISOString() }
-async function choose(id: string) {
-  const sequence = ++selectionSequence
-  selected.value = null; entries.value = []; digest.value = ''; review.value = false
-  if (!id) return
-  loading.value = true; error.value = ''
+
+// ---------- People ----------
+const personMenu = ref<HTMLElement | null>(null)
+const personOptions = computed<PickOption[]>(() => [
+  { value: me.value, label: 'You', note: business.nameOf(me.value), icon: 'user' },
+  ...business.timeKeepers.filter(p => p.id !== me.value).map(p => ({ value: p.id, label: p.name, icon: (p.kind === 'agent' ? 'agent' : 'user') as 'agent' | 'user', hint: p.kind === 'agent' ? 'agent' : undefined })),
+])
+function choosePerson(option: PickOption) { personMenu.value = null; go({ person: option.value === me.value ? undefined : option.value }) }
+
+// ---------- Approvals ----------
+const allPeriods = ref<TimePeriod[]>([])
+const periodEntries = ref(new Map<string, TimeEntry[]>())
+const approvalsState = ref<'loading' | 'ready' | 'error'>('loading')
+const showApproved = ref(false)
+async function loadApprovals() {
+  approvalsState.value = 'loading'
   try {
-    // Revision checks detect changes between these HTTP reads. The approval
-    // digest remains pinned to the reviewed period, never silently refreshed.
-    const first = await request<Period>(`/time-periods/${encodeURIComponent(id)}`)
-    const list = await request<Entry[]>(`/time-entries?period_id=${encodeURIComponent(id)}`)
-    const last = await request<Period>(`/time-periods/${encodeURIComponent(id)}`)
-    if (sequence !== selectionSequence) return
-    if (first.data.revision !== last.data.revision || first.etag !== last.etag) throw new Error('Entries changed while loading. Select the period again.')
-    selected.value = last.data; entries.value = list.data; digest.value = last.etag
-  } catch (e) { if (sequence === selectionSequence) error.value = (e as Error).message }
-  finally { if (sequence === selectionSequence) loading.value = false }
+    const list = await listPeriods()
+    const relevant = list.filter(p => p.state === 'open' || showApproved.value)
+    const found = await Promise.all(relevant.map(async p => [p.id, await listEntries({ period_id: p.id })] as const))
+    periodEntries.value = new Map(found)
+    await resolveNodes(found.flatMap(([, list]) => list.map(e => e.node_id)))
+    allPeriods.value = list
+    approvalsState.value = 'ready'
+  } catch { approvalsState.value = 'error' }
 }
-async function load() {
-  loading.value = true; error.value = ''; ready.value = false
+const now = Date.now()
+const ready = computed(() => allPeriods.value.filter(p => p.state === 'open' && Date.parse(p.ends_at) <= now).sort((a, b) => a.ends_at.localeCompare(b.ends_at)))
+const runningPeriods = computed(() => allPeriods.value.filter(p => p.state === 'open' && Date.parse(p.ends_at) > now))
+const approved = computed(() => allPeriods.value.filter(p => p.state === 'approved').sort((a, b) => b.ends_at.localeCompare(a.ends_at)).slice(0, 20))
+const periodId = computed(() => typeof route.query.period === 'string' ? route.query.period : '')
+const openPeriod = computed(() => allPeriods.value.find(p => p.id === periodId.value) ?? periods.value.find(p => p.id === periodId.value) ?? null)
+const openEntries = computed(() => periodEntries.value.get(periodId.value) ?? (openPeriod.value ? entries.value.filter(e => e.period_id === periodId.value) : []))
+const panelLoading = ref(false)
+watch(periodId, async id => {
+  if (!id || periodEntries.value.has(id)) return
+  panelLoading.value = true
+  try { const list = await listEntries({ period_id: id }); periodEntries.value = new Map(periodEntries.value).set(id, list); await resolveNodes(list.map(e => e.node_id)) }
+  finally { panelLoading.value = false }
+})
+function summaryOf(period: TimePeriod) {
+  const list = periodEntries.value.get(period.id) ?? []
+  const by = new Map<string, string[]>()
+  for (const e of list) by.set(e.currency, [...(by.get(e.currency) ?? []), e.amount])
+  return { count: list.length, seconds: list.reduce((s, e) => s + e.duration_seconds, 0), amounts: [...by.entries()].map(([currency, a]) => ({ currency, amount: sumAmounts(a) })) }
+}
+function approvedPeriod(period: TimePeriod) {
+  allPeriods.value = allPeriods.value.map(p => p.id === period.id ? period : p)
+  periods.value = periods.value.map(p => p.id === period.id ? period : p)
+  if (view.value === 'week') void loadWeek()
+}
+function openReview(period: TimePeriod) { go({ period: period.id }) }
+function closeReview() { go({ period: undefined }) }
+
+// ---------- Summary ----------
+const summary = computed(() => view.value === 'approvals'
+  ? approvalsState.value === 'ready' ? (ready.value.length ? `${plural(ready.value.length, 'period')} waiting for approval` : 'Nothing waits for approval') : ''
+  : weekState.value === 'ready' ? `Week ${isoWeek(weekStart.value)} · ${weekLabel(weekStart.value)} · ${total.value ? `${formatSpan(total.value)} logged` : 'nothing logged'}` : '')
+
+// ---------- Keyboard and commands ----------
+function typing(target: EventTarget | null) { return target instanceof HTMLElement && (target.isContentEditable || ['INPUT', 'TEXTAREA', 'SELECT'].includes(target.tagName)) }
+function keydown(event: KeyboardEvent) {
+  if (event.defaultPrevented || event.metaKey || event.ctrlKey || event.altKey || typing(event.target)) return
+  if (document.querySelector('dialog[open], .floating')) return
+  if (event.key === 'Escape' && periodId.value) { event.preventDefault(); closeReview(); return }
+  if (view.value !== 'week') return
+  if (event.key === 'ArrowLeft' || event.key === '[') { event.preventDefault(); shiftWeek(-1) }
+  else if (event.key === 'ArrowRight' || event.key === ']') { event.preventDefault(); shiftWeek(1) }
+  else if (event.key === 't') { event.preventDefault(); go({ week: undefined }) }
+  else if (event.key === 'l' && canLog.value) { event.preventDefault(); void openLog() }
+}
+async function presetFromKey(key: string) {
   try {
-    periods.value = (await request<Period[]>('/time-periods')).data
-    const kinds = await getKinds()
-    const kind = kinds.items.find(k => k.slug === 'cost_unit')
-    // Follow R1 pagination so imported cost units/projects remain selectable.
-    const all: WorkNode[] = []; let cursor: string | null = null
-    do { const page = await getNodes({ limit: 200, ...(cursor ? { cursor } : {}) }); all.push(...page.items); cursor = page.next_cursor } while (cursor)
-    nodes.value = all; costs.value = all.filter(n => n.kind_id === kind?.id)
-    principal.value ||= session.identity?.principal.id || ''
-    if (!isPerson.value) source.value = 'agent_run'
-    ready.value = true
-    if (periods.value[0]) await choose(selected.value?.id || periods.value[0].id)
-  } catch (e) { error.value = (e as Error).message }
-  finally { loading.value = false }
+    const page = await listNodes({ q: key, sort: 'key', limit: 5 })
+    const hit = page.items.find(item => item.key.toUpperCase() === key.toUpperCase())
+    if (hit) preset.value = { id: hit.id, key: hit.key, title: hit.title }
+  } catch { /* the picker stays empty */ }
 }
-async function mutate(action: () => Promise<void>) {
-  if (busy.value) return
-  busy.value = true; error.value = ''; notice.value = ''
-  try { await action() } catch (e) { error.value = (e as Error).message; review.value = false }
-  finally { busy.value = false }
+async function presetFromNode(nodeId: string) {
+  try { const n = await getNode(nodeId); preset.value = { id: n.id, key: n.key, title: n.title } } catch { /* the picker stays empty */ }
 }
-function createPeriod() { return mutate(async () => {
-  const result = await request<Period>('/time-periods', { principal_id: principal.value, starts_at: iso(periodStart.value), ends_at: iso(periodEnd.value) })
-  periods.value = [result.data, ...periods.value]; await choose(result.data.id); notice.value = 'Period opened.'
-}) }
-function createEntry() { return mutate(async () => {
-  if (!selected.value) return
-  const id = selected.value.id
-  const body = { period_id: id, cost_unit_node_id: cost.value, currency: currency.value, source: source.value, note: note.value,
-    ...(source.value === 'manual' ? { principal_id: selected.value.principal_id, node_id: node.value, started_at: iso(started.value), ended_at: iso(ended.value) } : { agent_run_id: run.value }) }
-  await request<Entry>('/time-entries', body)
-  note.value = ''; await choose(id); notice.value = 'Time recorded.'; totals.value = null
-}) }
-function approve() { return mutate(async () => {
-  if (!selected.value || !digest.value || !review.value) return
-  const result = await request<Period>(`/time-periods/${selected.value.id}/approve`, { expected_revision: selected.value.revision, expected_entries_sha256: digest.value })
-  selected.value = result.data; periods.value = periods.value.map(p => p.id === result.data.id ? result.data : p)
-  review.value = false; notice.value = 'Period approved and closed.'; totals.value = null
-}) }
-async function loadTotals() { await mutate(async () => { totals.value = null; totals.value = (await request<Totals>(`/nodes/${encodeURIComponent(totalNode.value)}/time-totals?approved_only=${approvedOnly.value}`)).data }) }
-onMounted(load)
+watch(command, value => {
+  if (value?.command.name !== 'log-time') return
+  const nodeId = value.command.nodeId
+  consume()
+  go({ view: undefined, person: undefined, week: undefined })
+  if (nodeId) void presetFromNode(nodeId)
+  void openLog()
+}, { immediate: true })
+watch(() => route.query.log, value => {
+  if (!value) return
+  const node = typeof route.query.node === 'string' ? route.query.node : ''
+  const key = typeof route.query.ticket === 'string' ? route.query.ticket : ''
+  go({ log: undefined, node: undefined, ticket: undefined })
+  if (node) void presetFromNode(node)
+  else if (key) void presetFromKey(key)
+  setTimeout(() => void openLog(), 400)
+}, { immediate: true })
+
+watch([person, weekStart], () => { if (business.open.hours) void loadWeek() })
+watch(view, value => { if (value === 'approvals') void loadApprovals(); else void loadWeek() })
+watch(showApproved, () => { if (view.value === 'approvals') void loadApprovals() })
+onMounted(async () => {
+  window.addEventListener('keydown', keydown)
+  await business.loadPlugins()
+  if (!business.open.hours) return
+  void business.loadCostUnits(); void business.loadPrincipals(); void projects.load()
+  if (view.value === 'approvals') void loadApprovals()
+  else void loadWeek()
+  if (business.admin) void listPeriods().then(list => { allPeriods.value = list }).catch(() => undefined)
+})
+onBeforeUnmount(() => { window.removeEventListener('keydown', keydown); phoneQuery.removeEventListener('change', onPhone) })
+const waitingCount = computed(() => allPeriods.value.filter(p => p.state === 'open' && Date.parse(p.ends_at) <= now).length)
 </script>
 
 <template>
-  <section class="hours-view" aria-labelledby="hours-title">
-    <header><div><p class="eyebrow">Business</p><h1 id="hours-title">Hours</h1><p>Recorded work, frozen rates and approved periods.</p></div><button :disabled="busy || loading" @click="load">Refresh</button></header>
-    <p v-if="error" role="alert" class="error">{{ error }} <button :disabled="busy" @click="load">Reload</button></p>
-    <p role="status" aria-label="Hours status">{{ loading ? 'Loading hours…' : notice }}</p>
-    <template v-if="ready">
-      <div class="columns">
-        <section class="card" aria-labelledby="periods-title">
-          <h2 id="periods-title">Time periods</h2>
-          <label><span id="hours-period-label">Period</span><select aria-labelledby="hours-period-label" :value="selected?.id || ''" :disabled="busy || loading" @change="choose(($event.target as HTMLSelectElement).value)"><option value="">Select a period</option><option v-for="p in periods" :key="p.id" :value="p.id">{{ date(p.starts_at) }} – {{ date(p.ends_at) }} · {{ p.state }}</option></select></label>
-          <p v-if="!periods.length">No periods yet. Open one to start recording time.</p>
-          <details><summary>Open a period</summary><form @submit.prevent="createPeriod"><label>Principal ID<input v-model="principal" required :readonly="!isAdmin" /></label><label>Period starts<input v-model="periodStart" type="datetime-local" step="1" required /></label><label>Period ends<input v-model="periodEnd" type="datetime-local" step="1" required /></label><button :disabled="busy || loading" class="primary">Open period</button></form></details>
-        </section>
-        <section class="card" aria-labelledby="totals-title">
-          <h2 id="totals-title">Subtree totals</h2>
-          <form @submit.prevent="loadTotals"><label><span id="hours-root-label">Root work item</span><select aria-labelledby="hours-root-label" v-model="totalNode" required @change="totals = null"><option value="">Select work item</option><option v-for="n in nodes" :key="n.id" :value="n.id">{{ n.key }} · {{ n.title }}</option></select></label><label class="check"><input v-model="approvedOnly" type="checkbox" @change="totals = null" />Approved periods only</label><button :disabled="busy || !totalNode">Calculate totals</button></form>
-          <div role="status" aria-label="Subtree totals" aria-live="polite"><template v-if="totals"><strong>{{ duration(totals.duration_seconds) }}</strong><p v-for="a in totals.amounts" :key="a.currency">{{ a.currency }} {{ a.amount }}</p><p v-if="!totals.amounts.length">No recorded time.</p></template></div>
-        </section>
+  <BusinessPage title="Hours" area="hours" :panel-open="!!openPeriod">
+    <template #summary><span v-if="summary">{{ summary }}</span><span v-else class="skeleton summary-skeleton" /></template>
+
+    <div class="toolbar">
+      <div v-if="business.admin" class="seg view-seg" role="radiogroup" aria-label="View">
+        <button type="button" role="radio" :aria-checked="view === 'week'" @click="go({ view: undefined, period: undefined })"><AppIcon name="calendar" :size="13" />Week</button>
+        <button type="button" role="radio" :aria-checked="view === 'approvals'" @click="go({ view: 'approvals', period: undefined })"><AppIcon name="seal" :size="13" />Approvals<span v-if="waitingCount" class="badge">{{ waitingCount }}</span></button>
       </div>
-      <section v-if="selected" class="card" aria-labelledby="entries-title">
-        <header><div><h2 id="entries-title">{{ selected.state === 'approved' ? 'Approved period' : 'Open period' }}</h2><p>{{ date(selected.starts_at) }} – {{ date(selected.ends_at) }}</p><p>Principal: {{ selected.principal_id }}</p></div><span class="badge">{{ selected.state }}</span></header>
-        <p v-if="selected.approval">Approved by {{ selected.approval.approved_by_principal_id }} · {{ duration(selected.approval.total_seconds) }}. This period is closed.</p>
-        <div class="table-scroll"><table><caption>Time entries</caption><thead><tr><th>Work item</th><th>Started</th><th>Source</th><th>Duration</th><th>Hourly rate</th><th>Amount</th></tr></thead><tbody><tr v-for="entry in entries" :key="entry.id"><td>{{ label(entry.node_id) }}<small v-if="entry.note">{{ entry.note }}</small></td><td>{{ date(entry.started_at) }}</td><td>{{ entry.source === 'agent_run' ? 'Agent run' : 'Manual' }}</td><td>{{ duration(entry.duration_seconds) }}</td><td>{{ entry.currency }} {{ entry.rate_amount }}</td><td>{{ entry.currency }} {{ entry.amount }}</td></tr></tbody></table></div>
-        <p v-if="!entries.length">No time entries in this period.</p>
-        <template v-if="selected.state === 'open'">
-          <details><summary>Record time</summary><form class="entry-form" @submit.prevent="createEntry">
-            <label><span id="hours-source-label">Source</span><select aria-labelledby="hours-source-label" v-model="source"><option v-if="isPerson" value="manual">Manual time</option><option value="agent_run">Terminal agent run</option></select></label>
-            <template v-if="source === 'manual'"><label><span id="hours-work-item-label">Work item</span><select aria-labelledby="hours-work-item-label" v-model="node" required><option value="">Select work item</option><option v-for="n in nodes" :key="n.id" :value="n.id">{{ n.key }} · {{ n.title }}</option></select></label><label>Started<input v-model="started" type="datetime-local" step="1" required /></label><label>Ended<input v-model="ended" type="datetime-local" step="1" required /></label></template>
-            <label v-else><span id="hours-run-label">Agent run ID</span><input aria-labelledby="hours-run-label" aria-describedby="hours-run-hint" v-model="run" required /><small id="hours-run-hint">Uses the run’s recorded principal, work item and terminal interval.</small></label>
-            <label><span id="hours-cost-label">Cost unit</span><select aria-labelledby="hours-cost-label" v-model="cost" required><option value="">Select cost unit</option><option v-for="c in costs" :key="c.id" :value="c.id">{{ c.key }} · {{ c.title }}</option></select></label><label>Currency<input v-model="currency" pattern="[A-Z]{3}" maxlength="3" required /></label><label>Note<textarea v-model="note" maxlength="65536" /></label><p>The effective hourly bill rate is frozen when recorded. Entries cannot be edited.</p><button class="primary" :disabled="busy || loading || !costs.length">Record time</button>
-          </form></details>
-          <div v-if="isAdmin" class="approval"><p>Approval closes this period and seals exactly the entries shown above.</p><label class="check"><input v-model="review" type="checkbox" :disabled="busy || !digest" />I have reviewed these entries</label><button :disabled="busy || loading || !review || !digest" @click="approve">Approve and close period</button><p v-if="!digest">Reload to obtain the current approval snapshot.</p></div>
-        </template>
+      <template v-if="view === 'week'">
+        <button v-if="business.admin" type="button" class="btn sm person-btn" aria-haspopup="dialog" :aria-expanded="!!personMenu" :aria-label="`Hours of ${personName}. Choose a person or agent`" @click="personMenu = personMenu ? null : ($event.currentTarget as HTMLElement)">
+          <AppIcon :name="isAgent ? 'agent' : 'user'" :size="13" />{{ personName }}<AppIcon name="chevron" :size="12" class="chev" />
+        </button>
+        <div class="week-nav" role="group" aria-label="Week">
+          <button type="button" class="icon-btn sm" aria-label="Previous week" aria-keyshortcuts="ArrowLeft" data-tip="Previous week · ←" @click="shiftWeek(-1)"><AppIcon name="chevron-left" :size="14" /></button>
+          <span class="week-label"><b>Week {{ isoWeek(weekStart) }}</b><span>{{ weekLabel(weekStart) }}</span></span>
+          <button type="button" class="icon-btn sm" aria-label="Next week" aria-keyshortcuts="ArrowRight" data-tip="Next week · →" @click="shiftWeek(1)"><AppIcon name="chevron-right" :size="14" /></button>
+          <button v-if="!thisWeek" type="button" class="btn sm ghost" aria-keyshortcuts="t" @click="go({ week: undefined })">This week</button>
+        </div>
+      </template>
+      <label v-else class="switch approved-switch"><input v-model="showApproved" type="checkbox" /><span>Show approved</span></label>
+    </div>
+
+    <!-- ---------- Week ---------- -->
+    <template v-if="view === 'week'">
+      <section class="card glass-card week-card" aria-label="Week">
+        <div class="period-strip" :class="{ ok: closed }">
+          <template v-if="weekState !== 'ready'"><span class="skeleton strip-skel" /></template>
+          <template v-else-if="!weekPeriods.length">
+            <AppIcon name="calendar" :size="14" /><span>No period for this week yet. {{ canLog ? 'The first entry opens one, Monday to Sunday.' : '' }}</span>
+          </template>
+          <template v-else>
+            <template v-for="p in weekPeriods" :key="p.id">
+              <span class="period-chip" :class="p.state"><AppIcon :name="p.state === 'approved' ? 'lock' : 'calendar'" :size="12" />{{ periodLabel(p.starts_at, p.ends_at) }}</span>
+              <span v-if="p.state === 'approved'" class="strip-text">Approved{{ p.approval ? ` by ${business.nameOf(p.approval.approved_by_principal_id)}` : '' }}. Closed for new entries.</span>
+              <span v-else class="strip-text">Open · waiting for an admin’s approval once the week is done.</span>
+              <button v-if="business.admin" type="button" class="link-btn" @click="go({ period: p.id })">{{ p.state === 'approved' ? 'View' : 'Review' }}</button>
+            </template>
+          </template>
+        </div>
+
+        <div v-if="canLog && (logOpen || !phone)" class="log-wrap"><LogTimeBar ref="logBar" :days="days" :suggestions="suggestions" :busy="logging" :preset="preset" @log="log" /></div>
+        <div v-else-if="canLog" class="log-closed"><button type="button" class="btn log-open" @click="openLog"><AppIcon name="plus" :size="14" />Log time</button></div>
+        <p v-else-if="isAgent" class="agent-note"><AppIcon name="agent" :size="14" />An agent’s time comes from its finished runs, one entry per run.</p>
+
+        <div v-if="weekState === 'loading'" class="grid-skeleton" aria-hidden="true"><span v-for="i in 4" :key="i" class="skeleton" /></div>
+        <p v-else-if="weekState === 'error'" class="inline-error" role="alert"><AppIcon name="alert" :size="14" />{{ weekError }} <button type="button" class="btn sm" @click="loadWeek">Try again</button></p>
+        <div v-else class="grid-scroll">
+          <table class="week-grid" aria-label="Hours per ticket and day">
+            <thead>
+              <tr>
+                <th scope="col" class="c-ticket">Ticket</th>
+                <th v-for="(day, i) in days" :key="i" scope="col" class="c-day" :class="{ today: dayKey(day) === todayKey, weekend: i > 4 }"><span class="d-name">{{ WEEKDAYS[i] }}</span><span class="d-date">{{ day.getDate() }}</span></th>
+                <th scope="col" class="c-total">Total</th>
+              </tr>
+            </thead>
+            <tbody>
+              <tr v-for="row in grid" :key="row.id">
+                <th scope="row" class="c-ticket"><div class="t-cell">
+                  <RouterLink v-if="ticketHref(row.id)" class="ticket-chip" :to="ticketHref(row.id)" :data-tip="`Open ${nodes.get(row.id)?.key}`">{{ nodes.get(row.id)?.key }}</RouterLink>
+                  <span v-else class="ticket-chip plain">{{ nodes.get(row.id)?.key }}</span>
+                  <span class="t-title">{{ nodes.get(row.id)?.title }}</span>
+                </div></th>
+                <td v-for="(cell, i) in row.cells" :key="i" class="c-day mono" :class="{ today: dayKey(days[i]) === todayKey, weekend: i > 4, empty: !cell }">{{ cell ? formatClock(cell) : '·' }}</td>
+                <td class="c-total mono">{{ formatClock(row.total) }}</td>
+              </tr>
+              <tr v-if="!grid.length" class="empty-row"><td :colspan="9">{{ canLog ? 'Nothing logged this week. Log your first entry above.' : 'Nothing logged this week.' }}</td></tr>
+            </tbody>
+            <tfoot v-if="grid.length">
+              <tr>
+                <th scope="row" class="c-ticket">Per day</th>
+                <td v-for="(seconds, i) in perDay" :key="i" class="c-day mono" :class="{ today: dayKey(days[i]) === todayKey, weekend: i > 4, empty: !seconds }">{{ seconds ? formatClock(seconds) : '·' }}</td>
+                <td class="c-total mono grand">{{ formatClock(total) }}</td>
+              </tr>
+            </tfoot>
+          </table>
+        </div>
+        <footer v-if="amounts.length" class="week-foot"><span class="foot-label">Billable at the day’s rates</span><MoneyText v-for="row in amounts" :key="row.currency" :amount="row.amount" :currency="row.currency" strong /></footer>
       </section>
+
+      <section v-if="byDay.length" class="card glass-card entries-card" aria-labelledby="entries-title">
+        <header class="card-head"><h2 id="entries-title">Entries</h2><span class="sub">Entries are final once logged; a correction is a new entry.</span></header>
+        <div v-for="group in byDay" :key="group.i" class="day-group">
+          <p class="day-head"><span>{{ WEEKDAYS[group.i] }} {{ group.day.getDate() }}</span><span class="mono">{{ formatClock(perDay[group.i]) }}</span></p>
+          <ul class="entries">
+            <li v-for="e in group.list" :key="e.id" class="entry">
+              <span class="e-time mono" :data-tip="absoluteTime(e.started_at)">{{ timeOfDay(e.started_at) }}–{{ timeOfDay(e.ended_at) }}</span>
+              <RouterLink v-if="ticketHref(e.node_id)" class="ticket-chip" :to="ticketHref(e.node_id)">{{ nodes.get(e.node_id)?.key }}</RouterLink>
+              <span v-else class="ticket-chip plain">{{ nodes.get(e.node_id)?.key }}</span>
+              <span class="e-text"><span class="e-title">{{ nodes.get(e.node_id)?.title }}</span><span class="e-meta"><AppIcon name="tag" :size="11" />{{ business.costUnit(e.cost_unit_node_id)?.node.title ?? 'Cost unit' }}<template v-if="e.note"> · {{ e.note }}</template></span></span>
+              <span v-if="e.source === 'agent_run'" class="agent-chip">Agent run</span>
+              <span class="e-dur mono">{{ formatClock(e.duration_seconds) }}</span>
+              <span class="e-amount"><MoneyText :amount="e.amount" :currency="e.currency" /></span>
+            </li>
+          </ul>
+        </div>
+      </section>
+      <p class="hint"><kbd class="keycap">l</kbd> log time · <kbd class="keycap"><AppIcon name="arrow-left" /></kbd><kbd class="keycap"><AppIcon name="arrow" /></kbd> week · <kbd class="keycap">t</kbd> this week</p>
     </template>
-  </section>
+
+    <!-- ---------- Approvals ---------- -->
+    <template v-else>
+      <div v-if="approvalsState === 'loading'" class="card glass-card"><div class="grid-skeleton"><span v-for="i in 3" :key="i" class="skeleton" /></div></div>
+      <p v-else-if="approvalsState === 'error'" class="inline-error" role="alert"><AppIcon name="alert" :size="14" />Periods could not be loaded. <button type="button" class="btn sm" @click="loadApprovals">Try again</button></p>
+      <template v-else>
+        <section v-for="group in [{ id: 'ready', title: 'Waiting for approval', list: ready, note: 'Ended, not approved yet.' }, { id: 'running', title: 'Still running', list: runningPeriods, note: 'Open for entries.' }, ...(showApproved ? [{ id: 'approved', title: 'Approved', list: approved, note: 'Closed.' }] : [])]" :key="group.id" class="card glass-card periods-card" :aria-labelledby="`${group.id}-title`">
+          <header class="card-head"><h2 :id="`${group.id}-title`">{{ group.title }}</h2><span class="count mono">{{ group.list.length }}</span><span class="sub">{{ group.note }}</span></header>
+          <p v-if="!group.list.length" class="empty-line">{{ group.id === 'ready' ? 'Nothing waits for approval.' : group.id === 'running' ? 'No open period is running.' : 'No approved period yet.' }}</p>
+          <ul v-else class="period-rows" :aria-label="group.title">
+            <li v-for="p in group.list" :key="p.id">
+              <button type="button" class="period-row" :class="{ open: periodId === p.id }" @click="openReview(p)">
+                <span class="p-who"><AppIcon :name="business.principals.find(x => x.id === p.principal_id)?.kind === 'agent' ? 'agent' : 'user'" :size="13" />{{ business.nameOf(p.principal_id) }}</span>
+                <span class="p-when">{{ periodLabel(p.starts_at, p.ends_at) }}</span>
+                <span class="p-count">{{ plural(summaryOf(p).count, 'entry', 'entries') }}</span>
+                <span class="p-time mono">{{ formatSpan(p.approval?.total_seconds ?? summaryOf(p).seconds) }}</span>
+                <span class="p-amount"><MoneyText v-for="a in summaryOf(p).amounts" :key="a.currency" :amount="a.amount" :currency="a.currency" /></span>
+                <AppIcon name="chevron-right" :size="13" class="go" />
+              </button>
+            </li>
+          </ul>
+        </section>
+      </template>
+    </template>
+
+    <PickerMenu v-if="personMenu" :anchor="personMenu" title="Hours of" :options="personOptions" :current="person" placeholder="Find a person or agent…" @choose="choosePerson" @close="personMenu = null" />
+  </BusinessPage>
+  <PeriodPanel v-if="openPeriod" :period="openPeriod" :entries="openEntries" :nodes="nodes" :loading="panelLoading" @close="closeReview" @approved="approvedPeriod" @reload="view === 'approvals' ? loadApprovals() : loadWeek()" />
 </template>
 
 <style scoped>
-.hours-view{padding:24px;overflow:auto;min-height:0;color:var(--ink);width:100%;box-sizing:border-box}header{display:flex;justify-content:space-between;align-items:start;gap:16px}h1{font-size:28px;margin:0}h2{font-size:18px;margin:0 0 16px}p{color:var(--ink-2);line-height:1.5}.eyebrow{color:var(--teal);margin:0 0 5px;font-size:12px;text-transform:uppercase;letter-spacing:.1em}.columns{display:grid;grid-template-columns:1fr 1fr;gap:20px}.card{background:var(--surface);border:1px solid var(--line);border-radius:var(--radius);padding:20px;margin:20px 0;min-width:0}form{display:grid;gap:12px;margin:14px 0}label{display:grid;gap:6px;color:var(--ink-2);font-size:13px}input,select,textarea,button{font:inherit;color:var(--ink);background:var(--surface);border:1px solid var(--line-2);border-radius:var(--radius-s);padding:10px;min-width:0}button{cursor:pointer;justify-self:start}button.primary{background:var(--teal);color:var(--button-ink)}button:disabled{opacity:.5;cursor:default}button:focus-visible,input:focus-visible,select:focus-visible,summary:focus-visible{outline:2px solid var(--teal);outline-offset:3px}.check{display:flex;align-items:center;gap:8px}.check input{margin:0}summary{cursor:pointer;padding:12px 0;color:var(--teal)}table{border-collapse:collapse;width:100%;font-size:13px}caption{text-align:left;font-weight:600;margin-bottom:10px}th,td{text-align:left;border-bottom:1px solid var(--line);padding:12px;vertical-align:top;font-variant-numeric:tabular-nums}small{display:block;color:var(--ink-2);margin-top:4px;overflow-wrap:anywhere}.table-scroll{overflow:auto}.badge{background:var(--aqua-3);border-radius:20px;padding:6px 12px}.error{color:var(--danger)}.approval{border-top:1px solid var(--line);padding-top:16px;margin-top:16px}.approval button{margin-top:12px}.entry-form{max-width:620px}@media(max-width:760px){.columns{grid-template-columns:1fr;gap:0}.hours-view{padding:14px}.card{padding:16px;margin:12px 0}header{flex-wrap:wrap}}
+.summary-skeleton { display: inline-block; width: 260px; }
+.toolbar { display: flex; align-items: center; flex-wrap: wrap; gap: 10px; min-height: 48px; margin-bottom: 12px; }
+.view-seg button { gap: 6px; }
+.badge { display: inline-grid; place-items: center; min-width: 17px; height: 17px; padding: 0 5px; border-radius: 999px; background: var(--gold); color: #fff; font: 700 10px/1 var(--mono); }
+.person-btn { gap: 7px; }
+.chev { color: var(--ink-3); }
+.week-nav { display: inline-flex; align-items: center; gap: 6px; }
+.week-label { display: inline-flex; align-items: baseline; gap: 8px; min-width: 190px; justify-content: center; font-size: 13px; color: var(--ink-2); }
+.week-label b { color: var(--ink); font-weight: 650; }
+.approved-switch { margin-left: auto; }
+.card { overflow: clip; margin-bottom: 16px; container-type: inline-size; }
+.period-strip { display: flex; align-items: center; flex-wrap: wrap; gap: 8px 10px; min-height: 46px; padding: 10px 18px; border-bottom: 1px solid var(--line); font-size: 12.5px; color: var(--ink-2); }
+.period-strip > svg { color: var(--ink-3); }
+.period-chip { display: inline-flex; align-items: center; gap: 6px; height: 22px; padding: 0 9px; border-radius: 999px; background: var(--chip-teal-bg); box-shadow: inset 0 0 0 1px var(--chip-teal-line); color: var(--teal-ink); font-weight: 600; }
+.period-chip.approved { background: rgba(47, 122, 90, .1); box-shadow: inset 0 0 0 1px rgba(47, 122, 90, .3); color: var(--ok); }
+.strip-text { color: var(--ink-2); }
+.strip-skel { width: 280px; }
+.link-btn { height: 24px; padding: 0 8px; border: 0; border-radius: 999px; background: transparent; color: var(--teal-ink); font-size: 12.5px; font-weight: 600; }
+.link-btn:hover { background: var(--row-hover); }
+.link-btn:focus-visible { box-shadow: var(--focus-ring); }
+.log-wrap { padding: 14px 18px 6px; border-bottom: 1px solid var(--line); background: var(--surface-sunken); }
+.log-closed { padding: 10px 12px; border-bottom: 1px solid var(--line); }
+.log-open { width: 100%; height: 44px; }
+.agent-note { display: flex; align-items: center; gap: 8px; padding: 12px 18px; border-bottom: 1px solid var(--line); font-size: 13px; }
+.grid-scroll { overflow-x: auto; }
+.week-grid { width: 100%; min-width: 720px; border-collapse: separate; border-spacing: 0; table-layout: fixed; font-size: 13px; }
+.week-grid th, .week-grid td { height: 40px; padding: 0 10px; border-bottom: 1px solid var(--line); text-align: right; font-weight: 400; }
+.week-grid thead th { height: 44px; font: 500 10px/1.2 var(--mono); letter-spacing: .12em; text-transform: uppercase; color: var(--ink-3); border-bottom: 1px solid var(--line-2); font-variant-ligatures: none; }
+.week-grid .c-ticket { text-align: left; padding-left: 18px; width: 38%; }
+.week-grid thead .c-ticket { vertical-align: middle; }
+.c-day { width: 7.5%; }
+.d-name { display: block; }
+.d-date { display: block; margin-top: 2px; font-size: 12px; letter-spacing: 0; color: var(--ink-2); }
+.today { background: var(--aqua-wash); }
+thead .today .d-name, thead .today .d-date { color: var(--teal-ink); font-weight: 700; }
+.weekend:not(.today) { background: var(--surface-sunken); }
+.week-grid td.empty { color: var(--ink-3); opacity: .6; }
+.mono { font-family: var(--mono); font-variant-numeric: tabular-nums; font-variant-ligatures: none; }
+.c-total { width: 80px; font-weight: 650; color: var(--ink); padding-right: 18px !important; }
+tbody th.c-ticket { font-weight: 400; }
+.t-cell { display: flex; align-items: center; gap: 10px; min-width: 0; }
+.t-title { min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; color: var(--ink); }
+.ticket-chip { flex-shrink: 0; display: inline-flex; align-items: center; height: 22px; padding: 0 8px; border-radius: 6px; background: var(--chip-teal-bg); box-shadow: inset 0 0 0 1px var(--chip-teal-line); color: var(--teal-ink); font: 600 11.5px/1 var(--mono); text-decoration: none; font-variant-ligatures: none; white-space: nowrap; }
+a.ticket-chip:hover { text-decoration: underline; }
+.ticket-chip:focus-visible { box-shadow: var(--focus-ring); }
+.ticket-chip.plain { background: var(--chip-bg); box-shadow: inset 0 0 0 1px var(--chip-line); color: var(--ink-2); }
+tfoot th, tfoot td { border-bottom: 0 !important; font-weight: 650; color: var(--ink); }
+tfoot th.c-ticket { font: 500 10px/1 var(--mono); letter-spacing: .12em; text-transform: uppercase; color: var(--ink-3); }
+.grand { font-size: 14px; }
+.empty-row td { height: 64px; text-align: center; color: var(--ink-3); font-size: 13px; }
+.week-foot { display: flex; align-items: center; justify-content: flex-end; gap: 14px; padding: 10px 18px 12px; border-top: 1px solid var(--line); font-size: 14px; }
+.foot-label { font-size: 12px; color: var(--ink-3); }
+.grid-skeleton { display: grid; gap: 14px; padding: 18px; }
+.grid-skeleton .skeleton { height: 12px; }
+.inline-error { display: flex; align-items: center; gap: 8px; flex-wrap: wrap; margin: 12px 18px; padding: 8px 12px; border-radius: 10px; background: var(--danger-bg); color: var(--danger); font-size: 13px; }
+.card-head { display: flex; align-items: baseline; flex-wrap: wrap; gap: 10px; padding: 14px 18px 10px; }
+.card-head h2 { font-size: 15px; font-weight: 650; }
+.sub { font-size: 12.5px; color: var(--ink-3); }
+.count { display: inline-grid; place-items: center; min-width: 22px; height: 20px; padding: 0 6px; border-radius: 999px; background: var(--chip-bg); box-shadow: inset 0 0 0 1px var(--chip-line); font-size: 11px; color: var(--ink-2); }
+.day-group { padding: 0 18px 10px; }
+.day-head { display: flex; justify-content: space-between; padding: 8px 2px 6px; border-bottom: 1px solid var(--line-2); font-size: 12px; font-weight: 650; color: var(--ink-2); }
+.entries { margin: 0; padding: 0; list-style: none; }
+.entry { display: grid; grid-template-columns: 96px max-content minmax(0, 1fr) auto 56px 130px; align-items: center; gap: 12px; min-height: 44px; border-bottom: 1px solid var(--line); font-size: 13px; }
+.entry:last-child { border-bottom: 0; }
+.e-time { font-size: 12px; color: var(--ink-2); }
+.e-text { display: grid; min-width: 0; }
+.e-title { min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.e-meta { display: flex; align-items: center; gap: 5px; min-width: 0; overflow: hidden; white-space: nowrap; text-overflow: ellipsis; font-size: 12px; color: var(--ink-3); }
+.agent-chip { height: 18px; padding: 0 7px; border-radius: 999px; background: var(--chip-bg); box-shadow: inset 0 0 0 1px var(--chip-line); color: var(--ink-2); font: 600 9.5px/18px var(--mono); letter-spacing: .06em; text-transform: uppercase; }
+.e-dur { text-align: right; font-size: 12.5px; }
+.e-amount { text-align: right; font-size: 12.5px; }
+.hint { display: flex; align-items: center; justify-content: center; gap: 5px; padding: 8px 0 4px; font-size: 12px; color: var(--ink-3); }
+.hint .keycap + .keycap { margin-left: 2px; }
+.periods-card .card-head { padding-bottom: 8px; }
+.empty-line { padding: 4px 18px 18px; font-size: 13px; color: var(--ink-3); }
+.period-rows { margin: 0; padding: 0 6px 8px; list-style: none; border-top: 1px solid var(--line); }
+.period-row { display: grid; grid-template-columns: minmax(150px, 1.2fr) minmax(140px, 1fr) 90px 80px minmax(120px, auto) 14px; align-items: center; gap: 12px; width: 100%; min-height: 48px; margin-top: 4px; padding: 6px 12px; border: 0; border-radius: 10px; background: transparent; color: var(--ink); font-size: 13px; text-align: left; }
+@media (hover: hover) { .period-row:hover { background: var(--row-hover); } }
+.period-row.open { background: var(--row-selected); box-shadow: inset 3px 0 0 var(--row-accent); }
+.period-row:focus-visible { box-shadow: var(--focus-ring); }
+.p-who { display: inline-flex; align-items: center; gap: 8px; font-weight: 650; min-width: 0; overflow: hidden; white-space: nowrap; text-overflow: ellipsis; }
+.p-who svg { color: var(--ink-3); flex-shrink: 0; }
+.p-when, .p-count { color: var(--ink-2); font-size: 12.5px; }
+.p-time { text-align: right; }
+.p-amount { display: grid; justify-items: end; }
+.go { color: var(--ink-3); }
+@container (max-width: 760px) { .entry { grid-template-columns: 88px max-content minmax(0, 1fr) 48px; } .entry .agent-chip, .e-amount { display: none; } }
+@container (max-width: 720px) { .period-row { grid-template-columns: minmax(0, 1fr) auto 14px; grid-template-areas: "who time go" "when amount go"; row-gap: 2px; } .p-who { grid-area: who; } .p-when { grid-area: when; } .p-time { grid-area: time; } .p-amount { grid-area: amount; } .p-count { display: none; } .go { grid-area: go; } }
+@media (max-width: 720px) {
+  .toolbar { gap: 8px; }
+  .view-seg { order: -1; }
+  .week-nav { width: 100%; justify-content: space-between; }
+  .week-nav .icon-btn { width: 40px; height: 40px; }
+  .week-label { min-width: 0; flex-direction: column; align-items: center; gap: 0; }
+  .person-btn { height: 40px; }
+  .log-wrap { padding: 12px; }
+  .week-grid { min-width: 0; }
+  .week-grid .c-ticket { width: 84px; padding-left: 10px; }
+  .week-grid thead .c-ticket { font-size: 0; }
+  .t-cell .t-title { display: none; }
+  .c-day { width: auto; padding: 0 4px !important; font-size: 11.5px; }
+  .d-date { font-size: 10.5px; }
+  .c-total { width: 56px; padding-right: 10px !important; }
+  .day-group { padding: 0 12px 8px; }
+  .entry { grid-template-columns: max-content minmax(0, 1fr) 48px; grid-template-areas: "time title dur" "chip title dur"; padding: 6px 0; }
+  .e-time { grid-area: time; } .entry .ticket-chip { grid-area: chip; justify-self: start; } .e-text { grid-area: title; } .e-dur { grid-area: dur; }
+  .hint { display: none; }
+}
 </style>

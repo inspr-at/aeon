@@ -12,6 +12,8 @@ import { kinds } from '../lib/useTicket'
 import { highlight, statusMeta } from '../lib/work'
 import { useProjects } from '../stores/projects'
 import AppIcon, { type IconName } from './AppIcon.vue'
+import BizIcon, { type BizIconName } from './business/BizIcon.vue'
+import { useBusiness } from '../stores/business'
 import StatusIcon from './work/StatusIcon.vue'
 
 // One input for tickets, projects and actions. Inside a project the search is scoped
@@ -21,6 +23,7 @@ const props = defineProps<{ canWrite: boolean }>()
 const route = useRoute()
 const router = useRouter()
 const projects = useProjects()
+const business = useBusiness()
 const dialog = ref<HTMLDialogElement>()
 const input = ref<HTMLInputElement>()
 const list = ref<HTMLElement>()
@@ -58,6 +61,12 @@ const actions = computed<ActionResult[]>(() => {
   }
   if (route.path !== '/') out.push({ type: 'action', id: 'go-projects', label: 'Go to Projects', icon: 'folder' })
   if (!route.path.startsWith('/agents')) out.push({ type: 'action', id: 'go-agents', label: 'Go to Agents', hint: 'Sessions, approvals and pacing', icon: 'agent' })
+  // Business: log time (on the open ticket, when one is open) and the overview.
+  if (business.open.hours && business.staff) {
+    const ticket = typeof route.params.ticketKey === 'string' ? route.params.ticketKey.toUpperCase() : ''
+    out.push({ type: 'action', id: 'log-time', label: ticket ? `Log time on ${ticket}` : 'Log time', hint: 'Hours this week', icon: 'clock', keys: route.path.startsWith('/business/hours') ? ['l'] : undefined })
+  }
+  if (business.anyOpen && route.path !== '/business') out.push({ type: 'action', id: 'go-business', label: 'Go to Business', hint: 'Hours and rates', icon: 'briefcase' })
   out.push({ type: 'action', id: 'theme', label: dark.value ? 'Switch to light theme' : 'Switch to dark theme', icon: dark.value ? 'sun' : 'moon' })
   out.push({ type: 'action', id: 'shortcuts', label: 'Keyboard shortcuts', icon: 'keyboard', keys: ['?'] })
   return out
@@ -148,6 +157,11 @@ function act(id: string) {
     void router.push({ path: here ? `/p/${encodeURIComponent(here.routeKey)}` : route.path, query: id === 'go-outline' ? { ...rest, view: 'outline' } : rest })
   } else if (id === 'go-projects') void router.push('/')
   else if (id === 'go-agents') void router.push('/agents')
+  else if (id === 'go-business') void router.push('/business')
+  else if (id === 'log-time') {
+    const ticket = typeof route.params.ticketKey === 'string' ? route.params.ticketKey.toUpperCase() : ''
+    void router.push({ path: '/business/hours', query: ticket ? { log: '1', ticket } : { log: '1' } })
+  }
   else if (id === 'theme') toggleTheme()
   else if (id === 'shortcuts') run({ name: 'shortcuts' })
 }
@@ -190,7 +204,7 @@ function backdrop(event: MouseEvent) { if (event.target === dialog.value) close(
 function indexOf(result: Result) { return flat.value.indexOf(result) }
 onBeforeUnmount(() => { clearTimeout(timer); controller?.abort(); narrowQuery.removeEventListener('change', onNarrow) })
 defineExpose({ open })
-const iconOf = (result: Result): IconName => result.type === 'action' ? result.icon as IconName : result.type === 'project' ? 'folder' : result.kind === 'epic' ? 'epic' : result.kind === 'task' ? 'task' : 'ticket'
+const iconOf = (result: Result): BizIconName => result.type === 'action' ? result.icon as BizIconName : result.type === 'project' ? 'folder' : result.kind === 'epic' ? 'epic' : result.kind === 'task' ? 'task' : 'ticket'
 </script>
 
 <template>
@@ -237,7 +251,7 @@ const iconOf = (result: Result): IconName => result.type === 'action' ? result.i
               <template v-if="result.type === 'ticket'">
                 <StatusIcon :state="result.state" :size="13" class="st" :data-tip="statusMeta(result.state).label" />
                 <span class="key"><template v-for="(part, i) in highlight(result.key, group.id === 'recent' || !keyQuery(query) ? '' : query)" :key="i"><mark v-if="part.match">{{ part.text }}</mark><template v-else>{{ part.text }}</template></template></span>
-                <AppIcon :name="iconOf(result)" :size="13" class="kind" :class="result.kind" />
+                <AppIcon :name="iconOf(result) as IconName" :size="13" class="kind" :class="result.kind" />
                 <span class="title"><template v-for="(part, i) in highlight(result.title, group.id === 'recent' ? '' : query)" :key="i"><mark v-if="part.match">{{ part.text }}</mark><template v-else>{{ part.text }}</template></template></span>
                 <span v-if="result.projectKey && result.projectKey !== scope" class="project-chip">{{ result.projectKey }}</span>
               </template>
@@ -248,7 +262,7 @@ const iconOf = (result: Result): IconName => result.type === 'action' ? result.i
                 <span v-if="result.description" class="desc">{{ result.description }}</span>
               </template>
               <template v-else>
-                <span class="action-mark"><AppIcon :name="iconOf(result)" :size="14" /></span>
+                <span class="action-mark"><BizIcon :name="iconOf(result)" :size="14" /></span>
                 <span class="title">{{ result.label }}</span>
                 <span v-if="result.hint" class="desc">{{ result.hint }}</span>
                 <span v-if="result.keys" class="item-keys" aria-hidden="true"><kbd v-for="k in result.keys" :key="k" class="keycap">{{ k }}</kbd></span>

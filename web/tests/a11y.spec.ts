@@ -4,6 +4,7 @@ import { test, expect, type Page } from '@playwright/test'
 import AxeBuilder from '@axe-core/playwright'
 import { fixtures, me, mockWork } from './work-fixtures'
 import { agentData, mockAgents } from './agents-fixtures'
+import { businessData, mockBusiness, type BusinessMockOptions } from './business-fixtures'
 
 const world = {
   me: me.id,
@@ -18,6 +19,13 @@ const world = {
 async function signedIn(page: Page, empty = false) {
   await mockWork(page, fixtures())
   await mockAgents(page, agentData({ ...world, empty }))
+}
+function business(options: BusinessMockOptions = {}) {
+  return async (page: Page) => {
+    await mockWork(page, fixtures())
+    await mockAgents(page, agentData({ ...world, empty: true }))
+    await mockBusiness(page, businessData(options), options)
+  }
 }
 async function signedOut(page: Page) {
   await page.route('**/api/**', route => {
@@ -61,6 +69,22 @@ const screens: [string, (page: Page) => Promise<void>, string, (page: Page) => P
   ['agents empty', page => signedIn(page, true), '/agents', async page => { await expect(page.getByRole('heading', { name: 'No agent has connected yet' })).toBeVisible() }],
   ['agents session panel', signedIn, '/agents/5e000000-0000-4000-8000-000000000001', async page => {
     await expect(page.getByRole('complementary', { name: 'Session details' }).locator('.msg').first()).toBeVisible()
+  }],
+  ['business setup', business({ enabled: [] }), '/business', async page => { await expect(page.getByRole('heading', { name: 'Set up Business' })).toBeVisible() }],
+  ['business overview', business(), '/business', async page => { await expect(page.getByRole('list', { name: 'Time per ticket' })).toBeVisible() }],
+  ['hours week', business(), '/business/hours', async page => { await expect(page.locator('.week-grid tbody tr').first()).toBeVisible() }],
+  ['hours ticket picker', business(), '/business/hours', async page => {
+    await expect(page.locator('.week-grid tbody tr').first()).toBeVisible()
+    await page.getByRole('button', { name: /^Ticket:/ }).click()
+    await page.getByRole('combobox', { name: 'Ticket' }).fill('pharos')
+    await expect(page.getByRole('listbox', { name: 'Ticket' }).getByRole('option').first()).toBeVisible()
+  }],
+  ['hours approvals', business(), '/business/hours?view=approvals&period=p-me-38', async page => { await expect(page.getByRole('complementary', { name: 'Period review' }).locator('.t-row').first()).toBeVisible() }],
+  ['rates', business(), '/business/rates', async page => { await expect(page.getByRole('table', { name: 'Rates of Development' })).toBeVisible() }],
+  ['rates add form', business(), '/business/rates', async page => {
+    await expect(page.getByRole('table', { name: 'Rates of Development' })).toBeVisible()
+    await page.getByRole('button', { name: 'Add rate' }).nth(1).click()
+    await expect(page.getByRole('combobox', { name: 'Unit' })).toBeFocused()
   }],
   ['agents approve', signedIn, '/agents', async page => {
     await expect(page.locator('.agents-page .row').first()).toBeVisible()

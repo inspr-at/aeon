@@ -6,5 +6,6 @@ export default defineConfig({
   plugins: [vue()],
   // Never inline assets as data: URLs; the server CSP (default-src 'self') blocks them.
   build: { assetsInlineLimit: 0 },
-  server: { proxy: { '/api': 'http://127.0.0.1:8080' } },
+  // AEON_API_URL points the dev proxy at another local backend (a branch build on its own port).
+  server: { proxy: { '/api': process.env.AEON_API_URL ?? 'http://127.0.0.1:8080' } },
 })

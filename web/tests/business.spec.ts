@@ -1,188 +1,113 @@
 // SPDX-License-Identifier: AGPL-3.0-only
-// Requires the coordinator route { path: '/business', component: BusinessHome, meta: { title: 'Business' } }.
+// Business entry and overview: the header link, admin setup, the week and rates.
 import { test, expect, type Page } from '@playwright/test'
+import { fixtures, mockWork, watchErrors } from './work-fixtures'
+import { businessData, mockBusiness, type BusinessMockOptions } from './business-fixtures'
 
-const build = 'ab'.repeat(32)
-const pinned = 'cd'.repeat(32)
-const identity = {
-  principal: { id: 'person-1', name: 'Markus Barta', kind: 'person', roles: ['admin'] },
-  tenant: { id: 'tenant-1', name: 'INSPR Studio' },
+test.use({ timezoneId: 'Europe/Vienna' })
+
+async function setup(page: Page, options: BusinessMockOptions = {}) {
+  await mockWork(page, fixtures())
+  const data = businessData(options)
+  const calls = await mockBusiness(page, data, options)
+  return { data, calls }
 }
+const header = (page: Page) => page.getByRole('banner')
 
-function plugin(id: string, permissions: string[], installation: { enabled: boolean; permissions: string[]; digest?: string; updated_at?: string }) {
-  return {
-    id,
-    version: '1',
-    digest_sha256: build,
-    owner: 'aeon',
-    permissions,
-    node_kinds: id === 'business_costs' ? [{ slug: 'cost_unit', field_schema: {} }] : [],
-    views: [{ id, panels: ['main'] }],
-    workflow_steps: [],
-    agent_tools: [],
-    integrations: [],
-    background_jobs: [],
-    installation: {
-      manifest_digest_sha256: installation.digest ?? build,
-      enabled: installation.enabled,
-      permissions: installation.permissions,
-      plugin_id: id,
-      version: '1',
-      updated_at: installation.updated_at ?? '2026-09-23T18:00:00Z',
-    },
-  }
-}
-
-function catalog() {
-  return [
-    plugin('business_costs', ['nodes.contribute', 'views.provide', 'steps.apply'], { enabled: true, permissions: ['nodes.contribute', 'views.provide', 'steps.apply'] }),
-    plugin('business_crm', ['nodes.contribute', 'views.provide'], { enabled: false, permissions: [], updated_at: '0001-01-01T00:00:00Z' }),
-    plugin('business_quotes', ['views.provide', 'steps.apply'], { enabled: true, permissions: ['views.provide', 'steps.apply'] }),
-    plugin('business_hours', ['views.provide', 'steps.apply'], { enabled: true, permissions: ['steps.apply'] }),
-  ]
-}
-
-async function mockAPI(page: Page, options: { admin?: boolean; items?: ReturnType<typeof catalog> } = {}) {
-  let items = options.items ?? catalog()
-  const calls: { path: string; method: string; body: string | null }[] = []
-  const principal = {
-    ...identity.principal,
-    roles: options.admin === false ? ['customer'] : identity.principal.roles,
-  }
-  await page.route('**/api/**', async route => {
-    const request = route.request()
-    const path = new URL(request.url()).pathname
-    const body = request.postData()
-    calls.push({ path, method: request.method(), body })
-    if (path === '/api/version') return route.fulfill({ json: { version: '260923120000.0.0', scheme: 'inspr-calendar-v2' } })
-    if (path === '/api/me') return route.fulfill({ json: { principal, tenant: identity.tenant, dev_mode: false } })
-    if (path === '/api/plugins' && request.method() === 'GET') return route.fulfill({ json: items })
-    const install = path.match(/^\/api\/plugins\/([a-z][a-z0-9_]*)\/installation$/)
-    if (install && request.method() === 'PUT') {
-      const written = JSON.parse(body ?? '{}') as { manifest_digest_sha256: string; enabled: boolean; permissions: string[] }
-      items = items.map(item => item.id === install[1] ? {
-        ...item,
-        installation: {
-          ...item.installation,
-          manifest_digest_sha256: written.manifest_digest_sha256,
-          enabled: written.enabled,
-          permissions: written.permissions,
-          updated_at: '2026-09-23T18:05:00Z',
-        },
-      } : item)
-      return route.fulfill({ json: items.find(item => item.id === install[1])?.installation })
-    }
-    return route.fulfill({ status: 404, json: {} })
-  })
-  return { calls, read: () => items }
-}
-
-async function noOverflow(page: Page) {
-  expect(await page.evaluate(() => {
-    const main = document.querySelector('main')!
-    return {
-      documentX: document.documentElement.scrollWidth > innerWidth,
-      documentY: document.documentElement.scrollHeight > innerHeight,
-      mainY: main.scrollHeight > main.clientHeight + 1,
-      mainX: main.scrollWidth > main.clientWidth + 1,
-    }
-  })).toEqual({ documentX: false, documentY: false, mainY: false, mainX: false })
-}
-
-test('admin enables an unpinned plugin with the compiled digest, then quotes open', async ({ page }) => {
-  const errors: string[] = []
-  page.on('pageerror', error => errors.push(error.message))
-  const api = await mockAPI(page)
-  await page.goto('/business')
-  await expect(page.getByRole('heading', { name: 'Business' }), 'coordinator registers /business to BusinessHome').toBeVisible()
-  await expect(page.getByRole('article', { name: 'Quotes' })).toContainText('Waiting on Organisations.')
-  await expect(page.getByRole('link', { name: 'Open Quotes' })).toHaveCount(0)
-  await expect(page.getByRole('link', { name: 'Open Cost units' })).toHaveAttribute('href', '/business/costs')
-  await page.getByRole('button', { name: 'Enable Organisations' }).click()
-  await expect(page.getByRole('link', { name: 'Open Quotes' })).toHaveAttribute('href', '/business/quotes')
-  const put = api.calls.find(call => call.method === 'PUT')
-  assertBody(put?.body, {
-    manifest_digest_sha256: build,
-    enabled: true,
-    permissions: ['nodes.contribute', 'views.provide'],
-  })
+test('the header offers Business once a business plugin is enabled', async ({ page }) => {
+  const errors = watchErrors(page)
+  await setup(page)
+  await page.goto('/')
+  await expect(page.getByRole('list', { name: 'Projects' })).toBeVisible()
+  const link = header(page).getByRole('link', { name: 'Business' })
+  await expect(link).toBeVisible()
+  await link.click()
+  await expect(page).toHaveURL(/\/business$/)
+  await expect(page.getByRole('heading', { name: 'Business', level: 1 })).toBeVisible()
+  await expect(link).toHaveAttribute('aria-current', 'page')
+  // Quotes and organisations are parked: no tab and no route.
+  await expect(page.getByRole('navigation', { name: 'Business' }).getByRole('link')).toHaveText(['Overview', 'Hours', 'Rates'])
+  await page.goto('/business/quotes')
+  await expect(page).toHaveURL(/\/business$/)
   expect(errors).toEqual([])
 })
 
-test('digest mismatch is relabelled with the compiled digest, not the pin', async ({ page }) => {
-  const items = catalog()
-  items[3] = plugin('business_hours', ['views.provide', 'steps.apply'], { enabled: true, permissions: ['views.provide', 'steps.apply'], digest: pinned })
-  const api = await mockAPI(page, { items })
+test('without an enabled plugin the header stays quiet and members see why', async ({ page }) => {
+  await setup(page, { role: 'member', enabled: [] })
+  await page.goto('/')
+  await expect(page.getByRole('list', { name: 'Projects' })).toBeVisible()
+  await expect(header(page).getByRole('link', { name: 'Business' })).toHaveCount(0)
   await page.goto('/business')
-  const hours = page.getByRole('article', { name: 'Hours' })
-  await expect(hours).toContainText('Digest mismatch')
-  await expect(hours).toContainText('does not match this build')
-  await page.getByRole('button', { name: 'Enable Hours' }).click()
-  const put = api.calls.find(call => call.path === '/api/plugins/business_hours/installation')
-  assertBody(put?.body, {
-    manifest_digest_sha256: build,
-    enabled: true,
-    permissions: ['views.provide', 'steps.apply'],
-  })
+  await expect(page.getByRole('heading', { name: 'Business is not set up for this workspace' })).toBeVisible()
+  await expect(page.getByRole('button', { name: 'Enable Business' })).toHaveCount(0)
 })
 
-test('a customer sees open sections and no installation controls', async ({ page }) => {
-  await mockAPI(page, { admin: false })
+test('an admin enables hours and rates with the compiled digests', async ({ page }) => {
+  const { calls } = await setup(page, { enabled: [] })
   await page.goto('/business')
-  await expect(page.getByRole('link', { name: 'Open Cost units' })).toBeVisible()
-  await expect(page.getByRole('button', { name: /Enable|Disable|Grant/ })).toHaveCount(0)
+  await expect(page.getByRole('heading', { name: 'Set up Business' })).toBeVisible()
+  await expect(page.getByRole('checkbox', { name: 'Hours enabled' })).not.toBeChecked()
+  await expect(page.getByText('Also enables Rates.')).toBeVisible()
+  await page.getByRole('button', { name: 'Enable Business' }).click()
+  await expect(page.getByRole('heading', { name: 'Your week' })).toBeVisible()
+  const writes = calls.filter(c => c.method === 'PUT')
+  expect(writes.map(c => c.path)).toEqual(['/api/plugins/business_costs/installation', '/api/plugins/business_hours/installation'])
+  expect(writes[0].body).toEqual({ manifest_digest_sha256: 'ab'.repeat(32), enabled: true, permissions: ['nodes.contribute', 'steps.apply', 'views.provide'] })
+  await expect(header(page).getByRole('link', { name: 'Business' })).toBeVisible()
 })
 
-test('a failed plugin list stays closed and retries', async ({ page }) => {
-  let fail = true
-  await page.route('**/api/**', async route => {
-    const path = new URL(route.request().url()).pathname
-    if (path === '/api/version') return route.fulfill({ json: { version: '260923120000.0.0', scheme: 'inspr-calendar-v2' } })
-    if (path === '/api/me') return route.fulfill({ json: { ...identity, dev_mode: false } })
-    if (path === '/api/plugins') {
-      if (fail) return route.fulfill({ status: 503, json: { message: 'Plugin list unavailable' } })
-      return route.fulfill({ json: catalog() })
-    }
-    return route.fulfill({ status: 404, json: {} })
-  })
+test('disabling a part asks first and closes its page', async ({ page }) => {
+  const { calls } = await setup(page)
   await page.goto('/business')
-  await expect(page.getByRole('alert')).toContainText('Plugin list unavailable')
-  await expect(page.getByRole('link', { name: 'Open Cost units' })).toHaveCount(0)
-  fail = false
-  await page.getByRole('button', { name: 'Refresh' }).click()
-  await expect(page.getByRole('link', { name: 'Open Cost units' })).toBeVisible()
+  await page.getByRole('button', { name: 'Manage parts' }).click()
+  await page.getByRole('checkbox', { name: 'Hours enabled' }).click()
+  const dialog = page.getByRole('dialog', { name: 'Disable Hours?' })
+  await expect(dialog).toBeVisible()
+  await dialog.getByRole('button', { name: 'Disable Hours' }).click()
+  await expect.poll(() => calls.filter(c => c.method === 'PUT').length).toBe(1)
+  expect(calls.find(c => c.method === 'PUT')?.body).toMatchObject({ enabled: false })
+  await page.goto('/business/hours')
+  await expect(page.getByRole('heading', { name: 'Hours is not enabled for this workspace' })).toBeVisible()
 })
 
-for (const viewport of [{ width: 1280, height: 720 }, { width: 390, height: 844 }]) {
-  for (const colorScheme of ['light', 'dark'] as const) {
-    test(`business home ${viewport.width} ${colorScheme}`, async ({ page }) => {
-      const errors: string[] = []
-      page.on('pageerror', error => errors.push(error.message))
-      await page.setViewportSize(viewport)
-      await page.emulateMedia({ colorScheme })
-      await mockAPI(page)
-      await page.goto('/business')
-      await expect(page.getByRole('heading', { name: 'Business' })).toBeVisible()
-      await page.evaluate(() => document.fonts.ready)
-      await noOverflow(page)
-      for (const control of await page.locator('main').locator('button:visible, a:visible, [role="button"]:visible').all()) {
-        const bounds = await control.boundingBox()
-        expect(bounds!.height).toBeGreaterThanOrEqual(44)
-        expect(bounds!.width).toBeGreaterThanOrEqual(44)
-      }
-      const centered = await page.locator('.business-nav .business-link, .business-mark, .business-heading .button, .business-actions .button').evaluateAll(nodes => nodes.map(node => {
-        const icon = node.querySelector('svg')
-        if (!icon) return 0
-        const host = node.getBoundingClientRect()
-        const mark = icon.getBoundingClientRect()
-        return Math.abs((host.y + host.height / 2) - (mark.y + mark.height / 2))
-      }))
-      for (const delta of centered) expect(delta).toBeLessThanOrEqual(1)
-      expect(errors).toEqual([])
-    })
-  }
-}
+test('the overview shows the week, where it went, what waits and the rates', async ({ page }) => {
+  const errors = watchErrors(page)
+  await setup(page)
+  await page.goto('/business')
+  await expect(page.getByText('8h 30m logged this week · 1 period to approve · 3 rates in force')).toBeVisible()
+  const week = page.getByRole('region', { name: 'Your week' })
+  await expect(week.getByText('8h 30m', { exact: true })).toBeVisible()
+  await expect(week.getByRole('listitem', { name: 'Thu 24: 1h 30m' })).toBeVisible()
+  await expect(week.getByRole('list', { name: 'Time per ticket' }).getByRole('listitem').first()).toContainText('PHAROS-11')
+  await expect(week.getByRole('list', { name: 'Time per ticket' }).getByRole('listitem').first()).toContainText('5:30')
+  const waiting = page.getByRole('region', { name: 'Waiting for approval' })
+  const period = waiting.getByRole('list', { name: 'Periods waiting for approval' }).getByRole('link')
+  await expect(period).toHaveCount(1)
+  for (const text of ['Markus Barta', '14–20 Sep 2026', '6h 15m']) await expect(period).toContainText(text)
+  const rates = page.getByRole('region', { name: 'Rates in force' })
+  await expect(rates.getByRole('listitem')).toHaveCount(2)
+  await expect(rates.getByRole('listitem').last()).toContainText('95.00 EUR/h')
+  await expect(rates.getByRole('listitem').last()).toContainText('720.00 EUR/day')
+  await period.click()
+  await expect(page).toHaveURL(/\/business\/hours\?view=approvals&period=p-me-38/)
+  await expect(page.getByRole('complementary', { name: 'Period review' })).toBeVisible()
+  expect(errors).toEqual([])
+})
 
-function assertBody(body: string | null | undefined, expected: unknown) {
-  expect(JSON.parse(body ?? 'null')).toEqual(expected)
-}
+test('the palette logs time and goes to Business', async ({ page }) => {
+  await setup(page)
+  await page.goto('/')
+  await expect(page.getByRole('list', { name: 'Projects' })).toBeVisible()
+  await page.keyboard.press('Control+k')
+  const palette = page.getByRole('dialog', { name: 'Search and commands' })
+  await page.keyboard.type('log time')
+  await expect(palette.getByRole('option', { name: /Log time/ })).toBeVisible()
+  await page.keyboard.press('Enter')
+  await expect(page).toHaveURL(/\/business\/hours/)
+  await expect(page.getByRole('form', { name: 'Log time' })).toBeVisible()
+  await page.keyboard.press('Control+k')
+  await page.keyboard.type('business')
+  await expect(palette.getByRole('option', { name: /Go to Business/ })).toBeVisible()
+  await page.keyboard.press('Enter')
+  await expect(page).toHaveURL(/\/business$/)
+})

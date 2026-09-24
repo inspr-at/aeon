@@ -44,6 +44,7 @@ import (
 	"github.com/inspr-at/aeon/internal/auth"
 	"github.com/inspr-at/aeon/internal/business/costunits"
 	"github.com/inspr-at/aeon/internal/business/crm"
+	"github.com/inspr-at/aeon/internal/business/directory"
 	"github.com/inspr-at/aeon/internal/business/hours"
 	"github.com/inspr-at/aeon/internal/business/quotes"
 
@@ -140,7 +141,7 @@ func serveListener(ctx context.Context, cfg config.Config, ln net.Listener) erro
 			authMod,
 			nodes.New(pool, nodes.SQLWriter{}),
 			relations.New(pool),
-			events.New(pool),
+			events.New(pool, events.WithUndoHandlers(attachments.UndoHandlers())),
 			search.New(pool, embedProvider),
 			views.New(pool),
 			activity.New(pool),
@@ -167,6 +168,7 @@ func serveListener(ctx context.Context, cfg config.Config, ln net.Listener) erro
 			crm.New(pool, pluginRegistry),
 			quotesMod,
 			hours.New(pool, pluginRegistry),
+			directory.New(pool, pluginRegistry),
 		},
 		Middleware: []func(http.Handler) http.Handler{authMod.Middleware},
 	}
