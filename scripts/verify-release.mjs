@@ -6,6 +6,7 @@ import { createHash } from "node:crypto";
 import { lstatSync, readFileSync, readdirSync } from "node:fs";
 import { dirname, join, resolve } from "node:path";
 import { fileURLToPath } from "node:url";
+import { checkQuoteEvidence } from "./check-quote-evidence.mjs";
 
 const root = resolve(dirname(fileURLToPath(import.meta.url)), "..");
 const sha = (bytes) => createHash("sha256").update(bytes).digest("hex");
@@ -20,6 +21,7 @@ export function validCalendarVersion(v) {
 
 export function verifyRelease() {
   const fail = (why) => { throw new Error(`release check: ${why}`); };
+  checkQuoteEvidence();
   const pin = JSON.parse(readFileSync(join(root, "scripts/calendar-version-bundle-pin.json"), "utf8"));
   if (pin.repository !== "inspr-at/inspr" || !/^[a-f0-9]{40}$/.test(pin.revision) || !/^[a-f0-9]{64}$/.test(pin.configSha256) || !/^[a-f0-9]{64}$/.test(pin.manifestSha256)) fail("invalid pin");
   const dir = join(root, "web/src/vendor/calendar-version-display");

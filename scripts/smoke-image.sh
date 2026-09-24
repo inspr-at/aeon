@@ -34,7 +34,7 @@ cleanup() {
 }
 trap cleanup EXIT
 
-mkdir -p "$tmp/files" "$tmp/secrets" "$tmp/initdb"
+mkdir -p "$tmp/files" "$tmp/secrets" "$tmp/initdb" "$tmp/public"
 openssl rand -hex 32 > "$tmp/secrets/db-super"
 openssl rand -hex 32 > "$tmp/secrets/db-app"
 openssl rand -hex 32 > "$tmp/secrets/session"
@@ -68,6 +68,12 @@ fi
 
 echo 'Building release image for smoke gate'
 docker build --build-arg "VERSION=${AEON_SMOKE_VERSION:-dev}" -t "$image" .
+docker run --rm --entrypoint /bin/sh "$image" -c '
+  test -s /usr/share/doc/aeon/NOTICE &&
+  apk list --installed chromium | grep -Eq "^chromium-152[.]0[.]7977[.]82-r0 .*[(]BSD-3-Clause[)] \\[installed\\]$" &&
+  apk list --installed tini | grep -Eq "^tini-0[.]19[.]0-r3 .*[(]MIT[)] \\[installed\\]$"
+' || { echo 'runtime quote dependency notice or license check failed' >&2; exit 1; }
+echo 'runtime: quote dependency pins, licenses and NOTICE OK'
 docker network create "$network" >/dev/null
 docker run -d --name "$db" --network "$network" \
   -e POSTGRES_USER=postgres -e POSTGRES_PASSWORD_FILE=/run/secrets/db-super \
@@ -136,7 +142,7 @@ PY
 docker container rm -f "$app" >/dev/null
 
 start_app dev
-SMOKE_BASE="$base" SMOKE_QUOTE_HTML="$tmp/quote.html" python3 - <<'PY'
+SMOKE_BASE="$base" SMOKE_QUOTE_HTML="$tmp/quote.html" SMOKE_PUBLIC_PDF="$tmp/public/quote.pdf" python3 - <<'PY'
 import html
 import http.cookiejar
 import io
@@ -251,7 +257,10 @@ with urllib.request.urlopen(base + public_api, timeout=50) as response:
 with urllib.request.urlopen(base + public_api + '/pdf', timeout=50) as response:
     assert response.status == 200
     assert response.headers.get_content_type() == 'application/pdf'
-    assert response.read(5) == b'%PDF-'
+    pdf_bytes = response.read()
+    assert pdf_bytes.startswith(b'%PDF-')
+    with open(os.environ['SMOKE_PUBLIC_PDF'], 'wb') as output:
+        output.write(pdf_bytes)
 print('dev: anonymous public quote projection and PDF OK')
 with open(os.environ['SMOKE_QUOTE_HTML'], 'w', encoding='utf-8') as output:
     output.write('<!doctype html><meta charset="utf-8"><title>Quote smoke</title>'
@@ -259,6 +268,16 @@ with open(os.environ['SMOKE_QUOTE_HTML'], 'w', encoding='utf-8') as output:
         '<p>Smoke service: EUR 1.00</p>')
 print('dev: issued quote fixture OK')
 PY
+
+# A disposable Poppler reader inspects the actual public PDF bytes. The
+# release image stays small; only this synthetic PDF is mounted into the reader.
+docker run --rm -v "$tmp/public:/smoke:ro" alpine:3.24 sh -c '
+  apk add --no-cache poppler-utils >/dev/null &&
+  pdfinfo /smoke/quote.pdf | grep -E "^Page size:.*A4" >/dev/null &&
+  pdftotext /smoke/quote.pdf - | grep -F "Smoke quote" >/dev/null &&
+  pdftotext /smoke/quote.pdf - | grep -F "Smoke service" >/dev/null
+' || { echo 'public quote PDF text or A4 geometry check failed' >&2; exit 1; }
+echo 'dev: public quote PDF text and A4 geometry OK'
 
 # Print the issued quote fixture inside the exact runtime image, as its USER.
 # The public capability endpoint has separate authorization/selector semantics;

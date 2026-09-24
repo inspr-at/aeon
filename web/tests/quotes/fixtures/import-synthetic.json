@@ -1,0 +1,13 @@
+{
+  "source_instance": "synthetic-one",
+  "customers": [
+    { "source_id": "17", "customer_no": "K26091", "name": "Sample Customer", "primary_contact_source_id": "3" }
+  ],
+  "contacts": [
+    { "source_id": "3", "customer_source_id": "17", "name": "Alex Sample" },
+    { "source_id": "4", "customer_source_id": "17", "name": "Riley Sample" }
+  ],
+  "quotes": [
+    { "source_id": "9", "customer_source_id": "17", "offer_no": "A260924-01", "state": "accepted", "currency": "EUR", "net_total_minor": 14999, "original_sha256": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa", "original_pdf_sha256": "" }
+  ]
+}

@@ -228,12 +228,31 @@ func TestQuoteFlowAndGates(t *testing.T) {
 		t.Fatalf("wrong total %v", v["total"])
 	}
 	digest := v["content_sha256"].(string)
+	// This is the pre-document R4 write path on a migrated database. Its saved
+	// digest/pricing modes, lines and export must remain readable after 0600.
+	if err := db.InTenant(ctx, database.App, tenantID, func(tx pgx.Tx) error {
+		old, err := readVersion(ctx, tx, quoteID, 1)
+		if err != nil {
+			return err
+		}
+		if old.DigestMode != "r4-v1" || old.PricingMode != "rate-4" || old.ContentSHA256 != digest || len(old.Lines) != 1 || old.Document != nil {
+			return fmt.Errorf("R4 row changed on read: %+v", old)
+		}
+		return nil
+	}); err != nil {
+		t.Fatal(err)
+	}
 	pdfReq := httptest.NewRequest("GET", "/api/quotes/"+quoteID+"/versions/1/export?format=pdf", nil)
 	pdfReq = pdfReq.WithContext(tenant.WithPrincipal(pdfReq.Context(), as("admin")))
 	pdfRec := httptest.NewRecorder()
 	mux.ServeHTTP(pdfRec, pdfReq)
 	if pdfRec.Code != 200 || !strings.HasPrefix(pdfRec.Body.String(), "%PDF-1.4") || !strings.Contains(pdfRec.Body.String(), "xref") {
 		t.Fatalf("invalid PDF export: %d", pdfRec.Code)
+	}
+	for _, text := range []string{"/MediaBox [0 0 595 842]", "(Offer) Tj", "(Work ", digest} {
+		if !strings.Contains(pdfRec.Body.String(), text) {
+			t.Fatalf("R4 PDF lost %q", text)
+		}
 	}
 	status, _ = call("admin", "POST", "/api/quotes/"+quoteID+"/versions", body)
 	if status != 409 {

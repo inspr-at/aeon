@@ -8,6 +8,9 @@ RUN npm ci
 COPY web/ ./
 # prebuild runs the release check, which reads ../scripts and ../version.json
 COPY scripts/ /src/scripts/
+COPY NOTICE /src/NOTICE
+COPY Dockerfile /src/Dockerfile
+COPY go.mod /src/go.mod
 COPY version.json /src/version.json
 RUN npm run build
 
@@ -34,6 +37,7 @@ RUN apk add --no-cache ca-certificates chromium=152.0.7977.82-r0 \
 # tini reaps Chromium helper processes after each render.
 RUN apk add --no-cache tini=0.19.0-r3
 COPY --from=build /aeon /aeon
+COPY NOTICE /usr/share/doc/aeon/NOTICE
 # The runtime UID/GID is a contract with the host: csb1's aeon-files directory
 # is owned by 65532 (the former distroless nonroot user). Never let it float.
 USER 65532:65532
