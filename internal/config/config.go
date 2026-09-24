@@ -4,6 +4,8 @@
 package config
 
 import (
+	"crypto/rand"
+	"crypto/sha256"
 	"fmt"
 	"net/url"
 	"os"
@@ -19,6 +21,10 @@ type Config struct {
 	WebDir              string
 	BootstrapTenantSlug string
 	BootstrapTenantName string
+	// MessagingKey encrypts inbox receiver targets. It is SHA-256 of the
+	// AEON_MESSAGING_KEY_FILE contents; in dev without a file it is random and
+	// lives only in memory; in prod without a file it is nil and messaging is off.
+	MessagingKey []byte
 }
 
 // FromEnv reads AEON_* variables. Empty optional values take their defaults.
@@ -43,6 +49,18 @@ func FromEnv() (Config, error) {
 	if cfg.DatabaseURL == "" {
 		return Config{}, fmt.Errorf("AEON_DATABASE_URL is required")
 	}
+	if f := os.Getenv("AEON_MESSAGING_KEY_FILE"); f != "" {
+		key, err := messagingKey(f)
+		if err != nil {
+			return Config{}, err
+		}
+		cfg.MessagingKey = key
+	} else if cfg.Env == "dev" {
+		cfg.MessagingKey = make([]byte, 32)
+		if _, err := rand.Read(cfg.MessagingKey); err != nil {
+			return Config{}, fmt.Errorf("dev messaging key: %w", err)
+		}
+	}
 	if f := os.Getenv("AEON_DATABASE_PASSWORD_FILE"); f != "" {
 		u, err := withPasswordFile(cfg.DatabaseURL, f)
 		if err != nil {
@@ -51,6 +69,21 @@ func FromEnv() (Config, error) {
 		cfg.DatabaseURL = u
 	}
 	return cfg, nil
+}
+
+// messagingKey reads a host-generated secret file (at least 32 characters)
+// and derives the 32-byte AES key from it.
+func messagingKey(file string) ([]byte, error) {
+	b, err := os.ReadFile(file)
+	if err != nil {
+		return nil, fmt.Errorf("AEON_MESSAGING_KEY_FILE: %w", err)
+	}
+	secret := strings.TrimSpace(string(b))
+	if len(secret) < 32 {
+		return nil, fmt.Errorf("AEON_MESSAGING_KEY_FILE must hold at least 32 characters")
+	}
+	sum := sha256.Sum256([]byte(secret))
+	return sum[:], nil
 }
 
 func getenv(key, fallback string) string {
