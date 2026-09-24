@@ -16,15 +16,13 @@ import (
 var actionNames = map[string]bool{
 	"confirm_brief": true, "go": true, "reduce_scope": true, "park": true, "drop": true,
 	"reopen": true, "start_build": true, "approve_candidate": true, "reject_candidate": true,
+	"open_first_release": true, "mark_candidate": true,
 	"approve_deploy": true, "retry_deploy": true, "approve_permit": true, "plan_next_release": true,
 }
 
 func (m *Module) read(ctx context.Context, p tenant.Principal, projectID string) (Journey, error) {
 	var out Journey
 	err := m.inTenant(ctx, m.pool, p.TenantID, func(tx pgx.Tx) error {
-		if err := ensureJourney(ctx, tx, p, projectID); err != nil {
-			return err
-		}
 		f, err := loadFacts(ctx, tx, projectID, false)
 		if err != nil {
 			return err
@@ -206,6 +204,11 @@ func gateTarget(f facts, action string) (string, string, bool) {
 			return "", "", false
 		}
 		return ScopeBuild, f.Release.ID, true
+	case "mark_candidate":
+		if f.Release == nil {
+			return "", "", false
+		}
+		return ScopeBuild, f.Release.ID, true
 	case "approve_candidate", "reject_candidate":
 		if f.Release == nil {
 			return "", "", false
@@ -252,6 +255,10 @@ func applyAction(ctx context.Context, tx pgx.Tx, p tenant.Principal, f facts, in
 		return "", nil, reopen(ctx, tx, p, f, in)
 	case "start_build":
 		return "", nil, startBuild(ctx, tx, p, f, in)
+	case "open_first_release":
+		return "", nil, openFirstRelease(ctx, tx, p, f, in)
+	case "mark_candidate":
+		return "", nil, markCandidate(ctx, tx, p, f, in)
 	case "approve_candidate":
 		return "", nil, decideCandidate(ctx, tx, p, f, in, "deploying")
 	case "reject_candidate":
@@ -360,6 +367,68 @@ func startBuild(ctx context.Context, tx pgx.Tx, p tenant.Principal, f facts, in 
 	}
 	if tag.RowsAffected() != 1 {
 		return fail(http.StatusConflict, "the release is not in planning")
+	}
+	if _, err := bumpProject(ctx, tx, f.ProjectID, f.Revision); err != nil {
+		return err
+	}
+	return insertGate(ctx, tx, p.TenantID, f.ProjectID, f.Release.ID, GateBuild, ptrVal(in.ApprovalRequestID))
+}
+
+func openFirstRelease(ctx context.Context, tx pgx.Tx, p tenant.Principal, f facts, in actionWrite) error {
+	if f.Release != nil {
+		return fail(http.StatusConflict, "a release already exists")
+	}
+	if ptrVal(in.ApprovalRequestID) != "" {
+		return fail(http.StatusBadRequest, "approval_request_id is not used by this action")
+	}
+	var count int
+	if err := tx.QueryRow(ctx, `SELECT count(*) FROM journey_releases WHERE project_node_id=$1::uuid`, f.ProjectID).Scan(&count); err != nil {
+		return err
+	}
+	if count != 0 {
+		return fail(http.StatusConflict, "a release already exists")
+	}
+	_, _, err := createNextRelease(ctx, tx, p, f.ProjectID, f.Revision)
+	return err
+}
+
+func markCandidate(ctx context.Context, tx pgx.Tx, p tenant.Principal, f facts, in actionWrite) error {
+	if f.Release == nil {
+		return fail(http.StatusConflict, reasonNoRelease)
+	}
+	if err := requireGate(ctx, tx, p.ID, ptrVal(in.ApprovalRequestID), ScopeBuild, f.Release.ID); err != nil {
+		return err
+	}
+	rows, err := tx.Query(ctx, `SELECT n.id FROM journey_tickets t JOIN nodes n ON n.tenant_id=t.tenant_id AND n.id=t.ticket_node_id WHERE t.release_node_id=$1::uuid AND n.deleted_at IS NULL ORDER BY n.id FOR SHARE OF n`, f.Release.ID)
+	if err != nil {
+		return err
+	}
+	for rows.Next() {
+	}
+	err = rows.Err()
+	rows.Close()
+	if err != nil {
+		return err
+	}
+	var total, open int
+	if err := tx.QueryRow(ctx, `SELECT count(*),count(*) FILTER(WHERE n.state<>'done') FROM journey_tickets t JOIN nodes n ON n.tenant_id=t.tenant_id AND n.id=t.ticket_node_id WHERE t.release_node_id=$1::uuid AND n.deleted_at IS NULL`, f.Release.ID).Scan(&total, &open); err != nil {
+		return err
+	}
+	if total == 0 {
+		return fail(http.StatusConflict, reasonEmptyRelease)
+	}
+	if open > 0 {
+		return fail(http.StatusConflict, reasonOpenTickets)
+	}
+	tag, err := tx.Exec(ctx, `UPDATE journey_releases SET state='candidate',revision=revision+1 WHERE release_node_id=$1::uuid AND state IN ('building','planning')`, f.Release.ID)
+	if err != nil {
+		return err
+	}
+	if tag.RowsAffected() != 1 {
+		return fail(http.StatusConflict, "the release is not building")
+	}
+	if _, err := tx.Exec(ctx, `UPDATE journey_projects SET current_release_node_id=$2::uuid WHERE project_node_id=$1::uuid AND current_release_node_id IS NULL`, f.ProjectID, f.Release.ID); err != nil {
+		return err
 	}
 	if _, err := bumpProject(ctx, tx, f.ProjectID, f.Revision); err != nil {
 		return err
@@ -497,6 +566,15 @@ func planNext(ctx context.Context, tx pgx.Tx, p tenant.Principal, f facts, in ac
 		return "", nil, fail(http.StatusConflict, reasonNoRelease)
 	}
 	var superseded []string
+	if f.ImportedStage == stageLive && f.Release.State == "planning" {
+		var err error
+		superseded, err = settleReleased(ctx, tx, f.ProjectID, f.Release.ID)
+		if err != nil {
+			return "", nil, err
+		}
+		_, _, err = createNextRelease(ctx, tx, p, f.ProjectID, f.Revision)
+		return "", superseded, err
+	}
 	if f.Release.State != "released" && f.Release.State != "superseded" {
 		ready := f.DeployGateID != "" && deployPhase(f) == outcomeSucceeded &&
 			(!accessNeeded(f) || (f.AccessGateID != "" && f.AccessOutcome == outcomeSucceeded))
@@ -543,6 +621,10 @@ func eventType(action string) string {
 		return "journey.reopened"
 	case "start_build":
 		return "journey.build_started"
+	case "open_first_release":
+		return "journey.release_opened"
+	case "mark_candidate":
+		return "journey.candidate_marked"
 	case "approve_candidate":
 		return "journey.candidate_approved"
 	case "reject_candidate":

@@ -118,7 +118,7 @@ func TestDeriveStagesAndNextAction(t *testing.T) {
 			facts: facts{
 				Profile: "personal", BriefConfirmed: true,
 				RequirementsRevision: 1, AgreedRequirementsRevision: 1,
-				Release: release("building", false),
+				Release: release("building", false), IncludedTickets: 1, OpenReleaseTickets: 1,
 			},
 			stage: stageBuild, next: actionWaitForBuild, reason: reasonBuilding,
 			shape: "skipped", access: "skipped", live: "later",

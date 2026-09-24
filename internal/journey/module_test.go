@@ -40,14 +40,14 @@ func TestJourneyActions(t *testing.T) {
 	if view.Stage != "inspire" || view.NextAction.Key != "continue_intake" || !view.NextAction.Available || view.Revision != 1 {
 		t.Fatalf("init %+v", view.NextAction)
 	}
-	if n := f.events(t, "journey.initialized"); n != 1 {
-		t.Fatalf("init events %d", n)
+	if n := f.events(t, "journey.initialized"); n != 0 {
+		t.Fatalf("read initialized a journey: %d events", n)
 	}
-	if n := f.kindCount(t, f.tenant, "requirement"); n != 1 {
-		t.Fatalf("requirement kind %d", n)
+	if n := f.kindCount(t, f.tenant, "requirement"); n != 0 {
+		t.Fatalf("read seeded requirement kind: %d", n)
 	}
 	again := f.journey(t, f.person, http.MethodGet, "/api/projects/"+project+"/journey", "")
-	if again.Revision != 1 || f.events(t, "journey.initialized") != 1 {
+	if again.Revision != 1 || f.events(t, "journey.initialized") != 0 {
 		t.Fatal("second read wrote a journey")
 	}
 
@@ -62,11 +62,14 @@ func TestJourneyActions(t *testing.T) {
 	if view.Profile != "professional" || view.Revision != 2 || view.Stage != "inspire" {
 		t.Fatalf("profile %+v", view)
 	}
+	if f.events(t, "journey.initialized") != 1 || f.kindCount(t, f.tenant, "requirement") != 1 {
+		t.Fatal("first action did not initialize journey")
+	}
 	if f.events(t, "journey.profile_set") != 1 {
 		t.Fatal("profile event missing")
 	}
 	same := f.journey(t, f.person, http.MethodPut, "/api/projects/"+project+"/journey/profile", `{"profile":"professional","expected_revision":2}`)
-	if same.Revision != 2 || f.eventCount(t) != before+1 {
+	if same.Revision != 2 || f.eventCount(t) != before+2 {
 		t.Fatal("unchanged profile wrote an event")
 	}
 
@@ -157,7 +160,13 @@ func TestJourneyActions(t *testing.T) {
 	if w := f.do(f.person, http.MethodPost, "/api/projects/"+project+"/journey/actions", actionJSON("start_build", view.Revision, "build-2", build, release, "")); w.Code != http.StatusConflict {
 		t.Fatalf("start during build %d %s", w.Code, w.Body.String())
 	}
-	f.setReleaseState(t, release, "candidate")
+	f.setTicketState(t, "TKT-1", "done")
+	mark := f.grant(t, f.agent.ID, f.person.ID, journey.ScopeBuild, release)
+	view = f.journey(t, f.person, http.MethodGet, "/api/projects/"+project+"/journey", "")
+	view = f.journey(t, f.person, http.MethodPost, "/api/projects/"+project+"/journey/actions", actionJSON("mark_candidate", view.Revision, "mark-1", mark, release, ""))
+	if f.releaseState(t, release) != "candidate" || f.events(t, "journey.candidate_marked") != 1 {
+		t.Fatal("candidate transition was not recorded")
+	}
 	cand := f.grant(t, f.agent.ID, f.person.ID, journey.ScopeCandidate, release)
 	view = f.journey(t, f.person, http.MethodGet, "/api/projects/"+project+"/journey", "")
 	view = f.journey(t, f.person, http.MethodPost, "/api/projects/"+project+"/journey/actions", actionJSON("approve_candidate", view.Revision, "cand-1", cand, release, ""))
@@ -246,6 +255,7 @@ func TestJourneyProfileAccessAndEnterprise(t *testing.T) {
 	f := newFixture(t)
 	project := f.node(t, "project", "PRJ-3", "Personal")
 	view := f.journey(t, f.person, http.MethodGet, "/api/projects/"+project+"/journey", "")
+	view = f.journey(t, f.person, http.MethodPut, "/api/projects/"+project+"/journey/profile", `{"profile":"personal","expected_revision":1}`)
 	f.acceptBrief(t, project)
 	view = f.journey(t, f.person, http.MethodPost, "/api/projects/"+project+"/journey/actions", actionJSON("confirm_brief", view.Revision, "p-brief", "", "", ""))
 	if view.Stage != "requirements" || stateOf(view, "shape") != "skipped" {
@@ -275,6 +285,7 @@ func TestJourneyProfileAccessAndEnterprise(t *testing.T) {
 
 	accessProject := f.node(t, "project", "PRJ-4", "Access")
 	view = f.journey(t, f.person, http.MethodGet, "/api/projects/"+accessProject+"/journey", "")
+	view = f.journey(t, f.person, http.MethodPut, "/api/projects/"+accessProject+"/journey/profile", `{"profile":"personal","expected_revision":1}`)
 	f.acceptBrief(t, accessProject)
 	view = f.journey(t, f.person, http.MethodPost, "/api/projects/"+accessProject+"/journey/actions", actionJSON("confirm_brief", view.Revision, "a-brief", "", "", ""))
 	f.agree(t, accessProject)
@@ -582,6 +593,13 @@ func (f *fixture) setTicketHours(t *testing.T, key, hours string) {
 		UPDATE journey_tickets SET estimated_hours = $2::numeric
 		WHERE ticket_node_id = (SELECT id FROM nodes WHERE tenant_id = $1::uuid AND key = $3)`,
 		f.tenant, hours, key); err != nil {
+		t.Fatal(err)
+	}
+}
+
+func (f *fixture) setTicketState(t *testing.T, key, state string) {
+	t.Helper()
+	if _, err := f.db.Admin.Exec(t.Context(), `UPDATE nodes SET state=$3 WHERE tenant_id=$1::uuid AND key=$2`, f.tenant, key, state); err != nil {
 		t.Fatal(err)
 	}
 }
