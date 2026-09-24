@@ -34,11 +34,11 @@ func TestImportAttachmentsFixtureIdempotent(t *testing.T) {
 	}
 	gets := 0
 	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		if r.URL.Path == "/api/attachments/51/download" {
+		if r.URL.Path == "/api/attachments/51" {
 			w.WriteHeader(404) // file purged in the classic instance
 			return
 		}
-		if r.Method != "GET" || r.URL.Path != "/api/attachments/50/download" || r.Header.Get("Authorization") != "Bearer fixture-key" {
+		if r.Method != "GET" || r.URL.Path != "/api/attachments/50" || r.Header.Get("Authorization") != "Bearer fixture-key" {
 			t.Errorf("unexpected source request %s %s", r.Method, r.URL.Path)
 			w.WriteHeader(404)
 			return

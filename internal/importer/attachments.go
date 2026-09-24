@@ -22,7 +22,7 @@ import (
 )
 
 // ImportAttachments downloads the attachment records already captured in a
-// classic snapshot. It only issues GET /api/attachments/{id}/download to the
+// classic snapshot. It only issues GET /api/attachments/{id} to the
 // same configured HTTPSource. The node snapshot must already be imported.
 // A rerun skips rows identified by (tenant, source instance, classic ID).
 func ImportAttachments(ctx context.Context, pool *pgxpool.Pool, store attachments.Store, source *HTTPSource, snap Snapshot, tenantID, actorID string) (int, error) {
@@ -129,7 +129,8 @@ func optionalDimension(n int) any {
 	return n
 }
 func (s *HTTPSource) downloadAttachment(ctx context.Context, id int64) (io.ReadCloser, error) {
-	path := "/attachments/" + strconv.FormatInt(id, 10) + "/download"
+	// Classic Paimos serves the file at GET /api/attachments/{id} (backend/main.go).
+	path := "/attachments/" + strconv.FormatInt(id, 10)
 	u := *s.base
 	u.Path = strings.TrimSuffix(u.Path, "/") + "/api" + path
 	u.RawPath = ""
