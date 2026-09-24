@@ -38,7 +38,7 @@ func TestHandlersAndMiddleware(t *testing.T) {
 		if err := json.Unmarshal(get(t, (&Server{Brand: &custom}).Handler(), "/api/version", "").Body.Bytes(), &branded); err != nil || branded.Brand != custom {
 			t.Fatalf("custom brand %+v %v", branded, err)
 		}
-		if rec.Header().Get("Content-Security-Policy") != "default-src 'self'" {
+		if rec.Header().Get("Content-Security-Policy") != "default-src 'self'; img-src 'self' blob: data:" {
 			t.Fatalf("csp %q", rec.Header().Get("Content-Security-Policy"))
 		}
 		if rec.Header().Get("X-Content-Type-Options") != "nosniff" {
@@ -85,7 +85,7 @@ func TestHandlersAndMiddleware(t *testing.T) {
 		if !strings.Contains(rec.Body.String(), "<title>"+brand.Default().Wordmark+"</title>") {
 			t.Fatalf("body %s", rec.Body.String())
 		}
-		if rec.Header().Get("Content-Security-Policy") != "default-src 'self'" {
+		if rec.Header().Get("Content-Security-Policy") != "default-src 'self'; img-src 'self' blob: data:" {
 			t.Fatal("csp missing on placeholder")
 		}
 		// The deployment's brand names the placeholder too.

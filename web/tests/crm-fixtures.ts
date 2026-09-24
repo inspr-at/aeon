@@ -28,6 +28,8 @@ export interface CRMMockOptions {
   kinds?: string[]
   providers?: { id: string; enabled: boolean; configured: boolean; revision: number }[]
   noQuotes?: boolean
+  // The quote list (GET /api/quotes); empty unless given.
+  quotes?: { quote_node_id: string; offer_no?: string; state: string }[]
   empty?: boolean
   // Someone else changes this customer just before this page's next write.
   meanwhile?: string
@@ -54,6 +56,7 @@ function contact(id: string, org: string, name: string, extra: Partial<MockConta
   return { id, key: `CON-${id.slice(-2)}`, organisation_node_id: org, name, revision: 2, email: '', phone: '', role: '', note: '', external_provider: '', external_id: '', external_url: '', ...extra }
 }
 export const HOFER = 'org-hofer'
+export const QUOTE_12 = '9b2f3c41-7d1e-4a8b-9c0d-2e3f4a5b6c12'
 export const NORDSTERN = 'org-nordstern'
 export const LUMEN = 'org-lumen'
 
@@ -95,7 +98,7 @@ export function crmData(options: CRMMockOptions = {}) {
   const related: Record<string, { projects: unknown[]; quotes: unknown[]; hours: unknown[]; documents: unknown[] }> = {
     [HOFER]: {
       projects: [{ id: 'p-pharos', key: 'PRJ-17', title: 'Pharos', state: 'active', cooperation: {}, cooperation_revision: 1 }],
-      quotes: [{ id: 'q-12', offer_no: 'Q-2026-0012', state: 'accepted', archived: false }, { id: 'q-19', offer_no: null, state: 'draft', archived: false }],
+      quotes: [{ id: QUOTE_12, offer_no: 'Q-2026-0012', state: 'accepted', archived: false }, { id: '9b2f3c41-7d1e-4a8b-9c0d-2e3f4a5b6c19', offer_no: null, state: 'draft', archived: false }],
       hours: [{ project_node_id: 'p-pharos', currency: 'EUR', duration_seconds: 27000, amount: '712.5000' }],
       documents: [{ attachment_id: 'att-1', node_id: HOFER, name: 'framework-agreement.pdf', title: 'Framework agreement', category: 'contract', status: 'signed', valid_from: '2026-01-01', valid_until: '2027-12-31' }],
     },
@@ -137,6 +140,7 @@ export async function mockCRM(page: Page, data: CRMData, options: CRMMockOptions
     const contactNodes = path === '/api/nodes' && method === 'GET' && q.get('kind') === 'contact'
     const known = path === '/api/me' || path === '/api/plugins' || path.startsWith('/api/plugins/') || path === '/api/kinds' || path === '/api/business/principals'
       || path.startsWith('/api/crm/') || path === '/api/events' || /^\/api\/events\/\d+\/undo$/.test(path) || path === '/api/quotes/settings' || contactNodes
+      || (path === '/api/quotes' && method === 'GET')
     if (!known) return route.fallback()
     calls.push({ path, method, body, query: q })
     if (path === '/api/me') return route.fulfill({ json: { principal: { id: me.id, name: me.name, kind: 'person', roles: [options.role ?? 'admin'] }, tenant: { id: 't1', name: 'INSPR Studio' } } })
@@ -157,6 +161,7 @@ export async function mockCRM(page: Page, data: CRMData, options: CRMMockOptions
       const items = data.contacts.filter(c => !c.deleted).map(c => ({ id: c.id, key: c.key, kind_id: 'k-contact', kind_slug: 'contact', kind_label: 'Contact', title: c.name, body: '', state: 'new', fields: { email: c.email, role: c.role, phone: c.phone }, parent_id: null, position: '0', created_at: '2026-01-01T00:00:00Z', updated_at: '2026-01-01T00:00:00Z', deleted_at: null, priority: null, assignee: null, parent: null, children_count: 0, project: null }))
       return route.fulfill({ json: { items, next_cursor: null } })
     }
+    if (path === '/api/quotes') return route.fulfill({ json: options.quotes ?? [] })
     if (path === '/api/quotes/settings') {
       if (options.noQuotes) return route.fulfill({ status: 409, json: { error: 'business_quotes is not enabled' } })
       if (method === 'PATCH') {

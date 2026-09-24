@@ -64,7 +64,7 @@ const docMeta = (d: Related['documents'][number]) => [d.category && sentenceCase
         <h3 id="rel-quotes" class="group-title">Quotes <span class="card-count">{{ related.quotes.length }}</span></h3>
         <ul v-if="quotes.length" class="rows">
           <li v-for="q in quotes" :key="q.id">
-            <RouterLink class="rel-row" to="/business/quotes" :class="{ archived: q.archived }">
+            <RouterLink class="rel-row" :to="`/business/quotes/${encodeURIComponent(q.id)}`" :class="{ archived: q.archived }">
               <BizIcon name="document" :size="13" class="rel-icon" />
               <span class="rel-title" :class="{ mono: q.offer_no }">{{ q.offer_no ?? 'Draft, no number yet' }}</span>
               <span class="rel-meta dot-list"><span>{{ sentenceCase(q.state) }}</span><span v-if="q.archived">archived</span></span>

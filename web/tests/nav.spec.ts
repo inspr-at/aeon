@@ -80,7 +80,7 @@ test('the palette offers the places with their keys and every settings section b
   await expect(page).toHaveURL('/settings/workspace')
 })
 
-test('Business tabs: a closed Customers says how to open it, Quotes says what arrives; earlier links lead there', async ({ page }) => {
+test('Business tabs: a closed Customers says how to open it, Quotes shows its empty state; earlier links lead there', async ({ page }) => {
   const errors = watchErrors(page)
   await setup(page)
   await page.goto('/business/customers')
@@ -89,7 +89,7 @@ test('Business tabs: a closed Customers says how to open it, Quotes says what ar
   await expect(page.getByRole('heading', { name: 'Customers is not enabled for this workspace' })).toBeVisible()
   await expect(page.getByRole('link', { name: 'Open Business setup' })).toBeVisible()
   await page.getByRole('link', { name: 'Quotes', exact: true }).click()
-  await expect(page.getByRole('heading', { name: 'Quotes arrive with the quote editor' })).toBeVisible()
+  await expect(page.getByRole('heading', { name: 'No quotes yet' })).toBeVisible()
   await page.getByRole('link', { name: 'Quote settings' }).click()
   await expect(page).toHaveURL('/settings/business#quotes')
   await expect(page.locator('#quotes')).toHaveClass(/arrived/)
@@ -101,7 +101,7 @@ test('Business tabs: a closed Customers says how to open it, Quotes says what ar
 test('members see the Business tabs without the admin settings links', async ({ page }) => {
   await setup(page, { role: 'member' })
   await page.goto('/business/quotes')
-  await expect(page.getByRole('heading', { name: 'Quotes arrive with the quote editor' })).toBeVisible()
+  await expect(page.getByRole('heading', { name: 'No quotes yet' })).toBeVisible()
   await expect(page.getByRole('link', { name: 'Quote settings' })).toHaveCount(0)
 })
 
@@ -152,7 +152,7 @@ for (const colorScheme of ['light', 'dark'] as const) {
     await page.emulateMedia({ colorScheme, reducedMotion: 'reduce' })
     await setup(page)
     await page.goto('/business/quotes')
-    await expect(page.getByRole('heading', { name: 'Quotes arrive with the quote editor' })).toBeVisible()
+    await expect(page.getByRole('heading', { name: 'No quotes yet' })).toBeVisible()
     await page.waitForTimeout(250)
     const results = await new AxeBuilder({ page }).withTags(['wcag2a', 'wcag2aa', 'wcag21a', 'wcag21aa']).exclude('.calendar-version').analyze()
     const summary = results.violations.map(v => `${v.id} (${v.impact}): ${v.help}\n${v.nodes.slice(0, 4).map(n => `    ${n.target.join(' ')} — ${n.failureSummary?.split('\n').slice(1, 2).join(' ').trim()}`).join('\n')}`)

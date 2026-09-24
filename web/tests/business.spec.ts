@@ -25,11 +25,11 @@ test('the header offers Business once a business plugin is enabled', async ({ pa
   await expect(page).toHaveURL(/\/business$/)
   await expect(page.getByRole('heading', { name: 'Business', level: 1 })).toBeVisible()
   await expect(link).toHaveAttribute('aria-current', 'page')
-  // Customers and Quotes always have tabs; the earlier routes lead there.
+  // Customers and Quotes always have tabs; an unknown quote link returns to the list.
   await expect(page.getByRole('navigation', { name: 'Business' }).getByRole('link')).toHaveText(['Overview', 'Customers', 'Quotes', 'Hours', 'Rates'])
   await page.goto('/business/quotes/QUO-3')
   await expect(page).toHaveURL(/\/business\/quotes$/)
-  await expect(page.getByRole('heading', { name: 'Quotes arrive with the quote editor' })).toBeVisible()
+  await expect(page.getByRole('heading', { name: 'No quotes yet' })).toBeVisible()
   await page.goto('/business/organisations')
   await expect(page).toHaveURL(/\/business\/customers$/)
   expect(errors).toEqual([])

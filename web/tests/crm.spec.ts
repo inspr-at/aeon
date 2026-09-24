@@ -6,7 +6,7 @@
 import { test, expect, type Page } from '@playwright/test'
 import AxeBuilder from '@axe-core/playwright'
 import { fixtures, mockWork, watchErrors } from './work-fixtures'
-import { HOFER, LUMEN, ORG_SCHEMA, crmData, mockCRM, type CRMMockOptions } from './crm-fixtures'
+import { HOFER, LUMEN, ORG_SCHEMA, QUOTE_12, crmData, mockCRM, type CRMMockOptions } from './crm-fixtures'
 
 async function setup(page: Page, options: CRMMockOptions = {}) {
   await mockWork(page, fixtures())
@@ -216,7 +216,7 @@ test('the customer page: number, primary contact, contacts, related work and an 
   await expect(contacts.locator('.contact').first()).toContainText('Primary')
   const related = page.getByRole('region', { name: 'Projects, quotes and hours' })
   await expect(related.getByRole('link', { name: /Pharos/ }).first()).toHaveAttribute('href', '/p/PHAROS')
-  await expect(related).toContainText('Q-2026-0012')
+  await expect(related.getByRole('link', { name: /Q-2026-0012/ })).toHaveAttribute('href', `/business/quotes/${QUOTE_12}`)
   await expect(related).toContainText('Draft, no number yet')
   await expect(related).toContainText('7h 30m')
   await expect(related).toContainText('712.50 EUR')
