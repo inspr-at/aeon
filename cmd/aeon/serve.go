@@ -141,7 +141,7 @@ func serveListener(ctx context.Context, cfg config.Config, ln net.Listener) erro
 			authMod,
 			nodes.New(pool, nodes.SQLWriter{}),
 			relations.New(pool),
-			events.New(pool, events.WithUndoHandlers(attachments.UndoHandlers())),
+			events.New(pool, events.WithUndoHandlers(attachments.UndoHandlers()), events.WithUndoHandlers(hours.UndoHandlers(pluginRegistry))),
 			search.New(pool, embedProvider),
 			views.New(pool),
 			activity.New(pool),
