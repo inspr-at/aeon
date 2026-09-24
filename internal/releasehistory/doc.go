@@ -50,7 +50,8 @@
 //
 // The History carries schema, product, repository, version_scheme,
 // generated_at and source ("git+github", "git" or "none"). The HTTP face adds
-// current: the version of the running build.
+// current, the version of the running build, and live_since, when this server
+// started running it.
 //
 // # HTTP
 //

@@ -441,7 +441,7 @@ defineExpose({
 <style scoped>
 .ticket-ws { display: flex; flex-direction: column; min-height: 0; outline: none; }
 .ticket-ws.panel {
-  position: fixed; z-index: 15; top: calc(var(--header-h) + 10px); right: 10px; bottom: 10px; width: min(560px, calc(100vw - 20px));
+  position: fixed; z-index: 15; top: calc(var(--header-h) + 10px); right: 10px; bottom: calc(var(--footer-h) + 10px); width: min(560px, calc(100vw - 20px));
   border-radius: var(--radius); border: 1px solid var(--glass-edge);
   background: linear-gradient(165deg, var(--surface-raised), var(--surface-raised-2)); box-shadow: var(--shadow-pop), var(--shadow);
   backdrop-filter: blur(20px) saturate(1.15); -webkit-backdrop-filter: blur(20px) saturate(1.15);
@@ -508,7 +508,7 @@ defineExpose({
 .full .edit-form { padding: 26px 0 40px; }
 /* Dropping files anywhere on the ticket. */
 .drop-overlay { position: absolute; inset: 0; z-index: 30; display: grid; place-items: center; padding: 24px; border-radius: inherit; background: rgba(14, 111, 108, .12); box-shadow: inset 0 0 0 2px var(--teal); backdrop-filter: blur(3px); -webkit-backdrop-filter: blur(3px); pointer-events: none; }
-.full .drop-overlay { position: fixed; inset: calc(var(--header-h) + 8px) 8px 8px; border-radius: var(--radius); }
+.full .drop-overlay { position: fixed; inset: calc(var(--header-h) + 8px) 8px calc(var(--footer-h) + 8px); border-radius: var(--radius); }
 .drop-card { display: grid; justify-items: center; gap: 6px; padding: 22px 28px; border-radius: 16px; background: var(--surface-raised); box-shadow: var(--shadow-pop); color: var(--ink); text-align: center; }
 .drop-card svg { color: var(--teal); }
 .drop-card span { font-size: 12.5px; color: var(--ink-2); }
@@ -524,7 +524,7 @@ defineExpose({
 .ticket-ws.full.has-context { max-width: 1480px; }
 .full.has-context .ws-grid { grid-template-columns: minmax(0, 1fr) clamp(340px, 24vw, 440px) 300px; gap: 44px; }
 .full.has-context .ws-main { max-width: none; }
-.full.has-context .ws-context { position: sticky; top: 16px; max-height: calc(100dvh - var(--header-h) - 32px); overflow: auto; padding-right: 4px; }
+.full.has-context .ws-context { position: sticky; top: 16px; max-height: calc(100dvh - var(--header-h) - var(--footer-h) - 32px); overflow: auto; padding-right: 4px; }
 .full .ws-main { min-width: 0; max-width: 820px; }
 .full .sections :deep(.markdown-body), .full .inline-composer, .full .activity, .full .children { max-width: 72ch; }
 .full .ws-side { position: sticky; top: 16px; display: grid; gap: 14px; }

@@ -275,9 +275,7 @@ test('an unfiltered load holds about the height of the first page', async ({ pag
   await page.goto('/p/PHAROS')
   // The summary counts 3 open and 2 in progress for PHAROS; the closed ones stay hidden.
   await expect(page.locator('.skeleton-body tr')).toHaveCount(5)
-  await expect(page.locator('main footer.app-footer')).toBeHidden()
   await expect(rows(page)).toHaveCount(5)
-  await expect(page.locator('main footer.app-footer')).toBeVisible()
 })
 
 test('load errors offer a retry', async ({ page }) => {
@@ -350,14 +348,21 @@ test('wide screens dock the side panel beside the list; narrow ones overlay it',
   expect(overlaid.x + overlaid.width).toBeGreaterThan((await panel.boundingBox())!.x)
 })
 
-test('the footer ends the page flow instead of covering rows', async ({ page }) => {
+test('the footer bar is a row of the shell: rows scroll above it, never under it', async ({ page }) => {
   await mockWork(page, fixtures({ bigProject: 30 }))
   await page.goto('/p/AEON')
   await expect(rows(page)).toHaveCount(31)
-  const footer = page.locator('main footer.app-footer')
-  expect(await footer.evaluate(el => getComputedStyle(el).position)).toBe('static')
-  const last = (await rows(page).last().boundingBox())!, foot = (await footer.boundingBox())!
-  expect(foot.y).toBeGreaterThanOrEqual(last.y + last.height)
+  const footer = page.locator('footer.app-footer')
+  await expect(footer).toBeVisible()
+  // Outside the scrolling page, at the bottom of the window.
+  expect(await footer.evaluate(el => !el.closest('main'))).toBe(true)
+  const viewport = page.viewportSize()!
+  const foot = (await footer.boundingBox())!
+  expect(Math.round(foot.y + foot.height)).toBe(viewport.height)
+  expect(Math.round((await page.locator('main').boundingBox())!.y + (await page.locator('main').boundingBox())!.height)).toBeLessThanOrEqual(Math.round(foot.y) + 1)
+  await page.locator('main').evaluate(el => { el.scrollTop = el.scrollHeight })
+  const last = (await rows(page).last().boundingBox())!
+  expect(last.y + last.height).toBeLessThanOrEqual(foot.y)
 })
 
 test('global search opens a ticket inside its project', async ({ page }) => {

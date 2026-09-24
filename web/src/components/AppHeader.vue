@@ -75,6 +75,7 @@ function themeKeys(event: KeyboardEvent) {
   void nextTick(focusTheme)
 }
 function showShortcuts() { closeMenu(); run({ name: 'shortcuts' }) }
+function showReleases() { closeMenu(); run({ name: 'releases' }) }
 watch(command, value => { if (value?.command.name === 'palette') { consume(); palette.value?.open() } })
 function closeMenu(restoreFocus = false) {
   open.value = false
@@ -194,6 +195,7 @@ onBeforeUnmount(() => { document.removeEventListener('pointerdown', outside); wi
             <button v-for="option in themes" :key="option.value" type="button" role="radio" :aria-checked="themeChoice === option.value" :tabindex="themeChoice === option.value ? 0 : -1" @click="setTheme(option.value)"><AppIcon :name="option.icon" :size="13" />{{ option.label }}</button>
           </div>
         </div>
+        <button class="menu-row" type="button" @click="showReleases"><AppIcon name="history" />Release history</button>
         <button class="menu-row" type="button" aria-keyshortcuts="?" @click="showShortcuts"><AppIcon name="keyboard" />Keyboard shortcuts<kbd class="keycap row-key" aria-hidden="true">?</kbd></button>
         <button class="menu-row" type="button" :disabled="busy" @click="signOut"><AppIcon name="logout" />{{ busy ? 'Signing out…' : 'Sign out' }}</button>
         <p v-if="error" class="error" role="alert">{{ error }}</p>

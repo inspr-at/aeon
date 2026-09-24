@@ -8,6 +8,7 @@ import (
 	"fmt"
 	"net/http"
 	"strings"
+	"time"
 
 	"github.com/inspr-at/aeon/internal/httpapi"
 	"github.com/inspr-at/aeon/internal/tenant"
@@ -46,6 +47,7 @@ func Embedded() (History, error) {
 type Module struct {
 	history History
 	current string
+	started time.Time
 }
 
 // New serves the embedded history; current is the running version.
@@ -57,8 +59,12 @@ func New() (*Module, error) {
 	return NewWith(h, version.Version), nil
 }
 
-// NewWith serves the given history, for tests and other products.
-func NewWith(h History, current string) *Module { return &Module{history: h, current: current} }
+// NewWith serves the given history, for tests and other products. The server
+// creates its module at startup, so that moment is when the running version went
+// live on this server.
+func NewWith(h History, current string) *Module {
+	return &Module{history: h, current: current, started: time.Now().UTC().Truncate(time.Second)}
+}
 
 var _ httpapi.Module = (*Module)(nil)
 
@@ -68,10 +74,12 @@ func (m *Module) Mount(mux *http.ServeMux) {
 	mux.HandleFunc("GET /api/releases/{version}", m.one)
 }
 
-// Response is the history as served, with the running version.
+// Response is the history as served, with the running version and since when
+// this server has run it.
 type Response struct {
 	History
-	Current string `json:"current"`
+	Current   string    `json:"current"`
+	LiveSince time.Time `json:"live_since"`
 }
 
 func authorized(w http.ResponseWriter, r *http.Request) bool {
@@ -87,7 +95,7 @@ func (m *Module) list(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	w.Header().Set("Cache-Control", "no-store")
-	httpapi.WriteJSON(w, http.StatusOK, Response{History: m.history, Current: m.current})
+	httpapi.WriteJSON(w, http.StatusOK, Response{History: m.history, Current: m.current, LiveSince: m.started})
 }
 
 func (m *Module) one(w http.ResponseWriter, r *http.Request) {

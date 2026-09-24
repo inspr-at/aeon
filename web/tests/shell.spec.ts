@@ -66,7 +66,9 @@ for (const viewport of [{ width: 1280, height: 720 }, { width: 390, height: 844 
         await mockAPI(page, { signedIn: screen === 'home' || screen === '404', devMode: screen === 'signin-dev' })
         await page.goto(screen === '404' ? '/missing' : screen.startsWith('signin') ? '/signin' : '/')
         await expect(page.locator('h1')).toBeVisible()
-        await expect(page.locator('footer [data-version-view="pretty"]')).toBeVisible()
+        // Sign-in's card carries the copyable version; signed in, the footer bar's pill opens the release history.
+        if (screen.startsWith('signin')) await expect(page.locator('footer [data-version-view="pretty"]')).toBeVisible()
+        else await expect(page.locator('footer.app-footer .version-pill .calendar-version[role="img"]')).toHaveAttribute('aria-label', canonical)
         await page.evaluate(() => document.fonts.ready)
         await noOverflow(page)
         // Sign-in is a bare page: no header, the card carries brand, version and theme.

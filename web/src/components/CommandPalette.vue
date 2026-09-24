@@ -68,6 +68,7 @@ const actions = computed<ActionResult[]>(() => {
   }
   if (business.anyOpen && route.path !== '/business') out.push({ type: 'action', id: 'go-business', label: 'Go to Business', hint: 'Hours and rates', icon: 'briefcase' })
   out.push({ type: 'action', id: 'theme', label: dark.value ? 'Switch to light theme' : 'Switch to dark theme', icon: dark.value ? 'sun' : 'moon' })
+  out.push({ type: 'action', id: 'releases', label: 'Release history', hint: 'What changed, release by release', icon: 'history' })
   out.push({ type: 'action', id: 'shortcuts', label: 'Keyboard shortcuts', icon: 'keyboard', keys: ['?'] })
   return out
 })
@@ -164,6 +165,7 @@ function act(id: string) {
   }
   else if (id === 'theme') toggleTheme()
   else if (id === 'shortcuts') run({ name: 'shortcuts' })
+  else if (id === 'releases') run({ name: 'releases' })
 }
 async function choose(result: Result | undefined, newTab = false) {
   if (!result) return

@@ -5,4 +5,5 @@ declare module '*calendar-version-display/version.js' {
     config: object; mode: 'pretty' | 'reduced'; brand: string; interactive?: boolean
   }): void
   export function disposeVersion(element: HTMLElement): void
+  export function parts(value: string, scheme: string): Record<'v' | 'yy' | 'mm' | 'dd' | 'hh' | 'mi' | 'ss' | 'tail', string> | null
 }

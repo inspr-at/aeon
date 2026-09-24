@@ -1,12 +1,12 @@
 <!-- SPDX-License-Identifier: AGPL-3.0-only -->
 <script setup lang="ts">
-import { computed, ref, watch, nextTick } from 'vue'
+import { computed, defineAsyncComponent, nextTick, onBeforeUnmount, onMounted, ref, watch } from 'vue'
 import { useRoute, useRouter } from 'vue-router'
 import AppHeader from './components/AppHeader.vue'
 import ConfirmHost from './components/ConfirmHost.vue'
 import ToastHost from './components/ToastHost.vue'
 import TooltipHost from './components/TooltipHost.vue'
-import VersionDisplay from './components/VersionDisplay.vue'
+import AppFooter from './components/AppFooter.vue'
 import ErrorPage from './components/ErrorPage.vue'
 import StatusPage from './components/StatusPage.vue'
 import ShortcutSheet from './components/work/ShortcutSheet.vue'
@@ -14,7 +14,11 @@ import AppIcon from './components/AppIcon.vue'
 import { command, consume } from './lib/commands'
 import { clearFatal, fatal } from './lib/fatal'
 import { useSession } from './stores/session'
+import { useReleases } from './stores/releases'
 import { brand } from './lib/brand'
+import { toast } from './lib/toast'
+
+const ReleasesSheet = defineAsyncComponent(() => import('./components/releases/ReleasesSheet.vue'))
 
 const session = useSession()
 const route = useRoute()
@@ -27,6 +31,78 @@ const bare = computed(() => !!route.meta.bare && !fatal.value)
 watch(command, value => { if (value?.command.name === 'shortcuts') { consume(); shortcuts.value?.open() } })
 // A new page clears an earlier page error.
 watch(() => route.fullPath, (_path, old) => { if (old !== undefined && fatal.value?.kind !== 'update') clearFatal() })
+// ---------- Release history: /releases and /releases/<version>, or ?releases= over any page ----------
+const releases = useReleases()
+const releasesRoute = computed(() => route.path === '/releases' || route.path.startsWith('/releases/'))
+const releasesQuery = computed(() => typeof route.query.releases === 'string' ? route.query.releases : null)
+const releasesOpen = computed(() => !!session.identity && !bare.value && !fatal.value && (releasesRoute.value || releasesQuery.value !== null))
+const releasesTarget = computed(() => {
+  if (!releasesRoute.value) return releasesQuery.value
+  const value = route.params.version
+  return typeof value === 'string' && value ? value : null
+})
+let openedHere = false
+function openReleases(version?: string) {
+  if (releasesOpen.value) { if (version) selectRelease(version); return }
+  openedHere = true
+  void router.push({ path: route.path, query: { ...route.query, releases: version ?? 'all' }, hash: route.hash })
+}
+function selectRelease(version: string) {
+  if (releasesRoute.value) { if (route.params.version !== version) void router.replace(`/releases/${version}`) }
+  else if (releasesQuery.value !== version) void router.replace({ path: route.path, query: { ...route.query, releases: version }, hash: route.hash })
+}
+function closeReleases() {
+  if (openedHere && typeof window.history.state?.back === 'string') { openedHere = false; router.back(); return }
+  openedHere = false
+  if (releasesRoute.value) { void router.replace('/'); return }
+  const { releases: _releases, ...rest } = route.query
+  void router.replace({ path: route.path, query: rest, hash: route.hash })
+}
+watch(releasesOpen, open => { if (!open) openedHere = false })
+watch(command, value => { if (value?.command.name === 'releases') { consume(); openReleases() } })
+
+// Signed in: remember what was seen, count what is new, and notice a newer version on the server.
+watch(() => session.identity?.principal.id, id => {
+  if (!id) return
+  void releases.start()
+  setTimeout(() => { if (session.identity) void releases.load() }, 2500)
+}, { immediate: true })
+function checkUpdate() { if (session.identity && document.visibilityState === 'visible') void releases.checkForUpdate() }
+let updateTimer: ReturnType<typeof setInterval> | undefined
+onMounted(() => {
+  updateTimer = setInterval(checkUpdate, 60_000)
+  document.addEventListener('visibilitychange', checkUpdate)
+  window.addEventListener('focus', checkUpdate)
+})
+onBeforeUnmount(() => { clearInterval(updateTimer); document.removeEventListener('visibilitychange', checkUpdate); window.removeEventListener('focus', checkUpdate) })
+watch(() => releases.available, version => {
+  if (!version) return
+  toast(`${brand.value.wordmark} was updated to ${version}`, {
+    sticky: true, key: 'update',
+    actions: [{ label: 'What’s new', run: () => openReleases(version) }, { label: 'Reload', run: () => window.location.reload() }],
+  })
+})
+
+// ---------- Footer: on phones it folds away while reading down and returns on the way up ----------
+const footerHidden = ref(false)
+const phoneQuery = window.matchMedia('(max-width: 600px)')
+let lastTop = 0, travel = 0, settleUntil = 0
+function scrolled() {
+  const el = main.value
+  if (!el) return
+  const top = el.scrollTop
+  const delta = top - lastTop
+  lastTop = top
+  if (!phoneQuery.matches || Date.now() < settleUntil) return
+  // Near the end of the page the footer stays: it is where the page ends.
+  const nearEnd = el.scrollHeight - el.clientHeight - top < 48
+  travel = Math.sign(delta) === Math.sign(travel) ? travel + delta : delta
+  const next = nearEnd || top < 24 ? false : travel > 24 ? true : travel < -16 ? false : footerHidden.value
+  if (next !== footerHidden.value) { footerHidden.value = next; travel = 0; settleUntil = Date.now() + 260 }
+}
+watch(() => route.path, () => { footerHidden.value = false })
+phoneQuery.addEventListener('change', event => { if (!event.matches) footerHidden.value = false })
+
 async function retry() {
   retrying.value = true
   await session.refresh()
@@ -44,11 +120,10 @@ watch(() => [route.path, route.params.projectKey, route.params.ticketKey] as con
 </script>
 
 <template>
-  <div class="app-shell" :class="{ bare }">
+  <div class="app-shell" :class="{ bare, 'footer-hidden': footerHidden && !bare }">
     <a class="skip-link" href="#main">Skip to content</a>
     <AppHeader v-if="!bare" />
-    <main id="main" ref="main" tabindex="-1">
-      <!-- The footer ends the page flow; it never floats over content. -->
+    <main id="main" ref="main" tabindex="-1" @scroll.passive="scrolled">
       <div class="page-flow" :class="{ fill: route.meta.fill && !session.error && !fatal }">
         <ErrorPage v-if="fatal" :error="fatal" />
         <StatusPage v-else-if="session.error && !bare" eyebrow="Connection interrupted" title="Let’s try that again." tone="problem">
@@ -58,12 +133,11 @@ watch(() => [route.path, route.params.projectKey, route.params.ticketKey] as con
           </template>
         </StatusPage>
         <RouterView v-else />
-        <footer v-if="!bare && (!route.meta.fill || session.error || fatal)" class="app-footer">
-          <span class="footer-name">{{ brand.wordmark }}</span>
-          <VersionDisplay />
-        </footer>
       </div>
     </main>
+    <!-- A row of the shell: the page, docked panels and toasts all end above it. -->
+    <AppFooter v-if="!bare" :hidden="footerHidden" @releases="openReleases()" />
+    <ReleasesSheet v-if="releasesOpen" :target="releasesTarget" @select="selectRelease" @close="closeReleases" />
     <ToastHost />
     <ConfirmHost />
     <ShortcutSheet ref="shortcuts" />
@@ -72,24 +146,20 @@ watch(() => [route.path, route.params.projectKey, route.params.ticketKey] as con
 </template>
 
 <style scoped>
-.app-shell { height: 100%; display: grid; grid-template-rows: var(--header-h) minmax(0, 1fr); }
-.app-shell.bare { grid-template-rows: minmax(0, 1fr); }
+.app-shell { height: 100%; display: grid; grid-template-rows: var(--header-h) minmax(0, 1fr) var(--footer-h); }
+.app-shell.bare { --footer-h: 0px; grid-template-rows: minmax(0, 1fr); }
+@media (max-width: 600px) {
+  .app-shell { transition: --footer-h .22s ease; }
+  .app-shell.footer-hidden { --footer-h: 0px; }
+}
+@media (prefers-reduced-motion: reduce) { .app-shell { transition: none; } }
 /* The gutter is reserved so a scrollbar appearing as content loads never shifts the page sideways. */
 main { position: relative; min-height: 0; overflow: auto; scrollbar-gutter: stable; outline: none; scroll-padding-top: 96px; }
 main:focus-visible { box-shadow: none; }
 .page-flow { display: flex; flex-direction: column; min-height: 100%; }
 .page-flow > :first-child { flex: 1 0 auto; }
-/* While a page still shows its loading skeleton the footer waits, so it never jumps down as content arrives. */
-.page-flow:has(.head-skeleton, .skeleton-body) > .app-footer { visibility: hidden; }
 .page-flow.fill { height: 100%; }
 .page-flow.fill > :first-child { flex: 1 1 auto; min-height: 0; }
-/* The vendored version renderer nudges separators with transforms; clip them to the bar. */
-.app-footer {
-  display: flex; flex-shrink: 0; justify-content: space-between; align-items: center; gap: 12px; height: 44px; padding: 0 var(--gutter); overflow: clip;
-  box-shadow: inset 0 1px 0 var(--line); color: var(--ink-2);
-}
-.footer-name { font: 600 10.5px/1.5 var(--mono); letter-spacing: .22em; color: var(--ink-2); }
 .skip-link { position: fixed; z-index: 90; top: 8px; left: 16px; padding: 10px 16px; border-radius: 999px; background: var(--surface-raised); box-shadow: var(--shadow-pop); transform: translateY(-160%); }
 .skip-link:focus { transform: translateY(0); }
-@media (max-width: 600px) { .app-footer { padding: 0 16px; } .footer-name { font-size: 9.5px; letter-spacing: .18em; } }
 </style>

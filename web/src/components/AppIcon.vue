@@ -8,6 +8,7 @@ export type IconName =
   | 'inbox' | 'folder' | 'layers' | 'archive' | 'clock' | 'expand' | 'collapse' | 'more' | 'link' | 'trash' | 'agent' | 'outline' | 'expand-all' | 'collapse-all' | 'arrow-left' | 'eye' | 'eye-off' | 'monitor' | 'key'
   | 'pause' | 'stop' | 'shield' | 'send' | 'bolt' | 'gauge' | 'interrupt' | 'halt'
   | 'minus' | 'compare' | 'download' | 'paperclip' | 'image' | 'upload' | 'info' | 'journey'
+  | 'history' | 'sparkle' | 'wrench' | 'commit' | 'tag' | 'box' | 'rollback'
 </script>
 <script setup lang="ts">
 withDefaults(defineProps<{ name: IconName; size?: number }>(), { size: 16 })
@@ -80,6 +81,13 @@ withDefaults(defineProps<{ name: IconName; size?: number }>(), { size: 16 })
     <template v-else-if="name === 'image'"><rect x="2" y="2.6" width="12" height="10.8" rx="1.8" /><circle cx="5.8" cy="6.2" r="1.2" /><path d="m2.4 12 3.6-3.4 2.6 2.4 2.2-2 3 2.8" /></template>
     <template v-else-if="name === 'journey'"><circle cx="3.2" cy="11.6" r="1.7" /><circle cx="8" cy="4.6" r="1.7" /><circle cx="12.8" cy="10.2" r="1.7" /><path d="m4.3 10.1 2.6-4M9.2 6l2.4 2.7" /></template>
     <template v-else-if="name === 'clock'"><circle cx="8" cy="8" r="6.2" /><path d="M8 4.6V8l2.2 1.4" /></template>
+    <template v-else-if="name === 'history'"><path d="M2.7 8a5.3 5.3 0 1 0 1.6-3.8" /><path d="M2.5 2.6v2.6h2.6" /><path d="M8 5.1v3.1l2 1.3" /></template>
+    <path v-else-if="name === 'sparkle'" d="M8 1.9c.4 2.9 1.2 3.7 4.1 4.1-2.9.4-3.7 1.2-4.1 4.1-.4-2.9-1.2-3.7-4.1-4.1 2.9-.4 3.7-1.2 4.1-4.1ZM12.4 10.4c.2 1.2.5 1.5 1.7 1.7-1.2.2-1.5.5-1.7 1.7-.2-1.2-.5-1.5-1.7-1.7 1.2-.2 1.5-.5 1.7-1.7Z" />
+    <path v-else-if="name === 'wrench'" d="M10.2 2.2a3.3 3.3 0 0 0-3.3 4.3L2.4 11a1.5 1.5 0 0 0 2.1 2.1L9 8.6a3.3 3.3 0 0 0 4.3-3.3l-2 2-2.2-.4-.4-2.2Z" />
+    <template v-else-if="name === 'commit'"><circle cx="8" cy="8" r="2.5" /><path d="M1.6 8h3.9M10.5 8h3.9" /></template>
+    <template v-else-if="name === 'tag'"><path d="M2.2 2.9v4.3c0 .3.1.6.4.8l5.6 5.6c.4.4 1 .4 1.4 0l3.9-3.9c.4-.4.4-1 0-1.4L7.9 2.7a1.1 1.1 0 0 0-.8-.3H2.7a.5.5 0 0 0-.5.5Z" /><circle cx="5.2" cy="5.4" r=".6" fill="currentColor" stroke="none" /></template>
+    <template v-else-if="name === 'box'"><path d="M8 1.8 13.6 4.9v6.2L8 14.2l-5.6-3.1V4.9Z" /><path d="M2.4 4.9 8 8l5.6-3.1M8 8v6.2" /></template>
+    <path v-else-if="name === 'rollback'" d="M5.6 3.2 2.8 6l2.8 2.8M2.8 6h6.6a3.8 3.8 0 0 1 0 7.6H6.8" />
     <template v-else-if="name === 'info'"><circle cx="8" cy="8" r="6.2" /><path d="M8 7.4v3.8M8 4.9v.05" /></template>
     <template v-else><circle cx="8" cy="8" r="6.2" /><path d="M10.6 5.4 9.2 9.2l-3.8 1.4 1.4-3.8Z" /></template>
   </svg>

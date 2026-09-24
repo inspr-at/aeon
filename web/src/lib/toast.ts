@@ -1,16 +1,23 @@
 // SPDX-License-Identifier: AGPL-3.0-only
 import { reactive } from 'vue'
 
-export interface Toast { id: number; message: string; tone: 'info' | 'error'; action?: { label: string; run: () => void } }
+export interface ToastAction { label: string; run: () => void }
+export interface Toast { id: number; message: string; tone: 'info' | 'error'; actions: ToastAction[]; sticky: boolean; key?: string }
 export const toasts = reactive<Toast[]>([])
 let next = 1
 
-// Short, dismissible confirmations. Errors stay a little longer than info.
-export function toast(message: string, options: { tone?: Toast['tone']; action?: Toast['action']; timeout?: number } = {}) {
-  const item: Toast = { id: next++, message, tone: options.tone ?? 'info', action: options.action }
+// Short, dismissible confirmations. Errors stay a little longer than info. A sticky
+// toast stays until it is acted on or dismissed; a keyed one replaces its earlier self.
+export function toast(message: string, options: { tone?: Toast['tone']; action?: ToastAction; actions?: ToastAction[]; timeout?: number; sticky?: boolean; key?: string } = {}) {
+  if (options.key) { const earlier = toasts.find(item => item.key === options.key); if (earlier) dismiss(earlier.id) }
+  const item: Toast = {
+    id: next++, message, tone: options.tone ?? 'info', sticky: options.sticky ?? false, key: options.key,
+    actions: [...(options.action ? [options.action] : []), ...(options.actions ?? [])],
+  }
   toasts.push(item)
-  while (toasts.length > 3) toasts.shift()
-  setTimeout(() => dismiss(item.id), options.timeout ?? (item.tone === 'error' ? 7000 : 4500))
+  // Sticky toasts are kept when the stack is full; the oldest passing one goes.
+  while (toasts.length > 3) { const drop = toasts.findIndex(t => !t.sticky); toasts.splice(drop === -1 ? 0 : drop, 1) }
+  if (!item.sticky) setTimeout(() => dismiss(item.id), options.timeout ?? (item.tone === 'error' ? 7000 : 4500))
   return item.id
 }
 export function dismiss(id: number) {

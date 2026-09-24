@@ -8,10 +8,10 @@ function act(id: number, run: () => void) { dismiss(id); run() }
 <template>
   <div class="toast-host" aria-live="polite">
     <TransitionGroup name="toast">
-      <div v-for="item in toasts" :key="item.id" class="toast" :class="item.tone">
+      <div v-for="item in toasts" :key="item.id" class="toast" :class="[item.tone, { sticky: item.sticky }]">
         <AppIcon v-if="item.tone === 'error'" name="alert" :size="14" />
         <span>{{ item.message }}</span>
-        <button v-if="item.action" class="toast-action" type="button" @click="act(item.id, item.action.run)">{{ item.action.label }}</button>
+        <button v-for="a in item.actions" :key="a.label" class="toast-action" type="button" @click="act(item.id, a.run)">{{ a.label }}</button>
         <button class="toast-close" type="button" aria-label="Dismiss" @click="dismiss(item.id)"><AppIcon name="close" :size="12" /></button>
       </div>
     </TransitionGroup>
@@ -19,7 +19,8 @@ function act(id: number, run: () => void) { dismiss(id); run() }
 </template>
 
 <style scoped>
-.toast-host { position: fixed; z-index: 60; left: 50%; bottom: 20px; transform: translateX(-50%); display: flex; flex-direction: column; align-items: center; gap: 8px; pointer-events: none; width: max-content; max-width: calc(100vw - 32px); }
+/* Toasts rise above the footer bar, never over it. */
+.toast-host { position: fixed; z-index: 60; left: 50%; bottom: calc(var(--footer-h) + 14px); transform: translateX(-50%); display: flex; flex-direction: column; align-items: center; gap: 8px; pointer-events: none; width: max-content; max-width: calc(100vw - 32px); }
 .toast {
   display: flex; align-items: center; gap: 10px; min-height: 40px; padding: 6px 8px 6px 18px; border-radius: 999px; pointer-events: auto;
   background: var(--tip-bg); color: var(--tip-ink); font-size: 13.5px; box-shadow: 0 0 0 1px var(--glass-rim), 0 18px 36px -14px rgba(0, 0, 0, .45);
@@ -35,5 +36,6 @@ function act(id: number, run: () => void) { dismiss(id); run() }
   .toast-enter-active, .toast-leave-active { transition: opacity .2s ease, transform .2s ease; }
   .toast-enter-from, .toast-leave-to { opacity: 0; transform: translateY(8px); }
 }
-@media (max-width: 600px) { .toast-host { bottom: 16px; } .toast { font-size: 13px; } }
+.toast-action + .toast-action { margin-left: -4px; }
+@media (max-width: 600px) { .toast-host { bottom: calc(var(--footer-h) + 10px); } .toast { font-size: 13px; } .toast.sticky { flex-wrap: wrap; justify-content: flex-end; border-radius: 20px; padding: 8px 8px 8px 16px; } .toast.sticky span { flex: 1 1 100%; } }
 </style>

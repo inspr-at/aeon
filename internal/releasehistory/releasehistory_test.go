@@ -223,7 +223,7 @@ func TestHTTP(t *testing.T) {
 	}
 	w := get("/api/releases", true)
 	var body Response
-	if w.Code != 200 || json.Unmarshal(w.Body.Bytes(), &body) != nil || body.Current != "260923143005.0.0" || len(body.Releases) != 1 || body.Schema != Schema {
+	if w.Code != 200 || json.Unmarshal(w.Body.Bytes(), &body) != nil || body.Current != "260923143005.0.0" || body.LiveSince.IsZero() || len(body.Releases) != 1 || body.Schema != Schema {
 		t.Fatalf("list %d %s", w.Code, w.Body)
 	}
 	for path, code := range map[string]int{"/api/releases/v260923143005.0.0": 200, "/api/releases/260923143005.0.0": 200, "/api/releases/260923143006.0.0": 404, "/api/releases/nope": 400} {

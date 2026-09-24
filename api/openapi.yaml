@@ -1755,7 +1755,7 @@ components:
     ReleaseHistory:
       description: inspr.release-history.v1 (see internal/releasehistory), newest release first, plus the running version.
       type: object
-      required: [schema, product, repository, version_scheme, generated_at, source, releases, current]
+      required: [schema, product, repository, version_scheme, generated_at, source, releases, current, live_since]
       properties:
         schema: {type: string, enum: [inspr.release-history.v1]}
         product: {type: string}
@@ -1764,6 +1764,7 @@ components:
         generated_at: {type: string, format: date-time}
         source: {type: string, enum: [git+github, git, none]}
         current: {type: string, description: The running build's version or dev}
+        live_since: {type: string, format: date-time, description: When this server started running the current version}
         releases: {type: array, items: {$ref: '#/components/schemas/Release'}}
     Release:
       type: object

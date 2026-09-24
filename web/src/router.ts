@@ -42,6 +42,8 @@ export const router = createRouter({
     { path: '/runs/:runId?', redirect: '/agents' },
     { path: '/approvals', redirect: '/agents' },
     { path: '/pacing', redirect: '/agents' },
+    // The release history is a sheet over the page (App.vue); its own links open it over Projects.
+    { path: '/releases/:version?', component: ProjectsView, meta: { title: 'Releases' } },
     { path: '/signin', component: SignInView, meta: { title: 'Sign in', bare: true } },
     { path: '/:pathMatch(.*)*', component: NotFoundView, meta: { title: 'Page not found' } },
   ],
@@ -56,4 +58,5 @@ router.beforeEach(async (to) => {
   if (!session.identity && to.path !== '/signin') return wasSignedIn ? { path: '/signin', query: { error: 'expired' } } : '/signin'
   if (session.identity && to.path === '/signin') return '/'
 })
-router.afterEach((to) => { setPageTitle(String(to.meta.title ?? '')) })
+// A new page names the tab; a query change (filters, the release sheet) keeps the page's own title.
+router.afterEach((to, from) => { if (to.path !== from.path || !from.matched.length) setPageTitle(String(to.meta.title ?? '')) })

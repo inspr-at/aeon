@@ -9,6 +9,8 @@ const x = ref(0)
 const y = ref(0)
 const below = ref(false)
 const tip = ref<HTMLElement>()
+// Inside a modal dialog the tooltip moves into it, above the page (the top layer).
+const layer = ref<HTMLElement | null>(null)
 let target: HTMLElement | null = null
 let timer: ReturnType<typeof setTimeout> | undefined
 
@@ -19,6 +21,7 @@ async function show(element: HTMLElement) {
   const value = element.dataset.tip
   if (!value) return
   target = element
+  layer.value = element.closest<HTMLElement>('dialog[open]')
   text.value = value
   await nextTick()
   const rect = element.getBoundingClientRect()
@@ -60,7 +63,9 @@ onBeforeUnmount(() => {
 </script>
 
 <template>
-  <div v-if="text" ref="tip" class="tooltip" :class="{ below }" :style="{ transform: `translate(${x}px, ${y}px)` }" aria-hidden="true">{{ text }}</div>
+  <Teleport :to="layer ?? 'body'" :disabled="!layer">
+    <div v-if="text" ref="tip" class="tooltip" :class="{ below }" :style="{ transform: `translate(${x}px, ${y}px)` }" aria-hidden="true">{{ text }}</div>
+  </Teleport>
 </template>
 
 <style scoped>

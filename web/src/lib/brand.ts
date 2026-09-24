@@ -24,6 +24,9 @@ export function setBrand(value: unknown) { if (validBrand(value)) current.value 
 export const generationLabel = computed(() => `${current.value.product} ${current.value.generation}`)
 
 // Page titles end with the wordmark; they follow the brand once it arrives.
+// A sheet over the page (the release history) names the tab while it is open.
 const page = ref('')
+const overlay = ref('')
 export function setPageTitle(title: string) { page.value = title }
-watch([page, current], ([title, b]) => { document.title = title ? `${title} · ${b.wordmark}` : b.wordmark }, { immediate: typeof document !== 'undefined' })
+export function setOverlayTitle(title: string) { overlay.value = title }
+watch([page, overlay, current], ([title, over, b]) => { const t = over || title; document.title = t ? `${t} · ${b.wordmark}` : b.wordmark }, { immediate: typeof document !== 'undefined' })
