@@ -88,7 +88,8 @@ watch(() => journey.value?.revision, (revision, before) => {
   if (data.releaseNodes.status.value === 'ready') void data.loadReleases(true)
 })
 const canAct = computed(() => props.canWrite && props.person)
-const editable = computed(() => canAct.value && isCurrent.value && data.walker.value.value?.state === 'planning' && data.walker.value.value.release_node_id === journey.value?.current_release_id)
+// The plan changes only while the journey is at Plan, on the current release in planning.
+const editable = computed(() => canAct.value && journey.value?.stage === 'plan' && isCurrent.value && data.walker.value.value?.state === 'planning' && data.walker.value.value.release_node_id === journey.value?.current_release_id)
 const plan = usePlan(data, editable, () => { void store.load(projectId.value, true) })
 
 // ---------- The one next action ----------
@@ -217,7 +218,7 @@ onBeforeUnmount(() => { window.removeEventListener('keydown', keydown); clearInt
       <button type="button" class="btn" @click="refresh()"><AppIcon name="refresh" :size="14" />Try again</button>
     </div>
     <template v-else>
-      <JourneyRail :journey="journey" :viewed="viewed" :project-title="project.title" :release-label="currentRelease ? releaseName(currentRelease) : ''" :action="next" @view="s => emit('stage', s)" @act="runNext" />
+      <JourneyRail :journey="journey" :viewed="viewed" :project-title="project.title" :release-label="currentRelease ? releaseName(currentRelease) : ''" :action="next" @view="s => emit('stage', s)" />
       <header class="stage-head">
         <div class="stage-t">
           <p class="eyebrow">{{ STAGE_LABEL[viewed] }} · <span class="state-chip" :class="viewedState">{{ CHIP[viewedState] }}</span></p>

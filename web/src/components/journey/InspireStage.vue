@@ -4,11 +4,12 @@ import { computed, ref } from 'vue'
 import { acceptDraft, ACTION_LONG, type IntakeDraft } from '../../lib/journey'
 import { useJourneyContext } from '../../lib/journeyContext'
 import { toast } from '../../lib/toast'
-import { absoluteTime, relativeTime } from '../../lib/work'
+import { absoluteTime, plural, relativeTime } from '../../lib/work'
 import { useJourney } from '../../stores/journey'
 import AppIcon from '../AppIcon.vue'
 import MarkdownBody from '../MarkdownBody.vue'
 import GateCard from './GateCard.vue'
+import HistoryFold from './HistoryFold.vue'
 import SourcesCard from './SourcesCard.vue'
 
 // Inspire: what Aithema recorded (conversation and sources) and the drafts it
@@ -23,6 +24,12 @@ const here = computed(() => ctx.journey.value.stage === 'inspire')
 const next = computed(() => ctx.journey.value.next_action)
 const accepting = ref<string | null>(null)
 const sourceLabel = (id: string) => intake.value.sources.find(s => s.id === id)?.label ?? 'source'
+// Once the journey is past Inspire, this stage is history: one line, folded.
+const summary = computed(() => {
+  const sources = intake.value.sources.length, accepted = intake.value.drafts.filter(d => d.status === 'accepted').length
+  if (sources || intake.value.drafts.length) return `${plural(sources, 'source')} recorded · ${plural(accepted, 'draft')} accepted.`
+  return ctx.journey.value.stage_source === 'derived' ? 'Nothing was recorded here: the project came to Aeon with its history.' : 'No conversation or sources were recorded.'
+})
 async function accept(draft: IntakeDraft) {
   accepting.value = draft.id
   try {
@@ -34,6 +41,7 @@ async function accept(draft: IntakeDraft) {
 </script>
 
 <template>
+  <component :is="here ? 'div' : HistoryFold" v-bind="here ? {} : { title: 'Conversation and sources', summary, label: 'Show the sources' }">
   <div class="j-grid">
     <div class="j-col">
       <SourcesCard ref="sources" :intake="intake" :status="ctx.data.intake.status.value" :error="ctx.data.intake.error.value" :now="ctx.now.value" @retry="ctx.data.loadIntake(true)" />
@@ -73,6 +81,7 @@ async function accept(draft: IntakeDraft) {
       </section>
     </div>
   </div>
+  </component>
 </template>
 
 <style scoped>

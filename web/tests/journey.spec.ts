@@ -4,12 +4,12 @@
 // (A3), intake, the blocked deploy gate and the header's compact stage.
 import { test, expect, type Page } from '@playwright/test'
 import { fixtures, mockWork, watchErrors } from './work-fixtures'
-import { journeyWorld, mockJourney, type JourneyStart } from './journey-fixtures'
+import { journeyWorld, mockJourney, type JourneyStart, type WorldOptions } from './journey-fixtures'
 
-async function open(page: Page, start: JourneyStart = 'plan', path = '/p/PHAROS?view=journey', options: { noGate?: boolean; failPlan?: boolean; kind?: 'person' | 'agent' } = {}) {
+async function open(page: Page, start: JourneyStart = 'plan', path = '/p/PHAROS?view=journey', options: WorldOptions & { failPlan?: boolean; kind?: 'person' | 'agent'; noTicketRoute?: boolean } = {}) {
   await page.setViewportSize({ width: 1440, height: 900 })
   await mockWork(page, fixtures())
-  const world = journeyWorld(start, { noGate: options.noGate })
+  const world = journeyWorld(start, options)
   const calls = await mockJourney(page, world, options)
   await page.goto(path)
   await expect(page.getByRole('navigation', { name: 'Project journey' })).toBeVisible()
@@ -31,8 +31,9 @@ test('Journey is a third view of the project, with the stage and next action in 
   await expect(rail(page).locator('li')).toHaveCount(8)
   await expect(rail(page).getByRole('button', { name: '4. Plan, now' })).toHaveAttribute('aria-current', 'step')
   await expect(rail(page).getByRole('button', { name: '1. Inspire, done' })).toBeVisible()
-  // The current stage carries the one primary button: the gate is requested, so it approves and starts.
-  await expect(rail(page).locator('.stage-cta')).toHaveText('Approve and start build')
+  // The rail only navigates; the one primary button is on the decision card (the gate is requested, so it approves and starts).
+  await expect(rail(page).locator('.btn.primary, .stage-cta')).toHaveCount(0)
+  await expect(page.locator('.btn.primary:visible')).toHaveText(['Approve and start build'])
   await expect(page.getByRole('heading', { name: 'Plan release 2' })).toBeVisible()
   // [ and ] move between stages.
   await page.locator('body').click({ position: { x: 5, y: 400 } })
@@ -75,13 +76,13 @@ test('the plan: ticked tickets form the release; features cycle all, none and th
 test('the one next action approves the gate and starts the build; the stage follows', async ({ page }) => {
   const { calls } = await open(page)
   await expect(page.getByRole('region', { name: 'Decision: Release 2' }).getByRole('listitem', { name: /Build gate on Release 2, asked by/ })).toBeVisible()
-  await rail(page).getByRole('button', { name: /^Approve and start build/ }).click()
+  await page.getByRole('region', { name: 'Decision: Release 2' }).getByRole('button', { name: 'Approve and start build' }).click()
   const dialog = page.getByRole('dialog', { name: 'Start build?' })
   await expect(dialog).toContainText('This approves the build gate')
   await dialog.getByRole('button', { name: 'Approve and start build' }).click()
   await expect(page).toHaveURL(/stage=build/)
   await expect(page.getByRole('heading', { name: 'Build release 2' })).toBeVisible()
-  await expect(rail(page).locator('.stage-cta')).toHaveText('Building')
+  await expect(rail(page).getByRole('button', { name: '5. Build, now' })).toHaveAttribute('aria-current', 'step')
   const decision = writes(calls, '/decision')
   expect(decision).toHaveLength(1)
   expect(decision[0].body).toEqual({ decision: 'approved', reason: '' })
@@ -175,7 +176,7 @@ test('Inspire shows the sources, the transcript and cited drafts; accepting the 
   await page.getByRole('button', { name: 'Accept draft' }).click()
   await expect.poll(() => writes(calls, '/accept').length).toBe(1)
   expect(writes(calls, '/accept')[0].body).toEqual({ expected_base_event_id: 42 })
-  await expect(rail(page).locator('.stage-cta')).toHaveText('Confirm brief')
+  await expect(page.getByRole('region', { name: 'Decision: Confirm the brief' }).getByRole('button', { name: 'Confirm brief' })).toBeEnabled()
 })
 
 test('Shape decides with the gate: park needs a reason', async ({ page }) => {
@@ -193,7 +194,7 @@ test('Shape decides with the gate: park needs a reason', async ({ page }) => {
 test('requirements agree with the gate scoped to the revision', async ({ page }) => {
   const { calls } = await open(page, 'requirements')
   await expect(page.getByText('A new host is provisioned only after its price is approved.')).toBeVisible()
-  await rail(page).locator('.stage-cta').click()
+  await page.getByRole('region', { name: 'Decision: Approve requirements' }).getByRole('button', { name: /Approve requirements/ }).click()
   await page.getByRole('dialog', { name: 'Agree the requirements?' }).getByRole('button', { name: /Approve and approve requirements|Approve requirements/ }).click()
   await expect.poll(() => writes(calls, '/requirements/agree').length).toBe(1)
   expect(writes(calls, '/requirements/agree')[0].body).toMatchObject({ approval_request_id: 'ap-req', expected_revision: 12 })
@@ -203,7 +204,7 @@ test('Deploy shows launch admission as a blocked gate and the refused handoff', 
   await open(page, 'deploy')
   await expect(page.getByRole('region', { name: 'Blocked: Launch admission is closed' })).toContainText('Pharos launch checks are unavailable')
   await expect(page.getByText('The host policy refused it')).toBeVisible()
-  await expect(page.getByText('Launch admission · closed on this server')).toBeVisible()
+  await expect(page.getByText('Launch admission · unavailable')).toBeVisible()
   await expect(page.getByRole('region', { name: 'Decision: The host did not apply it' })).toBeVisible()
 })
 
@@ -221,15 +222,79 @@ test('an agent principal reads the journey but cannot move it', async ({ page })
   expect(calls.filter(c => c.method !== 'GET')).toHaveLength(0)
 })
 
-test('on a phone the rail scrolls and the next action is one wide button', async ({ page }) => {
+test('on a phone the rail scrolls and says what is next', async ({ page }) => {
   await page.setViewportSize({ width: 390, height: 844 })
   await mockWork(page, fixtures())
   await mockJourney(page, journeyWorld('plan'))
   await page.goto('/p/PHAROS?view=journey')
-  const button = rail(page).locator('.stage-cta.wide')
-  await expect(button).toBeVisible()
-  const box = (await button.boundingBox())!
-  expect(box.width).toBeGreaterThan(300)
+  await expect(rail(page).locator('.next-line')).toContainText('Approve and start build')
+  await expect(rail(page).getByRole('button', { name: '4. Plan, now' })).toBeInViewport()
   const width = await page.evaluate(() => document.documentElement.scrollWidth)
   expect(width).toBeLessThanOrEqual(390)
+})
+
+test('Plan adds a ticket to the release, under a feature', async ({ page }) => {
+  const { calls } = await open(page)
+  await page.getByLabel('New ticket for this release').fill('Show the provider price before approval')
+  await page.getByLabel('Feature of the new ticket').selectOption({ label: 'Guarded multi-cloud provisioning' })
+  await page.getByRole('button', { name: 'Add', exact: true }).click()
+  await expect(page.locator('.toast').filter({ hasText: 'PHAROS-44 joins release 2.' })).toBeVisible()
+  await expect(page.locator('.release-tickets').getByText('Show the provider price before approval')).toBeVisible()
+  const add = writes(calls, '/tickets')
+  expect(add).toHaveLength(1)
+  expect(add[0].body).toMatchObject({ title: 'Show the provider price before approval', feature_node_id: 'n-epic', included: true, expected_revision: 7 })
+})
+
+test('adding a ticket on a server without the route says so', async ({ page }) => {
+  await open(page, 'plan', '/p/PHAROS?view=journey', { noTicketRoute: true })
+  await page.getByLabel('New ticket for this release').fill('Anything')
+  await page.getByRole('button', { name: 'Add', exact: true }).click()
+  await expect(page.locator('.toast').filter({ hasText: 'This server cannot add tickets to a plan yet.' })).toBeVisible()
+})
+
+test('a mature project leads with its build: progress, what is left, releases; Inspire and Shape are history', async ({ page }) => {
+  await open(page, 'build', '/p/PHAROS?view=journey', { derived: true })
+  await expect(page.getByRole('heading', { name: 'Build release 2' })).toBeVisible()
+  await expect(page.getByRole('list', { name: 'Tickets by status' })).toContainText('1 in QA')
+  await expect(page.getByRole('region', { name: 'What stands before the candidate' })).toContainText('still open')
+  await expect(page.getByRole('list', { name: 'Releases, newest first' }).getByRole('listitem')).toHaveCount(2)
+  // The plan cannot change during the build.
+  await page.goto('/p/PHAROS?view=journey&stage=plan')
+  await expect(page.locator('.release-tickets .tk').first()).toBeVisible()
+  await expect(page.locator('.release-tickets input[type=checkbox]')).toHaveCount(0)
+  await page.goto('/p/PHAROS?view=journey&stage=inspire')
+  const history = page.locator('section.history')
+  await expect(history).toContainText('the project came to Aeon with its history')
+  await expect(page.getByText('Sources · stored with the project')).toHaveCount(0)
+  await history.getByRole('button', { name: 'Show the sources' }).click()
+  await expect(page.getByText('Sources · stored with the project')).toBeVisible()
+})
+
+test('the header chip hides until the project has really started its journey', async ({ page }) => {
+  await page.setViewportSize({ width: 1440, height: 900 })
+  await mockWork(page, fixtures())
+  await mockJourney(page, journeyWorld('inspire', { noIntake: true }))
+  await page.goto('/p/PHAROS')
+  await expect(page.locator('tr.ticket-row').first()).toBeVisible()
+  await page.waitForTimeout(300)
+  await expect(page.locator('.journey-chip')).toHaveCount(0)
+})
+
+test('the header chip shows once there are sources, or when the stage is derived', async ({ page }) => {
+  await page.setViewportSize({ width: 1440, height: 900 })
+  await mockWork(page, fixtures())
+  await mockJourney(page, journeyWorld('inspire'))
+  await page.goto('/p/PHAROS')
+  await expect(page.getByRole('button', { name: /^Journey: Inspire, stage 1 of 8\. Next: Continue intake/ })).toBeVisible()
+})
+
+test('Deploy follows launch readiness: ready shows a check, blocked shows its reason', async ({ page }) => {
+  await open(page, 'deploy', '/p/PHAROS?view=journey', { readiness: { state: 'blocked', reason: 'Backup evidence is older than the policy allows.', observed_at: '2026-09-23T11:40:00Z' } })
+  await expect(page.getByRole('region', { name: 'Blocked: Launch admission is blocked' })).toContainText('Backup evidence is older than the policy allows.')
+  await expect(page.getByText('Launch admission · blocked')).toBeVisible()
+  await page.unroute('**/api/**')
+  await open(page, 'deploy', '/p/PHAROS?view=journey', { readiness: { state: 'ready', reason: null, observed_at: '2026-09-23T11:40:00Z' } })
+  await expect(page.getByRole('region', { name: 'Launch admission is ready' })).toBeVisible()
+  await expect(page.getByText('Launch admission · ready')).toBeVisible()
+  await expect(page.getByRole('region', { name: /Blocked: Launch admission/ })).toHaveCount(0)
 })

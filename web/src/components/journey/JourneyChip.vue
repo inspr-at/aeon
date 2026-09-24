@@ -1,12 +1,14 @@
 <!-- SPDX-License-Identifier: AGPL-3.0-only -->
 <script setup lang="ts">
-import { computed, watch } from 'vue'
-import { STAGE_LABEL, STAGES } from '../../lib/journey'
+import { computed, ref, watch } from 'vue'
+import { getIntake, STAGE_LABEL, STAGES } from '../../lib/journey'
 import { useJourney } from '../../stores/journey'
 import AppIcon from '../AppIcon.vue'
 
 // The project header's compact journey line: where the project stands and the
-// one next action. It leads to the Journey view.
+// one next action. It leads to the Journey view. A project that has not really
+// started a journey (Inspire, nothing recorded, stage not derived from its
+// history) shows no chip: "Continue intake" would mislead on a mature project.
 const props = defineProps<{ projectId: string; active: boolean }>()
 const emit = defineEmits<{ go: [] }>()
 const store = useJourney()
@@ -15,11 +17,18 @@ const journey = computed(() => store.journeys[props.projectId] ?? null)
 const index = computed(() => journey.value ? STAGES.indexOf(journey.value.stage) + 1 : 0)
 const next = computed(() => journey.value?.next_action ?? null)
 const quiet = computed(() => !next.value || next.value.key === 'wait_for_build' || !next.value.available)
+const sources = ref<number | null>(null)
+watch(() => [props.projectId, journey.value?.stage, journey.value?.stage_source] as const, async ([id, stage, origin]) => {
+  sources.value = null
+  if (stage !== 'inspire' || origin === 'derived') return
+  try { const intake = await getIntake(id); if (id === props.projectId) sources.value = intake.sources.length } catch { if (id === props.projectId) sources.value = 0 }
+}, { immediate: true })
+const shown = computed(() => !!journey.value && !(journey.value.stage === 'inspire' && journey.value.stage_source !== 'derived' && !sources.value))
 </script>
 
 <template>
   <button
-    v-if="journey && next" type="button" class="journey-chip" :class="{ active, quiet }" :aria-label="`Journey: ${STAGE_LABEL[journey.stage]}, stage ${index} of 8. Next: ${next.label}. Open the journey`"
+    v-if="journey && next && shown" type="button" class="journey-chip" :class="{ active, quiet }" :aria-label="`Journey: ${STAGE_LABEL[journey.stage]}, stage ${index} of 8. Next: ${next.label}. Open the journey`"
     :data-tip="next.reason && !next.available ? `Next: ${next.label}\n${next.reason}` : `Next: ${next.label}`" @click="emit('go')"
   >
     <span class="n mono" aria-hidden="true">{{ index }}</span>

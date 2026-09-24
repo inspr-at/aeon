@@ -20,6 +20,8 @@ export interface JourneyWorld {
   journey: {
     project_node_id: string; profile: string; revision: number; stage: Stage; next_action: { key: string; label: string; stage: Stage; available: boolean; reason?: string; approval_request_id: string | null }
     requirements_revision: number; current_release_id: string | null; stages: { key: Stage; state: string; gate_approval_id: string | null; handoff_id: string | null }[]
+    stage_source?: 'journey' | 'derived'; requirements_gate_scope?: string | null
+    launch_readiness?: { state: 'ready' | 'blocked' | 'unavailable'; reason: string | null; observed_at: string | null } | null
   }
   approvals: { id: string; agent_principal_id: string; scope: string; resource_kind: 'node'; resource_id: string; run_id: null; rationale: string; expires_at: string; proposed_at: string; decision: 'approved' | 'denied' | null; decided_by_principal_id: string | null; risk: 'low' | 'medium' | 'high' }[]
   intake: { sources: unknown[]; turns: unknown[]; drafts: { id: string; kind: string; title: string; body: string; base_event_id: number; citations: unknown[]; ticket_suggestions: unknown[]; status: string; proposed_at: string; accepted_at: string | null; requirement_kind?: string }[] }
@@ -42,7 +44,14 @@ const approval = (id: string, scope: string, resource: string, rationale: string
   id, agent_principal_id: AGENT, scope, resource_kind: 'node', resource_id: resource, run_id: null, rationale, expires_at: ahead(120), proposed_at: ago(12), decision: null, decided_by_principal_id: null, risk: 'medium', ...extra,
 })
 
-export function journeyWorld(start: JourneyStart = 'plan', options: { noGate?: boolean } = {}): JourneyWorld {
+export interface WorldOptions {
+  noGate?: boolean
+  // B10: a stage derived from an imported project's history, and launch readiness.
+  derived?: boolean
+  readiness?: JourneyWorld['journey']['launch_readiness']
+  noIntake?: boolean
+}
+export function journeyWorld(start: JourneyStart = 'plan', options: WorldOptions = {}): JourneyWorld {
   const release = (id: string, key: string, title: string, state: string, minutes: number) => ({ id, key, kind_id: 'k-release', title, body: '', fields: {}, state, parent_id: PROJECT, position: '0', created_at: ago(minutes), updated_at: ago(minutes), deleted_at: null })
   const releases = [release('r-1', 'PHAROS-30', '260901120000.0.0', 'done', 60 * 24 * 22), release('r-2', 'PHAROS-31', 'Release 2', 'backlog', 60 * 24 * 2)]
   const walkers: JourneyWorld['walkers'] = {
@@ -103,6 +112,15 @@ export function journeyWorld(start: JourneyStart = 'plan', options: { noGate?: b
     world.approvals = options.noGate ? [] : [approval('ap-deploy', 'journey.deploy', 'r-2', 'Fresh backup evidence is recorded; retry the deployment.', { risk: 'high' })]
   }
   if (start === 'live') { set('live', 'plan_next_release'); world.walkers['r-2'].state = 'released'; world.walkers['r-2'].tickets = world.walkers['r-2'].tickets.filter(t => t.included); world.approvals = [] }
+  if (start === 'build' && !options.noGate) world.approvals = []
+  if (options.derived) {
+    world.journey.stage_source = 'derived'
+    world.intake = { sources: [], turns: [], drafts: [] }
+    world.requirements = []
+  }
+  if (options.noIntake) world.intake = { sources: [], turns: [], drafts: [] }
+  if (options.readiness !== undefined) world.journey.launch_readiness = options.readiness
+  if (start === 'requirements') world.journey.requirements_gate_scope = 'journey.requirements.r12.d9f2c1'
   return world
 }
 
@@ -112,7 +130,7 @@ const PLUGINS = [
 ]
 
 // Registered after mockWork, so its routes win; anything else falls through.
-export async function mockJourney(page: Page, world: JourneyWorld, options: { failPlan?: boolean; kind?: 'person' | 'agent' } = {}) {
+export async function mockJourney(page: Page, world: JourneyWorld, options: { failPlan?: boolean; kind?: 'person' | 'agent'; noTicketRoute?: boolean } = {}) {
   const calls: Call[] = []
   const bump = () => { world.journey.revision++ }
   await page.route('**/api/**', async route => {
@@ -142,7 +160,7 @@ export async function mockJourney(page: Page, world: JourneyWorld, options: { fa
       if (found.decision === 'approved' && world.journey.next_action.approval_request_id === found.id) { world.journey.next_action.available = true; delete world.journey.next_action.reason }
       return route.fulfill({ json: found })
     }
-    const project = /^\/api\/projects\/([^/]+)\/(journey(?:\/profile|\/actions)?|requirements(?:\/agree)?|intake(?:\/drafts\/([^/]+)\/accept)?|releases\/([^/]+)\/(walker|plan))$/.exec(path)
+    const project = /^\/api\/projects\/([^/]+)\/(journey(?:\/profile|\/actions)?|requirements(?:\/agree)?|intake(?:\/drafts\/([^/]+)\/accept)?|releases\/([^/]+)\/(walker|plan|tickets))$/.exec(path)
     if (!project) {
       const handoff = /^\/api\/stage-handoffs\/([^/]+)$/.exec(path)
       if (handoff) return world.handoffs[handoff[1]] ? route.fulfill({ json: world.handoffs[handoff[1]] }) : route.fulfill({ status: 404, json: { error: 'handoff not found' } })
@@ -196,6 +214,14 @@ export async function mockJourney(page: Page, world: JourneyWorld, options: { fa
     const walker = releaseId ? world.walkers[releaseId] : undefined
     if (!walker) return route.fulfill({ status: 404, json: { error: 'project or release not found' } })
     if (releaseWhat === 'walker') return route.fulfill({ json: walker })
+    if (releaseWhat === 'tickets') {
+      if (options.noTicketRoute) return route.fulfill({ status: 404, json: { error: 'not found' } })
+      if (body.expected_revision !== walker.revision) return route.fulfill({ status: 409, json: { error: 'release revision changed' } })
+      const n = walker.tickets.length + 1
+      walker.tickets = [...walker.tickets, { ticket_node_id: `n-added-${n}`, key: `PHAROS-${39 + n}`, title: String(body.title), feature_node_id: (body.feature_node_id as string | null) ?? null, included: body.included === true, position: walker.tickets.length, estimated_hours: null, screen_node_ids: [] }]
+      walker.revision++; bump()
+      return route.fulfill({ status: 201, json: walker })
+    }
     if (options.failPlan) return route.fulfill({ status: 409, json: { error: 'release revision changed' } })
     if (releaseId !== world.journey.current_release_id || walker.state !== 'planning') return route.fulfill({ status: 409, json: { error: 'only the current planning release can change' } })
     if (body.expected_revision !== walker.revision) return route.fulfill({ status: 409, json: { error: 'release revision changed' } })

@@ -1,8 +1,8 @@
 // SPDX-License-Identifier: AGPL-3.0-only
 import { computed, ref, shallowRef, watch, type Ref } from 'vue'
-import type { ListItem, WorkNode } from './api'
+import { APIError, type ListItem, type WorkNode } from './api'
 import {
-  getHandoff, getIntake, getRequirements, getWalker, listReleases, listWork, putPlan, releaseRefs,
+  addPlanTicket, getHandoff, getIntake, getRequirements, getWalker, listReleases, listWork, putPlan, releaseRefs,
   type Handoff, type Intake, type Journey, type ReleaseRef, type Requirement, type Walker,
 } from './journey'
 
@@ -60,7 +60,9 @@ export function useJourneyData(projectId: Ref<string | null>, journey: Ref<Journ
       walker.value.value = value; walker.status.value = 'ready'
     } catch (e) {
       if (mine !== generation || walkerRelease.value !== releaseId) return
-      walker.value.value = null; walker.status.value = 'error'; walker.error.value = message(e, 'This release could not be loaded.')
+      walker.value.value = null; walker.status.value = 'error'
+      // Some imported releases have no journey record yet; say so rather than "not found".
+      walker.error.value = e instanceof APIError && e.status === 404 ? 'This release has no plan record yet (it came from Paimos without one), so its tickets cannot be listed here.' : message(e, 'This release could not be loaded.')
     }
   }
   // The plan write: the whole order and the included set, on the walker's revision.
@@ -72,6 +74,15 @@ export function useJourneyData(projectId: Ref<string | null>, journey: Ref<Journ
     return saved
   }
   function patchWalker(next: Walker) { walker.value.value = next }
+  // A ticket added while planning: the server creates it and answers with the walker.
+  async function addTicket(title: string, featureId: string | null, included: boolean) {
+    const current = walker.value.value
+    if (!current || !projectId.value) throw new Error('No release is loaded.')
+    const saved = await addPlanTicket(id(), current.release_node_id, { title, feature_node_id: featureId, included, expected_revision: current.revision, idempotency_key: crypto.randomUUID() })
+    walker.value.value = saved
+    void loadWork(true)
+    return saved
+  }
 
   watch(projectId, () => {
     generation++
@@ -90,7 +101,7 @@ export function useJourneyData(projectId: Ref<string | null>, journey: Ref<Journ
   }
   return {
     intake, requirements, releaseNodes, releases, work, workById, epicOf, walker, walkerRelease, handoffs,
-    loadIntake, loadRequirements, loadReleases, loadWork, loadWalker, loadHandoffs, savePlan, patchWalker,
+    loadIntake, loadRequirements, loadReleases, loadWork, loadWalker, loadHandoffs, savePlan, patchWalker, addTicket,
   }
 }
 export type JourneyData = ReturnType<typeof useJourneyData>

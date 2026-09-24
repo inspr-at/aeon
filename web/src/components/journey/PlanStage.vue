@@ -1,7 +1,9 @@
 <!-- SPDX-License-Identifier: AGPL-3.0-only -->
 <script setup lang="ts">
-import { computed } from 'vue'
+import { computed, ref } from 'vue'
+import { APIError } from '../../lib/api'
 import { ACTION_LONG, gateApprovals, hours, offeredApproval, RELEASE_STATE_LABEL } from '../../lib/journey'
+import { toast } from '../../lib/toast'
 import { useJourneyContext } from '../../lib/journeyContext'
 import { plural, statusMeta } from '../../lib/work'
 import { useJourney } from '../../stores/journey'
@@ -27,6 +29,28 @@ const approval = computed(() => offeredApproval(ctx.approvals.value, journey.val
 const releases = computed(() => ctx.data.releases.value)
 const epicsWithout = computed(() => stats.value.emptyFeatures.map(g => g.feature!.key))
 const reqRevision = computed(() => journey.value.requirements_revision)
+
+// Adding a ticket while planning: it joins this release, under a feature or none.
+const features = computed(() => ctx.plan.groups.value.filter(g => g.feature && !g.feature.derived).map(g => g.feature!))
+const newTitle = ref('')
+const newFeature = ref<string>('')
+const adding = ref(false)
+async function addTicket() {
+  const title = newTitle.value.trim()
+  if (!title || adding.value) return
+  adding.value = true
+  try {
+    const before = new Set((walker.value?.tickets ?? []).map(t => t.ticket_node_id))
+    const saved = await ctx.data.addTicket(title, newFeature.value || null, true)
+    const added = saved.tickets.find(t => !before.has(t.ticket_node_id))
+    newTitle.value = ''
+    toast(`${added?.key ?? 'The ticket'} joins ${ctx.releaseLabel.value.toLowerCase()}.`)
+    void store.load(ctx.project.value.id, true)
+  } catch (e) {
+    const missing = e instanceof APIError && (e.status === 404 || e.status === 405)
+    toast(missing ? 'This server cannot add tickets to a plan yet.' : `The ticket was not added: ${e instanceof Error ? e.message : 'unknown error'}`, { tone: 'error' })
+  } finally { adding.value = false }
+}
 </script>
 
 <template>
@@ -52,8 +76,16 @@ const reqRevision = computed(() => journey.value.requirements_revision)
         <div v-else-if="status === 'error'" class="j-empty" role="alert"><strong>This release could not be loaded</strong><span>{{ ctx.data.walker.error.value }}</span>
           <button type="button" class="btn sm" @click="ctx.data.loadWalker(ctx.release.value!.id, true)"><AppIcon name="refresh" :size="13" />Try again</button>
         </div>
-        <div v-else-if="walker && !walker.tickets.length" class="j-empty"><strong>No tickets yet</strong><span>Agreeing the requirements generates the tickets; tickets added by hand join the backlog.</span></div>
-        <ReleaseTickets v-else-if="walker" :plan="ctx.plan" :editable="ctx.editable.value" :project-key="ctx.project.value.routeKey" :work-by-id="ctx.data.workById.value" @walk="t => ctx.walk(t.key)" @open="ctx.open" />
+        <div v-else-if="walker && !walker.tickets.length" class="j-empty"><strong>No tickets yet</strong><span>Agreeing the requirements generates the tickets{{ ctx.editable.value ? "; you can also add one below" : "" }}.</span></div>
+        <form v-if="ctx.editable.value && walker" class="add-row" @submit.prevent="addTicket">
+          <input v-model="newTitle" class="field" placeholder="Add a ticket, e.g. Show opening hours on the order form" aria-label="New ticket for this release" maxlength="500" />
+          <select v-if="features.length" v-model="newFeature" class="field feature" aria-label="Feature of the new ticket">
+            <option value="">No feature</option>
+            <option v-for="f in features" :key="f.id" :value="f.id">{{ f.title }}</option>
+          </select>
+          <button type="submit" class="btn" :disabled="!newTitle.trim() || adding">{{ adding ? 'Adding…' : 'Add' }}</button>
+        </form>
+        <ReleaseTickets v-if="walker && walker.tickets.length && status !== 'loading' && status !== 'error'" :plan="ctx.plan" :editable="ctx.editable.value" :project-key="ctx.project.value.routeKey" :work-by-id="ctx.data.workById.value" @walk="t => ctx.walk(t.key)" @open="ctx.open" />
       </section>
       <section v-if="releases.length" class="j-card" aria-labelledby="plan-releases">
         <header class="j-card-head"><p id="plan-releases" class="eyebrow">Releases · {{ releases.length }}</p></header>
@@ -103,6 +135,10 @@ const reqRevision = computed(() => journey.value.requirements_revision)
 
 <style scoped>
 .list-skel { height: 180px; border-radius: 10px; }
+.add-row { display: flex; gap: 8px; }
+.add-row .field { height: 36px; }
+.add-row .feature { width: 220px; flex-shrink: 0; }
+@media (max-width: 720px) { .add-row { flex-wrap: wrap; } .add-row .feature { width: 100%; } }
 .saving { font-size: 12px; color: var(--ink-3); }
 .linkish { display: inline-flex; align-items: center; gap: 4px; padding: 0; border: 0; background: transparent; color: var(--teal-ink); font-weight: 600; cursor: pointer; }
 .linkish:focus-visible { border-radius: 4px; box-shadow: var(--focus-ring); }

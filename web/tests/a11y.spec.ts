@@ -5,7 +5,7 @@ import AxeBuilder from '@axe-core/playwright'
 import { fixtures, me, mockWork } from './work-fixtures'
 import { agentData, mockAgents } from './agents-fixtures'
 import { businessData, mockBusiness, type BusinessMockOptions } from './business-fixtures'
-import { journeyWorld, mockJourney, type JourneyStart } from './journey-fixtures'
+import { journeyWorld, mockJourney, type JourneyStart, type WorldOptions } from './journey-fixtures'
 
 const world = {
   me: me.id,
@@ -152,7 +152,7 @@ for (const colorScheme of ['light', 'dark'] as const) {
 }
 
 // U10 journey: the rail and each kind of stage, the walker and its sheet.
-const journeyScreens: [string, JourneyStart, string, (page: Page) => Promise<void>][] = [
+const journeyScreens: [string, JourneyStart, string, (page: Page) => Promise<void>, WorldOptions?][] = [
   ['journey plan', 'plan', '/p/PHAROS?view=journey', async page => { await expect(page.locator('.release-tickets .tk').first()).toBeVisible() }],
   ['journey plan earlier release', 'plan', '/p/PHAROS?view=journey&release=PHAROS-30', async page => { await expect(page.getByRole('heading', { name: 'Plan release 1' })).toBeVisible() }],
   ['journey inspire', 'inspire', '/p/PHAROS?view=journey', async page => {
@@ -165,6 +165,12 @@ const journeyScreens: [string, JourneyStart, string, (page: Page) => Promise<voi
   ['journey deploy', 'deploy', '/p/PHAROS?view=journey', async page => { await expect(page.getByText('The host policy refused it')).toBeVisible() }],
   ['journey live', 'live', '/p/PHAROS?view=journey', async page => { await expect(page.locator('.release-list li').first()).toBeVisible() }],
   ['journey walker', 'plan', '/p/PHAROS?view=journey&walk=PHAROS-11', async page => { await expect(page.locator('dialog.walker img.shot')).toBeVisible() }],
+  ['journey build derived', 'build', '/p/PHAROS?view=journey', async page => { await expect(page.getByRole('list', { name: 'Tickets by status' })).toBeVisible() }, { derived: true }],
+  ['journey history fold', 'build', '/p/PHAROS?view=journey&stage=inspire', async page => {
+    await page.locator('section.history').getByRole('button', { name: 'Show the sources' }).click()
+    await expect(page.getByText('Sources · stored with the project')).toBeVisible()
+  }, { derived: true }],
+  ['journey deploy ready', 'deploy', '/p/PHAROS?view=journey', async page => { await expect(page.getByRole('region', { name: 'Launch admission is ready' })).toBeVisible() }, { readiness: { state: 'ready', reason: null, observed_at: '2026-09-23T11:40:00Z' } }],
   ['journey walker sheet', 'plan', '/p/PHAROS?view=journey&walk=PHAROS-12', async page => {
     await expect(page.locator('dialog.walker .ck.on')).toBeVisible()
     await page.keyboard.press('?')
@@ -172,12 +178,12 @@ const journeyScreens: [string, JourneyStart, string, (page: Page) => Promise<voi
   }],
 ]
 for (const colorScheme of ['light', 'dark'] as const) {
-  for (const [name, start, path, ready] of journeyScreens) {
+  for (const [name, start, path, ready, options] of journeyScreens) {
     test(`axe: ${name} in ${colorScheme}`, async ({ page }) => {
       await page.setViewportSize({ width: 1440, height: 1000 })
       await page.emulateMedia({ colorScheme, reducedMotion: 'reduce' })
       await mockWork(page, fixtures())
-      await mockJourney(page, journeyWorld(start))
+      await mockJourney(page, journeyWorld(start, options))
       await page.goto(path)
       await ready(page)
       await page.waitForTimeout(250)

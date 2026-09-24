@@ -29,9 +29,17 @@ export type ActionKey = 'confirm_brief' | 'go' | 'reduce_scope' | 'park' | 'drop
 export type NextKey = 'continue_intake' | 'confirm_brief' | 'decide' | 'reopen' | 'approve_requirements' | 'start_build' | 'wait_for_build'
   | 'approve_candidate' | 'approve_deploy' | 'retry_deploy' | 'approve_permit' | 'plan_next_release'
 export interface NextAction { key: NextKey; label: string; stage: Stage; available: boolean; reason?: string; approval_request_id: string | null }
+// Whether Pharos can admit a launch now, and why not.
+export interface LaunchReadiness { state: 'ready' | 'blocked' | 'unavailable'; reason: string | null; observed_at: string | null }
 export interface Journey {
   project_node_id: string; profile: Profile; revision: number; stage: Stage; stages: JourneyStage[]
   next_action: NextAction; requirements_revision: number; current_release_id: string | null
+  // B10 (AEON-78), absent on older servers: how the stage was reached ('derived'
+  // from an imported project's data), the exact scope the requirements gate needs,
+  // and launch readiness for the Deploy stage.
+  stage_source?: 'journey' | 'derived'
+  requirements_gate_scope?: string | null
+  launch_readiness?: LaunchReadiness | null
 }
 export interface Requirement {
   node_id: string; project_node_id: string; kind: 'functional' | 'nonfunctional'; revision: number
@@ -92,6 +100,10 @@ export const getIntake = (project: string) => request<Intake>(`${root(project)}/
 export const acceptDraft = (project: string, draft: IntakeDraft) =>
   request<IntakeDraft>(`${root(project)}/intake/drafts/${enc(draft.id)}/accept`, 'POST', { expected_base_event_id: draft.base_event_id })
 export const getHandoff = (id: string) => request<Handoff>(`/stage-handoffs/${enc(id)}`)
+// A ticket added while planning joins the release (or the backlog) under a
+// feature, or under none. Proposed route; older servers answer 404 or 405.
+export interface TicketAdd { title: string; feature_node_id: string | null; included: boolean; expected_revision: number; idempotency_key: string }
+export const addPlanTicket = (project: string, release: string, body: TicketAdd) => request<Walker>(`${releaseRoot(project, release)}/tickets`, 'POST', body)
 
 // Releases are R1 nodes of the release kind under the project (history and the
 // backfilled releases); the journey's current release is one of them.
@@ -238,6 +250,11 @@ export function offeredApproval(approvals: Approval[], journey: Journey, gate: G
   const resource = gateOnRelease(gate) ? journey.current_release_id : journey.project_node_id
   const candidates = gateApprovals(approvals, gate, resource).filter(a => a.decision !== 'denied' && Date.parse(a.expires_at) > now)
   if (gate === 'requirements') {
+    // The server names the exact scope when it can; otherwise the revision's.
+    if (journey.requirements_gate_scope) {
+      const exact = candidates.filter(a => a.scope === journey.requirements_gate_scope)
+      return exact.find(a => a.decision === 'approved') ?? exact[0] ?? null
+    }
     const refined = candidates.filter(a => a.scope.startsWith('journey.requirements.r'))
     const exact = refined.filter(a => a.scope.startsWith(`journey.requirements.r${journey.revision}.`))
     const pool = exact.length ? exact : refined

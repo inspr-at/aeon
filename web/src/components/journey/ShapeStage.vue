@@ -9,6 +9,7 @@ import AppIcon from '../AppIcon.vue'
 import MarkdownBody from '../MarkdownBody.vue'
 import GateApprovals from './GateApprovals.vue'
 import GateCard from './GateCard.vue'
+import HistoryFold from './HistoryFold.vue'
 
 // Shape: the brief Aithema drafted and the person accepted, the profile, and the
 // decision: go, reduce scope, park or drop. The decision needs the shape gate.
@@ -37,9 +38,14 @@ async function setProfile(value: Profile) {
   try { await store.profile(ctx.project.value.id, value); toast(`Profile: ${PROFILES[value].label}`) } catch (e) { toast(e instanceof Error ? e.message : 'The profile was not saved.', { tone: 'error' }) } finally { profileSaving.value = false }
 }
 const noGate = computed(() => !approval.value)
+// Past Shape, the stage is history: one line, folded.
+const past = computed(() => ['done', 'skipped'].includes(state.value) && journey.value.stage !== 'shape')
+const summary = computed(() => state.value === 'skipped' ? 'Not needed on Personal: the conversation went straight to requirements.'
+  : journey.value.stage_source === 'derived' ? 'Decided before the project came to Aeon.' : `Decided${brief.value ? `: ${brief.value.title}` : ''}. The decision is recorded.`)
 </script>
 
 <template>
+  <component :is="past ? HistoryFold : 'div'" v-bind="past ? { title: 'The brief and the decision', summary, label: 'Show the brief' } : {}">
   <div v-if="state === 'skipped'" class="j-grid one">
     <section class="j-card">
       <h3>Not needed on Personal</h3>
@@ -97,6 +103,7 @@ const noGate = computed(() => !approval.value)
       <GateCard v-else eyebrow="Later" title="Not yet" tone="record"><p>{{ journey.stage === 'inspire' ? 'The brief comes first: once it is confirmed, the decision is made here.' : 'The brief and the decision.' }}</p></GateCard>
     </div>
   </div>
+  </component>
 </template>
 
 <style scoped>

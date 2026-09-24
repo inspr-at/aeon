@@ -2,6 +2,7 @@
 <script setup lang="ts">
 import { computed } from 'vue'
 import { ACTION_LONG, gateApprovals, offeredApproval, PLUGIN_GATE } from '../../lib/journey'
+import { absoluteTime, relativeTime } from '../../lib/work'
 import { useJourneyContext } from '../../lib/journeyContext'
 import AppIcon from '../AppIcon.vue'
 import GateApprovals from './GateApprovals.vue'
@@ -9,8 +10,9 @@ import GateCard from './GateCard.vue'
 import HandoffList from './HandoffList.vue'
 
 // Deploy: Pharos applies the release after your approval. Its deploy step has
-// gates of its own; launch admission among them fails closed on this server (no
-// launch-checks provider is installed), so a deployment cannot be admitted yet.
+// gates of its own; launch admission among them comes from the server's launch
+// readiness. Servers without that field fail closed (no launch-checks provider),
+// which is said as such.
 const ctx = useJourneyContext()
 const journey = computed(() => ctx.journey.value)
 const next = computed(() => journey.value.next_action)
@@ -22,6 +24,10 @@ const deciding = computed(() => next.value.key === 'approve_deploy' || next.valu
 const approvals = computed(() => gateApprovals(ctx.approvals.value, 'deploy', journey.value.current_release_id))
 const approval = computed(() => offeredApproval(ctx.approvals.value, journey.value, 'deploy', ctx.now.value))
 const state = computed(() => journey.value.stages.find(s => s.key === 'deploy')?.state ?? 'later')
+// Launch readiness from the server, or the known fail-closed default.
+const launch = computed(() => journey.value.launch_readiness ?? { state: 'unavailable' as const, reason: 'Pharos launch checks are unavailable: this server has no launch-checks provider, so launch admission fails closed and no release can be admitted for deployment.', observed_at: null })
+const launchReady = computed(() => launch.value.state === 'ready')
+const launchNote = computed(() => launch.value.state === 'ready' ? 'ready' : launch.value.state === 'blocked' ? 'blocked' : 'unavailable')
 </script>
 
 <template>
@@ -36,8 +42,8 @@ const state = computed(() => journey.value.stages.find(s => s.key === 'deploy')?
           <dd>
             <ul class="j-checks">
               <li v-for="gate in deployGates" :key="gate">
-                <AppIcon :name="gate === 'launch_admission' ? 'close' : gate === 'person_decision' ? 'user' : 'info'" :size="13" :class="gate === 'launch_admission' ? 'bad' : 'info'" />
-                <span>{{ PLUGIN_GATE[gate] ?? gate.replace(/_/g, ' ') }}<template v-if="gate === 'launch_admission'"> · closed on this server</template><template v-else-if="gate === 'person_decision'"> · the deployment gate below</template></span>
+                <AppIcon :name="gate === 'launch_admission' ? (launchReady ? 'check' : 'close') : gate === 'person_decision' ? 'user' : 'info'" :size="13" :class="gate === 'launch_admission' ? (launchReady ? 'ok' : 'bad') : 'info'" />
+                <span>{{ PLUGIN_GATE[gate] ?? gate.replace(/_/g, ' ') }}<template v-if="gate === 'launch_admission'"> · {{ launchNote }}</template><template v-else-if="gate === 'person_decision'"> · the deployment gate below</template></span>
               </li>
               <li v-if="!deployGates.length"><AppIcon name="info" :size="13" class="info" /><span>Pharos lists its checks once it is installed.</span></li>
             </ul>
@@ -50,10 +56,15 @@ const state = computed(() => journey.value.stages.find(s => s.key === 'deploy')?
       </section>
     </div>
     <div class="j-col">
-      <GateCard eyebrow="Blocked" title="Launch admission is closed" tone="blocked">
-        <p>Pharos launch checks are unavailable: this server has no launch-checks provider, so launch admission fails closed and no release can be admitted for deployment.</p>
+      <GateCard v-if="!launchReady" eyebrow="Blocked" :title="launch.state === 'blocked' ? 'Launch admission is blocked' : 'Launch admission is closed'" tone="blocked">
+        <p>{{ launch.reason || 'Pharos did not say why.' }}</p>
+        <p v-if="launch.observed_at" class="j-note">Checked <time :datetime="launch.observed_at" :data-tip="absoluteTime(launch.observed_at)">{{ relativeTime(launch.observed_at, { now: ctx.now.value }) }}</time>.</p>
         <p class="j-note">Approving the deployment still records your decision; the host applies the release once admission can succeed.</p>
       </GateCard>
+      <section v-else class="j-card ready" aria-label="Launch admission is ready">
+        <p class="eyebrow ok-eyebrow"><AppIcon name="check" :size="11" />Launch admission</p>
+        <p>Pharos can admit this release.<template v-if="launch.observed_at"> Checked <time :datetime="launch.observed_at" :data-tip="absoluteTime(launch.observed_at)">{{ relativeTime(launch.observed_at, { now: ctx.now.value }) }}</time>.</template></p>
+      </section>
       <GateCard
         v-if="deciding" eyebrow="Decision" :title="next.key === 'retry_deploy' ? 'The host did not apply it' : 'Approve deployment'"
         :action="{ label: ctx.next.value.label, disabled: ctx.next.value.disabled, busy: ctx.next.value.busy, tip: ctx.next.value.tip }" @act="ctx.runNext()"
@@ -68,3 +79,8 @@ const state = computed(() => journey.value.stages.find(s => s.key === 'deploy')?
     </div>
   </div>
 </template>
+
+<style scoped>
+.ok-eyebrow { display: inline-flex; align-items: center; gap: 6px; color: var(--ok); }
+.ready p:not(.eyebrow) { font-size: 13.5px; color: var(--ink-2); }
+</style>

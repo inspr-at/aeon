@@ -12,8 +12,8 @@ export const router = createRouter({
     { path: '/', component: ProjectsView, meta: { title: 'Projects' } },
     // One record for the list and its open ticket, so opening the panel never remounts the list.
     { path: '/p/:projectKey/:ticketKey?', component: () => import('./views/ProjectView.vue'), meta: { title: 'Project' } },
-    // Earlier workspace tree and list, kept reachable but unlinked.
-    { path: '/workspace', component: () => import('./views/HomeView.vue'), meta: { title: 'Workspace', legacySearch: true, fill: true } },
+    // The earlier workspace tree and list are gone; the projects page replaces them.
+    { path: '/workspace', redirect: '/' },
     // The journey lives in the project page (?view=journey); earlier journey links lead there.
     {
       path: '/projects/:projectId/:rest(.*)*', component: NotFoundView, meta: { title: 'Journey' },
