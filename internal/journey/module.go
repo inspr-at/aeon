@@ -41,8 +41,10 @@ func uuidOK(s string) bool { return uuidPattern.MatchString(s) }
 //	PUT  /projects/{projectId}/journey/profile
 //	POST /projects/{projectId}/journey/actions
 //
-// Stage and the single next action are derived. Human gates are live R2
-// approvals (journey.shape, journey.requirements, journey.build,
+// Stage and the single next action are derived. GET is read-only; the first
+// person action initializes a missing projection and records imported-stage
+// derivation once. Human gates are live R2 approvals (journey.shape, the
+// projection's revision-and-digest-bound requirements_approval_scope, journey.build,
 // journey.candidate, journey.deploy, journey.access) on the project or release
 // node. Actions never write an approval decision. Queries run inside db.InTenant
 // and every mutation appends a tenant event in that transaction.

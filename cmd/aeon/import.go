@@ -11,6 +11,9 @@ import (
 	"os/signal"
 	"syscall"
 
+	"github.com/jackc/pgx/v5"
+
+	"github.com/inspr-at/aeon/internal/attachments"
 	"github.com/inspr-at/aeon/internal/config"
 	"github.com/inspr-at/aeon/internal/db"
 	"github.com/inspr-at/aeon/internal/importer"
@@ -90,4 +93,57 @@ func backfillRelations(args []string, stdout io.Writer) error {
 		return err
 	}
 	return json.NewEncoder(stdout).Encode(report)
+}
+
+// importPaimosAttachments downloads the files of attachment records in a
+// classic Paimos snapshot and attaches them to the already imported nodes.
+// It reads the classic instance only; nodes and their fields are not touched.
+func importPaimosAttachments(args []string, stdout io.Writer) error {
+	flags := flag.NewFlagSet("aeon import paimos-attachments", flag.ContinueOnError)
+	flags.SetOutput(io.Discard)
+	sourceURL := flags.String("source-url", "", "classic Paimos URL")
+	keyFile := flags.String("api-key-file", "", "bearer key file")
+	tenant := flags.String("tenant", "", "Aeon tenant slug")
+	project := flags.String("project", "", "classic project key (default: all)")
+	concurrency := flags.Int("concurrency", 4, "maximum concurrent source requests")
+	delay := flags.Duration("delay", 0, "minimum delay between source request starts")
+	if err := flags.Parse(args); err != nil || flags.NArg() != 0 || *sourceURL == "" || *keyFile == "" || *tenant == "" {
+		return errors.New("usage: aeon import paimos-attachments --source-url URL --api-key-file FILE --tenant SLUG [--project KEY] [--concurrency N] [--delay DURATION]")
+	}
+	source, err := importer.NewHTTPSource(*sourceURL, *keyFile, nil)
+	if err != nil {
+		return err
+	}
+	if err := source.Configure(*concurrency, *delay); err != nil {
+		return err
+	}
+	ctx, stop := signal.NotifyContext(context.Background(), syscall.SIGTERM, syscall.SIGINT)
+	defer stop()
+	cfg, err := config.FromEnv()
+	if err != nil {
+		return err
+	}
+	pool, err := db.Open(ctx, cfg.DatabaseURL)
+	if err != nil {
+		return fmt.Errorf("open target database: %w", err)
+	}
+	defer pool.Close()
+	var tenantID, actorID string
+	if err := pool.QueryRow(ctx, `SELECT id FROM tenants WHERE slug=$1`, *tenant).Scan(&tenantID); err != nil {
+		return fmt.Errorf("tenant %q: %w", *tenant, err)
+	}
+	if err := db.InTenant(ctx, pool, tenantID, func(tx pgx.Tx) error {
+		return tx.QueryRow(ctx, `SELECT id FROM principals WHERE tenant_id=$1 AND kind='agent' AND name='Classic Paimos importer' ORDER BY created_at LIMIT 1`, tenantID).Scan(&actorID)
+	}); err != nil {
+		return fmt.Errorf("importer principal (run aeon import paimos first): %w", err)
+	}
+	snap, err := source.Read(ctx, *project)
+	if err != nil {
+		return err
+	}
+	created, err := importer.ImportAttachments(ctx, pool, attachments.Store{FilesDir: cfg.FilesDir}, source, snap, tenantID, actorID)
+	if err != nil {
+		return fmt.Errorf("after %d attachments: %w", created, err)
+	}
+	return json.NewEncoder(stdout).Encode(map[string]int{"attachments_created": created})
 }

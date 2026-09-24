@@ -16,6 +16,7 @@ import (
 	"github.com/jackc/pgx/v5"
 
 	"github.com/inspr-at/aeon/internal/events"
+	"github.com/inspr-at/aeon/internal/requirements"
 	"github.com/inspr-at/aeon/internal/tenant"
 )
 
@@ -96,7 +97,7 @@ func ensureJourney(ctx context.Context, tx pgx.Tx, p tenant.Principal, projectID
 		return err
 	}
 	if exists {
-		return nil
+		return recordDerivation(ctx, tx, p, projectID)
 	}
 	if _, err := tx.Exec(ctx, `SELECT aeon_seed_requirement_kind($1::uuid)`, p.TenantID); err != nil {
 		return err
@@ -108,7 +109,7 @@ func ensureJourney(ctx context.Context, tx pgx.Tx, p tenant.Principal, projectID
 		ON CONFLICT (tenant_id, project_node_id) DO NOTHING
 		RETURNING true`, p.TenantID, projectID).Scan(&inserted)
 	if errors.Is(err, pgx.ErrNoRows) {
-		return nil
+		return recordDerivation(ctx, tx, p, projectID)
 	}
 	if err != nil {
 		return err
@@ -121,6 +122,34 @@ func ensureJourney(ctx context.Context, tx pgx.Tx, p tenant.Principal, projectID
 		Stage:         stageInspire,
 		Action:        "initialize",
 	})
+	if err != nil {
+		return err
+	}
+	return recordDerivation(ctx, tx, p, projectID)
+}
+
+// The first successful person action records imported data interpretation once.
+// GET deliberately does not call this function.
+func recordDerivation(ctx context.Context, tx pgx.Tx, p tenant.Principal, projectID string) error {
+	var locked string
+	if err := tx.QueryRow(ctx, `SELECT project_node_id::text FROM journey_projects WHERE project_node_id=$1::uuid FOR UPDATE`, projectID).Scan(&locked); err != nil {
+		return err
+	}
+	var seen bool
+	if err := tx.QueryRow(ctx, `SELECT EXISTS(SELECT 1 FROM events WHERE node_id=$1::uuid AND type='journey.derived')`, projectID).Scan(&seen); err != nil {
+		return err
+	}
+	if seen {
+		return nil
+	}
+	f, err := loadFacts(ctx, tx, projectID, false)
+	if err != nil {
+		return err
+	}
+	if f.ImportedStage == "" {
+		return nil
+	}
+	_, err = writeEvent(ctx, tx, p, projectID, "journey.derived", nil, snapFrom(f, derive(f), "derive", "", "", "", nil))
 	return err
 }
 
@@ -153,12 +182,24 @@ func loadFacts(ctx context.Context, tx pgx.Tx, projectID string, lockRelease boo
 		&f.Profile, &f.Revision, &confirmed, &f.Decision,
 		&f.RequirementsRevision, &f.AgreedRequirementsRevision, &releaseID, &f.AcceptedBrief)
 	if errors.Is(err, pgx.ErrNoRows) {
-		return facts{}, fail(404, "project not found")
+		var exists bool
+		if err := tx.QueryRow(ctx, `SELECT EXISTS(SELECT 1 FROM nodes n JOIN node_kinds k ON k.tenant_id=n.tenant_id AND k.id=n.kind_id WHERE n.id=$1::uuid AND n.deleted_at IS NULL AND k.slug='project')`, projectID).Scan(&exists); err != nil {
+			return facts{}, err
+		}
+		if !exists {
+			return facts{}, fail(404, "project not found")
+		}
+		f.Profile, f.Revision, f.Decision = "personal", 1, "pending"
+		releaseID = nil
+		err = nil
 	}
 	if err != nil {
 		return facts{}, err
 	}
 	f.BriefConfirmed = confirmed
+	if err := loadImported(ctx, tx, &f, &releaseID); err != nil {
+		return facts{}, err
+	}
 	if releaseID != nil && *releaseID != "" {
 		rel, err := loadRelease(ctx, tx, *releaseID, lockRelease)
 		if err != nil {
@@ -185,6 +226,9 @@ func loadFacts(ctx context.Context, tx pgx.Tx, projectID string, lockRelease boo
 			  AND ($2::uuid IS NULL OR release_node_id <> $2::uuid))`, projectID, nullableUUID(current)).Scan(&f.PriorReleased); err != nil {
 		return facts{}, err
 	}
+	if err := tx.QueryRow(ctx, `SELECT coalesce(max(number),0)+1 FROM journey_releases WHERE project_node_id=$1::uuid`, projectID).Scan(&f.NextReleaseNumber); err != nil {
+		return facts{}, err
+	}
 	if err := loadCap(ctx, tx, &f); err != nil {
 		return facts{}, err
 	}
@@ -192,6 +236,10 @@ func loadFacts(ctx context.Context, tx pgx.Tx, projectID string, lockRelease boo
 		return facts{}, err
 	}
 	if err := loadGates(ctx, tx, &f); err != nil {
+		return facts{}, err
+	}
+	f.RequirementsDigest, err = requirements.Digest(ctx, tx, projectID)
+	if err != nil {
 		return facts{}, err
 	}
 	if err := loadOffers(ctx, tx, &f); err != nil {
@@ -203,6 +251,54 @@ func loadFacts(ctx context.Context, tx pgx.Tx, projectID string, lockRelease boo
 		}
 	}
 	return f, nil
+}
+
+func loadImported(ctx context.Context, tx pgx.Tx, f *facts, releaseID **string) error {
+	var imported bool
+	if err := tx.QueryRow(ctx, `SELECT EXISTS(SELECT 1 FROM events WHERE node_id=$1::uuid AND type='import.node_created')`, f.ProjectID).Scan(&imported); err != nil {
+		return err
+	}
+	if !imported {
+		return nil
+	}
+	if *releaseID != nil {
+		f.ImportedStage = stagePlan
+		return nil
+	}
+	var latest *string
+	var releaseCount, ticketCount, openTickets int
+	var allDone bool
+	err := tx.QueryRow(ctx, `WITH RECURSIVE tree AS (
+		SELECT n.id,n.parent_id,n.kind_id,n.state,n.created_at,0 AS depth
+		FROM nodes n WHERE n.id=$1::uuid AND n.deleted_at IS NULL
+		UNION ALL
+		SELECT n.id,n.parent_id,n.kind_id,n.state,n.created_at,t.depth+1
+		FROM nodes n JOIN tree t ON n.parent_id=t.id AND n.tenant_id=current_setting('aeon.tenant_id')::uuid
+		WHERE n.deleted_at IS NULL AND t.depth<64
+	), typed AS (
+		SELECT t.*,k.slug FROM tree t JOIN node_kinds k ON k.id=t.kind_id AND k.tenant_id=current_setting('aeon.tenant_id')::uuid
+	)
+		SELECT (SELECT r.release_node_id::text FROM journey_releases r JOIN nodes n ON n.id=r.release_node_id AND n.tenant_id=r.tenant_id WHERE r.project_node_id=$1::uuid AND n.deleted_at IS NULL ORDER BY n.created_at DESC,n.id DESC LIMIT 1),
+		       (SELECT count(*) FROM journey_releases r WHERE r.project_node_id=$1::uuid),
+		       (SELECT count(*) FROM typed WHERE slug='ticket') + (SELECT count(*) FROM journey_tickets WHERE project_node_id=$1::uuid),
+		       (SELECT count(*) FROM typed WHERE slug='ticket' AND state<>'done') +
+		         (SELECT count(*) FROM journey_tickets jt JOIN nodes n ON n.tenant_id=jt.tenant_id AND n.id=jt.ticket_node_id WHERE jt.project_node_id=$1::uuid AND n.deleted_at IS NULL AND n.state<>'done'),
+		       coalesce((SELECT bool_and(n.state='done') FROM journey_releases r JOIN nodes n ON n.tenant_id=r.tenant_id AND n.id=r.release_node_id WHERE r.project_node_id=$1::uuid),false)`, f.ProjectID).Scan(&latest, &releaseCount, &ticketCount, &openTickets, &allDone)
+	if err != nil {
+		return err
+	}
+	if latest != nil {
+		*releaseID = latest
+	}
+	switch {
+	case releaseCount > 0 && allDone && openTickets == 0:
+		f.ImportedStage = stageLive
+	case releaseCount > 0:
+		f.ImportedStage = stageBuild
+	case ticketCount > 0:
+		f.ImportedStage = stagePlan
+	}
+	return nil
 }
 
 func loadRelease(ctx context.Context, tx pgx.Tx, id string, lock bool) (releaseFacts, error) {
@@ -227,15 +323,16 @@ func loadTicketStats(ctx context.Context, tx pgx.Tx, f *facts) error {
 	var scopeN, accessN int
 	var plan, spent string
 	if err := tx.QueryRow(ctx, `
-		SELECT count(*) FILTER (WHERE release_node_id = $2::uuid),
+		SELECT count(*) FILTER (WHERE release_node_id = $2::uuid AND n.deleted_at IS NULL),
+		       count(*) FILTER (WHERE release_node_id = $2::uuid AND n.deleted_at IS NULL AND n.state <> 'done'),
 		       count(*) FILTER (WHERE release_node_id = $2::uuid AND scope_revision_required),
 		       count(*) FILTER (WHERE release_node_id = $2::uuid AND access_change),
 		       coalesce(bool_or(release_node_id = $2::uuid AND estimated_hours IS NULL), false),
 		       coalesce(sum(estimated_hours) FILTER (
 		         WHERE release_node_id = $2::uuid AND estimated_hours IS NOT NULL), 0)::text
-		FROM journey_tickets
-		WHERE project_node_id = $1::uuid`, f.ProjectID, f.Release.ID).Scan(
-		&f.IncludedTickets, &scopeN, &accessN, &f.MissingEstimate, &plan); err != nil {
+		FROM journey_tickets t JOIN nodes n ON n.tenant_id=t.tenant_id AND n.id=t.ticket_node_id
+		WHERE t.project_node_id = $1::uuid`, f.ProjectID, f.Release.ID).Scan(
+		&f.IncludedTickets, &f.OpenReleaseTickets, &scopeN, &accessN, &f.MissingEstimate, &plan); err != nil {
 		return err
 	}
 	f.ScopeRevision = scopeN > 0
@@ -419,7 +516,7 @@ func loadOffers(ctx context.Context, tx pgx.Tx, f *facts) error {
 		    SELECT 1 FROM journey_gates jg
 		    WHERE jg.tenant_id = r.tenant_id AND jg.approval_request_id = r.id)
 		ORDER BY r.proposed_at DESC`, ids, []string{
-		ScopeShape, ScopeRequirements, ScopeBuild, ScopeCandidate, ScopeDeploy, ScopeAccess,
+		ScopeShape, requirementsScope(f.Revision, f.RequirementsDigest), ScopeBuild, ScopeCandidate, ScopeDeploy, ScopeAccess,
 	})
 	if err != nil {
 		return err
@@ -458,7 +555,7 @@ func assignOffer(f *facts, scope, resource string, offer gateOffer, replace bool
 		if resource == f.ProjectID && (replace || f.Shape.ID == "") {
 			f.Shape = offer
 		}
-	case ScopeRequirements:
+	case requirementsScope(f.Revision, f.RequirementsDigest):
 		if resource == f.ProjectID && (replace || f.Requirements.ID == "") {
 			f.Requirements = offer
 		}

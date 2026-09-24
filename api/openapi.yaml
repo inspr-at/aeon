@@ -1662,7 +1662,7 @@ components:
   schemas:
     Journey:
       type: object
-      required: [project_node_id, profile, revision, stage, stages, next_action, requirements_revision]
+      required: [project_node_id, profile, revision, stage, stages, next_action, requirements_revision, requirements_digest_sha256, requirements_approval_scope, launch_readiness]
       properties:
         project_node_id: {type: string, format: uuid}
         profile: {type: string, enum: [personal, professional, enterprise]}
@@ -1671,7 +1671,16 @@ components:
         stages: {type: array, items: {$ref: '#/components/schemas/JourneyStage'}}
         next_action: {$ref: '#/components/schemas/JourneyNextAction'}
         requirements_revision: {type: integer, minimum: 0}
+        requirements_digest_sha256: {type: string, pattern: '^[0-9a-f]{64}$'}
+        requirements_approval_scope: {type: string, description: Exact approval scope for the current requirements revision and content digest}
+        launch_readiness: {$ref: '#/components/schemas/JourneyLaunchReadiness'}
         current_release_id: {type: [string, 'null'], format: uuid}
+    JourneyLaunchReadiness:
+      type: object
+      required: [can_admit, reason]
+      properties:
+        can_admit: {type: boolean}
+        reason: {type: string, description: Current blocker or empty when admission can proceed}
     JourneyStage:
       type: object
       required: [key, state]
@@ -1684,7 +1693,7 @@ components:
       type: object
       required: [key, label, stage, available]
       properties:
-        key: {type: string, enum: [continue_intake, confirm_brief, decide, reopen, approve_requirements, start_build, wait_for_build, approve_candidate, approve_deploy, retry_deploy, approve_permit, plan_next_release]}
+        key: {type: string, enum: [continue_intake, confirm_brief, decide, reopen, approve_requirements, open_first_release, start_build, wait_for_build, mark_candidate, approve_candidate, approve_deploy, retry_deploy, approve_permit, plan_next_release]}
         label: {type: string}
         stage: {type: string, enum: [inspire, shape, requirements, plan, build, deploy, access, live]}
         available: {type: boolean}
@@ -1702,7 +1711,7 @@ components:
       additionalProperties: false
       required: [action, expected_revision, idempotency_key]
       properties:
-        action: {type: string, enum: [confirm_brief, go, reduce_scope, park, drop, reopen, start_build, approve_candidate, reject_candidate, approve_deploy, retry_deploy, approve_permit, plan_next_release]}
+        action: {type: string, enum: [confirm_brief, go, reduce_scope, park, drop, reopen, open_first_release, start_build, mark_candidate, approve_candidate, reject_candidate, approve_deploy, retry_deploy, approve_permit, plan_next_release]}
         expected_revision: {type: integer, minimum: 1}
         idempotency_key: {type: string, minLength: 1, maxLength: 128}
         approval_request_id: {type: string, format: uuid}

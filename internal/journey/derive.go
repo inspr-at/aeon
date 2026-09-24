@@ -4,7 +4,6 @@ package journey
 
 import (
 	"fmt"
-	"math"
 	"strconv"
 	"strings"
 )
@@ -26,6 +25,8 @@ const (
 	actionApproveRequirements = "approve_requirements"
 	actionStartBuild          = "start_build"
 	actionWaitForBuild        = "wait_for_build"
+	actionOpenFirstRelease    = "open_first_release"
+	actionMarkCandidate       = "mark_candidate"
 	actionApproveCandidate    = "approve_candidate"
 	actionApproveDeploy       = "approve_deploy"
 	actionRetryDeploy         = "retry_deploy"
@@ -47,7 +48,10 @@ const (
 	reasonNoCap           = "The approved cap is missing."
 	reasonOverCap         = "The selected plan exceeds the approved cap."
 	reasonBuildGate       = "Build start needs an approved gate."
+	reasonCompletionGate  = "Marking a candidate needs an approved build gate."
 	reasonBuilding        = "The build is still in progress."
+	reasonOpenTickets     = "Finish the release's tickets before marking a candidate."
+	reasonEmptyRelease    = "A release needs at least one ticket before it can become a candidate."
 	reasonCandidateGate   = "Candidate review needs an approved gate."
 	reasonReviewer        = "The candidate reviewer must be a different person from the builder and the author."
 	reasonReviewerUnknown = "Candidate review needs a recorded builder and author."
@@ -95,6 +99,10 @@ type facts struct {
 	RequirementCount           int
 	DraftCount                 int
 	Release                    *releaseFacts
+	ImportedStage              string
+	RequirementsDigest         string
+	OpenReleaseTickets         int
+	NextReleaseNumber          int
 	PriorReleased              bool
 	IncludedTickets            int
 	ScopeRevision              bool
@@ -140,11 +148,53 @@ func derive(f facts) Journey {
 		Stages:               stageRail(f, stage, blocked),
 		NextAction:           nextAction(f, stage, nextKey, available, reason, approvalID),
 		RequirementsRevision: f.RequirementsRevision,
+		RequirementsDigest:   f.RequirementsDigest,
+		RequirementsScope:    requirementsScope(f.Revision, f.RequirementsDigest),
+		LaunchReadiness:      launchReadiness(f),
 		CurrentReleaseID:     strPtr(relID),
 	}
 }
 
+func requirementsScope(revision int64, digest string) string {
+	return fmt.Sprintf("journey.requirements.r%d.d%s", revision, digest)
+}
+
+func launchReadiness(f facts) LaunchReadiness {
+	if f.Release == nil {
+		return LaunchReadiness{Reason: "No release is open."}
+	}
+	if f.Release.State != "deploying" {
+		return LaunchReadiness{Reason: "The release is not ready for deployment."}
+	}
+	if f.CandidateGateID == "" {
+		return LaunchReadiness{Reason: "Candidate review has not been approved."}
+	}
+	return LaunchReadiness{Reason: "Pharos launch checks are unavailable."}
+}
+
 func project(f facts) (stage, key string, available bool, reason, approvalID string, blocked bool) {
+	if f.ImportedStage != "" {
+		switch {
+		case f.Release != nil && f.Release.State == "candidate":
+			return candidateProjection(f)
+		case f.Release != nil && (f.Release.State == "deploying" || f.Release.State == "refused"):
+			return deployProjection(f)
+		case f.Release != nil && f.Release.State == "access":
+			return accessProjection(f)
+		case f.Release != nil && (f.Release.State == "released" || f.Release.State == "superseded"):
+			return stageLive, actionPlanNext, true, "", "", false
+		case f.Release != nil && f.Release.State == "building":
+			return buildProjection(f)
+		case f.ImportedStage == stageLive && f.Release != nil && f.Release.State == "planning":
+			return stageLive, actionPlanNext, true, "", "", false
+		case f.ImportedStage == stageBuild && f.Release != nil:
+			return buildProjection(f)
+		case f.ImportedStage == stagePlan && f.Release == nil:
+			return stagePlan, actionOpenFirstRelease, true, "", "", false
+		case f.ImportedStage == stagePlan && f.Release != nil:
+			return planProjection(f)
+		}
+	}
 	if !f.BriefConfirmed {
 		if !f.AcceptedBrief {
 			return stageInspire, actionContinueIntake, true, "", "", false
@@ -175,7 +225,7 @@ func project(f facts) (stage, key string, available bool, reason, approvalID str
 	}
 	switch f.Release.State {
 	case "building":
-		return stageBuild, actionWaitForBuild, false, reasonBuilding, "", false
+		return buildProjection(f)
 	case "candidate":
 		return candidateProjection(f)
 	case "deploying", "refused":
@@ -228,7 +278,7 @@ func requirementsProjection(f facts) (string, string, bool, string, string, bool
 
 func planProjection(f facts) (string, string, bool, string, string, bool) {
 	if f.Release == nil {
-		return stagePlan, actionStartBuild, false, reasonNoRelease, "", false
+		return stagePlan, actionOpenFirstRelease, true, "", "", false
 	}
 	if f.IncludedTickets == 0 {
 		return stagePlan, actionStartBuild, false, reasonNoTickets, "", false
@@ -249,6 +299,20 @@ func planProjection(f facts) (string, string, bool, string, string, bool) {
 		reason = reasonBuildGate
 	}
 	return stagePlan, actionStartBuild, ok, reason, id, false
+}
+
+func buildProjection(f facts) (string, string, bool, string, string, bool) {
+	if f.IncludedTickets == 0 {
+		return stageBuild, actionMarkCandidate, false, reasonEmptyRelease, "", false
+	}
+	if f.OpenReleaseTickets > 0 {
+		return stageBuild, actionWaitForBuild, false, reasonBuilding, "", false
+	}
+	ok, id := offer(f.Build)
+	if !ok {
+		return stageBuild, actionMarkCandidate, false, reasonCompletionGate, id, false
+	}
+	return stageBuild, actionMarkCandidate, true, "", id, false
 }
 
 func candidateProjection(f facts) (string, string, bool, string, string, bool) {
@@ -410,6 +474,10 @@ func actionLabel(f facts, key string) string {
 		return "Approve requirements"
 	case actionStartBuild:
 		return "Start build"
+	case actionOpenFirstRelease:
+		return "Open release 1"
+	case actionMarkCandidate:
+		return "Mark candidate"
 	case actionWaitForBuild:
 		return "Building"
 	case actionApproveCandidate:
@@ -421,9 +489,12 @@ func actionLabel(f facts, key string) string {
 	case actionApprovePermit:
 		return "Approve permit"
 	case actionPlanNext:
-		n := 1
-		if f.Release != nil {
+		n := f.NextReleaseNumber
+		if n == 0 && f.Release != nil {
 			n = f.Release.Number + 1
+		}
+		if n == 0 {
+			n = 1
 		}
 		return fmt.Sprintf("Plan release %d", n)
 	default:
@@ -522,11 +593,33 @@ func parseCents(raw string) (int64, bool) {
 	if s == "" {
 		return 0, false
 	}
-	v, err := strconv.ParseFloat(s, 64)
-	if err != nil || math.IsNaN(v) || math.IsInf(v, 0) || v < 0 {
+	whole, fractional, hasPoint := strings.Cut(s, ".")
+	if whole == "" || strings.Trim(whole, "0123456789") != "" {
 		return 0, false
 	}
-	return int64(math.Round(v * 100)), true
+	units, err := strconv.ParseInt(whole, 10, 64)
+	if err != nil {
+		return 0, false
+	}
+	if hasPoint {
+		if fractional == "" || strings.Trim(fractional, "0123456789") != "" {
+			return 0, false
+		}
+		if len(fractional) > 2 {
+			if strings.Trim(fractional[2:], "0") != "" {
+				return 0, false
+			}
+			fractional = fractional[:2]
+		}
+	}
+	for len(fractional) < 2 {
+		fractional += "0"
+	}
+	minor, err := strconv.ParseInt(fractional, 10, 64)
+	if err != nil || units > (int64(^uint64(0)>>1)-minor)/100 {
+		return 0, false
+	}
+	return units*100 + minor, true
 }
 
 func formatCents(cents int64) string {

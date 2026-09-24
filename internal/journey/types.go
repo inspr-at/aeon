@@ -30,7 +30,15 @@ type Journey struct {
 	Stages               []JourneyStage    `json:"stages"`
 	NextAction           JourneyNextAction `json:"next_action"`
 	RequirementsRevision int64             `json:"requirements_revision"`
+	RequirementsDigest   string            `json:"requirements_digest_sha256"`
+	RequirementsScope    string            `json:"requirements_approval_scope"`
+	LaunchReadiness      LaunchReadiness   `json:"launch_readiness"`
 	CurrentReleaseID     *string           `json:"current_release_id"`
+}
+
+type LaunchReadiness struct {
+	CanAdmit bool   `json:"can_admit"`
+	Reason   string `json:"reason"`
 }
 
 // JourneyStage is one step on the eight-stage rail.
