@@ -13,6 +13,8 @@ import (
 	"net/http"
 	"os"
 	"os/signal"
+	"strconv"
+	"sync"
 	"syscall"
 	"time"
 
@@ -44,6 +46,7 @@ import (
 	"github.com/inspr-at/aeon/internal/views"
 	"github.com/inspr-at/aeon/internal/workorders"
 	"github.com/jackc/pgx/v5"
+	"github.com/jackc/pgx/v5/pgxpool"
 
 	"github.com/inspr-at/aeon/internal/auth"
 	"github.com/inspr-at/aeon/internal/business/costunits"
@@ -51,6 +54,9 @@ import (
 	"github.com/inspr-at/aeon/internal/business/directory"
 	"github.com/inspr-at/aeon/internal/business/hours"
 	"github.com/inspr-at/aeon/internal/business/quotes"
+	"github.com/inspr-at/aeon/internal/business/quotes/collaboration"
+	"github.com/inspr-at/aeon/internal/business/quotes/confirmation"
+	publicquotes "github.com/inspr-at/aeon/internal/business/quotes/public"
 
 	"github.com/inspr-at/aeon/internal/config"
 	"github.com/inspr-at/aeon/internal/db"
@@ -75,6 +81,11 @@ func serve() error {
 
 func serveListener(ctx context.Context, cfg config.Config, ln net.Listener) error {
 	setupLogger(cfg.Env)
+	pdfConcurrency, err := pdfRenderConcurrency(os.Getenv("AEON_PDF_CONCURRENCY"))
+	if err != nil {
+		_ = ln.Close()
+		return err
+	}
 
 	pool, err := db.Open(ctx, cfg.DatabaseURL)
 	if err != nil {
@@ -122,7 +133,23 @@ func serveListener(ctx context.Context, cfg config.Config, ln net.Listener) erro
 	if err != nil {
 		return fmt.Errorf("greetings: %w", err)
 	}
-	pluginRegistry, err := plugins.Builtin(extraPlugins...)
+	fileStore := attachments.Store{FilesDir: cfg.FilesDir}
+	var confirmationMod *confirmation.Module
+	pluginRegistry, err := plugins.BuiltinWithRegistration(func(reg *plugins.Registry) error {
+		var err error
+		confirmationMod, err = confirmation.New(pool, reg, webFS, fileStore)
+		if err != nil {
+			return err
+		}
+		if err := confirmationMod.SetRenderConcurrency(pdfConcurrency); err != nil {
+			return err
+		}
+		plugin, err := confirmation.ManifestPlugin(confirmationMod)
+		if err != nil {
+			return err
+		}
+		return reg.Register(plugin)
+	}, extraPlugins...)
 	if err != nil {
 		_ = ln.Close()
 		return fmt.Errorf("plugins: %w", err)
@@ -132,6 +159,16 @@ func serveListener(ctx context.Context, cfg config.Config, ln net.Listener) erro
 		_ = ln.Close()
 		return fmt.Errorf("quotes: %w", err)
 	}
+	collaborationMod, err := collaboration.New(pool, pluginRegistry)
+	if err != nil {
+		_ = ln.Close()
+		return fmt.Errorf("quote collaboration: %w", err)
+	}
+	publicQuotesMod, err := publicquotes.New(pool, pluginRegistry, webFS, cfg.PublicURL)
+	if err != nil {
+		_ = ln.Close()
+		return fmt.Errorf("public quotes: %w", err)
+	}
 	embedProvider, err := embedding.FromEnv()
 	if err != nil {
 		_ = ln.Close()
@@ -140,6 +177,7 @@ func serveListener(ctx context.Context, cfg config.Config, ln net.Listener) erro
 	if embedProvider != nil {
 		go embedding.NewWorker(pool, embedProvider, embedding.Options{}).Run(ctx)
 	}
+	go runConfirmationJobs(ctx, pool, confirmationMod, pdfConcurrency)
 	// A bad AEON_BRAND_FILE must stop startup, never fall back silently.
 	productBrand, err := brand.Load()
 	if err != nil {
@@ -159,7 +197,7 @@ func serveListener(ctx context.Context, cfg config.Config, ln net.Listener) erro
 			authMod,
 			nodes.New(pool, nodes.SQLWriter{}),
 			relations.New(pool),
-			events.New(pool, events.WithUndoHandlers(attachments.UndoHandlers()), events.WithUndoHandlers(hours.UndoHandlers(pluginRegistry)), events.WithUndoHandlers(profile.UndoHandlers()), events.WithUndoHandlers(crm.UndoHandlers(pluginRegistry))),
+			events.New(pool, events.WithUndoHandlers(attachments.UndoHandlers()), events.WithUndoHandlers(hours.UndoHandlers(pluginRegistry)), events.WithUndoHandlers(profile.UndoHandlers()), events.WithUndoHandlers(crm.UndoHandlers(pluginRegistry)), events.WithUndoHandlers(publicquotes.UndoHandlers())),
 			search.New(pool, embedProvider),
 			views.New(pool),
 			activity.New(pool),
@@ -188,6 +226,9 @@ func serveListener(ctx context.Context, cfg config.Config, ln net.Listener) erro
 			costunits.New(pool, pluginRegistry),
 			crm.New(pool, pluginRegistry),
 			quotesMod,
+			collaborationMod,
+			publicQuotesMod,
+			confirmationMod,
 			hours.New(pool, pluginRegistry),
 			directory.New(pool, pluginRegistry),
 		},
@@ -226,6 +267,91 @@ func serveListener(ctx context.Context, cfg config.Config, ln net.Listener) erro
 		}
 		return <-errCh
 	}
+}
+
+func pdfRenderConcurrency(raw string) (int, error) {
+	if raw == "" {
+		return 1, nil
+	}
+	n, err := strconv.Atoi(raw)
+	if err != nil || n < 1 || n > 4 {
+		return 0, fmt.Errorf("AEON_PDF_CONCURRENCY must be between 1 and 4")
+	}
+	return n, nil
+}
+
+// runConfirmationJobs scans tenant queues inside tenant transactions. A cycle
+// waits for every render before scheduling more, bounding concurrent browsers.
+func runConfirmationJobs(ctx context.Context, pool *pgxpool.Pool, worker *confirmation.Module, concurrency int) {
+	ticker := time.NewTicker(5 * time.Second)
+	defer ticker.Stop()
+	for {
+		confirmationCycle(ctx, pool, worker, concurrency)
+		select {
+		case <-ctx.Done():
+			return
+		case <-ticker.C:
+		}
+	}
+}
+
+func confirmationCycle(ctx context.Context, pool *pgxpool.Pool, worker *confirmation.Module, concurrency int) {
+	var tenantIDs []string
+	// tenants is the one global table; the transaction still carries an explicit
+	// tenant setting so no query in the worker bypasses db.InTenant.
+	err := db.InTenant(ctx, pool, "00000000-0000-0000-0000-000000000000", func(tx pgx.Tx) error {
+		rows, err := tx.Query(ctx, `SELECT id::text FROM tenants ORDER BY id`)
+		if err != nil {
+			return err
+		}
+		defer rows.Close()
+		for rows.Next() {
+			var id string
+			if err := rows.Scan(&id); err != nil {
+				return err
+			}
+			tenantIDs = append(tenantIDs, id)
+		}
+		return rows.Err()
+	})
+	if err != nil {
+		if ctx.Err() == nil {
+			slog.Error("quote confirmation tenant scan failed", "error", err)
+		}
+		return
+	}
+	limit := make(chan struct{}, concurrency)
+	var group sync.WaitGroup
+	for _, id := range tenantIDs {
+		var pending bool
+		err := db.InTenant(ctx, pool, id, func(tx pgx.Tx) error {
+			return tx.QueryRow(ctx, `SELECT EXISTS(SELECT 1 FROM quote_confirmation_jobs WHERE (state IN ('pending','failed') AND next_attempt_at<=clock_timestamp()) OR (state='rendering' AND lease_until<clock_timestamp()))`).Scan(&pending)
+		})
+		if err != nil {
+			if ctx.Err() == nil {
+				slog.Error("quote confirmation queue scan failed", "tenant_id", id, "error", err)
+			}
+			continue
+		}
+		if !pending {
+			continue
+		}
+		select {
+		case limit <- struct{}{}:
+		case <-ctx.Done():
+			group.Wait()
+			return
+		}
+		group.Add(1)
+		go func(tenantID string) {
+			defer group.Done()
+			defer func() { <-limit }()
+			if _, err := worker.ProcessNext(ctx, tenantID); err != nil && ctx.Err() == nil {
+				slog.Error("quote confirmation failed", "tenant_id", tenantID, "error", err)
+			}
+		}(id)
+	}
+	group.Wait()
 }
 
 func setupLogger(env string) {
