@@ -153,6 +153,9 @@ func (m *Module) accept(w http.ResponseWriter, r *http.Request) {
 		if q.State != "issued" {
 			return conflict("quote is not issued")
 		}
+		if q.ClassicStatus == "expired" {
+			return conflict("quote validity has expired")
+		}
 		v, err := readVersion(r.Context(), tx, id, n)
 		if err != nil {
 			return err
@@ -160,7 +163,16 @@ func (m *Module) accept(w http.ResponseWriter, r *http.Request) {
 		if v.ContentSHA256 != in.ExpectedContentSHA256 {
 			return conflict("quote content digest is stale")
 		}
-		sum, err := digestVersion(v)
+		var sum string
+		if v.DigestMode == "document-v1" {
+			var doc quoteDocument
+			doc, err = decodeDocument(v.Document)
+			if err == nil {
+				sum, err = documentDigest(id, n, v.OfferNo, doc)
+			}
+		} else {
+			sum, err = digestVersion(v)
+		}
 		if err != nil {
 			return err
 		}

@@ -95,12 +95,54 @@ func TestR4QuoteAcceptanceIsVersionBoundAndTenantScoped(t *testing.T) {
 		t.Fatal("stale digest accepted")
 	}
 	err = db.InTenant(ctx, fresh.App, tenantA, func(tx pgx.Tx) error {
+		var eventID int64
+		if err := tx.QueryRow(ctx, `INSERT INTO events(tenant_id,actor_principal_id,type,after) VALUES($1::uuid,$2::uuid,'quote.public_link_created','{}') RETURNING id`, tenantA, ids["person"]).Scan(&eventID); err != nil {
+			return err
+		}
+		_, err := tx.Exec(ctx, `INSERT INTO quote_public_links(tenant_id,quote_node_id,version,token_sha256,target_content_sha256,issued_by_principal_id,issued_event_id) VALUES($1::uuid,$2::uuid,1,$3,$4,$5::uuid,$6)`, tenantA, ids["quote_node"], strings.Repeat("c", 64), digest, ids["person"], eventID)
+		return err
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	err = db.InTenant(ctx, fresh.App, tenantA, func(tx pgx.Tx) error {
 		acceptEvent, err := insertID(ctx, tx, `INSERT INTO events(tenant_id,actor_principal_id,type,after) VALUES($1,$2,'quote.accepted','{}') RETURNING id::text`, tenantA, ids["person"])
 		if err != nil {
 			return err
 		}
 		_, err = tx.Exec(ctx, `INSERT INTO quote_acceptances(tenant_id,quote_node_id,version,customer_principal_id,recipient_contact_node_id,accepted_content_sha256,event_id) VALUES($1,$2,1,$3,$4,$5,$6)`, tenantA, ids["quote_node"], ids["person"], ids["contact_node"], digest, acceptEvent)
 		return err
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	err = db.InTenant(ctx, fresh.App, tenantA, func(tx pgx.Tx) error {
+		if _, err := tx.Exec(ctx, `INSERT INTO quote_settings(tenant_id,revision,numbering_time_zone,default_currency,sender,defaults,layout,updated_by_principal_id) VALUES($1::uuid,1,'Europe/Vienna','EUR','{}','{}','{}',$2::uuid)`, tenantA, ids["person"]); err != nil {
+			return err
+		}
+		var count int
+		if err := tx.QueryRow(ctx, `SELECT count(*) FROM quote_decisions WHERE channel='authenticated'`).Scan(&count); err != nil {
+			return err
+		}
+		if count != 1 {
+			t.Fatalf("authenticated decision projection %d", count)
+		}
+		return nil
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	err = db.InTenant(ctx, fresh.App, tenantB, func(tx pgx.Tx) error {
+		for _, table := range []string{"quote_settings", "quote_drafts", "quote_version_snapshots", "quote_public_links", "quote_decisions", "crm_customer_numbers"} {
+			var count int
+			if err := tx.QueryRow(ctx, `SELECT count(*) FROM `+table).Scan(&count); err != nil {
+				return err
+			}
+			if count != 0 {
+				t.Fatalf("tenant B sees %d rows in %s", count, table)
+			}
+		}
+		return nil
 	})
 	if err != nil {
 		t.Fatal(err)
