@@ -201,6 +201,9 @@ print('dev: attachment upload and download OK')
 
 body, content_type = multipart({'file': ('avatar.png', 'image/png', png()),
     'crop': ('', 'application/json', b'{"x":0,"y":0,"size":2}')})
+# The runtime image must resolve IANA time zones (tzdata is embedded in the binary).
+tz = call('PATCH', '/api/me/profile', {'timezone': 'Europe/Vienna'})
+assert tz.get('timezone') == 'Europe/Vienna', tz
 profile = call('POST', '/api/me/avatar', body, content_type)
 assert profile['avatar_hashes']['32']
 avatar = call('GET', f"/api/people/{profile['principal_id']}/avatar/32")
@@ -212,7 +215,7 @@ for plugin in ('business_costs', 'business_crm', 'business_quotes'):
     item = catalog[plugin]
     call('PUT', f'/api/plugins/{plugin}/installation', {'manifest_digest_sha256': item['digest_sha256'],
         'enabled': True, 'permissions': item['permissions']})
-call('PATCH', '/api/quotes/settings', {'expected_revision': 0, 'numbering_time_zone': 'UTC',
+call('PATCH', '/api/quotes/settings', {'expected_revision': 0, 'numbering_time_zone': 'Europe/Vienna',
     'default_currency': 'EUR', 'sender': {'company': 'Smoke fixture', 'street': 'Test Lane 1',
         'postal_code': '1000', 'city': 'Test City', 'country': 'AT', 'email': 'sender@example.invalid'},
     'defaults': {}, 'layout': {},

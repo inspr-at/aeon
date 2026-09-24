@@ -9,6 +9,10 @@ import (
 	"context"
 	"fmt"
 	"os"
+	// Embed the IANA time zone database: the runtime image (alpine) has no
+	// /usr/share/zoneinfo, and time zones drive greetings, profiles, hours and
+	// quote numbering.
+	_ "time/tzdata"
 
 	"github.com/jackc/pgx/v5/pgxpool"
 
