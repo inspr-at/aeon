@@ -34,12 +34,13 @@ export interface CRMMockOptions {
   // Someone else changes this customer just before this page's next write.
   meanwhile?: string
   quoteRevision?: number
+  aiEnabled?: boolean
 }
 
 const DIGEST = 'cd'.repeat(32)
 const PERMS: Record<string, string[]> = {
   business_costs: ['nodes.contribute', 'steps.apply', 'views.provide'],
-  business_crm: ['integrations.call', 'nodes.contribute', 'steps.apply', 'views.provide'],
+  business_crm: ['integrations.call', 'nodes.contribute', 'steps.apply', 'tools.invoke', 'views.provide'],
   business_hours: ['steps.apply', 'views.provide'],
   business_quotes: ['nodes.contribute', 'steps.apply', 'views.provide'],
 }
@@ -65,12 +66,12 @@ export function crmData(options: CRMMockOptions = {}) {
   const plugins = Object.keys(PERMS).map(id => {
     const pinned = enabled.has(id) || options.mismatch?.includes(id) || options.underGranted?.includes(id)
     return {
-      id, version: '2', digest_sha256: DIGEST, owner: 'aeon', permissions: PERMS[id],
+      id, version: id === 'business_crm' ? '3' : '2', digest_sha256: DIGEST, owner: 'aeon', permissions: PERMS[id],
       node_kinds: id === 'business_crm' ? [{ slug: 'organisation', field_schema: ORG_SCHEMA, allowed_child_kinds: [] }, { slug: 'contact', field_schema: { type: 'object', properties: {} }, allowed_child_kinds: [] }] : [],
-      views: [{ id, panels: ['main'] }], workflow_steps: [], agent_tools: [], integrations: [], background_jobs: [],
+      views: [{ id, panels: ['main'] }], workflow_steps: [], agent_tools: id === 'business_crm' ? [{ id: 'crm_note_optimize', permission: 'tools.invoke' }] : [], integrations: [], background_jobs: [],
       installation: pinned
-        ? { manifest_digest_sha256: options.mismatch?.includes(id) ? 'ef'.repeat(32) : DIGEST, enabled: true, permissions: options.underGranted?.includes(id) ? PERMS[id].slice(1) : PERMS[id], plugin_id: id, version: '2', updated_at: '2026-09-20T09:00:00Z' }
-        : { manifest_digest_sha256: '0'.repeat(64), enabled: false, permissions: [], plugin_id: id, version: '2', updated_at: '0001-01-01T00:00:00Z' },
+        ? { manifest_digest_sha256: options.mismatch?.includes(id) ? 'ef'.repeat(32) : DIGEST, enabled: true, permissions: options.underGranted?.includes(id) ? PERMS[id].slice(1) : PERMS[id], plugin_id: id, version: id === 'business_crm' ? '3' : '2', updated_at: '2026-09-20T09:00:00Z' }
+        : { manifest_digest_sha256: '0'.repeat(64), enabled: false, permissions: [], plugin_id: id, version: id === 'business_crm' ? '3' : '2', updated_at: '0001-01-01T00:00:00Z' },
     }
   })
   const kinds = (options.kinds ?? ['epic', 'ticket', 'task', 'project', 'cost_unit', 'organisation', 'contact', 'quote']).map(slug => ({ id: `k-${slug}`, slug, label: slug, short_prefix: slug.slice(0, 3).toUpperCase(), icon: slug, allowed_child_kinds: null, field_schema: {} }))
@@ -131,7 +132,7 @@ export async function mockCRM(page: Page, data: CRMData, options: CRMMockOptions
   const liveContact = (id: string) => data.contacts.find(c => c.id === id && !c.deleted)
   const crmOpen = () => {
     const p = data.plugins.find(x => x.id === 'business_crm')!
-    return p.installation.enabled && p.installation.manifest_digest_sha256 === p.digest_sha256 && PERMS.business_crm.every(x => p.installation.permissions.includes(x))
+    return p.installation.enabled && p.installation.manifest_digest_sha256 === p.digest_sha256 && PERMS.business_crm.filter(x => x !== 'tools.invoke').every(x => p.installation.permissions.includes(x))
   }
   const handler = async (route: Route) => {
     const request = route.request(), url = new URL(request.url()), path = url.pathname, method = request.method(), q = url.searchParams
@@ -268,6 +269,21 @@ export async function mockCRM(page: Page, data: CRMData, options: CRMMockOptions
         return route.fulfill({ json: view(org) })
       }
       if (rest === 'related') return route.fulfill({ json: data.related[id] ?? { projects: [], quotes: [], hours: [], documents: [] } })
+      if (rest === 'note-ai') {
+        if (!admin) return bad(route, 403, 'forbidden', 'admin session required')
+        return route.fulfill({ json: options.aiEnabled && data.plugins.find(p => p.id === 'business_crm')?.installation.permissions.includes('tools.invoke')
+          ? { enabled: true }
+          : { enabled: false, reason: 'No model is configured for AI note rewriting.' } })
+      }
+      if (rest === 'note-ai/generate') {
+        if (!options.aiEnabled || !data.plugins.find(p => p.id === 'business_crm')?.installation.permissions.includes('tools.invoke')) return bad(route, 409, 'ai_unavailable', 'No model is configured for AI note rewriting.')
+        if (body.expected_revision !== org.revision) return bad(route, 409, 'conflict', 'stale')
+        const proposed = org.customer_notes.replace('Invoices go to accounting, not to Jana.', 'Invoices go to Max Brandl in accounting.')
+        const draft = { id: `draft-${data.counter.next++}`, org: id, base: org.revision, text: proposed, applied: false }
+        data.drafts.push(draft)
+        event(id, 'crm.note_rewrite_drafted', null, { draft_id: draft.id, base_revision: org.revision, source: 'ai', model_profile_id: 'profile-fake' })
+        return route.fulfill({ status: 201, json: { id: draft.id, organisation_node_id: id, draft_text: proposed, base_revision: org.revision, applied: false } })
+      }
       if (rest === 'note-rewrite') {
         if (!String(body.draft_text ?? '').trim()) return bad(route, 400, 'invalid_request', 'invalid note draft')
         if (body.expected_revision !== org.revision) return bad(route, 409, 'conflict', 'stale')

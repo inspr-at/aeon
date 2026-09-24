@@ -35,7 +35,7 @@ func TestPluginDeclaration(t *testing.T) {
 	if stored.Manifest.ID != ID || stored.Manifest.Version != Version || stored.Manifest.Owner != Owner {
 		t.Fatalf("manifest %+v", stored.Manifest)
 	}
-	wantPerms := []string{fence.PermIntegrationsCall, fence.PermNodesContribute, fence.PermStepsApply, fence.PermViewsProvide}
+	wantPerms := []string{fence.PermIntegrationsCall, fence.PermNodesContribute, fence.PermStepsApply, fence.PermToolsInvoke, fence.PermViewsProvide}
 	if len(stored.Manifest.Permissions) != len(wantPerms) {
 		t.Fatalf("permissions %#v", stored.Manifest.Permissions)
 	}
@@ -63,8 +63,8 @@ func TestPluginDeclaration(t *testing.T) {
 	if stored.StepPermissions[OperationBind] != fence.PermStepsApply {
 		t.Fatalf("binding %#v", stored.StepPermissions)
 	}
-	if len(stored.Manifest.AgentTools) != 0 || len(stored.Manifest.Integrations) != 1 || len(stored.Manifest.BackgroundJobs) != 0 {
-		t.Fatal("crm provider integration declaration")
+	if len(stored.Manifest.AgentTools) != 1 || stored.Manifest.AgentTools[0].ID != NoteToolID || len(stored.Manifest.Integrations) != 1 || len(stored.Manifest.BackgroundJobs) != 0 {
+		t.Fatal("crm tool and provider integration declaration")
 	}
 	if _, err := stored.Kinds.NodeKinds(context.Background(), plugins.Call{}); err != plugins.ErrDenied {
 		t.Fatalf("kinds without grant: %v", err)

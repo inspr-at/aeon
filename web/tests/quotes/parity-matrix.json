@@ -8,8 +8,8 @@
   },
   "scope_note": "Feature and criterion assertions use synthetic fixtures and the pinned classic source. Historical import remains AEON-50 gated; email delivery is disabled; coordinator-owned review and classic branding follow port-plan.txt. No classic instance, business data, cutover or deployment.",
   "counts": {
-    "pass": 107,
-    "gap": 3,
+    "pass": 110,
+    "gap": 0,
     "deferred": 11
   },
   "features": [
@@ -34,14 +34,17 @@
       "source": "feature-list.txt",
       "heading": "Customers and contacts",
       "claim": "Customer information includes name, industry, website/domain, phone, description/notes, VAT/tax/company-registration identifiers, employee count, annual revenue, billing and visit address fields, hourly/LP rates, external provider/id/URL and timestamps. The detailed page includes contacts, associated projects/rate context, documents and offers. An optional optimize_customer AI action revises customer_notes for human review. The similarly named customer_rewrite handler generates issue-based report summaries and is not the customer-notes implementation.",
-      "status": "gap",
+      "status": "pass",
       "owner": "P2",
       "evidence": [
         "inspect:/Users/markus/Code/aeon-worktrees/quote-port/port-plan.txt:64",
         "inspect:/Users/markus/Code/aeon-worktrees/quote-port/port-plan.txt:99",
-        "test:web/tests/crm.spec.ts::a note rewrite is a draft first; applying it shows the difference and can be undone"
+        "test:web/tests/crm.spec.ts::a note rewrite is a draft first; applying it shows the difference and can be undone",
+        "test:web/tests/crm.spec.ts::AI notes are honestly disabled when no model is configured",
+        "test:web/tests/crm.spec.ts::AI generates only a review proposal and admin applies it separately",
+        "test:internal/business/crm/note_ai_test.go::TestAINoteRequiresToolGrantAndModelAndNeverApplies"
       ],
-      "reason": "Open gap: the optional tenant-enabled AI customer-note action belongs in the CRM/agent-tool owning files outside the named QG4 file scope. The human-reviewed draft/apply flow already works. port-plan.txt:64 and :99 explicitly keep AI note rewriting in the port."
+      "reason": "The optional admin-enabled agent tool resolves a tenant model, generates a review draft, and requires separate human apply. With no model it shows a disabled reason."
     },
     {
       "id": "F01.03",
@@ -825,14 +828,15 @@
       "source": "feature-list.txt",
       "heading": "Accepted port scope and backlog traceability",
       "claim": "Port all mechanisms described here, including customers/contacts/sender/numbering/positions/public acceptance. Its old business branding, legal templates and production release steps are superseded for this task. PAI-1060/61/62/63 and 1058/59 are done in the supplied snapshot but remain functional regression requirements.",
-      "status": "gap",
+      "status": "pass",
       "owner": "P2/P5/P7",
       "evidence": [
         "inspect:/Users/markus/Code/aeon-worktrees/quote-port/port-plan.txt:64",
         "inspect:/Users/markus/Code/aeon-worktrees/quote-port/port-plan.txt:99",
-        "test:web/tests/crm.spec.ts::a note rewrite is a draft first; applying it shows the difference and can be undone"
+        "test:web/tests/crm.spec.ts::AI generates only a review proposal and admin applies it separately",
+        "test:internal/business/crm/note_ai_test.go::TestAINoteRequiresToolGrantAndModelAndNeverApplies"
       ],
-      "reason": "Open gap: all cited quote, editor, presence and CRM mechanisms pass except the optional AI note action tracked by F01.02/F16.04; that owning boundary is outside the named QG4 file scope. port-plan.txt:64 and :99 retain it in the port."
+      "reason": "The final optional CRM AI note action is implemented with a configured model, a tenant tool grant, a review draft, and explicit admin apply."
     },
     {
       "id": "F15.18",
@@ -889,14 +893,16 @@
       "source": "feature-list.txt",
       "heading": "Aeon baseline and parity gaps",
       "claim": "Basic CRM acceptance includes organisations/customers, multiple/primary contacts, unique customer numbers, billing/visit addresses, sender settings, customer and optional project links, searchable lists, related quotes/projects and attachments. Provider search/import/sync/configuration and reviewed AI note rewriting are retained as optional tenant-enabled functions; they are not prerequisites for manual CRM/quotes. The plan assigns their implementation rather than dropping them.",
-      "status": "gap",
+      "status": "pass",
       "owner": "P2/P7",
       "evidence": [
         "inspect:/Users/markus/Code/aeon-worktrees/quote-port/port-plan.txt:64",
         "inspect:/Users/markus/Code/aeon-worktrees/quote-port/port-plan.txt:99",
-        "test:web/tests/crm.spec.ts::a note rewrite is a draft first; applying it shows the difference and can be undone"
+        "test:web/tests/crm.spec.ts::AI notes are honestly disabled when no model is configured",
+        "test:web/tests/crm.spec.ts::AI generates only a review proposal and admin applies it separately",
+        "test:internal/business/crm/note_ai_test.go::TestAINoteRejectsRevisionRaceAfterGeneration"
       ],
-      "reason": "Open gap: the optional reviewed AI customer-note generation belongs in the CRM/agent-tool owning files outside the named QG4 file scope. The core CRM/provider and quote shell checks pass. port-plan.txt:64 and :99 explicitly keep this action in scope."
+      "reason": "Optional tenant-enabled note generation is gated by admin, tool permission and configured model; stale or missing setup fails closed, and proposals never auto-apply."
     }
   ],
   "backlog_criteria": [

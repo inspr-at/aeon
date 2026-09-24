@@ -15,7 +15,7 @@ const (
 	// ID is the compiled plugin id.
 	ID = "business_crm"
 	// Version is the compiled manifest version.
-	Version = "2"
+	Version = "3"
 	// Owner is the accountable first-party package.
 	Owner = "internal/business/crm"
 	// OperationBind is the workflow step plugins.Enabled checks for a binding.
@@ -82,11 +82,12 @@ func Plugin() (plugins.Plugin, error) {
 				fence.PermViewsProvide,
 				fence.PermStepsApply,
 				fence.PermIntegrationsCall,
+				fence.PermToolsInvoke,
 			},
 			NodeKinds:      kinds,
 			Views:          views,
 			WorkflowSteps:  []plugins.WorkflowStep{{Key: OperationBind, Gates: []string{fence.GateObservedState, fence.GatePersonDecision}}},
-			AgentTools:     []plugins.Capability{},
+			AgentTools:     []plugins.Capability{{ID: NoteToolID, Permission: fence.PermToolsInvoke}},
 			Integrations:   []plugins.Capability{{ID: "crm_provider", Permission: fence.PermIntegrationsCall}},
 			BackgroundJobs: []plugins.Capability{},
 		},
@@ -95,6 +96,7 @@ func Plugin() (plugins.Plugin, error) {
 		Views:           h,
 		Steps:           bindStep{},
 		Integrations:    providerIntegration{},
+		Tools:           noteTool{},
 	}
 	sum, err := plugins.Digest(p)
 	if err != nil {

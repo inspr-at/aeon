@@ -1740,6 +1740,25 @@ paths:
       requestBody: {required: true, content: {application/json: {schema: {type: object, required: [draft_text, expected_revision], properties: {draft_text: {type: string, maxLength: 20000}, expected_revision: {type: integer}}}}}}
       responses:
         '201': {description: Review draft, content: {application/json: {schema: {type: object}}}}
+  /crm/organisations/{organisationId}/note-ai:
+    get:
+      operationId: getCRMNoteAIStatus
+      summary: Admin-only availability of the optional CRM note agent tool and configured model
+      security: [{session: []}]
+      parameters: [{name: organisationId, in: path, required: true, schema: {type: string, format: uuid}}]
+      responses:
+        '200': {description: Availability and disabled reason, content: {application/json: {schema: {type: object, required: [enabled], properties: {enabled: {type: boolean}, reason: {type: string}}}}}}
+  /crm/organisations/{organisationId}/note-ai/generate:
+    post:
+      operationId: generateCRMNoteAIProposal
+      summary: Generate a review draft through the tenant-enabled agent tool; never applies notes
+      security: [{session: []}]
+      parameters: [{name: organisationId, in: path, required: true, schema: {type: string, format: uuid}}]
+      requestBody: {required: true, content: {application/json: {schema: {type: object, required: [expected_revision], properties: {expected_revision: {type: integer, minimum: 1}}}}}}
+      responses:
+        '201': {description: Generated review draft, content: {application/json: {schema: {type: object}}}}
+        '409': {description: Stale customer or action disabled}
+        '503': {description: Model execution unavailable}
   /crm/organisations/{organisationId}/note-rewrite/{draftId}/apply:
     post:
       operationId: applyCRMNoteRewrite
