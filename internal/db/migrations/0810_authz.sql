@@ -113,36 +113,192 @@ $$;
 REVOKE EXECUTE ON FUNCTION aeon_seed_builtin_roles_trigger() FROM PUBLIC;
 CREATE TRIGGER tenants_seed_builtin_roles AFTER INSERT ON tenants
     FOR EACH ROW EXECUTE FUNCTION aeon_seed_builtin_roles_trigger();
-SELECT aeon_seed_builtin_roles(id) FROM tenants;
 
--- Only people get classic workspace bindings. Idempotent for importer reruns;
--- subsequent classic role text never changes an existing binding.
+-- Migration events belong to System, never to the person or agent receiving
+-- the binding. Create it only in tenants where a binding is actually written.
+CREATE FUNCTION aeon_authz_system_actor(target_tenant uuid) RETURNS uuid
+LANGUAGE plpgsql AS $$
+DECLARE actor uuid;
+BEGIN
+    SELECT id INTO actor FROM principals
+    WHERE tenant_id=target_tenant AND kind='agent' AND name='System' AND roles @> ARRAY['system']
+    ORDER BY created_at,id LIMIT 1;
+    IF actor IS NULL THEN
+        INSERT INTO principals(tenant_id,kind,name,roles)
+        VALUES(target_tenant,'agent','System',ARRAY['system']) RETURNING id INTO actor;
+        INSERT INTO events(tenant_id,actor_principal_id,type,after)
+        VALUES(target_tenant,actor,'principal.created',
+               jsonb_build_object('id',actor,'kind','agent','name','System','roles',ARRAY['system']));
+    END IF;
+    RETURN actor;
+END;
+$$;
+
+-- A linked classic identity is an alias. The signed-in, unlinked person gets
+-- the strongest classic role among their own labels and all linked aliases.
+-- Subsequent imports never replace an existing workspace binding.
 CREATE FUNCTION aeon_bind_legacy_principal(target_tenant uuid,target_principal uuid)
 RETURNS void LANGUAGE plpgsql AS $$
 DECLARE chosen_role uuid;
 DECLARE new_binding uuid;
+DECLARE canonical_id uuid;
 BEGIN
-    SELECT r.id INTO chosen_role FROM principals p JOIN roles r ON r.tenant_id=p.tenant_id
-      AND r.key=CASE
-        WHEN 'super_admin'=ANY(p.roles) THEN 'owner'
-        WHEN 'admin'=ANY(p.roles) THEN 'admin'
-        WHEN 'member'=ANY(p.roles) OR 'reviewer'=ANY(p.roles) THEN 'member'
-        WHEN 'external'=ANY(p.roles) THEN 'guest'
-        WHEN 'customer'=ANY(p.roles) THEN 'customer'
-      END
-    WHERE p.tenant_id=target_tenant AND p.id=target_principal AND p.kind='person';
+    SELECT coalesce(linked_to,id) INTO canonical_id FROM principals
+    WHERE tenant_id=target_tenant AND id=target_principal AND kind='person';
+    IF canonical_id IS NULL THEN RETURN; END IF;
+    SELECT r.id INTO chosen_role FROM (
+      SELECT max(CASE
+        WHEN 'super_admin'=ANY(p.roles) THEN 5
+        WHEN 'admin'=ANY(p.roles) THEN 4
+        WHEN 'member'=ANY(p.roles) OR 'reviewer'=ANY(p.roles) THEN 3
+        WHEN 'external'=ANY(p.roles) THEN 2
+        WHEN 'customer'=ANY(p.roles) THEN 1
+        ELSE 0 END) AS rank
+      FROM principals p WHERE p.tenant_id=target_tenant
+        AND (p.id=canonical_id OR p.linked_to=canonical_id)
+    ) mapped JOIN roles r ON r.tenant_id=target_tenant AND r.key=CASE mapped.rank
+      WHEN 5 THEN 'owner' WHEN 4 THEN 'admin' WHEN 3 THEN 'member'
+      WHEN 2 THEN 'guest' WHEN 1 THEN 'customer' END;
     IF chosen_role IS NULL THEN RETURN; END IF;
     INSERT INTO role_bindings(tenant_id,principal_id,role_id,scope_type)
-      VALUES(target_tenant,target_principal,chosen_role,'workspace')
+      VALUES(target_tenant,canonical_id,chosen_role,'workspace')
       ON CONFLICT DO NOTHING RETURNING id INTO new_binding;
     IF new_binding IS NOT NULL THEN
       INSERT INTO events(tenant_id,actor_principal_id,type,after)
-      VALUES(target_tenant,target_principal,'authz.binding_migrated',
-        jsonb_build_object('principal_id',target_principal,'role_id',chosen_role,'scope_type','workspace'));
+      VALUES(target_tenant,aeon_authz_system_actor(target_tenant),'authz.binding_migrated',
+        jsonb_build_object('principal_id',canonical_id,'role_id',chosen_role,'scope_type','workspace'));
     END IF;
 END;
 $$;
-SELECT aeon_bind_legacy_principal(tenant_id,id) FROM principals WHERE kind='person';
+
+-- Keep this list in step with the versioned Go registry. Old key scopes may
+-- contain unknown values; they are recorded, never silently granted.
+CREATE FUNCTION aeon_authz_registry_permission(candidate text) RETURNS boolean
+LANGUAGE sql IMMUTABLE AS $$
+    SELECT EXISTS (
+      SELECT 1 FROM (VALUES
+        ('nodes','read write delete move restore configure'),
+        ('kinds','read manage'), ('tags','read write manage'),
+        ('relations','read write delete'), ('comments','read write delete'),
+        ('attachments','read write delete'), ('knowledge','read write delete'),
+        ('journey','read act manage'), ('requirements','read write agree'),
+        ('releases','read write deploy'), ('intake','read write decide'),
+        ('stage_handoffs','read write decide'), ('harness','read write worker control manage'),
+        ('work_orders','read write assign'), ('runs','read write control claim'),
+        ('run','create read claim telemetry'), ('account','read manage route probe'),
+        ('approvals','read request propose decide decide_high revoke'), ('inbox','read send manage'),
+        ('stage','prepare deploy verify apply'), ('models','read manage resolve'),
+        ('plugins','read manage invoke'), ('imports','read manage'),
+        ('views','read write share'), ('events','read undo undo_other'),
+        ('search','read'), ('hours','read write approve'),
+        ('quotes','read write issue accept delete manage portal_read portal_accept'),
+        ('crm','read write manage'), ('cost_units','read write manage'),
+        ('project_groups','read write'), ('profile','read write manage portal_read portal_write'),
+        ('settings','read manage'), ('members','read manage'),
+        ('roles','read manage'), ('keys','read manage'),
+        ('audit','read'), ('authz','read'), ('ownership','transfer')
+      ) AS registry(resource,actions)
+      CROSS JOIN LATERAL unnest(string_to_array(registry.actions,' ')) AS a(action)
+      WHERE candidate=registry.resource || '.' || a.action
+    );
+$$;
+
+CREATE FUNCTION aeon_migrate_agent_binding(target_tenant uuid,target_agent uuid)
+RETURNS void LANGUAGE plpgsql AS $$
+DECLARE role_id uuid;
+DECLARE new_binding uuid;
+DECLARE mapped text[];
+DECLARE unmapped text[];
+BEGIN
+    IF NOT EXISTS (SELECT 1 FROM principals p WHERE p.tenant_id=target_tenant
+       AND p.id=target_agent AND p.kind='agent'
+       AND NOT (p.roles && ARRAY['system','importer','operator','embedding',
+           'quote_public_service','quote_confirmation_service']::text[])
+       AND EXISTS (SELECT 1 FROM agent_keys k WHERE k.tenant_id=target_tenant
+           AND k.principal_id=p.id AND k.revoked_at IS NULL
+           AND (k.expires_at IS NULL OR k.expires_at>now()))) THEN RETURN; END IF;
+    SELECT array_agg(DISTINCT permission ORDER BY permission)
+             FILTER (WHERE aeon_authz_registry_permission(permission)),
+           array_agg(DISTINCT scope ORDER BY scope)
+             FILTER (WHERE NOT aeon_authz_registry_permission(permission))
+      INTO mapped,unmapped
+      FROM agent_keys k CROSS JOIN LATERAL unnest(k.scopes) AS s(scope)
+      CROSS JOIN LATERAL (SELECT replace(s.scope,':','.') AS permission) normalized
+      WHERE k.tenant_id=target_tenant AND k.principal_id=target_agent
+        AND k.revoked_at IS NULL AND (k.expires_at IS NULL OR k.expires_at>now());
+    INSERT INTO roles(tenant_id,key,name,description)
+      SELECT p.tenant_id,'agent_' || replace(p.id::text,'-',''),'Agent ' || p.name,
+        'Permissions assigned to this agent'
+      FROM principals p WHERE p.tenant_id=target_tenant AND p.id=target_agent
+      ON CONFLICT (tenant_id,key) DO UPDATE SET name=EXCLUDED.name
+      RETURNING id INTO role_id;
+    INSERT INTO role_permissions(tenant_id,role_id,permission)
+      SELECT target_tenant,role_id,p.permission
+      FROM unnest(coalesce(mapped,'{}'::text[])) AS p(permission)
+      ON CONFLICT DO NOTHING;
+    INSERT INTO role_bindings(tenant_id,principal_id,role_id,scope_type)
+      VALUES(target_tenant,target_agent,role_id,'workspace')
+      ON CONFLICT DO NOTHING RETURNING id INTO new_binding;
+    IF new_binding IS NOT NULL THEN
+      INSERT INTO events(tenant_id,actor_principal_id,type,after)
+      VALUES(target_tenant,aeon_authz_system_actor(target_tenant),'authz.agent_binding_migrated',
+        jsonb_build_object('principal_id',target_agent,'role_id',role_id,
+          'scope_type','workspace','permissions',coalesce(mapped,'{}'::text[]),
+          'unmapped_scopes',coalesce(unmapped,'{}'::text[])));
+    END IF;
+END;
+$$;
+
+-- The runner wraps this file in one transaction. FORCE RLS applies to its
+-- table-owning app role, so every data step must run in tenant context.
+DO $$
+DECLARE
+    tenant uuid;
+    person_id uuid;
+    agent_id uuid;
+    fallback_id uuid;
+    owner_role uuid;
+    prior_setting text := current_setting('aeon.tenant_id',true);
+BEGIN
+    FOR tenant IN SELECT id FROM tenants ORDER BY id LOOP
+        PERFORM set_config('aeon.tenant_id',tenant::text,true);
+        PERFORM aeon_seed_builtin_roles(tenant);
+        FOR person_id IN SELECT id FROM principals
+          WHERE tenant_id=tenant AND kind='person' AND linked_to IS NULL ORDER BY created_at,id LOOP
+            PERFORM aeon_bind_legacy_principal(tenant,person_id);
+        END LOOP;
+        FOR agent_id IN SELECT p.id FROM principals p WHERE p.tenant_id=tenant
+          AND p.kind='agent' AND NOT (p.roles && ARRAY['system','importer','operator',
+            'embedding','quote_public_service','quote_confirmation_service']::text[])
+          AND EXISTS (SELECT 1 FROM agent_keys k WHERE k.tenant_id=tenant
+            AND k.principal_id=p.id AND k.revoked_at IS NULL
+            AND (k.expires_at IS NULL OR k.expires_at>now())) ORDER BY p.created_at,p.id LOOP
+            PERFORM aeon_migrate_agent_binding(tenant,agent_id);
+        END LOOP;
+        SELECT id INTO owner_role FROM roles WHERE tenant_id=tenant AND key='owner';
+        IF NOT EXISTS (SELECT 1 FROM role_bindings b JOIN principals p
+             ON p.tenant_id=b.tenant_id AND p.id=b.principal_id
+             WHERE b.tenant_id=tenant AND b.role_id=owner_role
+               AND b.scope_type='workspace' AND p.status='active') THEN
+            SELECT p.id INTO fallback_id FROM principals p JOIN role_bindings b
+              ON b.tenant_id=p.tenant_id AND b.principal_id=p.id
+              JOIN roles r ON r.tenant_id=b.tenant_id AND r.id=b.role_id
+              WHERE p.tenant_id=tenant AND p.kind='person' AND p.status='active'
+                AND p.linked_to IS NULL AND b.scope_type='workspace' AND r.key='admin'
+              ORDER BY p.created_at,p.id LIMIT 1;
+            IF fallback_id IS NULL THEN
+                RAISE EXCEPTION 'tenant % has no active owner or admin person', tenant;
+            END IF;
+            UPDATE role_bindings SET role_id=owner_role
+              WHERE tenant_id=tenant AND principal_id=fallback_id AND scope_type='workspace';
+            INSERT INTO events(tenant_id,actor_principal_id,type,after)
+              VALUES(tenant,aeon_authz_system_actor(tenant),'authz.owner_fallback',
+                jsonb_build_object('principal_id',fallback_id,'role_id',owner_role));
+        END IF;
+    END LOOP;
+    PERFORM set_config('aeon.tenant_id',coalesce(prior_setting,''),true);
+END;
+$$;
 
 CREATE FUNCTION aeon_protect_last_owner() RETURNS trigger LANGUAGE plpgsql AS $$
 DECLARE owner_role uuid;

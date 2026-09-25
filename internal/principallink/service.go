@@ -32,7 +32,8 @@ type Result struct {
 }
 
 // Resolve returns a canonical principal within the caller's db.InTenant
-// transaction. It preserves agents and never grants the target's roles.
+// transaction. It preserves agents and does not change the source's classic
+// role labels; authorization resolves the canonical person's role binding.
 func Resolve(ctx context.Context, tx pgx.Tx, tenantID, id string) (string, string, error) {
 	var canonical, name string
 	err := tx.QueryRow(ctx, `SELECT coalesce(t.id,p.id)::text,coalesce(t.name,p.name)
@@ -128,6 +129,13 @@ func (s *Service) change(ctx context.Context, slug, from, to string) (Result, er
 		}
 		if _, err := events.Append(ctx, tx, tenant.Principal{TenantID: tid, ID: actor}, events.Change{Type: typ, Before: before, After: after}); err != nil {
 			return err
+		}
+		if target == nil {
+			// An unlinked person needs their own workspace role again; while
+			// linked, authorization comes from the canonical person's binding.
+			if _, err := tx.Exec(ctx, `SELECT aeon_bind_legacy_principal($1::uuid,$2::uuid)`, tid, source.ID); err != nil {
+				return err
+			}
 		}
 		result.Person.LinkedTo = target
 		result.Changed = true

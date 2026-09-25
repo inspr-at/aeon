@@ -133,19 +133,24 @@ func loadTx(ctx context.Context, tx pgx.Tx, p tenant.Principal, projectID string
 	if projectID != "" {
 		result.Project = &ProjectGrant{ID: projectID, Permissions: []string{}}
 	}
-	var status, kind string
-	if err := tx.QueryRow(ctx, `SELECT status,kind FROM principals WHERE tenant_id=$1::uuid AND id=$2::uuid`, p.TenantID, p.ID).Scan(&status, &kind); err != nil {
+	// Linked people have no binding of their own. Their session retains its
+	// principal ID, but permissions come from the signed-in canonical person.
+	var status, kind, bindingID, canonicalStatus string
+	if err := tx.QueryRow(ctx, `SELECT p.status,p.kind,canonical.id::text,canonical.status
+		FROM principals p JOIN principals canonical
+		  ON canonical.tenant_id=p.tenant_id AND canonical.id=coalesce(p.linked_to,p.id)
+		WHERE p.tenant_id=$1::uuid AND p.id=$2::uuid`, p.TenantID, p.ID).Scan(&status, &kind, &bindingID, &canonicalStatus); err != nil {
 		return Effective{}, err
 	}
-	if status != "active" || kind != string(p.Kind) {
+	if status != "active" || canonicalStatus != "active" || kind != string(p.Kind) {
 		return Effective{}, ErrForbidden
 	}
 	rows, err := tx.Query(ctx, `SELECT b.scope_type,coalesce(b.scope_id::text,''),r.id::text,r.key,r.name,r.builtin,rp.permission
           FROM role_bindings b JOIN roles r ON r.tenant_id=b.tenant_id AND r.id=b.role_id
           LEFT JOIN role_permissions rp ON rp.tenant_id=r.tenant_id AND rp.role_id=r.id
-          WHERE b.tenant_id=$1::uuid AND b.principal_id=$2::uuid
+		  WHERE b.tenant_id=$1::uuid AND b.principal_id=$2::uuid
             AND (b.scope_type='workspace' OR b.scope_type='project' AND b.scope_id=$3::uuid)
-          ORDER BY b.scope_type,rp.permission`, p.TenantID, p.ID, nullUUID(projectID))
+		  ORDER BY b.scope_type,rp.permission`, p.TenantID, bindingID, nullUUID(projectID))
 	if err != nil {
 		return Effective{}, err
 	}

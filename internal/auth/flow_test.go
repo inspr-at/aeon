@@ -223,7 +223,7 @@ func TestOIDCSessionLifecycle(t *testing.T) {
 	if len(me.Principal.Roles) != 1 || me.Principal.Roles[0] != "admin" {
 		t.Fatalf("roles %v", me.Principal.Roles)
 	}
-	if scalar(t, adminPool, `SELECT count(*) FROM principals`) != 1 {
+	if scalar(t, adminPool, `SELECT count(*) FROM principals WHERE kind='person'`) != 1 {
 		t.Fatal("principal count")
 	}
 	if scalar(t, appPool, `SELECT count(*) FROM principals`) != 0 {
@@ -241,7 +241,7 @@ func TestOIDCSessionLifecycle(t *testing.T) {
 	if status != http.StatusFound {
 		t.Fatalf("second login %d", status)
 	}
-	if scalar(t, adminPool, `SELECT count(*) FROM principals`) != 1 {
+	if scalar(t, adminPool, `SELECT count(*) FROM principals WHERE kind='person'`) != 1 {
 		t.Fatal("second login created another principal")
 	}
 
