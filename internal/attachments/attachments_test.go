@@ -171,6 +171,9 @@ func TestUploadDedupeVariantsETagIsolationUndoAndOps(t *testing.T) {
 	if w.Code != 200 || w.Header().Get("ETag") == "" || w.Header().Get("X-Content-Type-Options") != "nosniff" {
 		t.Fatalf("content %d", w.Code)
 	}
+	if csp := w.Header().Get("Content-Security-Policy"); csp != "" {
+		t.Fatalf("image content CSP %q", csp)
+	}
 	etag := w.Header().Get("ETag")
 	r := httptest.NewRequest("GET", "/api/attachments/"+a.ID+"/content?variant=thumb", nil).WithContext(tenant.WithPrincipal(t.Context(), p))
 	r.Header.Set("If-None-Match", etag)
@@ -272,8 +275,8 @@ func TestLimitSniffAndPatchPrecondition(t *testing.T) {
 		t.Fatalf("sniff body %v %s", err, w.Body.String())
 	}
 	w = request(t, mux, p, "GET", "/api/attachments/"+fake[0].ID+"/content", "", nil)
-	if w.Code != 200 || !strings.HasPrefix(w.Header().Get("Content-Disposition"), "attachment") || w.Header().Get("X-Content-Type-Options") != "nosniff" {
-		t.Fatalf("opaque download %d %q", w.Code, w.Header().Get("Content-Disposition"))
+	if w.Code != 200 || !strings.HasPrefix(w.Header().Get("Content-Disposition"), "attachment") || w.Header().Get("X-Content-Type-Options") != "nosniff" || w.Header().Get("Content-Security-Policy") != "default-src 'none'; sandbox" {
+		t.Fatalf("opaque download %d disposition %q csp %q", w.Code, w.Header().Get("Content-Disposition"), w.Header().Get("Content-Security-Policy"))
 	}
 	ct, b = multipartFile(t, "active.pdf", []byte("%PDF-1.7\n1 0 obj\n<< /Type /Catalog >>\nendobj\n"))
 	w = request(t, mux, p, "POST", "/api/nodes/"+node+"/attachments", ct, b)

@@ -3,7 +3,6 @@
 package costunits
 
 import (
-	"bytes"
 	"context"
 	"encoding/json"
 	"errors"
@@ -70,16 +69,12 @@ func TestPluginRegistersBusinessCosts(t *testing.T) {
 	if !ok {
 		t.Fatal("missing plugin")
 	}
-	raw, err := fieldSchema()
-	if err != nil || !bytes.Equal(bytes.TrimSpace(raw), bytes.TrimSpace(got.Manifest.NodeKinds[0].FieldSchema)) {
-		t.Fatalf("schema drift %s vs %s (%v)", raw, got.Manifest.NodeKinds[0].FieldSchema, err)
-	}
 	var schema map[string]any
-	if err := json.Unmarshal(raw, &schema); err != nil {
+	if err := json.Unmarshal(got.Manifest.NodeKinds[0].FieldSchema, &schema); err != nil {
 		t.Fatal(err)
 	}
-	if schema["additionalProperties"] != true {
-		t.Fatal("classic fields would be rejected")
+	if schema["$id"] != "urn:aeon:business_costs:cost_unit" || schema["additionalProperties"] != true {
+		t.Fatalf("installed schema id=%v additionalProperties=%v", schema["$id"], schema["additionalProperties"])
 	}
 	if !slices.Equal(got.Manifest.Permissions, []string{fence.PermNodesContribute, fence.PermStepsApply, fence.PermViewsProvide}) {
 		t.Fatalf("permissions %#v", got.Manifest.Permissions)

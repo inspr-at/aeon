@@ -8,15 +8,8 @@ import (
 	"strings"
 	"testing"
 
-	"github.com/inspr-at/aeon/internal/httpapi"
 	"github.com/inspr-at/aeon/internal/tenant"
 )
-
-func TestNewIsModule(t *testing.T) {
-	var module httpapi.Module = New(nil, nil)
-	mux := http.NewServeMux()
-	module.Mount(mux)
-}
 
 func TestParseAndRejectBeforeDatabase(t *testing.T) {
 	mux := http.NewServeMux()

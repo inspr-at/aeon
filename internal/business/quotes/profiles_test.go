@@ -226,6 +226,12 @@ func TestProfileRevisionsAssetsAndTenantIsolation(t *testing.T) {
 		t.Fatalf("safe brand asset upload %d", status)
 	}
 	brandID := asset.ID
+	svgReq := httptest.NewRequest(http.MethodGet, "/api/quote-profiles/assets/"+brandID, nil).WithContext(tenant.WithPrincipal(ctx, actors["example-one"]))
+	svgRec := httptest.NewRecorder()
+	mux.ServeHTTP(svgRec, svgReq)
+	if svgRec.Code != 200 || svgRec.Header().Get("Content-Security-Policy") != "default-src 'none'; sandbox" || svgRec.Header().Get("X-Content-Type-Options") != "nosniff" {
+		t.Fatalf("svg asset %d csp %q", svgRec.Code, svgRec.Header().Get("Content-Security-Policy"))
+	}
 	font := make([]byte, 48)
 	copy(font, "wOF2")
 	binary.BigEndian.PutUint32(font[8:12], uint32(len(font)))
@@ -237,6 +243,12 @@ func TestProfileRevisionsAssetsAndTenantIsolation(t *testing.T) {
 	status, body = call("example-one", "GET", "/api/quote-profiles/assets/"+asset.ID, nil)
 	if status != 200 || !bytes.Equal(body, font) {
 		t.Fatalf("profile font roundtrip %d", status)
+	}
+	fontReq := httptest.NewRequest(http.MethodGet, "/api/quote-profiles/assets/"+asset.ID, nil).WithContext(tenant.WithPrincipal(ctx, actors["example-one"]))
+	fontRec := httptest.NewRecorder()
+	mux.ServeHTTP(fontRec, fontReq)
+	if fontRec.Code != 200 || fontRec.Header().Get("Content-Security-Policy") != "" {
+		t.Fatalf("font CSP %q", fontRec.Header().Get("Content-Security-Policy"))
 	}
 	definition.Cover["brand_asset_id"] = brandID
 	definition.Footer.DotsAssetID = brandID
