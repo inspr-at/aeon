@@ -157,8 +157,9 @@ const busy = ref(false)
 
 // ---------- Moving ----------
 function subjectOf(list: Project[]) { return list.length === 1 ? list[0]!.title : plural(list.length, 'project') }
-async function moveTo(list: Project[], target: string, options: { quiet?: boolean } = {}) {
-  if (!list.length) return
+async function moveTo(list: Project[], target: string, options: { quiet?: boolean; focus?: boolean } = {}) {
+  // Dropping a project where it already is changes nothing and says nothing.
+  if (!list.length || list.every(p => groups.where(p) === target)) return
   busy.value = true
   const subject = subjectOf(list)
   const wasArchived = list.every(p => p.archived)
@@ -171,6 +172,8 @@ async function moveTo(list: Project[], target: string, options: { quiet?: boolea
     if (groups.hidden.has(target)) actions.push({ label: 'Show', run: () => groups.setVisible([target], true) })
     if (!options.quiet) toast(groups.hidden.has(target) ? `${message} (hidden)` : message, { actions, timeout: 8000 })
     if (target === ARCHIVED || wasArchived) void store.load(true)
+    // From the keyboard, focus follows the first project to its new place (when it is shown).
+    if (options.focus) { await nextTick(); if (!focusItem(list[0]!.id)) search.value?.focus() }
   } catch (e) {
     toast(`${subject} stays where it is: ${reason(e)}`, { tone: 'error' })
   } finally { busy.value = false }
@@ -204,7 +207,7 @@ function closeMove(restore: boolean) {
 async function chooseMove(target: string) {
   const list = moveProjects.value
   moveDialog.value = null
-  await moveTo(list, target)
+  await moveTo(list, target, { focus: true })
 }
 async function createAndMove(name: string) {
   const problem = validateName(name)
@@ -212,7 +215,7 @@ async function createAndMove(name: string) {
   const list = moveProjects.value
   moveDialog.value = null
   const id = groups.create(name)
-  await moveTo(list, id)
+  await moveTo(list, id, { focus: true })
 }
 
 // ---------- New group ----------
@@ -342,9 +345,10 @@ async function archiveSelection(restore: boolean) {
 // ---------- Keyboard ----------
 function items() { return [...(page.value?.querySelectorAll<HTMLElement>('[data-project-id] .item-link') ?? [])] }
 function focusedId(): string | null { return (document.activeElement as HTMLElement | null)?.closest<HTMLElement>('[data-project-id]')?.dataset.projectId ?? null }
-function focusItem(id: string) {
+function focusItem(id: string): boolean {
   const link = page.value?.querySelector<HTMLElement>(`[data-project-id="${CSS.escape(id)}"] .item-link`)
   link?.focus(); link?.scrollIntoView({ block: 'nearest' })
+  return !!link
 }
 function step(delta: number) {
   const list = items()

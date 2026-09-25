@@ -75,6 +75,8 @@ test('m opens Move to group with type-ahead; a new name creates the group; the t
   await expect(group(page, 'Focus').getByRole('link')).toHaveText(/PHAROS/)
   await expect(group(page, 'No group').getByRole('link')).toHaveCount(2)
   await expect(page.getByText('Moved Pharos to Focus')).toBeVisible()
+  // Focus followed the project to its new group.
+  await expect(group(page, 'Focus').getByRole('link')).toBeFocused()
   await expect.poll(() => lastPut(calls, 'project-groups')?.value).toMatchObject({ groups: [{ name: 'Focus' }], place: { 'p-pharos': expect.stringMatching(/^g:/) } })
   await page.getByRole('button', { name: 'Undo' }).click()
   await expect(group(page, 'No group').getByRole('link')).toHaveCount(3)
@@ -233,6 +235,9 @@ test('cards: arrows walk the cards; x, Shift and Command clicks select; m moves 
 test('drag and drop moves rows and cards between groups; dropping on a chip works too', async ({ page }) => {
   await page.setViewportSize({ width: 1440, height: 900 })
   await open(page, { prefs: { groups: [{ id: 'g:paused', name: 'Paused' }] } })
+  // A drop where the project already is does nothing.
+  await projects(page).locator('[data-project-id="p-aeon"]').dragTo(page.locator('.group-section[data-group-drop="none"] .group-head'))
+  await expect(page.locator('.toast')).toHaveCount(0)
   await projects(page).locator('[data-project-id="p-pharos"]').dragTo(page.locator('.group-section[data-group-drop="g:paused"]'))
   await expect(group(page, 'Paused').getByRole('link')).toHaveText(/PHAROS/)
   await expect(page.getByText('Moved Pharos to Paused')).toBeVisible()
