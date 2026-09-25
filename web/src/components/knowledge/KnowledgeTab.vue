@@ -511,7 +511,10 @@ li + li .k-row::before { content: ''; position: absolute; top: 0; left: 12px; ri
 @media (max-width: 600px) {
   .k-kinds { margin: 0 -12px; padding: 2px 12px 4px; }
   .k-kind, .k-frame .k-kind { height: 44px; }
-  .k-search { flex: 1; width: auto; }
+  .k-mode { padding: 2px; }
+  .k-mode button { width: 40px; height: 40px; padding: 0; }
+  .k-mode-label { display: none; }
+  .k-search { flex: 1 1 100px; width: auto; min-width: 0; }
   .k-search .slash { display: none; }
   .k-search .field { height: 44px; font-size: 16px; }
   .k-menu-btn { height: 44px; }

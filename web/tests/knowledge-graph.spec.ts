@@ -86,7 +86,8 @@ test('the pane closes back to the graph, which keeps the display and filters', a
   await expect(page).toHaveURL(/\/knowledge\?(?=.*mode=graph)(?=.*type=runbook)(?!.*entry=)/)
   await expect(canvas(page)).toBeFocused()
   // Expanding keeps the way back to the graph.
-  await canvas(page).press('ArrowRight'); await expect(pane(page)).toBeVisible()
+  // The pane's controls are used once its entry has loaded.
+  await canvas(page).press('ArrowRight'); await expect(pane(page).getByRole('heading', { level: 1 })).toHaveText('Rotate the fleet host keys')
   await pane(page).getByRole('button', { name: 'Open as full page' }).click()
   await expect(page).toHaveURL(/knowledge\/runbook\/[^?]+\?(?=.*mode=graph)/)
   await page.keyboard.press('Escape')

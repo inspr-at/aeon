@@ -305,8 +305,9 @@ defineExpose({ focusSearch, openFilterMenu, input })
   .new-btn { order: 3; width: 44px; height: 44px; padding: 0; }
   .new-label { display: none; }
   .count { display: none; }
-  /* Knowledge on a phone: the view switch on its own line, search and filters below. */
+  /* Knowledge on a phone: the view switch and the Entries/Graph switch share the first
+     line; search, status, sort and New wrap below (the knowledge tab sizes them). */
   .toolbar.knowledge { flex-wrap: wrap; }
-  .knowledge-controls { display: flex; flex: 1 1 100%; align-items: center; gap: 8px; min-width: 0; }
+  .knowledge-controls { display: contents; }
 }
 </style>
