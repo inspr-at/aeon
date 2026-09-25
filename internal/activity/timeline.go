@@ -21,6 +21,17 @@ import (
 type Author struct {
 	ID   *string `json:"id"`
 	Name string  `json:"name"`
+	// HasAvatar says a picture exists; clients request it only then.
+	HasAvatar bool `json:"has_avatar"`
+}
+
+// avatarExists is the SQL test for a principal's profile picture.
+const avatarExists = `EXISTS (SELECT 1 FROM personal_profiles avatar WHERE avatar.tenant_id=$1 AND avatar.principal_id=coalesce(target.id,p.id) AND avatar.avatar_hashes <> '{}'::jsonb)`
+
+func hasAvatar(ctx context.Context, tx pgx.Tx, tenantID, principalID string) (bool, error) {
+	var has bool
+	err := tx.QueryRow(ctx, `SELECT EXISTS (SELECT 1 FROM personal_profiles WHERE tenant_id=$1 AND principal_id=$2 AND avatar_hashes <> '{}'::jsonb)`, tenantID, principalID).Scan(&has)
+	return has, err
 }
 
 type FieldChange struct {
@@ -178,12 +189,12 @@ func readPeople(ctx context.Context, tx pgx.Tx, tenantID string, evs []activityE
 			}
 		}
 	}
-	rows, err := tx.Query(ctx, `SELECT p.id::text,coalesce(target.id,p.id)::text,coalesce(target.name,p.name),CASE WHEN i.issuer='paimos-classic' THEN i.subject ELSE '' END
+	rows, err := tx.Query(ctx, `SELECT p.id::text,coalesce(target.id,p.id)::text,coalesce(target.name,p.name),CASE WHEN i.issuer='paimos-classic' THEN i.subject ELSE '' END,`+avatarExists+`
 	 FROM principals p LEFT JOIN identities i ON i.id=p.identity_id
  LEFT JOIN principals target ON target.tenant_id=p.tenant_id AND target.id=p.linked_to
 	 WHERE p.tenant_id=$1 AND (p.id::text=ANY($2::text[]) OR (i.issuer='paimos-classic' AND i.subject=ANY($3::text[])))
  UNION ALL
- SELECT p.id::text,coalesce(target.id,p.id)::text,coalesce(target.name,p.name),'username:'||aliases.alias FROM principals p JOIN (
+ SELECT p.id::text,coalesce(target.id,p.id)::text,coalesce(target.name,p.name),'username:'||aliases.alias,`+avatarExists+` FROM principals p JOIN (
    SELECT min(after->'principal'->>'id') AS principal_id,
      (after->'classic'->>'source_id')||':'||(after->'classic'->>'username') AS alias
    FROM events WHERE tenant_id=$1 AND type IN ('import.user_created','import.user_updated')
@@ -199,10 +210,11 @@ func readPeople(ctx context.Context, tx pgx.Tx, tenantID string, evs []activityE
 	people := map[string]Author{}
 	for rows.Next() {
 		var id, canonical, name, subject string
-		if err := rows.Scan(&id, &canonical, &name, &subject); err != nil {
+		var avatar bool
+		if err := rows.Scan(&id, &canonical, &name, &subject, &avatar); err != nil {
 			return nil, err
 		}
-		a := Author{ID: &canonical, Name: name}
+		a := Author{ID: &canonical, Name: name, HasAvatar: avatar}
 		people[id] = a
 		if subject != "" {
 			people[subject] = a

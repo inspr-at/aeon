@@ -27,7 +27,7 @@ test('the panel shows title, properties, Markdown sections, relations and the ti
   await expect(ws.getByRole('region', { name: 'Notes' })).toHaveCount(0)
   const relations = ws.getByRole('region', { name: 'Relations' })
   await expect(relations).toContainText('Blocked by')
-  await expect(relations.getByRole('button', { name: /PHAROS-14/ })).toBeVisible()
+  await expect(relations.getByRole('button', { name: /^Blocked by PHAROS-14/ })).toBeVisible()
   await expect(relations).toContainText('Relates to')
   const activity = ws.getByRole('region', { name: 'Activity' })
   // Two changes by the same person within a minute read as one line, net of the intermediate status.
@@ -46,7 +46,7 @@ test('the panel shows title, properties, Markdown sections, relations and the ti
   await expect(marker.locator('.marker-detail')).toContainText('grok-4.6')
   // No comment card sits inside another framed block.
   expect(await activity.locator('.comment-card .comment-card, .entry.comment > .entry').count()).toBe(0)
-  await relations.getByRole('button', { name: /PHAROS-14/ }).click()
+  await relations.getByRole('button', { name: /^Blocked by PHAROS-14/ }).click()
   await expect(page).toHaveURL('/p/PHAROS/PHAROS-14')
   expect(errors).toEqual([])
 })

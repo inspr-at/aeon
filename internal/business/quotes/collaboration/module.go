@@ -86,6 +86,7 @@ type presence struct {
 	SessionID        string    `json:"session_id"`
 	PrincipalID      string    `json:"principal_id"`
 	Name             string    `json:"name"`
+	HasAvatar        bool      `json:"has_avatar"`
 	Mode             string    `json:"mode"`
 	Anchor           *anchor   `json:"anchor,omitempty"`
 	ObservedRevision int64     `json:"observed_revision"`
@@ -212,7 +213,7 @@ func readSnapshot(ctx context.Context, tx pgx.Tx, id string) (snapshot, error) {
 		}
 		return s, err
 	}
-	rows, err := tx.Query(ctx, `SELECT s.session_id::text,s.principal_id::text,p.name,s.mode,s.anchor,s.observed_revision,s.expires_at FROM quote_presence s JOIN principals p ON p.tenant_id=s.tenant_id AND p.id=s.principal_id WHERE s.quote_node_id=$1::uuid AND s.expires_at>clock_timestamp() ORDER BY s.last_seen DESC,s.session_id LIMIT 50`, id)
+	rows, err := tx.Query(ctx, `SELECT s.session_id::text,s.principal_id::text,p.name,EXISTS (SELECT 1 FROM personal_profiles avatar WHERE avatar.tenant_id=s.tenant_id AND avatar.principal_id=s.principal_id AND avatar.avatar_hashes <> '{}'::jsonb),s.mode,s.anchor,s.observed_revision,s.expires_at FROM quote_presence s JOIN principals p ON p.tenant_id=s.tenant_id AND p.id=s.principal_id WHERE s.quote_node_id=$1::uuid AND s.expires_at>clock_timestamp() ORDER BY s.last_seen DESC,s.session_id LIMIT 50`, id)
 	if err != nil {
 		return s, err
 	}
@@ -220,7 +221,7 @@ func readSnapshot(ctx context.Context, tx pgx.Tx, id string) (snapshot, error) {
 	for rows.Next() {
 		var x presence
 		var raw []byte
-		if err := rows.Scan(&x.SessionID, &x.PrincipalID, &x.Name, &x.Mode, &raw, &x.ObservedRevision, &x.ExpiresAt); err != nil {
+		if err := rows.Scan(&x.SessionID, &x.PrincipalID, &x.Name, &x.HasAvatar, &x.Mode, &raw, &x.ObservedRevision, &x.ExpiresAt); err != nil {
 			return s, err
 		}
 		if len(raw) > 0 {

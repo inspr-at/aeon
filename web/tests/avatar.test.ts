@@ -2,7 +2,7 @@
 import { test } from 'node:test'
 import assert from 'node:assert/strict'
 import { createHash } from 'node:crypto'
-import { AVATAR_PALETTE, avatarColor, avatarSources, centred, clampView, cropOf, deriveInitials, pan, sha256FirstByte, uploadError, uploadProblem, zoomAt } from '../src/lib/avatar.ts'
+import { AVATAR_PALETTE, avatarColor, avatarSources, centred, clampView, cropOf, deriveInitials, learnPictures, onPictures, pan, pictureKnown, sha256FirstByte, shouldRequestAvatar, uploadError, uploadProblem, zoomAt } from '../src/lib/avatar.ts'
 
 test('the initials colour follows the server: palette[sha256(id)[0] % 12]', () => {
   for (const id of ['11111111-1111-4111-8111-111111111111', '22222222-2222-4222-8222-222222222222', 'a', '', 'x'.repeat(200)]) {
@@ -60,4 +60,37 @@ test('zones and languages read well', async () => {
   assert.equal(zoneOffset('UTC', new Date('2026-09-24T12:00:00Z')), 'GMT')
   assert.match(datePreview('de-AT', 'Europe/Vienna', new Date('2026-09-24T12:00:00Z')), /Donnerstag, 24\. September 2026 · 24\.09\.26, 14:00/)
   assert.equal(localeName('de-AT').english, 'Austrian German')
+})
+
+test('a picture is requested only when there is one (U27)', () => {
+  const person = { kind: 'person' as const, id: 'p1', mine: false, myPicture: false, known: undefined as boolean | undefined, missing: false }
+  // Nobody said: initials, no request.
+  assert.equal(shouldRequestAvatar(person), false)
+  assert.equal(shouldRequestAvatar({ ...person, known: false }), false)
+  assert.equal(shouldRequestAvatar({ ...person, known: true }), true)
+  // Found missing this session, an agent, or no id: never.
+  assert.equal(shouldRequestAvatar({ ...person, known: true, missing: true }), false)
+  assert.equal(shouldRequestAvatar({ ...person, known: true, kind: 'agent' }), false)
+  assert.equal(shouldRequestAvatar({ ...person, known: true, id: null }), false)
+  // My own follows my profile, whatever a payload said.
+  assert.equal(shouldRequestAvatar({ ...person, mine: true, myPicture: true, known: false }), true)
+  assert.equal(shouldRequestAvatar({ ...person, mine: true, myPicture: false, known: true }), false)
+})
+
+test('people payloads teach who has a picture, and listeners hear of changes only', () => {
+  let heard = 0
+  const stop = onPictures(() => { heard++ })
+  learnPictures([{ id: 'with', has_avatar: true }, { id: 'without', has_avatar: false }, { id: 'silent' }, null, { name: 'no id', has_avatar: true } as never])
+  assert.equal(pictureKnown('with'), true)
+  assert.equal(pictureKnown('without'), false)
+  assert.equal(pictureKnown('silent'), undefined)
+  assert.equal(heard, 1)
+  learnPictures([{ id: 'with', has_avatar: true }])
+  assert.equal(heard, 1)
+  learnPictures([{ id: 'without', has_avatar: true }])
+  assert.equal(pictureKnown('without'), true)
+  assert.equal(heard, 2)
+  stop()
+  learnPictures([{ id: 'with', has_avatar: false }])
+  assert.equal(heard, 2)
 })

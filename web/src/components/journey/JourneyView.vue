@@ -4,7 +4,7 @@ import { brand } from '../../lib/brand'
 import { computed, onBeforeUnmount, onMounted, provide, ref, watch, type Component } from 'vue'
 import '../../styles/journey.css'
 import {
-  ACTION_LONG, GATE_OF_ACTION, isStage, listPlugins, offeredApproval, releaseName, STAGE_LABEL, STAGE_LATER, STAGE_OWNER, STAGES,
+  ACTION_LONG, GATE_OF_ACTION, isImported, isStage, listPlugins, offeredApproval, releaseName, releaseStateLabel, STAGE_LABEL, STAGE_LATER, STAGE_OWNER, STAGES,
   type ActionKey, type PluginInfo, type Stage,
 } from '../../lib/journey'
 import type { Approval } from '../../lib/agents'
@@ -45,14 +45,26 @@ const now = ref(Date.now())
 const plugins = ref<PluginInfo[]>([])
 const viewed = computed<Stage>(() => isStage(props.stage) ? props.stage : journey.value?.stage ?? 'inspire')
 const data = useJourneyData(computed(() => projectId.value), journey)
-const intakeLoadedOnce = ref(false)
-watch(projectId, () => { intakeLoadedOnce.value = false })
-watch(data.intake.status, status => { if (status === 'ready' || status === 'error') intakeLoadedOnce.value = true })
-const loadingStage = computed(() => !journey.value
-  ? !store.errors[projectId.value]
-  : (['inspire', 'shape', 'requirements'].includes(viewed.value) && !intakeLoadedOnce.value)
-    || (['plan', 'build', 'deploy', 'access', 'live'].includes(viewed.value) && !!journey.value.current_release_id
-      && !['ready', 'error'].includes(data.releaseNodes.status.value)))
+// A stage shows once what it reads has arrived the first time (later refreshes
+// keep what is shown), so nothing reads as empty or "not started" while loading.
+const loadedOnce = { intake: ref(false), origin: ref(false), work: ref(false) }
+watch(projectId, () => { for (const flag of Object.values(loadedOnce)) flag.value = false })
+const settled = (status: string) => status === 'ready' || status === 'error'
+watch(data.intake.status, status => { if (settled(status)) loadedOnce.intake.value = true })
+watch(data.origin.status, status => { if (settled(status)) loadedOnce.origin.value = true })
+watch(data.work.status, status => { if (settled(status)) loadedOnce.work.value = true })
+const imported = computed(() => !!journey.value && isImported(journey.value))
+const loadingStage = computed(() => {
+  const j = journey.value
+  if (!j) return !store.errors[projectId.value]
+  const stage = viewed.value
+  if (['inspire', 'shape', 'requirements'].includes(stage) && !loadedOnce.intake.value) return true
+  if (['inspire', 'shape'].includes(stage) && imported.value && !loadedOnce.origin.value) return true
+  if (['plan', 'build', 'deploy', 'access', 'live'].includes(stage) && !!j.current_release_id && !settled(data.releaseNodes.status.value)) return true
+  // Tickets are counted and grouped by their state and epic: wait for them.
+  if (['requirements', 'plan', 'build', 'live'].includes(stage) && (imported.value || stage !== 'requirements') && !loadedOnce.work.value) return true
+  return false
+})
 
 async function refresh(force = true) {
   await Promise.all([store.load(projectId.value, force), agents.refreshApprovals()])
@@ -67,15 +79,21 @@ watch([viewed, () => journey.value?.revision], ([stage]) => {
   // The current release is named everywhere (rail, gates), so its list is always read.
   if (journey.value.current_release_id) void data.loadReleases()
   if (stage === 'inspire' || stage === 'shape' || stage === 'requirements') void data.loadIntake()
+  // An imported project brought its description, knowledge, epics and tickets: those stand in for intake.
+  if ((stage === 'inspire' || stage === 'shape') && isImported(journey.value)) { void data.loadOrigin(); void data.loadWork() }
   if (stage === 'requirements') { void data.loadRequirements(); void data.loadWork() }
   if (['plan', 'build', 'deploy', 'access', 'live'].includes(stage)) { void data.loadReleases(); void data.loadWork() }
   if (stage === 'deploy' || stage === 'access') void data.loadHandoffs()
 }, { immediate: true })
-// The release shown: the one chosen, else the current one, else (on Live) the newest.
+// The release shown: the one chosen, else the current one. Live shows what is
+// live: the current release once the journey reached Live, else the newest one
+// released before it (an imported project's history), else none.
 const release = computed(() => {
   const refs = data.releases.value
   if (props.releaseKey) return refs.find(r => r.key.toLowerCase() === props.releaseKey!.toLowerCase()) ?? null
   const current = journey.value?.current_release_id
+  const liveReached = journey.value?.stages.find(s => s.key === 'live')?.state !== 'later'
+  if (viewed.value === 'live' && !liveReached) return [...refs].reverse().find(r => r.id !== current && releaseStateLabel(r.state) === 'Released') ?? null
   if (current) return refs.find(r => r.id === current) ?? null
   if (viewed.value === 'live') return refs.length ? refs[refs.length - 1] : null
   return null
@@ -185,16 +203,18 @@ const CHIP: Record<string, string> = { current: 'Now', done: 'Done', skipped: 'N
 const title = computed(() => {
   const r = release.value ? releaseName(release.value) : ''
   switch (viewed.value) {
-    case 'inspire': return 'Conversation and sources'
+    case 'inspire': return imported.value && viewedState.value !== 'current' ? 'Where it came from' : 'Conversation and sources'
     case 'plan': return r ? `Plan ${r.toLowerCase()}` : 'Plan'
     case 'build': return r ? `Build ${r.toLowerCase()}` : 'Build'
     case 'deploy': return r ? `Deploy ${r.toLowerCase()}` : 'Deploy'
     case 'access': return r ? `Access for ${r.toLowerCase()}` : 'Access'
-    case 'live': return r && viewedState.value !== 'later' ? `${r} is live` : 'Live'
+    case 'live': return r && (viewedState.value !== 'later' || releaseStateLabel(release.value!.state) === 'Released') ? `${r} is live` : 'Live'
     default: return STAGE_LABEL[viewed.value]
   }
 })
-const subtitle = computed(() => viewedState.value === 'later' ? STAGE_LATER[viewed.value] : viewed.value === 'inspire' ? STAGE_LATER.inspire : `Profile: ${journey.value ? journey.value.profile.charAt(0).toUpperCase() + journey.value.profile.slice(1) : ''}`)
+const subtitle = computed(() => viewedState.value === 'later' ? STAGE_LATER[viewed.value]
+  : viewed.value === 'inspire' ? (imported.value && viewedState.value !== 'current' ? 'Brought over from Paimos with its history.' : STAGE_LATER.inspire)
+  : `Profile: ${journey.value ? journey.value.profile.charAt(0).toUpperCase() + journey.value.profile.slice(1) : ''}`)
 
 // ---------- Keys: [ and ] move between stages, w opens the walker ----------
 function typing(target: EventTarget | null) { return target instanceof HTMLElement && (target.isContentEditable || ['INPUT', 'TEXTAREA', 'SELECT'].includes(target.tagName)) }
@@ -241,7 +261,7 @@ onBeforeUnmount(() => { window.removeEventListener('keydown', keydown); clearInt
       </header>
       <component :is="STAGE_VIEW[viewed]" :key="viewed" />
       <p class="journey-hint">
-        <kbd class="keycap">[</kbd><kbd class="keycap">]</kbd> stages · <kbd class="keycap">w</kbd> walk the release · <kbd class="keycap">?</kbd> all shortcuts
+        <kbd class="keycap">[</kbd><kbd class="keycap">]</kbd> stages<template v-if="data.walker.value.value?.tickets.length && ['plan', 'build', 'live'].includes(viewed)"> · <kbd class="keycap">w</kbd> walk the release</template> · <kbd class="keycap">?</kbd> all shortcuts
       </p>
     </template>
     <ReleaseWalker
@@ -274,6 +294,7 @@ onBeforeUnmount(() => { window.removeEventListener('keydown', keydown); clearInt
 .journey-error > svg { color: var(--danger); }
 @media (max-width: 720px) {
   .stage-head { flex-wrap: wrap; align-items: flex-start; gap: 6px; }
+  .subtitle { flex-basis: 100%; padding-bottom: 0; }
   .stage-t h2 { font-size: 22px; }
   .spacer, .owner { display: none; }
   .journey-hint { display: none; }

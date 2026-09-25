@@ -20,7 +20,7 @@ function submit() {
 </script>
 
 <template>
-  <FloatingPanel :anchor="anchor" :width="320" :label="mode === 'create' ? 'Save view' : 'Rename view'" @close="restore => emit('close', restore)">
+  <FloatingPanel :anchor="anchor" :width="320" :label="mode === 'create' ? 'Save view' : 'Rename view'" cycle @close="restore => emit('close', restore)">
     <form class="save-view" @submit.prevent="submit">
       <p class="eyebrow">{{ mode === 'create' ? 'Save view' : 'Rename view' }}</p>
       <label class="name">

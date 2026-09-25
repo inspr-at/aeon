@@ -6,6 +6,7 @@ import (
 	"encoding/json"
 	"net/http"
 	"net/http/httptest"
+	"strings"
 	"testing"
 
 	"github.com/jackc/pgx/v5"
@@ -55,7 +56,10 @@ func TestDirectoryListsTenantPrincipalsForStaff(t *testing.T) {
 			}
 			ids[p.key] = id
 		}
-		return nil
+		// Mia has a picture; the others have none (U27: clients ask only then).
+		_, err := tx.Exec(t.Context(), `INSERT INTO personal_profiles(tenant_id,principal_id,avatar_original_hash,avatar_hashes) VALUES($1,$2,$3,$4::jsonb)`,
+			tenants["dir-a"], ids["member"], strings.Repeat("a", 64), `{"32":"`+strings.Repeat("b", 64)+`"}`)
+		return err
 	})
 	if err != nil {
 		t.Fatal(err)
@@ -122,6 +126,9 @@ func TestDirectoryListsTenantPrincipalsForStaff(t *testing.T) {
 	for _, item := range out {
 		if item.ID == ids["other"] {
 			t.Fatal("another tenant's principal listed")
+		}
+		if item.HasAvatar != (item.ID == ids["member"]) {
+			t.Fatalf("has_avatar %+v", item)
 		}
 	}
 	if status, _ := call(as("customer", tenant.Person, "customer")); status != 403 {

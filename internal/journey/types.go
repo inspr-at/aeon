@@ -21,13 +21,17 @@ const (
 	ScopeAccess       = "journey.access"
 )
 
-// Journey is the derived projection returned by the journey routes.
+// Journey is the derived projection returned by the journey routes. Imported is
+// true for a project that came from classic Paimos with its history: its stages
+// before Plan were never recorded here, so the face shows what came with it
+// (description, epics, tickets) instead of intake and gates.
 type Journey struct {
 	ProjectNodeID        string            `json:"project_node_id"`
 	Profile              string            `json:"profile"`
 	Revision             int64             `json:"revision"`
 	Stage                string            `json:"stage"`
 	StageSource          string            `json:"stage_source"`
+	Imported             bool              `json:"imported"`
 	Stages               []JourneyStage    `json:"stages"`
 	NextAction           JourneyNextAction `json:"next_action"`
 	RequirementsRevision int64             `json:"requirements_revision"`

@@ -1,14 +1,16 @@
 <!-- SPDX-License-Identifier: AGPL-3.0-only -->
 <script setup lang="ts">
 import { computed, ref } from 'vue'
-import { ACTION_LONG, addRequirement, gateApprovals, offeredApproval, type Requirement } from '../../lib/journey'
+import { ACTION_LONG, addRequirement, gateApprovals, isDropped, isFinished, isImported, offeredApproval, STAGE_LABEL, type Requirement } from '../../lib/journey'
 import { useJourneyContext } from '../../lib/journeyContext'
 import { toast } from '../../lib/toast'
-import { plural } from '../../lib/work'
+import { plural, statusMeta } from '../../lib/work'
+import type { ListItem } from '../../lib/api'
 import { StaleJourney, useJourney } from '../../stores/journey'
 import AppIcon from '../AppIcon.vue'
 import GateApprovals from './GateApprovals.vue'
 import GateCard from './GateCard.vue'
+import LaterCard from './LaterCard.vue'
 
 // Requirements: functional ones become features (epics) with tickets, non-functional
 // ones knowledge entries and acceptance criteria. Agreeing them needs the
@@ -25,6 +27,22 @@ const approvals = computed(() => gateApprovals(ctx.approvals.value, 'requirement
 const approval = computed(() => offeredApproval(ctx.approvals.value, journey.value, 'requirements', ctx.now.value))
 const epicKey = (r: Requirement) => r.feature_node_id ? ctx.data.workById.value.get(r.feature_node_id)?.key ?? null : null
 const tickets = computed(() => all.value.reduce((sum, r) => sum + r.generated_ticket_ids.length, 0))
+// An imported project brought its features as epics: they stand for what was agreed
+// until requirements are agreed here. Each shows how far its tickets are.
+const imported = computed(() => isImported(journey.value) && !all.value.length)
+const work = computed(() => ctx.data.work.value.value)
+const keyOrder = (a: ListItem, b: ListItem) => a.key.localeCompare(b.key, undefined, { numeric: true })
+const epicOf = (item: ListItem) => item.epic?.id ?? (item.parent?.kind_slug === 'epic' ? item.parent.id : null)
+const importedEpics = computed(() => {
+  const tickets = work.value.filter(i => i.kind_slug === 'ticket' && !isDropped(i.state))
+  return work.value.filter(i => i.kind_slug === 'epic').sort(keyOrder).map(epic => {
+    const mine = tickets.filter(t => epicOf(t) === epic.id)
+    const done = mine.filter(t => isFinished(t.state)).length
+    return { epic, total: mine.length, done, segments: Array.from({ length: Math.min(12, Math.max(1, mine.length)) }, (_, i) => i < Math.round(done / Math.max(1, mine.length) * Math.min(12, Math.max(1, mine.length)))) }
+  })
+})
+const loose = computed(() => work.value.filter(i => i.kind_slug === 'ticket' && !isDropped(i.state) && !epicOf(i)).length)
+const epicHref = (key: string) => `/p/${encodeURIComponent(ctx.project.value.routeKey)}/${encodeURIComponent(key)}`
 
 // Adding a requirement (a draft until the next agreement).
 const kind = ref<Requirement['kind']>('functional')
@@ -49,7 +67,26 @@ async function add() {
 <template>
   <div class="j-grid">
     <div class="j-col">
-      <section v-for="group in [{ id: 'functional', title: 'Functional', note: 'become features with tickets', items: functional }, { id: 'nonfunctional', title: 'Non-functional', note: 'become knowledge and acceptance criteria', items: nonfunctional }]" :key="group.id" class="j-card" :aria-labelledby="`req-${group.id}`">
+      <section v-if="imported" class="j-card" aria-labelledby="req-imported">
+        <header class="j-card-head"><p id="req-imported" class="eyebrow">Features · {{ importedEpics.length }} · imported epics</p><span class="j-count">{{ plural(work.filter(i => i.kind_slug === 'ticket' && !isDropped(i.state)).length, 'ticket') }}</span></header>
+        <p v-if="!importedEpics.length" class="j-note">The project came without epics{{ loose ? `; its ${plural(loose, 'ticket')} stand on their own` : '' }}. Requirements agreed here become its first features.</p>
+        <ol v-else class="reqs">
+          <li v-for="(row, i) in importedEpics" :key="row.epic.id" class="req">
+            <span class="rid mono">F{{ i + 1 }}</span>
+            <div class="req-body">
+              <p class="req-title">{{ row.epic.title }}</p>
+              <p class="req-meta">
+                <span class="j-segs mini" role="img" :aria-label="`${row.done} of ${row.total} tickets done`"><i v-for="(on, n) in row.segments" :key="n" :class="{ on }" /></span>
+                {{ row.total ? `${row.done} of ${plural(row.total, 'ticket')} done` : 'No tickets yet' }}
+                <RouterLink class="ekey mono" :to="epicHref(row.epic.key)">{{ row.epic.key }}<AppIcon name="arrow" :size="10" /></RouterLink>
+              </p>
+            </div>
+            <span class="j-chip" :class="row.total && row.done === row.total ? 'ok' : ''">{{ statusMeta(row.epic.state).label }}</span>
+          </li>
+        </ol>
+        <p v-if="importedEpics.length && loose" class="j-note">{{ plural(loose, 'ticket') }} {{ loose === 1 ? 'is' : 'are' }} not tied to an epic.</p>
+      </section>
+      <section v-for="group in [{ id: 'functional', title: 'Functional', note: 'become features with tickets', items: functional }, { id: 'nonfunctional', title: 'Non-functional', note: 'become knowledge and acceptance criteria', items: nonfunctional }].filter(g => !imported || g.items.length)" :key="group.id" class="j-card" :aria-labelledby="`req-${group.id}`">
         <header class="j-card-head"><p :id="`req-${group.id}`" class="eyebrow">{{ group.title }} · {{ group.items.length }} · {{ group.note }}</p></header>
         <p v-if="ctx.data.requirements.status.value === 'loading' && !all.length" class="skeleton req-skel" role="status" aria-label="Loading requirements" />
         <p v-else-if="!group.items.length" class="j-note">{{ group.id === 'functional' ? 'No functional requirements yet. Aithema drafts them from the conversation; you can add one below.' : 'None yet.' }}</p>
@@ -96,13 +133,19 @@ async function add() {
         <p>{{ plural(tickets, 'ticket') }} generated · {{ plural(nonfunctional.length, 'knowledge entry', 'knowledge entries') }}.</p>
         <p><button type="button" class="linkish" @click="ctx.view('plan')">Plan <AppIcon name="arrow" :size="12" /></button></p>
       </GateCard>
-      <GateCard v-else eyebrow="Later" title="Not yet" tone="record"><p>Agreeing what will be built. Agreed requirements become tickets.</p></GateCard>
+      <GateCard v-else-if="imported" eyebrow="Imported" title="Features came with the project" tone="record">
+        <p>{{ importedEpics.length ? `The ${plural(importedEpics.length, 'epic')} above` : 'The tickets' }} came from Paimos and stand for what was agreed. A requirement added here is agreed with the next revision and becomes a feature beside them.</p>
+        <button type="button" class="btn sm go" @click="ctx.view(journey.stage)">Go to {{ STAGE_LABEL[journey.stage] }}<AppIcon name="arrow" :size="13" /></button>
+      </GateCard>
+      <LaterCard v-else stage="requirements" />
     </div>
   </div>
 </template>
 
 <style scoped>
 .req-skel { height: 48px; border-radius: 10px; }
+.go { justify-self: start; }
+.j-segs.mini { width: 72px; height: 5px; gap: 2px; }
 .reqs { display: grid; margin: 0; padding: 0; list-style: none; }
 .req { display: grid; grid-template-columns: 30px minmax(0, 1fr) auto; gap: 10px; align-items: start; padding: 9px 2px; border-top: 1px solid var(--line); }
 .req:first-child { border-top: 0; }

@@ -150,6 +150,8 @@ const me = computed(() => session.identity ? { id: session.identity.principal.id
 const writable = computed(() => can('nodes.write', projectId.value ?? undefined))
 const nodeDeletable = computed(() => can('nodes.delete', projectId.value ?? undefined))
 const nodeMovable = computed(() => can('nodes.move', projectId.value ?? undefined))
+const relationLinkable = computed(() => can('relations.write', projectId.value ?? undefined))
+const relationUnlinkable = computed(() => can('relations.delete', projectId.value ?? undefined))
 const commentable = computed(() => can('comments.write', projectId.value ?? undefined))
 const commentDeletable = computed(() => can('comments.delete', projectId.value ?? undefined))
 const attachable = computed(() => can('attachments.write', projectId.value ?? undefined) && can('attachments.delete', projectId.value ?? undefined))
@@ -919,6 +921,7 @@ function keydown(event: KeyboardEvent) {
       break
     case 'p': if (ticketKey.value) { event.preventDefault(); panel.value?.openPriority() } break
     case 'a': if (ticketKey.value) { event.preventDefault(); panel.value?.openAssignee() } break
+    case 'r': if (ticketKey.value) { event.preventDefault(); panel.value?.openLink() } break
     case 'c': if (ticketKey.value) { event.preventDefault(); panel.value?.focusComposer() } break
     case 'f': if (ticketKey.value) { event.preventDefault(); if (fullView.value) collapse(); else expand() } break
   }
@@ -1089,7 +1092,7 @@ watch([project, panelItem, knowledgeActive, knowledgeEntryOpen], ([current, item
       <TicketWorkspace
         v-if="ticketKey" ref="panel" :item="panelItem" :ticket-key="ticketKey.toUpperCase()" :resolving="panelLoading" :resolve-error="panelError"
         :position="panelPosition" :now="now" :mode="fullView ? 'full' : 'panel'" :project="{ id: project.id, routeKey: project.routeKey }"
-        :names="list.names" :me="me" :can-write="writable" :can-delete="nodeDeletable" :can-move="nodeMovable"
+        :names="list.names" :me="me" :can-write="writable" :can-delete="nodeDeletable" :can-move="nodeMovable" :can-link="relationLinkable" :can-unlink="relationUnlinkable"
         :can-comment="commentable" :can-delete-comment="commentDeletable" :can-attach="attachable" :people="people"
         @close="closePanel" @prev="move(-1)" @next="move(1)" @expand="expand" @collapse="collapse" @new-tab="newTab(panelItem?.key ?? ticketKey)"
         @status="anchor => panelItem && openStatus(panelItem, anchor, 'panel')" @open-key="openRelated" :trail="trail" @trail-back="trailBack" @removed="removed" @created="childCreated" @moved="childMoved" @retry="resolvePanel"

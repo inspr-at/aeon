@@ -262,9 +262,19 @@ test('a mature project leads with its build: progress, what is left, releases; I
   await page.goto('/p/PHAROS?view=journey&stage=plan')
   await expect(page.locator('.release-tickets .tk').first()).toBeVisible()
   await expect(page.locator('.release-tickets input[type=checkbox]')).toHaveCount(0)
+  // U24: an imported project shows what it brought where a new one shows its conversation.
   await page.goto('/p/PHAROS?view=journey&stage=inspire')
+  await expect(page.getByRole('heading', { name: 'Where it came from' })).toBeVisible()
+  await expect(page.getByRole('region', { name: 'Imported: Started in Paimos' })).toBeVisible()
+  await expect(page.getByRole('list', { name: 'What the project brought' })).toBeVisible()
+  // Nothing was recorded here, so there is no empty history to unfold.
+  await expect(page.locator('section.history')).toHaveCount(0)
+})
+
+test('a past Inspire of a project started here folds away as history, with its sources', async ({ page }) => {
+  await open(page, 'build', '/p/PHAROS?view=journey&stage=inspire')
   const history = page.locator('section.history')
-  await expect(history).toContainText('the project came to AEON with its history')
+  await expect(history).toContainText('3 sources recorded · 0 drafts accepted.')
   await expect(page.getByText('Sources · stored with the project')).toHaveCount(0)
   await history.getByRole('button', { name: 'Show the sources' }).click()
   await expect(page.getByText('Sources · stored with the project')).toBeVisible()
