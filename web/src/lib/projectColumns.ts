@@ -21,6 +21,8 @@ export const PROJECT_COLUMNS: ProjectColumnDef[] = [
 ]
 export const PROJECT_COLUMN_BY_ID = new Map(PROJECT_COLUMNS.map(c => [c.id, c]))
 export const DEFAULT_PROJECT_COLUMNS: ProjectColumnId[] = ['open', 'doing', 'done', 'progress', 'activity']
+// Without a saved choice, lists this wide also show who was active lately.
+export const WIDE_LIST = 1500
 // The least essential leave first when the list is narrow.
 const DROP_ORDER: ProjectColumnId[] = ['people', 'activity', 'progress', 'done', 'doing', 'open']
 // Key badge, a readable project name, the … button and the gaps between columns.
@@ -39,9 +41,10 @@ export function chosenProjectColumns(prefs: ProjectColumnPrefs | null | undefine
 }
 export const customisedProjectColumns = (prefs: ProjectColumnPrefs | null | undefined) => !!prefs?.order || !!prefs?.visible
 
-// The chosen columns that fit `width` pixels of list, in order.
+// The chosen columns that fit `width` pixels of list, in order. Without a saved
+// choice a wide list adds People.
 export function fittingProjectColumns(width: number, prefs: ProjectColumnPrefs | null | undefined): ProjectColumnId[] {
-  let ids = chosenProjectColumns(prefs)
+  let ids = !prefs?.visible && width >= WIDE_LIST ? chosenProjectColumns({ ...prefs, visible: [...DEFAULT_PROJECT_COLUMNS, 'people'] }) : chosenProjectColumns(prefs)
   const need = () => FIXED + ids.reduce((sum, id) => sum + PROJECT_COLUMN_BY_ID.get(id)!.min + GAP, 0) + GAP * 2
   for (const id of DROP_ORDER) {
     if (width <= 0 || need() <= width) break

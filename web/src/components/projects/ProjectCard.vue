@@ -36,7 +36,6 @@ const emit = defineEmits<{ menu: [anchor: HTMLElement] }>()
       </span>
       <span class="card-foot">
         <PeopleStack :people="project.people" :size="22" />
-        <span v-if="!project.people.length" class="nobody">No one lately</span>
         <time class="activity" :datetime="project.last_activity" :data-tip="absoluteTime(project.last_activity)">{{ relativeTime(project.last_activity, { now, long: true }) }}</time>
       </span>
     </RouterLink>
@@ -72,14 +71,13 @@ const emit = defineEmits<{ menu: [anchor: HTMLElement] }>()
 .card-desc { margin-top: 3px; font-size: 13px; color: var(--ink-2); overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 .card-mid { display: flex; align-items: center; gap: 20px; margin-top: 18px; }
 .ring-wrap { display: inline-flex; }
-.counts { display: grid; gap: 7px; width: min(100%, 164px); }
+.counts { display: grid; gap: 7px; width: min(100%, 176px); }
 .counts :deep(.stat-count) { gap: 8px; }
 .card-foot { display: flex; align-items: center; gap: 10px; min-height: 28px; margin-top: 18px; padding-top: 12px; border-top: 1px solid var(--line); }
-.nobody { font-size: 12px; color: var(--ink-3); }
 .activity { margin-left: auto; font-size: 12.5px; color: var(--ink-2); white-space: nowrap; }
 .card-more { position: absolute; top: 12px; right: 12px; width: 30px; height: 30px; color: var(--ink-3); opacity: 0; }
 .card:hover .card-more, .card:focus-within .card-more, .card.menu .card-more { opacity: 1; }
 .card-more:hover, .card.menu .card-more { color: var(--teal-ink); }
 @media (hover: none) { .card-more { opacity: 1; } }
-@media (max-width: 600px) { .card-link { padding: 14px 16px 12px; } .card-more { top: 8px; right: 8px; width: 36px; height: 36px; } }
+@media (max-width: 600px) { .card-link { padding: 14px 16px 12px; } .card-top { padding-right: 40px; } .card-more { top: 6px; right: 6px; width: 44px; height: 44px; } }
 </style>

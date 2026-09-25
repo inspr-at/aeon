@@ -99,5 +99,5 @@ const optionId = (index: number) => `${id}-option-${index}`
 .create svg { color: var(--teal-ink); }
 .note { padding: 8px 10px; font-size: 13px; color: var(--ink-3); }
 .fine { display: flex; align-items: center; gap: 6px; margin-top: 4px; padding: 8px 10px 4px; border-top: 1px solid var(--line); font-size: 11.5px; color: var(--ink-3); }
-@media (pointer: coarse) { .fine { display: none; } .option { min-height: 44px; } }
+@media (pointer: coarse), (max-width: 600px) { .fine { display: none; } .option { min-height: 44px; } .picker-search { height: 44px; font-size: 16px; } }
 </style>

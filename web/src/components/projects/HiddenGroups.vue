@@ -28,5 +28,5 @@ const emit = defineEmits<{ show: [ids: string[]] }>()
 .show-all { color: var(--teal-ink); font-weight: 600; }
 @media (hover: hover) { .hidden-group:hover, .show-all:hover { background: var(--row-hover); color: var(--ink); } }
 .hidden-group:focus-visible, .show-all:focus-visible { box-shadow: var(--focus-ring); }
-@media (max-width: 600px) { .hidden-group, .show-all { height: 36px; } }
+@media (max-width: 600px) { .hidden-group, .show-all { height: 44px; padding: 0 8px; } }
 </style>

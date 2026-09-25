@@ -47,10 +47,10 @@ const emit = defineEmits<{ move: [anchor: HTMLElement]; archive: []; restore: []
 .close:hover { color: var(--ink); background: var(--row-selected); }
 .esc { font-size: 10px; }
 @media (max-width: 600px) {
-  .bulk-bar { height: 52px; padding: 0 4px 0 12px; }
+  .bulk-bar { height: 56px; padding: 0 4px 0 14px; }
   .count-word, .esc, .rule, .link, .act .label { display: none; }
-  .act { width: 40px; height: 40px; padding: 0; justify-content: center; }
-  .close { width: 40px; height: 40px; padding: 0; justify-content: center; margin-left: 2px; }
+  .act { width: 44px; height: 44px; padding: 0; justify-content: center; }
+  .close { width: 44px; height: 44px; padding: 0; justify-content: center; margin-left: 2px; }
 }
 @media (hover: none) { .esc { display: none; } }
 @media (prefers-reduced-motion: no-preference) {

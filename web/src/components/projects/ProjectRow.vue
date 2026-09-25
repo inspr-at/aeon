@@ -88,7 +88,7 @@ const value = (project: Project, kind: StatKind) => kind === 'open' ? project.op
   .project-row {
     display: grid; grid-template-columns: auto minmax(0, 1fr) auto;
     grid-template-areas: "key key time" "text text text" "bar bar bar" "stats stats stats";
-    row-gap: 6px; padding: 12px 44px 12px 10px; min-height: 44px;
+    row-gap: 6px; padding: 12px 48px 12px 10px; min-height: 44px;
   }
   .project-row .key-badge { grid-area: key; }
   .project-text { grid-area: text; }
@@ -97,7 +97,7 @@ const value = (project: Project, kind: StatKind) => kind === 'open' ? project.op
   .project-row > .stat, .people-cell { display: none; }
   .name { white-space: normal; }
   .project-desc { white-space: normal; display: -webkit-box; -webkit-line-clamp: 2; -webkit-box-orient: vertical; }
-  .row-more { position: absolute; top: 7px; right: 4px; margin: 0; width: 36px; height: 36px; }
+  .row-more { position: absolute; top: 4px; right: 2px; margin: 0; width: 44px; height: 44px; }
   .stats-line { grid-area: stats; display: flex; flex-wrap: wrap; gap: 4px 16px; }
   .line-stat { display: inline-flex; align-items: center; gap: 5px; }
   .mini { gap: 5px; font-size: 11.5px; }

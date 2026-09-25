@@ -495,6 +495,9 @@ onMounted(() => {
   void store.load()
   void groups.load()
   window.addEventListener('keydown', keydown)
+  // A native capture listener, not @click.capture: a Vue invoker on an ancestor
+  // stamps the event first, and handlers attached in the same instant would skip it.
+  page.value?.addEventListener('click', clickCapture, true)
   clock = setInterval(() => { now.value = Date.now() }, 60_000)
 })
 watch(listCard, element => {
@@ -504,7 +507,7 @@ watch(listCard, element => {
   sizer = new ResizeObserver(([entry]) => { listWidth.value = entry!.contentRect.width })
   sizer.observe(element)
 }, { flush: 'post' })
-onBeforeUnmount(() => { window.removeEventListener('keydown', keydown); clearInterval(clock); sizer?.disconnect(); phoneQuery.removeEventListener('change', phoneChange) })
+onBeforeUnmount(() => { window.removeEventListener('keydown', keydown); page.value?.removeEventListener('click', clickCapture, true); clearInterval(clock); sizer?.disconnect(); phoneQuery.removeEventListener('change', phoneChange) })
 const who = computed(() => session.identity?.tenant.name ?? 'Workspace')
 const displayLabel = computed(() => sort.value === 'activity' ? 'Display' : `Sorted by ${sortLabel.value.toLowerCase()}`)
 const archivedSelection = computed(() => selectedProjects.value.length > 0 && selectedProjects.value.every(p => p.archived))
@@ -513,7 +516,7 @@ const archivedSelection = computed(() => selectedProjects.value.length > 0 && se
 <template>
   <section
     ref="page" class="projects-page" :class="[`view-${view}`, { selecting: selected.size }]" aria-labelledby="projects-title"
-    @dragstart="dragStart" @dragover="dragOver" @dragleave="dragLeave" @drop="drop" @dragend="resetDrag" @click.capture="clickCapture" @contextmenu="contextMenu"
+    @dragstart="dragStart" @dragover="dragOver" @dragleave="dragLeave" @drop="drop" @dragend="resetDrag" @contextmenu="contextMenu"
   >
     <WelcomeBlock />
     <header class="page-head">
@@ -551,8 +554,9 @@ const archivedSelection = computed(() => selectedProjects.value.length > 0 && se
                 :data-autofocus="sort === option.value ? '' : undefined" @click="chooseSort(option.value)"
               >{{ option.label }}</button>
             </div>
+            <p v-if="view === 'list' && phone" class="section fine">On a phone each project is a small card; columns apply to wider screens.</p>
             <ColumnPicker
-              v-if="view === 'list'" class="section" :order="pickerColumns.order" :visible="pickerColumns.visible" :customised="pickerColumns.customised"
+              v-else-if="view === 'list'" class="section" :order="pickerColumns.order" :visible="pickerColumns.visible" :customised="pickerColumns.customised"
               :labels="COLUMN_LABELS" :pinned="PINNED_COLUMNS" reset-label="Default" reset-tip="Open, Doing, Done, Progress and Last activity" :note="'Key and Project always lead. Columns that do not fit step aside.'"
               @change="saveColumns" @reset="resetColumns"
             />
@@ -619,17 +623,20 @@ const archivedSelection = computed(() => selectedProjects.value.length > 0 && se
 .summary { margin-top: 6px; font-size: 13.5px; color: var(--ink-2); min-height: 20px; }
 .summary-skeleton { display: inline-block; width: 220px; }
 .projects-card { overflow: clip; }
-.projects-toolbar { display: flex; align-items: flex-start; flex-wrap: wrap; gap: 10px 14px; padding: 14px 16px; }
+/* Search, chips and tools on one line when there is room; below 1200px the chips
+   take their own line, so the toolbar is as tall before the groups load as after. */
+.projects-toolbar { display: grid; grid-template-columns: 280px minmax(0, 1fr) auto; grid-template-areas: "search chips tools"; align-items: center; gap: 10px 14px; padding: 14px 16px; }
 .view-list .projects-toolbar, .projects-card:has(.state) .projects-toolbar { border-bottom: 1px solid var(--line); }
-.project-search { flex-shrink: 0; width: 280px; }
+.project-search { grid-area: search; min-width: 0; }
 .project-search .field { padding-right: 32px; }
 .project-search .field::-webkit-search-cancel-button { display: none; }
 .slash { position: absolute; right: 9px; pointer-events: none; }
 @media (hover: none) { .slash { display: none; } }
-.chips { flex: 1 1 280px; min-width: 0; padding-top: 2px; }
+.chips { grid-area: chips; min-width: 0; }
 .chips-skeleton { display: flex; align-items: center; height: 30px; }
 .chips-skeleton .skeleton { width: 140px; }
-.tools { display: flex; align-items: center; gap: 8px; margin-left: auto; padding-top: 1px; }
+.tools { grid-area: tools; display: flex; align-items: center; justify-content: flex-end; gap: 8px; }
+@media (max-width: 1199px) { .projects-toolbar { grid-template-columns: minmax(0, 280px) 1fr auto; grid-template-areas: "search . tools" "chips chips chips"; } }
 .view-seg button { height: 26px; padding: 0 11px; }
 .display-btn { gap: 6px; color: var(--ink-2); }
 .display-btn.on { color: var(--teal-ink); }
@@ -658,12 +665,11 @@ const archivedSelection = computed(() => selectedProjects.value.length > 0 && se
 @media (max-width: 760px) {
   .projects-page { padding: 14px 12px 28px; }
   .page-head { margin-bottom: 14px; padding: 0 4px; }
-  .projects-toolbar { gap: 10px; padding: 12px; }
-  .project-search { width: 100%; }
+  .projects-toolbar { grid-template-columns: minmax(0, 1fr); grid-template-areas: "search" "chips" "tools"; gap: 10px; padding: 12px; }
   .project-search .field { height: 44px; font-size: 16px; }
-  .chips { flex-basis: 100%; }
-  .tools { width: 100%; justify-content: space-between; margin-left: 0; }
-  .view-seg button { height: 38px; min-width: 44px; }
+  .chips-skeleton { height: 44px; }
+  .tools { justify-content: space-between; }
+  .view-seg button { height: 44px; min-width: 48px; }
   .display-btn { height: 44px; min-width: 44px; }
   .cards-area { margin-top: 16px; }
 }

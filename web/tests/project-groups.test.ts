@@ -119,6 +119,9 @@ test('project columns: Key and Project lead; the rest follow the person’s orde
   // 368 fixed + 40 + 3×96 + 170 + 112 + 128 = 1106: People steps aside first, then Last activity.
   assert.deepEqual(fittingProjectColumns(1000, { visible: ['open', 'doing', 'done', 'progress', 'people', 'activity'] }), ['open', 'doing', 'done', 'progress', 'activity'])
   assert.deepEqual(fittingProjectColumns(880, null), ['open', 'doing', 'done', 'progress'])
+  // Without a saved choice, wide lists add People.
+  assert.deepEqual(fittingProjectColumns(1600, null), ['open', 'doing', 'done', 'progress', 'people', 'activity'])
+  assert.deepEqual(fittingProjectColumns(1600, { visible: ['open'] }), ['open'])
   assert.deepEqual(moveProjectColumn(['open', 'doing', 'done'], 'doing', 1), ['open', 'done', 'doing'])
   assert.deepEqual(moveProjectColumn(['open', 'doing'], 'open', -1), ['open', 'doing'])
 })

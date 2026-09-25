@@ -83,7 +83,9 @@ defineExpose({ root })
 .project-list { margin: 0; padding: 6px 0; list-style: none; }
 .group-rows { margin: 0; padding: 0 0 6px; list-style: none; }
 .group-section { position: relative; margin: 0 6px; border-radius: 12px; }
-.group-section + .group-section { margin-top: 2px; }
+/* A hairline between groups (a neutral divider, never a coloured edge). */
+.group-section + .group-section { margin-top: 4px; }
+.group-section + .group-section::before { content: ''; position: absolute; left: 14px; right: 14px; top: -3px; height: 1px; background: var(--line); pointer-events: none; }
 .group-section :deep(.project-item) { margin: 0; }
 .group-section :deep(.group-head) { grid-column: 1 / -1; }
 .group-section.drop-on { background: var(--row-hover); box-shadow: inset 0 0 0 1.5px var(--chip-teal-line); }

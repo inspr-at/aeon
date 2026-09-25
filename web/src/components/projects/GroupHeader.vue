@@ -107,5 +107,5 @@ button.fold:focus-visible { box-shadow: var(--focus-ring); }
 .cards { height: 40px; padding: 0 4px; }
 .cards .fold { height: 34px; font-size: 14.5px; font-weight: 650; }
 .cards .count { font-size: 11.5px; }
-@media (max-width: 760px) { .list { padding: 0 4px 0 10px; } .fold { height: 40px; } .more { width: 36px; height: 36px; } }
+@media (max-width: 760px) { .list, .cards { height: 48px; } .list { padding: 0 4px 0 10px; } .list .fold, .cards .fold { height: 44px; } .more { width: 44px; height: 44px; } .rename { height: 40px; } }
 </style>
