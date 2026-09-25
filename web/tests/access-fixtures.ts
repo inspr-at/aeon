@@ -1,0 +1,371 @@
+// SPDX-License-Identifier: AGPL-3.0-only
+// The authz contract (ADR-003) in memory, for the Access UI specs: the permission
+// registry, built-in and custom roles, people with aliases, agents, invites,
+// project bindings, the access audit and /api/me/permissions. It keeps the
+// contract's rules (last owner, no escalation, roles in use, field reasons), so
+// specs see the answers the real server gives. Register after the work mocks.
+import type { Page, Route } from '@playwright/test'
+
+export const ME = '11111111-1111-4111-8111-111111111111'
+export const MIRA = '22222222-2222-4222-8222-222222222222'
+export const JONAS = '33333333-3333-4333-8333-333333333333'
+export const LENA = '44444444-4444-4444-8444-444444444444'
+export const PAUL = '55555555-5555-4555-8555-555555555555'
+export const CLEO = '66666666-6666-4666-8666-666666666666'
+export const MBA_CLASSIC = '77777777-7777-4777-8777-777777777771'
+export const JW_CLASSIC = '77777777-7777-4777-8777-777777777772'
+export const AGENTUR_CLASSIC = '77777777-7777-4777-8777-777777777773'
+export const COORDINATOR = '88888888-8888-4888-8888-888888888881'
+export const DEPLOYER = '88888888-8888-4888-8888-888888888882'
+export const SYSTEM = '88888888-8888-4888-8888-888888888889'
+const now = Date.parse('2026-09-23T12:00:00Z')
+const ago = (hours: number) => new Date(now - hours * 3_600_000).toISOString()
+
+type Risk = 'low' | 'medium' | 'high'
+const P = (key: string, group: string, description: string, risk: Risk, project = true) => ({ key, group, description, risk, grantable_at: project ? ['workspace', 'project'] : ['workspace'] })
+export const REGISTRY = [
+  P('nodes.read', 'Work', 'See projects, tickets and their history', 'low'),
+  P('nodes.write', 'Work', 'Create and edit tickets, move them and change their status', 'medium'),
+  P('nodes.delete', 'Work', 'Delete tickets and projects', 'high'),
+  P('comments.write', 'Work', 'Comment on tickets', 'low'),
+  P('knowledge.read', 'Knowledge', 'Read runbooks, guidelines and memories', 'low'),
+  P('knowledge.write', 'Knowledge', 'Write and change knowledge entries', 'medium'),
+  P('quotes.read', 'Business', 'See quotes and customers', 'low'),
+  P('quotes.write', 'Business', 'Draft and change quotes', 'medium'),
+  P('quotes.issue', 'Business', 'Issue quotes to customers', 'high', false),
+  P('hours.log', 'Business', 'Log hours', 'low'),
+  P('hours.approve', 'Business', 'Approve and lock hours', 'medium', false),
+  P('approvals.decide', 'Agents', 'Approve or deny what agents ask to do', 'high', false),
+  P('keys.manage', 'Agents', 'Create and revoke agent keys', 'high', false),
+  P('members.read', 'People and access', 'See who is in the workspace and their roles', 'low'),
+  P('members.manage', 'People and access', 'Invite people, change their roles and deactivate them', 'high'),
+  P('roles.manage', 'People and access', 'Create, change and delete custom roles', 'high', false),
+  P('audit.read', 'People and access', 'Read the access log', 'medium', false),
+  P('kinds.manage', 'Workspace', 'Change ticket types and their fields', 'high', false),
+  P('settings.manage', 'Workspace', 'Change workspace settings', 'high', false),
+  P('workspace.manage', 'Workspace', 'Rename or close the workspace and appoint owners', 'high', false),
+  P('portal.quotes', 'Customer portal', 'See and accept their own quotes', 'low', false),
+]
+const ALL = REGISTRY.map(p => p.key)
+const MEMBER = ['nodes.read', 'nodes.write', 'comments.write', 'knowledge.read', 'knowledge.write', 'quotes.read', 'hours.log', 'members.read']
+export interface MockRole { id: string; key: string; name: string; description: string; builtin: boolean; permissions: string[]; based_on: string | null }
+const builtin = (key: string, name: string, description: string, permissions: string[]): MockRole => ({ id: `role-${key}`, key, name, description, builtin: true, permissions, based_on: null })
+export function roles(): MockRole[] {
+  return [
+    builtin('owner', 'Owner', 'Everything, including the workspace itself and who owns it.', ALL.filter(k => k !== 'portal.quotes')),
+    builtin('admin', 'Admin', 'Runs the workspace: people, roles, settings and agents.', ALL.filter(k => k !== 'portal.quotes' && k !== 'workspace.manage')),
+    builtin('member', 'Member', 'Does the work: tickets, knowledge, quotes and hours.', MEMBER),
+    builtin('viewer', 'Viewer', 'Reads everything, changes nothing.', ['nodes.read', 'knowledge.read', 'quotes.read', 'members.read']),
+    builtin('guest', 'Guest', 'An outside collaborator on the projects they are given.', ['nodes.read', 'nodes.write', 'comments.write', 'knowledge.read']),
+    builtin('customer', 'Customer', 'A client in the portal: their own quotes.', ['portal.quotes']),
+    { id: 'role-lead', key: 'delivery-lead', name: 'Delivery lead', description: 'A member who also approves hours and issues quotes.', builtin: false, permissions: [...MEMBER, 'hours.approve', 'quotes.write', 'quotes.issue'], based_on: 'role-member' },
+  ]
+}
+const ref = (role: MockRole) => ({ id: role.id, key: role.key, name: role.name })
+
+export interface AccessWorld {
+  me: string
+  roles: MockRole[]
+  people: { principal_id: string; name: string; avatar_url: string | null; email: string | null; status: 'active' | 'deactivated'; identity: 'inspr_id' | null; workspace_role: string | null; aliases: { principal_id: string; name: string; source: 'classic' }[]; classic_role: string | null; last_active_at: string | null }[]
+  agents: { principal_id: string; name: string; workspace_role: string | null; last_seen_at: string | null; service: boolean }[]
+  imported: { principal_id: string; name: string; classic_role: string | null }[]
+  bindings: { principal_id: string; project_id: string; role_id: string }[]
+  invites: { id: string; email: string; workspace_role: string | null; project_roles: { project_id: string; role_id: string }[]; status: 'pending' | 'expired' | 'revoked' | 'accepted'; created_by: string; created_at: string; expires_at: string }[]
+  keys: { id: string; principal_id: string; name: string; prefix: string; scopes: string[]; created_at: string; expires_at: string | null; last_used_at: string | null; revoked_at: string | null }[]
+  events: { id: number; actor_principal_id: string; type: string; before: unknown; after: unknown; at: string }[]
+  projects: Record<string, { key: string; title: string }>
+  calls: { method: string; path: string; body: unknown }[]
+  available: boolean
+}
+export function accessWorld(options: { role?: 'owner' | 'admin' | 'member' | 'viewer' | 'guest'; secondOwner?: boolean; available?: boolean } = {}): AccessWorld {
+  const role = (key: string) => `role-${key}`
+  const world: AccessWorld = {
+    me: ME,
+    roles: roles(),
+    people: [
+      { principal_id: ME, name: 'Markus Barta', avatar_url: null, email: 'markus@barta.com', status: 'active', identity: 'inspr_id', workspace_role: role(options.role ?? 'owner'), aliases: [{ principal_id: MBA_CLASSIC, name: 'mba (classic)', source: 'classic' }], classic_role: 'super_admin', last_active_at: ago(0.1) },
+      { principal_id: MIRA, name: 'Mira Holm', avatar_url: null, email: 'mira@inspr.at', status: 'active', identity: 'inspr_id', workspace_role: options.secondOwner ? role('owner') : role('admin'), aliases: [], classic_role: 'admin', last_active_at: ago(3) },
+      { principal_id: JONAS, name: 'Jonas Weber', avatar_url: null, email: 'jonas@inspr.at', status: 'active', identity: 'inspr_id', workspace_role: role('member'), aliases: [], classic_role: 'member', last_active_at: ago(26) },
+      { principal_id: LENA, name: 'Lena Graf', avatar_url: null, email: 'lena@agentur-k.at', status: 'active', identity: null, workspace_role: null, aliases: [], classic_role: 'external', last_active_at: ago(24 * 4) },
+      { principal_id: PAUL, name: 'Paul Steiner', avatar_url: null, email: 'paul@inspr.at', status: 'deactivated', identity: 'inspr_id', workspace_role: role('viewer'), aliases: [], classic_role: 'member', last_active_at: ago(24 * 40) },
+      { principal_id: CLEO, name: 'Cleo Customer', avatar_url: null, email: 'cleo@hofer.at', status: 'active', identity: null, workspace_role: role('customer'), aliases: [], classic_role: null, last_active_at: ago(24 * 9) },
+    ],
+    agents: [
+      { principal_id: COORDINATOR, name: 'aeon-coordinator', workspace_role: role('member'), last_seen_at: ago(0.5), service: false },
+      { principal_id: DEPLOYER, name: 'pharos-deployer', workspace_role: role('viewer'), last_seen_at: ago(30), service: false },
+      { principal_id: SYSTEM, name: 'System', workspace_role: null, last_seen_at: ago(0.2), service: true },
+    ],
+    imported: [
+      { principal_id: JW_CLASSIC, name: 'jw (classic)', classic_role: 'member' },
+      { principal_id: AGENTUR_CLASSIC, name: 'agentur-k (classic)', classic_role: 'external' },
+    ],
+    bindings: [
+      { principal_id: JONAS, project_id: 'p-pharos', role_id: 'role-lead' },
+      { principal_id: LENA, project_id: 'p-pharos', role_id: role('guest') },
+      { principal_id: LENA, project_id: 'p-aeon', role_id: role('guest') },
+    ],
+    invites: [
+      { id: 'inv-1', email: 'anna@studio.at', workspace_role: role('member'), project_roles: [{ project_id: 'p-pharos', role_id: 'role-lead' }], status: 'pending', created_by: MIRA, created_at: ago(20), expires_at: ago(-24 * 13) },
+      { id: 'inv-2', email: 'ben@agentur-k.at', workspace_role: null, project_roles: [{ project_id: 'p-aeon', role_id: role('guest') }], status: 'expired', created_by: ME, created_at: ago(24 * 20), expires_at: ago(24 * 6) },
+      { id: 'inv-3', email: 'old@inspr.at', workspace_role: role('viewer'), project_roles: [], status: 'revoked', created_by: ME, created_at: ago(24 * 30), expires_at: ago(24 * 16) },
+      { id: 'inv-4', email: 'jonas@inspr.at', workspace_role: role('member'), project_roles: [], status: 'accepted', created_by: ME, created_at: ago(24 * 60), expires_at: ago(24 * 46) },
+    ],
+    keys: [
+      { id: 'k1', principal_id: COORDINATOR, name: 'aeon-coordinator', prefix: 'c0or', scopes: [], created_at: ago(24 * 3), expires_at: null, last_used_at: ago(0.5), revoked_at: null },
+      { id: 'k2', principal_id: DEPLOYER, name: 'pharos-deployer', prefix: 'ph4r', scopes: ['nodes.read'], created_at: ago(24 * 11), expires_at: '2026-12-31T00:00:00Z', last_used_at: null, revoked_at: null },
+      { id: 'k3', principal_id: DEPLOYER, name: 'pharos-deployer', prefix: 'ph0l', scopes: [], created_at: ago(24 * 50), expires_at: null, last_used_at: ago(24 * 49), revoked_at: ago(24 * 48) },
+    ],
+    events: [],
+    projects: { 'p-pharos': { key: 'PHAROS', title: 'Pharos' }, 'p-aeon': { key: 'AEON', title: 'Aeon' }, 'p-glint': { key: 'GLINT', title: 'Glint' }, 'p-frozen': { key: 'PRJ-26', title: 'Studio infrastructure' } },
+    calls: [],
+    available: options.available ?? true,
+  }
+  // A history to read: oldest first, like the event log.
+  const e = (hours: number, actor: string, type: string, before: unknown, after: unknown) => world.events.push({ id: world.events.length + 1, actor_principal_id: actor, type, before, after, at: ago(hours) })
+  const r = (id: string) => ref(world.roles.find(x => x.id === id)!)
+  e(24 * 60, ME, 'invite.created', null, { id: 'inv-4', email: 'jonas@inspr.at' })
+  e(24 * 59, JONAS, 'invite.accepted', null, { id: 'inv-4', email: 'jonas@inspr.at', principal_id: JONAS })
+  e(24 * 40, ME, 'principal.deactivated', null, { principal_id: PAUL })
+  e(24 * 30, ME, 'role.created', null, { id: 'role-lead', name: 'Delivery lead', permissions: world.roles.find(x => x.id === 'role-lead')!.permissions })
+  e(24 * 11, ME, 'agent_key.created', null, { id: 'k2', principal_id: DEPLOYER, name: 'pharos-deployer', prefix: 'ph4r' })
+  e(24 * 5, MIRA, 'binding.set', null, { principal_id: LENA, scope: 'project', project_id: 'p-aeon', role: r('role-guest') })
+  e(26, MIRA, 'binding.set', { principal_id: JONAS, scope: 'project', project_id: 'p-pharos', role: r('role-member') }, { principal_id: JONAS, scope: 'project', project_id: 'p-pharos', role: r('role-lead') })
+  e(20, MIRA, 'invite.created', null, { id: 'inv-1', email: 'anna@studio.at' })
+  e(2, ME, 'principal.alias_linked', null, { principal_id: ME, from_principal_id: MBA_CLASSIC })
+  return world
+}
+
+const has = (world: AccessWorld, principal: string, permission: string) => {
+  const person = world.people.find(p => p.principal_id === principal)
+  const role = world.roles.find(r => r.id === person?.workspace_role)
+  return person?.status === 'active' && !!role?.permissions.includes(permission)
+}
+const mine = (world: AccessWorld) => new Set(world.roles.find(r => r.id === world.people.find(p => p.principal_id === world.me)?.workspace_role)?.permissions ?? [])
+
+export async function mockAccess(page: Page, world: AccessWorld) {
+  let nextId = 1000
+  const event = (type: string, before: unknown, after: unknown) => world.events.push({ id: world.events.length + 1, actor_principal_id: world.me, type, before, after, at: new Date(now + world.events.length * 1000).toISOString() })
+  const fail = (route: Route, status: number, code: string, reason: string, field?: string) => route.fulfill({ status, json: { error: reason, code, reason, ...(field ? { field } : {}) } })
+  const roleRef = (id: string | null) => { const role = world.roles.find(r => r.id === id); return role ? ref(role) : null }
+  const projectRoles = (principal: string) => world.bindings.filter(b => b.principal_id === principal).map(b => ({ project_id: b.project_id, project_key: world.projects[b.project_id]?.key ?? '', project_title: world.projects[b.project_id]?.title ?? '', role: roleRef(b.role_id)! }))
+  const person = (p: AccessWorld['people'][number]) => ({ ...p, workspace_role: roleRef(p.workspace_role), project_roles: projectRoles(p.principal_id) })
+  const agent = (a: AccessWorld['agents'][number]) => ({ ...a, workspace_role: roleRef(a.workspace_role), key_count: world.keys.filter(k => k.principal_id === a.principal_id && !k.revoked_at).length })
+  const invite = (i: AccessWorld['invites'][number]) => ({ ...i, workspace_role: roleRef(i.workspace_role), project_roles: i.project_roles.map(pr => ({ project_id: pr.project_id, project_key: world.projects[pr.project_id]?.key ?? '', project_title: world.projects[pr.project_id]?.title ?? '', role: roleRef(pr.role_id)! })) })
+  const role = (r: MockRole) => ({ ...r, member_count: world.people.filter(p => p.workspace_role === r.id).length + world.agents.filter(a => a.workspace_role === r.id).length + world.bindings.filter(b => b.role_id === r.id).length })
+  const activeOwners = () => world.people.filter(p => p.status === 'active' && p.workspace_role === 'role-owner')
+  const lastOwner = (id: string) => { const p = world.people.find(x => x.principal_id === id); return p?.workspace_role === 'role-owner' && p.status === 'active' && activeOwners().length === 1 }
+  const LAST = 'The last active owner cannot be demoted, deactivated or removed.'
+
+  await page.route(/\/api\/(me\/permissions|authz\/permissions|roles|members|audit|agent-keys|projects\/[^/]+\/members)(\/|\?|$)/, async route => {
+    const request = route.request(), url = new URL(request.url()), path = url.pathname, method = request.method()
+    let body: Record<string, unknown> = {}
+    try { body = (request.postDataJSON() as Record<string, unknown>) ?? {} } catch { body = {} }
+    world.calls.push({ method, path: `${path}${url.search}`, body })
+    if (path === '/api/me/permissions' && !world.available) return route.fulfill({ status: 404, json: { error: 'not found' } })
+    if (!world.available) return route.fulfill({ status: 404, json: { error: 'not found' } })
+    const need = (permission: string) => has(world, world.me, permission)
+    if (path === '/api/me/permissions') {
+      const me = world.people.find(p => p.principal_id === world.me)!
+      const projectId = url.searchParams.get('project_id')
+      const binding = projectId ? world.bindings.find(b => b.principal_id === world.me && b.project_id === projectId) : undefined
+      return route.fulfill({ json: {
+        workspace: { role: roleRef(me.workspace_role), permissions: me.status === 'active' ? [...mine(world)] : [] },
+        project: projectId ? { id: projectId, role: roleRef(binding?.role_id ?? null), permissions: binding ? world.roles.find(r => r.id === binding.role_id)!.permissions : [] } : null,
+      } })
+    }
+    if (path === '/api/authz/permissions') return route.fulfill({ json: REGISTRY })
+    // ---------- Roles ----------
+    if (path === '/api/roles' && method === 'GET') return route.fulfill({ json: world.roles.map(role) })
+    const roleMatch = /^\/api\/roles(?:\/([^/]+))?$/.exec(path)
+    if (roleMatch) {
+      if (!need('roles.manage')) return fail(route, 403, 'forbidden', 'You need Manage roles to change roles.')
+      const name = typeof body.name === 'string' ? body.name.trim() : undefined
+      const permissions = Array.isArray(body.permissions) ? body.permissions as string[] : undefined
+      const escalation = (permissions ?? []).filter(key => !mine(world).has(key))
+      if (method === 'POST') {
+        if (!name) return fail(route, 400, 'invalid', 'A role needs a name.', 'name')
+        if (world.roles.some(r => r.name.toLowerCase() === name.toLowerCase())) return fail(route, 409, 'name_taken', `There is already a role called “${name}”.`, 'name')
+        if (escalation.length) return fail(route, 403, 'escalation', `You cannot grant permissions you do not hold: ${escalation.join(', ')}.`, 'permissions')
+        const created: MockRole = { id: `role-custom-${nextId++}`, key: name.toLowerCase().replace(/[^a-z0-9]+/g, '-'), name, description: String(body.description ?? ''), builtin: false, permissions: permissions ?? [], based_on: (body.based_on as string | undefined) ?? null }
+        world.roles.push(created)
+        event('role.created', null, { id: created.id, name, permissions: created.permissions })
+        return route.fulfill({ status: 201, json: role(created) })
+      }
+      const target = world.roles.find(r => r.id === roleMatch[1])
+      if (!target) return fail(route, 404, 'not_found', 'This role no longer exists.')
+      if (target.builtin) return fail(route, 409, 'builtin', 'Built-in roles cannot be changed; duplicate one to customize it.')
+      if (method === 'PATCH') {
+        if (name !== undefined && !name) return fail(route, 400, 'invalid', 'A role needs a name.', 'name')
+        if (name && world.roles.some(r => r.id !== target.id && r.name.toLowerCase() === name.toLowerCase())) return fail(route, 409, 'name_taken', `There is already a role called “${name}”.`, 'name')
+        if (escalation.length) return fail(route, 403, 'escalation', `You cannot grant permissions you do not hold: ${escalation.join(', ')}.`, 'permissions')
+        const before = { ...target, permissions: [...target.permissions] }
+        if (name) target.name = name
+        if (typeof body.description === 'string') target.description = body.description
+        if (permissions) target.permissions = permissions
+        event('role.updated', { id: before.id, name: before.name, permissions: before.permissions }, { id: target.id, name: target.name, permissions: target.permissions })
+        return route.fulfill({ json: role(target) })
+      }
+      if (method === 'DELETE') {
+        const inUse = role(target).member_count > 0
+        const reassign = url.searchParams.get('reassign_to')
+        if (inUse && !reassign) return fail(route, 409, 'in_use', 'This role is in use; choose a role for its people first.', 'reassign_to')
+        if (reassign) {
+          for (const p of world.people) if (p.workspace_role === target.id) p.workspace_role = reassign
+          for (const a of world.agents) if (a.workspace_role === target.id) a.workspace_role = reassign
+          for (const b of world.bindings) if (b.role_id === target.id) b.role_id = reassign
+        }
+        world.roles.splice(world.roles.indexOf(target), 1)
+        event('role.deleted', { id: target.id, name: target.name }, reassign ? { reassigned_to: roleRef(reassign) } : null)
+        return route.fulfill({ status: 204 })
+      }
+    }
+    // ---------- Members ----------
+    if (path === '/api/members' && method === 'GET') {
+      if (!need('members.read')) return fail(route, 403, 'forbidden', 'You need See members to see who is here.')
+      return route.fulfill({ json: { people: world.people.map(person), agents: world.agents.map(agent), invites: world.invites.map(invite), imported: world.imported } })
+    }
+    const roleOf = /^\/api\/members\/([^/]+)\/workspace-role$/.exec(path)
+    if (roleOf && method === 'PUT') {
+      if (!need('members.manage')) return fail(route, 403, 'forbidden', 'You need Manage members to change roles.')
+      const id = roleOf[1], next = (body.role_id as string | null) ?? null
+      const target = world.people.find(p => p.principal_id === id) ?? world.agents.find(a => a.principal_id === id)
+      if (!target) return fail(route, 404, 'not_found', 'This person is no longer here.')
+      if (lastOwner(id) && next !== 'role-owner') return fail(route, 409, 'last_owner', LAST, 'role_id')
+      const beyond = world.roles.find(r => r.id === next)?.permissions.filter(k => !mine(world).has(k)) ?? []
+      if (beyond.length) return fail(route, 403, 'escalation', 'You cannot give a role with permissions you do not hold.', 'role_id')
+      const before = roleRef(target.workspace_role)
+      target.workspace_role = next
+      event(next ? 'binding.set' : 'binding.removed', { principal_id: id, scope: 'workspace', role: before }, next ? { principal_id: id, scope: 'workspace', role: roleRef(next) } : null)
+      return route.fulfill({ json: 'service' in target ? agent(target) : person(target) })
+    }
+    const lifecycle = /^\/api\/members\/([^/]+)\/(deactivate|reactivate)$/.exec(path)
+    if (lifecycle && method === 'POST') {
+      if (!need('members.manage')) return fail(route, 403, 'forbidden', 'You need Manage members to deactivate people.')
+      const target = world.people.find(p => p.principal_id === lifecycle[1])
+      if (!target) return fail(route, 404, 'not_found', 'This person is no longer here.')
+      if (lifecycle[2] === 'deactivate') {
+        if (lastOwner(target.principal_id)) return fail(route, 409, 'last_owner', LAST)
+        target.status = 'deactivated'
+        event('principal.deactivated', null, { principal_id: target.principal_id })
+      } else {
+        target.status = 'active'
+        event('principal.reactivated', null, { principal_id: target.principal_id })
+      }
+      return route.fulfill({ json: person(target) })
+    }
+    const alias = /^\/api\/members\/([^/]+)\/aliases(?:\/([^/]+))?$/.exec(path)
+    if (alias) {
+      if (!need('members.manage')) return fail(route, 403, 'forbidden', 'You need Manage members to link identities.')
+      const target = world.people.find(p => p.principal_id === alias[1])
+      if (!target) return fail(route, 404, 'not_found', 'This person is no longer here.')
+      if (method === 'POST') {
+        const from = world.imported.find(i => i.principal_id === body.from_principal_id)
+        if (!from) return fail(route, 409, 'linked', 'This identity is already linked to someone.', 'from_principal_id')
+        world.imported.splice(world.imported.indexOf(from), 1)
+        target.aliases.push({ principal_id: from.principal_id, name: from.name, source: 'classic' })
+        event('principal.alias_linked', null, { principal_id: target.principal_id, from_principal_id: from.principal_id })
+        return route.fulfill({ json: person(target) })
+      }
+      if (method === 'DELETE') {
+        const index = target.aliases.findIndex(a => a.principal_id === alias[2])
+        if (index === -1) return fail(route, 404, 'not_found', 'This identity is not linked here.')
+        const [gone] = target.aliases.splice(index, 1)
+        world.imported.push({ principal_id: gone.principal_id, name: gone.name, classic_role: null })
+        event('principal.alias_unlinked', null, { principal_id: target.principal_id, from_principal_id: gone.principal_id })
+        return route.fulfill({ status: 204 })
+      }
+    }
+    if (path === '/api/members/invites' && method === 'POST') {
+      if (!need('members.manage')) return fail(route, 403, 'forbidden', 'You need Manage members to invite people.')
+      const email = String(body.email ?? '').trim().toLowerCase()
+      if (!/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(email)) return fail(route, 400, 'invalid', 'Enter an email address like name@example.com.', 'email')
+      if (world.people.some(p => p.email === email && p.status === 'active')) return fail(route, 409, 'member', `${email} is already a member of this workspace.`, 'email')
+      if (world.invites.some(i => i.email === email && i.status === 'pending')) return fail(route, 409, 'pending', `There is already a pending invite for ${email}. Revoke it first to send a new link.`, 'email')
+      const days = Number(body.expires_in_days ?? 14)
+      if (!(days >= 1 && days <= 90)) return fail(route, 400, 'invalid', 'An invite can last from 1 to 90 days.', 'expires_in_days')
+      const created = { id: `inv-${nextId++}`, email, workspace_role: (body.workspace_role_id as string | undefined) ?? null, project_roles: (body.project_roles as { project_id: string; role_id: string }[] | undefined) ?? [], status: 'pending' as const, created_by: world.me, created_at: new Date(now).toISOString(), expires_at: new Date(now + days * 86_400_000).toISOString() }
+      world.invites.unshift(created)
+      event('invite.created', null, { id: created.id, email })
+      return route.fulfill({ status: 201, json: { invite: invite(created), join_url: `https://aeon.inspr.at/join/tok_${created.id}_s3cr3t` } })
+    }
+    const inviteMatch = /^\/api\/members\/invites\/([^/]+)$/.exec(path)
+    if (inviteMatch && method === 'DELETE') {
+      if (!need('members.manage')) return fail(route, 403, 'forbidden', 'You need Manage members to revoke invites.')
+      const target = world.invites.find(i => i.id === inviteMatch[1])
+      if (!target || target.status !== 'pending') return fail(route, 409, 'not_pending', 'Only a pending invite can be revoked.')
+      target.status = 'revoked'
+      event('invite.revoked', null, { id: target.id, email: target.email })
+      return route.fulfill({ status: 204 })
+    }
+    // ---------- Project members ----------
+    const project = /^\/api\/projects\/([^/]+)\/members(?:\/([^/]+))?$/.exec(path)
+    if (project) {
+      const projectId = project[1]
+      if (method === 'GET') {
+        if (!need('members.read')) return fail(route, 403, 'forbidden', 'You need See members.')
+        const out: unknown[] = []
+        for (const p of world.people.filter(x => x.status === 'active')) {
+          const ws = world.roles.find(r => r.id === p.workspace_role)
+          if (ws?.permissions.includes('nodes.read')) out.push({ principal_id: p.principal_id, name: p.name, avatar_url: null, kind: 'person', via: 'workspace', role: ref(ws) })
+        }
+        for (const a of world.agents.filter(x => !x.service)) {
+          const ws = world.roles.find(r => r.id === a.workspace_role)
+          if (ws?.permissions.includes('nodes.read')) out.push({ principal_id: a.principal_id, name: a.name, avatar_url: null, kind: 'agent', via: 'workspace', role: ref(ws) })
+        }
+        for (const b of world.bindings.filter(x => x.project_id === projectId)) {
+          const who = world.people.find(p => p.principal_id === b.principal_id) ?? world.agents.find(a => a.principal_id === b.principal_id)
+          if (who) out.push({ principal_id: b.principal_id, name: who.name, avatar_url: null, kind: 'service' in who ? 'agent' : 'person', via: 'project', role: roleRef(b.role_id) })
+        }
+        return route.fulfill({ json: out })
+      }
+      if (!need('members.manage')) return fail(route, 403, 'forbidden', 'You need Manage members on this project.')
+      const principal = project[2]!
+      const existing = world.bindings.find(b => b.project_id === projectId && b.principal_id === principal)
+      if (method === 'PUT') {
+        const roleId = String(body.role_id ?? '')
+        const target = world.roles.find(r => r.id === roleId)
+        if (!target) return fail(route, 400, 'invalid', 'Choose a role.', 'role_id')
+        if (target.permissions.some(k => !mine(world).has(k))) return fail(route, 403, 'escalation', 'You cannot give a role with permissions you do not hold.', 'role_id')
+        const before = existing ? roleRef(existing.role_id) : null
+        if (existing) existing.role_id = roleId; else world.bindings.push({ principal_id: principal, project_id: projectId, role_id: roleId })
+        event('binding.set', before ? { principal_id: principal, scope: 'project', project_id: projectId, role: before } : null, { principal_id: principal, scope: 'project', project_id: projectId, role: roleRef(roleId) })
+        return route.fulfill({ json: { principal_id: principal, project_id: projectId, role: roleRef(roleId) } })
+      }
+      if (method === 'DELETE') {
+        if (!existing) return fail(route, 404, 'not_found', 'This person has no role on this project.')
+        world.bindings.splice(world.bindings.indexOf(existing), 1)
+        event('binding.removed', { principal_id: principal, scope: 'project', project_id: projectId, role: roleRef(existing.role_id) }, null)
+        return route.fulfill({ status: 204 })
+      }
+    }
+    // ---------- Audit ----------
+    if (path === '/api/audit') {
+      if (!need('audit.read')) return fail(route, 403, 'forbidden', 'You need Read the access log.')
+      const after = Number(url.searchParams.get('after') ?? 0)
+      const items = [...world.events].reverse().filter(e => !after || e.id < after)
+      const page = items.slice(0, 50)
+      return route.fulfill({ json: { items: page, next_after: items.length > 50 ? page.at(-1)!.id : null } })
+    }
+    // ---------- Agent keys ----------
+    if (path === '/api/agent-keys' && method === 'GET') return route.fulfill({ json: { keys: world.keys } })
+    if (path === '/api/agent-keys' && method === 'POST') {
+      if (!need('keys.manage')) return fail(route, 403, 'forbidden', 'You need Manage agent keys.')
+      const agentRow = world.agents.find(a => a.name === body.name)
+      if (agentRow?.service) return fail(route, 403, 'service', 'Service principals never get keys.', 'name')
+      const prefix = `n${String(nextId++).slice(-3)}`
+      const key = { id: `k-${prefix}`, principal_id: agentRow?.principal_id ?? `agent-${prefix}`, name: String(body.name), prefix, scopes: [], created_at: new Date(now).toISOString(), expires_at: (body.expires_at as string | undefined) ?? null, last_used_at: null, revoked_at: null }
+      world.keys.unshift(key)
+      event('agent_key.created', null, { id: key.id, principal_id: key.principal_id, name: key.name, prefix })
+      return route.fulfill({ status: 201, json: { id: key.id, token: `aeon_${prefix}_T0k3nS3cr3tValue`, prefix, name: key.name, expires_at: key.expires_at } })
+    }
+    const keyMatch = /^\/api\/agent-keys\/([^/]+)$/.exec(path)
+    if (keyMatch && method === 'DELETE') {
+      const key = world.keys.find(k => k.id === keyMatch[1])
+      if (!key) return fail(route, 404, 'not_found', 'No such key.')
+      key.revoked_at = new Date(now).toISOString()
+      event('agent_key.revoked', null, { id: key.id, principal_id: key.principal_id, name: key.name, prefix: key.prefix })
+      return route.fulfill({ status: 204 })
+    }
+    return route.fallback()
+  })
+}

@@ -18,15 +18,16 @@ import AppIcon from './AppIcon.vue'
 // Agents keep the robot glyph. Decorative unless given a label, since a name
 // sits beside it almost everywhere.
 const props = withDefaults(defineProps<{
-  id?: string | null; name: string; size?: number; kind?: 'person' | 'agent'; label?: string
-}>(), { id: null, size: 24, kind: 'person', label: undefined })
+  id?: string | null; name: string; size?: number; kind?: 'person' | 'agent'; label?: string; picture?: boolean
+}>(), { id: null, size: 24, kind: 'person', label: undefined, picture: true })
 const me = useProfile()
 const mine = computed(() => !!props.id && props.id === me.id)
 const hashes = computed(() => mine.value ? me.profile?.avatar_hashes ?? {} : {})
 const letters = computed(() => mine.value && me.profile?.initials ? me.profile.initials : nameInitials(props.name))
 const color = computed(() => mine.value ? me.color : avatarColor(props.id ?? props.name))
 // My own picture is asked for only when my profile says there is one.
-const wanted = computed(() => props.kind === 'person' && !!props.id && !missing.has(props.id) && (!mine.value || me.hasPicture))
+// picture false: the caller knows there is none (the members list says so).
+const wanted = computed(() => props.kind === 'person' && props.picture && !!props.id && !missing.has(props.id) && (!mine.value || me.hasPicture))
 const sources = computed(() => props.id ? avatarSources(props.id, props.size, hashes.value) : null)
 const loaded = ref(false)
 watch(() => sources.value?.src, () => { loaded.value = false })

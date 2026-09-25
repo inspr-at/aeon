@@ -20,6 +20,7 @@ import { domAudit, expectedMockConsole, decorativeVersionContrast, installLayout
 import { mockQuoteEditor, QUOTE_ID } from './quote-inspector-fixtures'
 import { knowledgeWorld, mockKnowledge } from './knowledge-fixtures'
 import { groupsWorld, mockProjectGroups } from './project-groups-fixtures'
+import { ME as ACCESS_ME, accessWorld, mockAccess } from './access-fixtures'
 
 type Finding = Raw & { id: string; route: string; state: string; viewport: string; theme: string; screenshot: string }
 type Setup = 'default' | 'editor' | 'journey' | 'public' | 'signed-out' | 'groups' | 'cards' | 'views'
@@ -105,6 +106,16 @@ const scenarios: Scenario[] = [
   // U22: the view bar with an own view that has changes (Save) and a shared one.
   { state: 'project saved views', route: `/p/PHAROS?priority=high,medium&v=${AUDIT_VIEW}`, setup: 'views', act: visible('.view-bar .changes .save') },
   { state: 'projects selection', route: '/', setup: 'cards', act: async page => { await visible('.card')(page); await page.locator('.card-link').first().focus(); await page.keyboard.press('x'); await expect(page.getByRole('toolbar', { name: /selected project/ })).toBeVisible() } },
+  // AEON-148: Settings -> Access on the mocked authz contract.
+  { state: 'access people', route: '/settings/access/people', act: visible('table.people') },
+  { state: 'access role picker', route: '/settings/access/people', act: async page => { await visible('table.people')(page); await page.getByRole('button', { name: /Workspace role of Jonas Weber/ }).click(); await page.getByRole('radio', { name: /^Admin/ }).click() } },
+  { state: 'access person', route: `/settings/access/people/${ACCESS_ME}`, act: async page => { await expect(page.getByRole('dialog', { name: /, access$/ })).toBeVisible() } },
+  { state: 'access invite', route: '/settings/access/invites', act: async page => { await visible('.invites')(page); await page.getByRole('button', { name: 'Invite people' }).click(); await expect(page.getByRole('dialog', { name: 'Invite people' })).toBeVisible() } },
+  { state: 'access roles', route: '/settings/access/roles', act: visible('.roles') },
+  { state: 'access role composer', route: '/settings/access/roles/new?from=role-member', act: visible('.perm') },
+  { state: 'access project', route: '/settings/access/projects/p-pharos', act: visible('.members') },
+  { state: 'access agents', route: '/settings/access/agents', act: visible('.agents') },
+  { state: 'access log', route: '/settings/access/audit', act: visible('.event') },
 ]
 
 async function installMocks(page: Page, setup: Setup) {
@@ -140,6 +151,7 @@ async function installMocks(page: Page, setup: Setup) {
   await mockKnowledge(page, knowledgeWorld())
   await mockReleases(page, history)
   if (setup === 'editor') await mockQuoteEditor(page)
+  await mockAccess(page, accessWorld())
 }
 
 

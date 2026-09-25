@@ -10,8 +10,7 @@ import { toast } from '../lib/toast'
 import { useAgents, type HeldRequest, type SessionView } from '../stores/agents'
 import { useProjects } from '../stores/projects'
 import { useSession } from '../stores/session'
-import { isTenantAdmin } from '../components/business/catalog'
-import { settingsLink } from '../lib/settings'
+import { can } from '../lib/authz'
 import AppIcon from '../components/AppIcon.vue'
 import AccountsCard from '../components/agents/AccountsCard.vue'
 import ApprovalQueue from '../components/agents/ApprovalQueue.vue'
@@ -211,7 +210,7 @@ watch(sessionId, id => { if (id) cursor.value = `s:${id}` }, { immediate: true }
         <p class="summary"><span v-if="summary">{{ summary }}</span><span v-else class="skeleton summary-skeleton" /></p>
       </div>
       <div class="head-side">
-        <RouterLink v-if="isTenantAdmin(session.identity)" class="context-link" :to="settingsLink('workspace', 'agent-keys')">Agent keys<AppIcon name="arrow" :size="13" /></RouterLink>
+        <RouterLink v-if="can('keys.manage')" class="context-link" to="/settings/access/agents">Agent keys<AppIcon name="arrow" :size="13" /></RouterLink>
         <p class="live" :class="{ on: live }" :data-tip="live ? 'Updates arrive as they happen' : 'Refreshing every 20 seconds'">
           <span class="live-mark" aria-hidden="true" />{{ live ? 'Live' : 'Polling' }}
         </p>

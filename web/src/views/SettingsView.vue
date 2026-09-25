@@ -10,20 +10,28 @@ import BusinessSection from '../components/settings/BusinessSection.vue'
 import PersonalSection from '../components/settings/PersonalSection.vue'
 import ProjectsSection from '../components/settings/ProjectsSection.vue'
 import WorkspaceSection from '../components/settings/WorkspaceSection.vue'
+import AccessSection from '../components/access/AccessSection.vue'
 import { SETTINGS_SECTIONS, sectionOf, visibleSections, type SectionId } from '../lib/settings'
+import { can, loadPermissions, permissionsLoaded } from '../lib/authz'
 import { useSession } from '../stores/session'
 
-// Settings: Personal for everyone; Workspace, Business and Projects for admins.
+// Settings: Personal for everyone; Workspace, Business and Projects for admins;
+// Access for whoever may see the members (can('members.read')).
 // /settings/<section>#<card> deep-links to one card, which is ringed on arrival.
 const route = useRoute()
 const session = useSession()
 const admin = computed(() => isTenantAdmin(session.identity))
-const sections = computed(() => visibleSections(admin.value))
+const sections = computed(() => visibleSections(admin.value, permission => can(permission)))
 const current = computed(() => sectionOf(route.params.section))
 const meta = computed(() => SETTINGS_SECTIONS.find(section => section.id === current.value)!)
-const allowed = computed(() => !meta.value.admin || admin.value)
-const VIEW: Record<SectionId, Component> = { personal: PersonalSection, workspace: WorkspaceSection, business: BusinessSection, projects: ProjectsSection }
-const ICON: Record<SectionId, BizIconName> = { personal: 'user', workspace: 'users', business: 'briefcase', projects: 'layers' }
+const allowed = computed(() => meta.value.permission ? can(meta.value.permission) : !meta.value.admin || admin.value)
+// A permission-gated section waits for my permissions before it says no.
+const deciding = computed(() => !!meta.value.permission && !permissionsLoaded.value)
+// Which sections show depends on my permissions: the layout waits for them, so
+// the nav never re-flows under the pointer (usually a few milliseconds).
+void loadPermissions()
+const VIEW: Record<SectionId, Component> = { personal: PersonalSection, workspace: WorkspaceSection, access: AccessSection, business: BusinessSection, projects: ProjectsSection }
+const ICON: Record<SectionId, BizIconName> = { personal: 'user', workspace: 'folder', access: 'users', business: 'briefcase', projects: 'layers' }
 
 // A deep link scrolls to its card once the section has rendered it.
 let arrival: ReturnType<typeof setTimeout> | undefined
@@ -46,27 +54,29 @@ watch(() => [current.value, route.hash] as const, async ([, hash]) => {
 </script>
 
 <template>
-  <section class="settings-page" aria-labelledby="settings-title">
+  <section class="settings-page" :class="{ wide: current === 'access' }" aria-labelledby="settings-title">
     <header class="page-head">
       <p class="eyebrow">{{ session.identity?.tenant.name ?? 'Workspace' }}</p>
       <h1 id="settings-title">Settings</h1>
       <p class="summary">{{ admin ? 'Your own preferences, and the workspace’s for admins.' : 'Your own preferences.' }}</p>
     </header>
     <!-- One grid for everyone: with only Personal to show, the nav still holds its column. -->
-    <div class="layout" :class="{ single: sections.length < 2 }">
+    <div v-if="!permissionsLoaded" class="layout waiting" role="status" aria-label="Loading settings"><span class="skeleton nav-skeleton" /><span class="skeleton body-skeleton" /></div>
+    <div v-else class="layout" :class="{ single: sections.length < 2 }">
       <nav class="section-nav" aria-label="Settings sections">
         <RouterLink v-for="section in sections" :key="section.id" :to="`/settings/${section.id}`" class="section-link" :aria-current="section.id === current ? 'page' : undefined">
           <span class="link-icon" aria-hidden="true"><BizIcon :name="ICON[section.id]" :size="15" /></span>
           <span class="link-text"><span class="link-label">{{ section.label }}</span><span class="link-summary">{{ section.summary }}</span></span>
-          <span v-if="section.admin" class="admin-mark" role="img" aria-label="Admins only" data-tip="Only workspace admins see this"><AppIcon name="shield" :size="12" /></span>
+          <span v-if="section.admin && !section.permission" class="admin-mark" role="img" aria-label="Admins only" data-tip="Only workspace admins see this"><AppIcon name="shield" :size="12" /></span>
         </RouterLink>
       </nav>
       <div class="body">
         <component :is="VIEW[current]" v-if="allowed" :key="current" />
+        <div v-else-if="deciding" class="set-skeleton" role="status" aria-label="Loading"><span class="skeleton" /><span class="skeleton" /></div>
         <div v-else class="gate glass-card">
           <span class="gate-icon"><AppIcon name="shield" :size="18" /></span>
-          <h2>{{ meta.label }} settings are for workspace admins</h2>
-          <p>A workspace admin can change these. Your own settings are under Personal.</p>
+          <h2>{{ meta.permission ? `${meta.label} is for people who manage the workspace` : `${meta.label} settings are for workspace admins` }}</h2>
+          <p>{{ meta.permission ? 'Seeing who is in the workspace needs the See members permission. An admin can give it to you.' : 'A workspace admin can change these. Your own settings are under Personal.' }}</p>
           <RouterLink class="btn" to="/settings/personal">Personal settings</RouterLink>
         </div>
       </div>
@@ -76,6 +86,11 @@ watch(() => [current.value, route.hash] as const, async ([, hash]) => {
 
 <style scoped>
 .settings-page { width: 100%; max-width: 1180px; margin: 0 auto; padding: 22px 28px 40px; }
+/* Access holds wide tables: it may use the room of a wide screen. */
+.settings-page.wide { max-width: 1440px; }
+.waiting .skeleton { border-radius: 14px; }
+.nav-skeleton { height: 220px; }
+.body-skeleton { height: 320px; }
 .page-head { margin-bottom: 20px; }
 .page-head h1 { margin-top: 6px; }
 .summary { margin-top: 6px; font-size: 13.5px; color: var(--ink-2); }
