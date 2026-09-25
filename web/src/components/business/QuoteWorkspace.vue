@@ -15,6 +15,8 @@ import { branchQuote, duplicateQuote, finalizeQuote, getLink, getVersion, issueC
 import { statusOf } from '../../lib/quotes/list'
 import { getProfile, listProfiles, selectQuoteProfile, type QuoteProfile } from '../../lib/quotes/profile'
 import { readZoom, zoomPercent, type ZoomMode } from '../../lib/quotes/zoom'
+import { saveProblems, type SaveProblem } from '../../lib/quotes/saveProblems'
+import { downloadRecovery } from '../../lib/quoteRecovery'
 import type { QuoteDocumentData } from '../../lib/quotes/types'
 import { toast } from '../../lib/toast'
 import { useBusiness } from '../../stores/business'
@@ -88,7 +90,28 @@ async function loadPublicLink() {
   } catch { /* The document remains printable without a customer link. */ }
 }
 watch(() => [props.quoteId, projection.value?.current_version, projection.value?.state, admin.value], () => { void loadPublicLink() }, { immediate: true })
+// Work that is not on the server yet (leaving asks first; printing and issuing save it).
 const canSave = computed(() => view.value?.local === 'dirty' || view.value?.local === 'failed' || view.value?.local === 'offline')
+// Why the last save did not land, and what in the quote to fix (FX3's field reasons).
+const failure = computed(() => view.value?.local === 'failed' ? view.value.failure ?? null : null)
+const problems = computed<SaveProblem[]>(() => failure.value?.kind === 'invalid' ? saveProblems(failure.value.body, view.value?.working ?? null) : [])
+// The title bar's Save: ready only when saving can land. A refused document needs a
+// fix first, a newer draft a review; a passing failure or lost connection can retry.
+const saveReady = computed(() => {
+  const v = view.value
+  if (!v || viewing.value !== null || v.remote === 'newer' || v.review) return false
+  if (v.local === 'dirty' || v.local === 'offline') return true
+  return v.local === 'failed' && failure.value?.kind === 'server'
+})
+const saveHint = computed(() => {
+  const v = view.value
+  if (!v) return ''
+  if (v.local === 'failed' && failure.value?.kind === 'invalid') return 'Fix what the notice below names; the draft then saves by itself'
+  if (v.local === 'failed' && failure.value?.kind === 'forbidden') return 'This draft cannot be saved from here any more'
+  if (v.remote === 'newer' || v.review || v.local === 'conflict') return 'Review the newer draft first'
+  if (v.local === 'saving') return 'Saving…'
+  return 'Nothing to save'
+})
 const editable = computed(() => isDraft.value && viewing.value === null && !!view.value && view.value.local !== 'read-only' && view.value.local !== 'loading' && staff.value)
 // An older version picked in Details, the frozen current version once issued, else the draft.
 const versionDocs = shallowRef(new Map<number, QuoteVersion>())
@@ -172,8 +195,60 @@ function numericValid() {
   return false
 }
 function save() { if (numericValid()) void live.value?.session.save() }
-function useRecovery() { const quote = live.value; if (quote?.recovery.value) { quote.session.restore(quote.recovery.value); quote.recovery.value = null } }
+function retry() { if (numericValid()) void live.value?.session.retry() }
+// "Show" on a save problem: the section or position on the paper, or the field on the Document tab.
+function showProblem(problem: SaveProblem) {
+  const target = problem.target
+  if (!target) return
+  if ('section' in target) { jump(target.section); return }
+  if ('position' in target) {
+    const row = root.value?.querySelector<HTMLElement>(`[data-position-id="${CSS.escape(target.position)}"]`)
+    row?.scrollIntoView({ block: 'center', behavior: window.matchMedia('(prefers-reduced-motion: reduce)').matches ? 'auto' : 'smooth' })
+    row?.querySelector<HTMLElement>('input, [contenteditable="true"]')?.focus({ preventScroll: true })
+    return
+  }
+  openPane('format')
+  reveal.value = { tab: 'document', target: 'quote-this-quote', n: (reveal.value?.n ?? 0) + 1 }
+}
+const failureLead = computed(() => {
+  const f = failure.value
+  if (!f) return ''
+  if (f.kind === 'invalid') return problems.value.length ? (problems.value.length === 1 ? 'One part of this draft needs a fix before it can be saved.' : `${problems.value.length} parts of this draft need a fix before it can be saved.`) : `The server did not accept this draft${f.message ? `: ${f.message.replace(/\.$/, '')}` : ''}.`
+  if (f.kind === 'forbidden') return f.status === 401 ? 'Your sign-in has ended, so this draft could not be saved.' : 'You can no longer edit this draft.'
+  return 'The server could not save it just now.'
+})
+
+// ---------- Unsaved work from an earlier visit ----------
+// On a draft it can be restored. On an issued version it never goes onto the version
+// (that stays as issued): it can start the next version, or be downloaded or discarded.
+const canRevise = computed(() => admin.value && (status.value === 'issued' || status.value === 'expired' || status.value === 'accepted') && !projection.value?.archived)
+const nextVersion = computed(() => (projection.value?.current_version ?? 0) + 1)
+function useRecovery() { const quote = live.value; if (quote?.recovery.value && isDraft.value) { quote.session.restore(quote.recovery.value); quote.recovery.value = null } }
 async function useServer() { const quote = live.value; if (!quote) return; quote.recovery.value = null; await quote.session.reload(true) }
+async function discardRecovery() {
+  const quote = live.value
+  if (!quote?.recovery.value) return
+  quote.recovery.value = null
+  await quote.session.discardRecovery()
+  toast('Your unsaved work from before is discarded. The issued version is unchanged.')
+}
+function downloadWork() { const stored = live.value?.recovery.value; if (stored) downloadRecovery(stored) }
+async function reviseWithWork() {
+  const stored = live.value?.recovery.value
+  if (!stored || !canRevise.value) return
+  const revised = await revise(true)
+  if (!revised) return
+  // The new draft opens in a fresh session; the work lands once it has, and replaces
+  // any copy that session found (it came from before the revision).
+  const quote = live.value
+  if (!quote) return
+  await quote.ready
+  quote.recovery.value = null
+  const outcome = await quote.session.adopt(stored)
+  if (outcome === 'applied') toast(`Revising version ${nextVersion.value - 1} with your unsaved work. It saves as you go.`)
+  else if (outcome === 'review') { reviewOpen.value = true; toast('Your work and the issued version changed the same places. Choose what to keep.') }
+  else toast('The revision is open, but your earlier work could not be applied. Download it to keep a copy.', { tone: 'error' })
+}
 
 // ---------- Undo and redo, from the paper's editor ----------
 const version = computed(() => paper.value?.version ?? 0)
@@ -278,11 +353,11 @@ async function issue() {
     void quote.refresh().catch(() => {})
   } finally { busy.value = '' }
 }
-async function revise() {
+async function revise(withWork = false): Promise<boolean> {
   const quote = live.value, current = projection.value, version = frozen.value
-  if (!quote || !current || !version || busy.value || !scope.value) return
+  if (!quote || !current || !version || busy.value || !scope.value) return false
   const ok = await confirmAction(reviseConfirm(current.current_version, status.value === 'accepted'))
-  if (!ok) return
+  if (!ok) return false
   busy.value = 'revise'
   try {
     await branchQuote(props.quoteId, { expected_quote_revision: current.revision, expected_version: current.current_version, expected_content_sha256: version.content_sha256 })
@@ -293,8 +368,9 @@ async function revise() {
     if (done) dropQuote(done.scope, done.quote)
     hold()
     openPane('format')
-    toast(`You are revising version ${current.current_version}. Issue it when it is ready.`)
-  } catch (e) { toast(lifecycleError(e, 'The quote could not be revised. Nothing changed.'), { tone: 'error' }) }
+    if (!withWork) toast(`You are revising version ${current.current_version}. Issue it when it is ready.`)
+    return true
+  } catch (e) { toast(lifecycleError(e, 'The quote could not be revised. Nothing changed.'), { tone: 'error' }); return false }
   finally { busy.value = '' }
 }
 async function duplicate() {
@@ -422,7 +498,7 @@ defineExpose({ focus: () => root.value?.focus({ preventScroll: true }), issue, r
   <section ref="root" class="quote-ws" :class="[`layout-${layout}`, `side-${sideMode}`, { 'side-open': !!pane && !!document, compact }]" :aria-label="layout === 'dock' ? `Quote ${offerNo}`.trim() : 'Quote editor'" tabindex="-1">
     <QuoteTitleBar
       class="quote-titlebar" :offer-no="offerNo" :status="status" :archived="!!projection?.archived" :revising="revising" :local="viewing !== null ? 'read-only' : view?.local ?? 'loading'"
-      :can-save="canSave && viewing === null" :can-undo="canUndo" :can-redo="canRedo" :zoom="effectiveZoom" :percent="percent" :pane="pane" :can-format="canFormat"
+      :can-save="saveReady" :save-hint="saveHint" :can-undo="canUndo" :can-redo="canRedo" :zoom="effectiveZoom" :percent="percent" :pane="pane" :can-format="canFormat"
       :header-collapsed="headerFolded" :printing="printing" :compact="compact" :layout="layout" :presence="presence" :principal-id="identity.identity?.principal.id ?? ''"
       :admin="admin" :staff="staff"
       @save="save" @undo="undo" @redo="redo" @zoom="setZoom" @print="print" @toggle-header="toggleHeader" @pane="setPane"
@@ -438,7 +514,13 @@ defineExpose({ focus: () => root.value?.focus({ preventScroll: true }), issue, r
     <div v-if="error || recovery || viewing !== null || view?.remote === 'newer' || view?.review || view?.local === 'failed' || view?.local === 'offline'" class="quote-notices">
       <p v-if="error" class="notice bad" role="alert"><QuoteIcon name="alert" :size="15" /><span>{{ error }}</span><RouterLink v-if="layout === 'full'" class="btn sm" to="/business/quotes">Back to Quotes</RouterLink></p>
       <p v-if="viewing !== null" class="notice" role="status"><QuoteIcon name="history" :size="15" /><span>You are reading version {{ viewing }} as it was issued. It cannot change.</span><button type="button" class="btn sm" @click="viewing = null">{{ isDraft ? 'Back to the draft' : 'Back to the current version' }}</button></p>
-      <p v-if="recovery" class="notice" role="alert"><QuoteIcon name="history" :size="15" /><span>Unsaved work from this tab is available.</span><button type="button" class="btn sm" @click="useRecovery">Restore my work</button><button type="button" class="btn sm ghost" @click="useServer">Use saved draft</button></p>
+      <p v-if="recovery && isDraft" class="notice" role="alert"><QuoteIcon name="history" :size="15" /><span>Unsaved work from this tab is available.</span><button type="button" class="btn sm" @click="useRecovery">Restore my work</button><button type="button" class="btn sm ghost" @click="useServer">Use saved draft</button></p>
+      <p v-else-if="recovery && projection" class="notice" role="alert">
+        <QuoteIcon name="history" :size="15" /><span>You have unsaved work from before version {{ nextVersion - 1 }} was issued. The issued version stays as it is.</span>
+        <button v-if="canRevise" type="button" class="btn sm" :disabled="!!busy" @click="reviseWithWork">Revise as version {{ nextVersion }} with my work</button>
+        <button v-else type="button" class="btn sm" @click="downloadWork">Download my work</button>
+        <button type="button" class="btn sm ghost" @click="discardRecovery">Discard</button>
+      </p>
       <p v-if="view?.review" class="notice warn" role="alert">
         <QuoteIcon name="alert" :size="15" />
         <span>{{ view.review.conflicts.length ? `${remoteName || 'Someone'} changed ${view.review.conflicts.length === 1 ? 'a place' : `${view.review.conflicts.length} places`} you changed too.` : `${remoteName || 'Someone'} saved changes that merge with yours.` }}</span>
@@ -448,9 +530,24 @@ defineExpose({ focus: () => root.value?.focus({ preventScroll: true }), issue, r
         <QuoteIcon name="refresh" :size="15" /><span>{{ remoteName || 'Someone' }} saved a newer draft.</span>
         <button type="button" class="btn sm" @click="review">{{ view.local === 'clean' ? 'Load it' : 'Review changes' }}</button>
       </p>
-      <p v-if="view?.local === 'failed' || view?.local === 'offline'" class="notice bad" role="alert">
-        <QuoteIcon name="alert" :size="15" /><span>{{ view.local === 'offline' ? 'You are offline. Your changes are kept in this tab.' : 'Your changes were not saved.' }}</span>
-        <button type="button" class="btn sm" @click="live?.session.retry()">Try again</button>
+      <div v-if="view?.local === 'failed'" class="notice bad save-failure" role="alert">
+        <QuoteIcon name="alert" :size="15" />
+        <div class="notice-text">
+          <p><strong>Not saved.</strong> {{ failureLead }}</p>
+          <ul v-if="problems.length" class="problems" aria-label="What to fix">
+            <li v-for="(problem, index) in problems" :key="index">
+              <span class="where">{{ problem.where }}</span>
+              <span class="what">{{ problem.message }}<button v-if="problem.target" type="button" class="show-btn" :aria-label="`Show ${problem.where}`" @click="showProblem(problem)">Show</button></span>
+            </li>
+          </ul>
+          <p class="fine">{{ failure?.kind === 'invalid' ? 'Your changes are kept in this tab. Once it is fixed, the draft saves by itself.' : 'Your changes are kept in this tab.' }}</p>
+        </div>
+        <button v-if="!failure || failure.kind === 'server'" type="button" class="btn sm" @click="retry">Try again</button>
+        <button v-else type="button" class="btn sm ghost" @click="live?.session.exportRecovery()">Download my work</button>
+      </div>
+      <p v-else-if="view?.local === 'offline'" class="notice warn" role="status">
+        <QuoteIcon name="offline" :size="15" /><span>You are offline. Your changes are kept in this tab and save when the connection is back.</span>
+        <button type="button" class="btn sm" @click="retry">Try now</button>
       </p>
     </div>
     <div class="workspace">
@@ -495,14 +592,29 @@ defineExpose({ focus: () => root.value?.focus({ preventScroll: true }), issue, r
 
 <style scoped>
 .quote-ws { position: relative; display: flex; flex-direction: column; height: 100%; min-height: 0; outline: none; }
-.quote-notices { display: grid; gap: 6px; padding: 8px 16px 0; }
+.quote-notices { display: grid; gap: 6px; padding: 8px 16px; }
 .notice { display: flex; flex-wrap: wrap; align-items: center; gap: 8px 10px; max-width: 900px; margin: 0 auto; width: 100%; padding: 8px 12px; border-radius: 10px; background: var(--surface-raised-2); box-shadow: inset 0 0 0 1px var(--line-2); font-size: 13px; color: var(--ink); }
 .notice svg { flex-shrink: 0; color: var(--ink-3); }
-.notice span { flex: 1; min-width: 12em; }
+.notice span { flex: 1; min-width: 12em; text-wrap: pretty; }
 .notice.warn { background: var(--gold-wash); }
 .notice.warn svg { color: var(--gold-ink); }
 .notice.bad { background: var(--danger-bg); box-shadow: inset 0 0 0 1px var(--danger-line); }
 .notice.bad svg { color: var(--danger); }
+/* A refused save: what to fix, each with the way to it. */
+.save-failure { align-items: flex-start; }
+.save-failure > svg { margin-top: 3px; }
+.save-failure > .btn { align-self: center; }
+.notice-text { display: grid; gap: 6px; flex: 1; min-width: 12em; }
+.notice-text p { margin: 0; line-height: 1.5; }
+.notice-text .fine { font-size: 12px; color: var(--ink-2); }
+.problems { display: grid; gap: 6px; margin: 0; padding: 0; list-style: none; }
+/* Each problem: where it is, then what is wrong with the way to it. */
+.problems li { display: grid; line-height: 1.45; }
+.problems .where { font-weight: 600; overflow-wrap: anywhere; }
+.problems .what { color: var(--ink); }
+.show-btn { min-height: 24px; margin-left: 6px; padding: 0 6px; border: 0; border-radius: 6px; background: transparent; color: var(--teal-ink); font-size: 12.5px; font-weight: 600; cursor: pointer; }
+@media (hover: hover) { .show-btn:hover { background: var(--row-hover); } }
+.show-btn:focus-visible { box-shadow: var(--focus-ring); }
 .workspace { position: relative; flex: 1; min-height: 0; display: grid; grid-template-columns: minmax(0, 1fr); }
 .side-dock.side-open .workspace { grid-template-columns: minmax(0, 1fr) 320px; }
 /* The desk: a quiet surface the paper sits on, scrolling in both directions when zoomed. */

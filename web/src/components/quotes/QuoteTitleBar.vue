@@ -19,7 +19,7 @@ import ZoomControl from './ZoomControl.vue'
 // also opens the quote on its own page; on its own page it can go back beside
 // the list with the same session.
 const props = defineProps<{
-  offerNo: string; status: QuoteStatus; archived: boolean; revising: boolean; local: LocalState | 'loading'; canSave: boolean; canUndo: boolean; canRedo: boolean
+  offerNo: string; status: QuoteStatus; archived: boolean; revising: boolean; local: LocalState | 'loading'; canSave: boolean; saveHint?: string; canUndo: boolean; canRedo: boolean
   zoom: ZoomMode; percent: number; pane: 'format' | 'details' | null; canFormat: boolean; headerCollapsed: boolean; printing: boolean; compact: boolean
   layout: 'full' | 'dock'; presence: PresenceSnapshot | null; principalId: string; admin: boolean; staff: boolean
 }>()
@@ -31,10 +31,14 @@ const mac = /Mac|iPhone|iPad/.test(navigator.platform || navigator.userAgent)
 // Tooltips spell keys as words, as everywhere else ("Close · Esc").
 const mod = mac ? 'Cmd ' : 'Ctrl '
 const stateLabel = computed(() => props.revising ? 'Revising' : STATUS_META[props.status].label)
+// The save state is a status, never a button: what is true of the draft now. The
+// Save button beside it is the one action, enabled only when there is something to
+// save that saving can land (the notice below the bar says why when it cannot).
 const saveText = computed(() => ({
   loading: 'Opening…', clean: 'Saved', dirty: 'Unsaved changes', saving: 'Saving…', offline: 'Offline, kept here', failed: 'Not saved', conflict: 'Changed elsewhere', 'read-only': 'Read only',
 } as Record<string, string>)[props.local] ?? '')
-const tone = computed(() => props.local === 'failed' || props.local === 'conflict' ? 'bad' : props.local === 'dirty' || props.local === 'offline' ? 'warn' : '')
+const stateIcon = computed(() => props.local === 'failed' || props.local === 'conflict' ? 'alert' : props.local === 'offline' ? 'offline' : 'check-circle')
+const tone = computed(() => props.local === 'failed' ? 'bad' : props.local === 'dirty' || props.local === 'offline' || props.local === 'conflict' ? 'warn' : props.local === 'clean' ? 'ok' : '')
 const editing = computed(() => props.status === 'draft' && props.local !== 'read-only')
 const menu = ref<HTMLElement | null>(null)
 const more = ref<HTMLButtonElement>()
@@ -50,6 +54,7 @@ function act(action: 'duplicate' | 'archive' | 'copyNumber' | 'issue' | 'expand'
 // The bar measures itself; while any group spills out of its box, it folds one
 // more step: 1 labels (PDF, Details) and the profile's name go, 2 the zoom moves
 // into the … menu, 3 so do Undo and Redo, 4 the save state keeps only its icon.
+// (Save's caption goes with the labels at 1.)
 const bar = ref<HTMLElement>()
 const fold = ref(0)
 const FOLDS = 4
@@ -113,17 +118,20 @@ function menuKeys(event: KeyboardEvent) {
         <span class="state-chip" :class="status"><QuoteStatusIcon :status="status" :label="false" :size="12" />{{ stateLabel }}</span>
         <span v-if="archived" class="state-chip">Archived</span>
       </div>
-      <div class="save" :class="tone" role="status" aria-live="polite">
-        <button
-          v-if="editing || local === 'loading'" type="button" class="save-btn" :class="{ ready: canSave }" :disabled="!canSave" aria-label="Save draft" :aria-keyshortcuts="mac ? 'Meta+S' : 'Control+S'"
-          :data-tip="canSave ? `Save · ${mod}S` : saveText" @click="emit('save')"
-        >
-          <svg v-if="local === 'saving'" class="spinner" width="15" height="15" viewBox="0 0 16 16" fill="none" stroke-width="1.8" stroke-linecap="round" aria-hidden="true"><circle cx="8" cy="8" r="5.8" class="spin-track" /><path d="M8 2.2a5.8 5.8 0 0 1 5.8 5.8" class="spin-arc" /></svg>
-          <QuoteIcon v-else :name="canSave ? 'save' : 'check-circle'" :size="15" />
-          <span class="save-text">{{ canSave && local === 'dirty' ? 'Save' : saveText }}</span>
-        </button>
-        <span v-else class="frozen" :data-tip="status === 'draft' ? 'You can read this draft; an admin or member edits it' : 'Issued versions never change; revise to make a new one'"><AppIcon name="eye" :size="14" /><span class="save-text">Read only</span></span>
-        <span v-if="canSave && local === 'dirty' && !compact" class="save-note">Unsaved changes</span>
+      <div class="save" :class="tone">
+        <template v-if="editing || local === 'loading'">
+          <span class="save-state" role="status" aria-live="polite">
+            <svg v-if="local === 'saving' || local === 'loading'" class="spinner" width="14" height="14" viewBox="0 0 16 16" fill="none" stroke-width="1.8" stroke-linecap="round" aria-hidden="true"><circle cx="8" cy="8" r="5.8" class="spin-track" /><path d="M8 2.2a5.8 5.8 0 0 1 5.8 5.8" class="spin-arc" /></svg>
+            <span v-else-if="local === 'dirty'" class="dirty-dot" aria-hidden="true" />
+            <QuoteIcon v-else :name="stateIcon" :size="14" />
+            <span class="save-text">{{ saveText }}</span>
+          </span>
+          <button
+            type="button" class="save-btn" :class="{ ready: canSave }" :disabled="!canSave" aria-label="Save draft" :aria-keyshortcuts="mac ? 'Meta+S' : 'Control+S'"
+            :data-tip="canSave ? `Save · ${mod}S` : saveHint || 'Nothing to save'" @click="emit('save')"
+          ><QuoteIcon name="save" :size="15" /><span class="save-caption">Save</span></button>
+        </template>
+        <span v-else class="frozen" role="status" :data-tip="status === 'draft' ? 'You can read this draft; an admin or member edits it' : 'Issued versions never change; revise to make a new one'"><AppIcon name="eye" :size="14" /><span class="save-text">Read only</span></span>
       </div>
       <div v-if="compact" class="win">
         <!-- Narrow bars keep the zoom its room: the profile rides on the first row. -->
@@ -206,16 +214,25 @@ function menuKeys(event: KeyboardEvent) {
 .number { font: 600 14px/1.2 var(--mono); color: var(--ink); white-space: nowrap; overflow: hidden; text-overflow: ellipsis; font-variant-ligatures: none; }
 .state-chip { display: inline-flex; align-items: center; gap: 5px; flex-shrink: 0; height: 22px; padding: 0 8px 0 6px; border-radius: 999px; background: var(--chip-bg); box-shadow: inset 0 0 0 1px var(--chip-line); color: var(--ink-2); font: 600 10px/22px var(--mono); letter-spacing: .06em; text-transform: uppercase; font-variant-ligatures: none; }
 .state-chip:not(:has(svg)) { padding-left: 8px; }
-.save { display: flex; align-items: center; gap: 8px; min-width: 0; margin-left: 4px; }
-.save-btn { display: inline-flex; align-items: center; gap: 6px; height: 28px; padding: 0 10px 0 8px; border: 0; border-radius: 8px; background: transparent; color: var(--ink-2); font-size: 12.5px; font-weight: 600; white-space: nowrap; }
+.save { display: flex; align-items: center; gap: 6px; min-width: 0; margin-left: 4px; }
+/* The status: an icon and a word, not a control. Its slot keeps one width while you
+   type, so the Save button beside it never shifts. */
+.save-state { display: inline-flex; align-items: center; gap: 6px; height: 28px; padding: 0 4px; color: var(--ink-2); font-size: 12.5px; font-weight: 600; white-space: nowrap; }
+.titlebar:not(.compact) .save-state { min-width: 124px; }
+.save-state svg { flex-shrink: 0; color: var(--ink-3); }
+.save.ok .save-state svg { color: color-mix(in oklab, var(--ok), var(--ink) 20%); }
+.save.warn .save-state { color: var(--gold-ink); }
+.save.warn .save-state svg { color: var(--gold-ink); }
+.save.bad .save-state, .save.bad .save-state svg { color: var(--danger); }
+.dirty-dot { flex-shrink: 0; width: 8px; height: 8px; margin: 0 3px; border-radius: 50%; background: var(--gold); }
+/* The action: always in the same place; ready (teal) only when there is something to save. */
+.save-btn { display: inline-flex; align-items: center; gap: 6px; height: 28px; padding: 0 10px 0 8px; border: 0; border-radius: 8px; background: transparent; box-shadow: inset 0 0 0 1px var(--line); color: var(--ink-3); font-size: 12.5px; font-weight: 600; white-space: nowrap; }
 .save-btn:disabled { cursor: default; }
 .save-btn.ready { background: var(--seg-on); color: var(--teal-ink); box-shadow: inset 0 0 0 1px var(--chip-teal-line); }
 @media (hover: hover) { .save-btn.ready:hover { filter: brightness(1.03); } }
 .save-btn:focus-visible { box-shadow: var(--focus-ring); }
-.save.bad .save-btn { color: var(--danger); }
 .frozen { display: inline-flex; align-items: center; gap: 6px; height: 28px; padding: 0 4px; color: var(--ink-2); font-size: 12.5px; font-weight: 600; white-space: nowrap; }
 .frozen svg { color: var(--ink-3); }
-.save-note { font-size: 12px; color: var(--gold-ink); white-space: nowrap; }
 .spinner { animation: spin .8s linear infinite; }
 .spin-track { stroke: var(--line-2); }
 .spin-arc { stroke: var(--teal); }
@@ -236,17 +253,20 @@ function menuKeys(event: KeyboardEvent) {
 .menu-item:disabled { color: var(--ink-3); cursor: default; }
 .menu-sep { height: 1px; margin: 4px 6px; background: var(--line); }
 /* Narrow: labels step aside; phones and the docked panel stack the bar in two rows. */
-@media (max-width: 1100px) { .save-note { display: none; } }
 .compact { grid-template-columns: minmax(min-content, 1fr) max-content; grid-template-areas: "left left" "center right"; row-gap: 6px; padding: 6px 12px 8px; }
 .compact .left { grid-area: left; }
 .compact .center { grid-area: center; justify-content: flex-start; }
 .compact .right { grid-area: right; gap: 4px; }
 .compact .pdf-text, .compact .pane-text { display: none; }
 /* Folded (measured, not guessed): labels first, then the save state's words. */
-.fold-1 .pdf-text, .fold-1 .pane-text, .fold-2 .pdf-text, .fold-2 .pane-text, .fold-3 .pdf-text, .fold-3 .pane-text, .fold-4 .pdf-text, .fold-4 .pane-text,
-.fold-1 .save-note, .fold-2 .save-note, .fold-3 .save-note, .fold-4 .save-note { display: none; }
+.fold-1 .pdf-text, .fold-1 .pane-text, .fold-2 .pdf-text, .fold-2 .pane-text, .fold-3 .pdf-text, .fold-3 .pane-text, .fold-4 .pdf-text, .fold-4 .pane-text { display: none; }
 .fold-1 .pdf, .fold-2 .pdf, .fold-3 .pdf, .fold-4 .pdf, .fold-1 .pane-btn, .fold-2 .pane-btn, .fold-3 .pane-btn, .fold-4 .pane-btn { width: 32px; padding: 0; justify-content: center; }
-.fold-4 .save-text { display: none; }
+/* Save's caption folds with the other labels; at the narrowest the status keeps its
+   icon (its words stay for screen readers). */
+.fold-1 .save-caption, .fold-2 .save-caption, .fold-3 .save-caption, .fold-4 .save-caption { display: none; }
+.fold-1 .save-btn, .fold-2 .save-btn, .fold-3 .save-btn, .fold-4 .save-btn { width: 28px; padding: 0; justify-content: center; }
+.fold-4 .save-text { position: absolute; width: 1px; height: 1px; overflow: hidden; clip-path: inset(50%); white-space: nowrap; }
+.fold-4 .save-state { min-width: 0 !important; }
 .menu-label { padding: 6px 10px 2px; font: 500 10.5px/1.4 var(--mono); letter-spacing: .12em; text-transform: uppercase; color: var(--ink-3); font-variant-ligatures: none; }
 .menu-hint { margin-left: auto; font: 500 11px/1 var(--mono); color: var(--ink-3); font-variant-numeric: tabular-nums; }
 .menu-item[aria-current="true"] { color: var(--teal-ink); font-weight: 600; }

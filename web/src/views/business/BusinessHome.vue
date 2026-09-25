@@ -84,7 +84,11 @@ const rateRows = computed(() => business.costUnits
 const ratesInForce = computed(() => rateRows.value.reduce((n, row) => n + row.rates.length, 0))
 const money = (rate: CostRate) => { try { return formatAmount(rate.bill_amount, rate.currency) } catch { return rate.bill_amount } }
 
+const settled = ref({ costs: false, crm: false })
+// The summary appears once every part it counts is in, in one piece rather than
+// growing a clause at a time.
 const summary = computed(() => {
+  if ((business.open.hours && !hoursLoaded.value && !hoursError.value) || (business.open.costs && !settled.value.costs) || (business.open.crm && !settled.value.crm)) return ''
   const parts: string[] = []
   if (business.open.hours && hoursLoaded.value) parts.push(weekTotal.value ? `${formatSpan(weekTotal.value)} logged this week` : 'Nothing logged this week')
   if (business.open.hours && business.admin && hoursLoaded.value) parts.push(waiting.value.length ? `${plural(waiting.value.length, 'period')} to approve` : 'nothing to approve')
@@ -94,9 +98,9 @@ const summary = computed(() => {
 })
 async function load() {
   await business.loadPlugins()
-  if (business.open.costs) void business.loadCostUnits(true)
+  if (business.open.costs) void business.loadCostUnits(true).catch(() => {}).finally(() => { settled.value = { ...settled.value, costs: true } })
   if (business.open.hours) { void loadHours(); void projects.load() }
-  if (business.open.crm) void customers.load()
+  if (business.open.crm) void customers.load().finally(() => { settled.value = { ...settled.value, crm: true } })
   if (business.anyOpen && business.staff) void business.loadPrincipals()
 }
 watch(() => [business.open.costs, business.open.hours, business.open.crm], (value, before) => { if (before && value.join() !== before.join()) void load() })

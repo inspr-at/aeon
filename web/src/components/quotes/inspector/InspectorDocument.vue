@@ -59,7 +59,7 @@ function currency(event: Event) {
 
 <template>
   <div class="tab-body">
-    <section class="group" aria-labelledby="doc-details">
+    <section id="quote-this-quote" class="group" aria-labelledby="doc-details">
       <h3 id="doc-details" class="group-title">This quote</h3>
       <div class="rows">
         <div class="row"><span class="row-label">Quote date</span><DatePicker label="Quote date" :model-value="document.offer_date" :disabled="!editable" @update:model-value="value => set({ offer_date: value })" /></div>

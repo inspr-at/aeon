@@ -6,8 +6,13 @@ import type { QuoteDocumentData } from './quotes/types'
 export interface RecoveryDraft {
   tenantId: string; principalId: string; quoteId: string; sessionId: string
   baseRevision: number; base: QuoteDocumentData; mine: QuoteDocumentData
+  // The version the draft was branched from (0 for a quote's first draft): a copy
+  // from another version's draft never belongs to this one.
+  baseVersion?: number
   pendingMutationId?: string; savedAt: number; schemaVersion: 1
 }
+// A copy is worth offering only when it holds work the saved draft does not.
+export const holdsWork = (r: Pick<RecoveryDraft, 'base' | 'mine'>) => JSON.stringify(r.base) !== JSON.stringify(r.mine)
 const database = 'aeon-quote-recovery-v1'
 const storeName = 'drafts'
 const retentionMs = 30*24*60*60*1000

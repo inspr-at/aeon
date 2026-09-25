@@ -340,3 +340,22 @@ for (const colorScheme of ['light', 'dark'] as const) {
     })
   }
 }
+
+test('the last 14 days show each day’s count above its bar, named for screen readers', async ({ page }) => {
+  await page.setViewportSize({ width: 1440, height: 900 })
+  await setup(page)
+  await page.goto('/releases')
+  await expect(options(page).first()).toBeVisible()
+  const days = sheet(page).getByRole('list', { name: /releases in the last 14 days/ }).getByRole('listitem')
+  await expect(days).toHaveCount(14)
+  const all = await days.evaluateAll(items => items.map(li => ({ label: li.getAttribute('aria-label') ?? '', count: li.querySelector('.count')?.textContent ?? null, today: li.classList.contains('today') })))
+  // A day with releases carries its number; a day without keeps the flat dash and no number.
+  for (const day of all) {
+    const n = /^(\d+) releases? on \d{1,2} \w+/.exec(day.label)?.[1] ?? null
+    if (n) expect(day.count).toBe(n)
+    else { expect(day.label).toMatch(/^No releases on \d{1,2} \w+/); expect(day.count).toBeNull() }
+  }
+  expect(all.at(-1)!.today).toBe(true)
+  expect(all.at(-1)!.label).toMatch(/, today$/)
+  expect(all.some(day => day.count !== null)).toBe(true)
+})
