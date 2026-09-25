@@ -1,4 +1,5 @@
 // SPDX-License-Identifier: AGPL-3.0-only
+import { defineComponent } from 'vue'
 import { createRouter, createWebHistory } from 'vue-router'
 import { setPageTitle } from './lib/brand'
 import { useProjects } from './stores/projects'
@@ -6,13 +7,30 @@ import { useSession } from './stores/session'
 import ProjectsView from './views/ProjectsView.vue'
 import SignInView from './views/SignInView.vue'
 import NotFoundView from './views/NotFoundView.vue'
+import { isKnowledgeType } from './lib/knowledge'
+
+// Child records of the project page carry only the address; ProjectView renders
+// what they name, so they need a component that draws nothing.
+const RouteMarker = defineComponent({ name: 'RouteMarker', render: () => null })
 
 export const router = createRouter({
   history: createWebHistory(),
   routes: [
     { path: '/', component: ProjectsView, meta: { title: 'Projects' } },
-    // One record for the list and its open ticket, so opening the panel never remounts the list.
-    { path: '/p/:projectKey/:ticketKey?', component: () => import('./views/ProjectView.vue'), meta: { title: 'Project' } },
+    // One record for the project page: its list, the open ticket and its Knowledge
+    // tab and entries are children, so moving between them never remounts the page
+    // (and its guards stay on the record that is matched throughout).
+    {
+      path: '/p/:projectKey', component: () => import('./views/ProjectView.vue'), meta: { title: 'Project' },
+      children: [
+        { path: 'knowledge', component: RouteMarker, meta: { title: 'Knowledge' } },
+        { path: 'knowledge/:knowledgeType/:slug', component: RouteMarker, meta: { title: 'Knowledge' },
+          beforeEnter: to => isKnowledgeType(to.params.knowledgeType) ? true : { path: `/p/${encodeURIComponent(String(to.params.projectKey))}/knowledge`, replace: true } },
+        { path: ':ticketKey?', component: RouteMarker },
+      ],
+    },
+    // Knowledge across every project: search runbooks, guidelines, memory and more.
+    { path: '/knowledge', component: () => import('./views/KnowledgeView.vue'), meta: { title: 'Knowledge' } },
     // The earlier workspace tree and list are gone; the projects page replaces them.
     { path: '/workspace', redirect: '/' },
     // The journey lives in the project page (?view=journey); earlier journey links lead there.

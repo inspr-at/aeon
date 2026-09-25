@@ -29,6 +29,10 @@ import TicketTable from '../components/work/TicketTable.vue'
 import TicketWorkspace from '../components/work/TicketWorkspace.vue'
 import JourneyChip from '../components/journey/JourneyChip.vue'
 import JourneyView from '../components/journey/JourneyView.vue'
+import KnowledgeEntryPage from '../components/knowledge/KnowledgeEntryPage.vue'
+import KnowledgeTab from '../components/knowledge/KnowledgeTab.vue'
+import { isKnowledgeType } from '../lib/knowledge'
+import { filtersFromQuery as knowledgeFiltersFrom, filtersToQuery as knowledgeQuery, useKnowledge, type KnowledgeFilters } from '../lib/useKnowledge'
 import type { Stage } from '../lib/journey'
 import type { QuickDraft } from '../components/work/QuickCreateRow.vue'
 
@@ -54,13 +58,23 @@ function saveWidths(widths: Partial<Record<ColumnId, number>>) { listPref.value?
 const filters = computed(() => filtersFromQuery(route.query))
 const list = useTicketList(projectId, filters)
 const now = ref(Date.now())
-// List, Outline or Journey. The full page keeps whichever the ticket was opened from.
-type ViewMode = 'list' | 'outline' | 'journey'
+// List, Outline, Journey or Knowledge. The full page keeps whichever the ticket was opened from.
+type ViewMode = 'list' | 'outline' | 'journey' | 'knowledge'
 const modeOf = (view: unknown): ViewMode => view === 'outline' ? 'outline' : view === 'journey' ? 'journey' : 'list'
+// Knowledge has its own address: /p/KEY/knowledge, and /p/KEY/knowledge/<type>/<slug> for one entry.
+const knowledgeActive = computed(() => route.matched.some(record => record.path.startsWith('/p/:projectKey/knowledge')))
+const knowledgeType = computed(() => isKnowledgeType(route.params.knowledgeType) ? route.params.knowledgeType : null)
+const knowledgeSlug = computed(() => typeof route.params.slug === 'string' ? route.params.slug : '')
+const knowledgeEntryOpen = computed(() => knowledgeActive.value && !!knowledgeType.value && !!knowledgeSlug.value)
+const knowledgeFilters = computed(() => knowledgeFiltersFrom(route.query))
+const knowledgeListQuery = computed(() => knowledgeQuery(knowledgeFilters.value))
+const knowledge = useKnowledge(projectId, knowledgeFilters, knowledgeActive)
+const knowledgeTab = ref<InstanceType<typeof KnowledgeTab>>()
+const knowledgeEntry = ref<InstanceType<typeof KnowledgeEntryPage>>()
 const fullViewQuery = computed(() => !!ticketKey.value && route.query.view === 'full')
 const lastListMode = ref<ViewMode>(modeOf(route.query.view))
-watch(() => route.query.view, view => { if (view !== 'full') lastListMode.value = modeOf(view) })
-const viewMode = computed<ViewMode>(() => fullViewQuery.value ? lastListMode.value : modeOf(route.query.view))
+watch(() => route.query.view, view => { if (view !== 'full' && !knowledgeActive.value) lastListMode.value = modeOf(view) })
+const viewMode = computed<ViewMode>(() => knowledgeActive.value ? 'knowledge' : fullViewQuery.value ? lastListMode.value : modeOf(route.query.view))
 const journeyActive = computed(() => viewMode.value === 'journey')
 // The journey's own place: the stage looked at, a chosen release and the walker's ticket.
 const JOURNEY_KEYS = ['stage', 'release', 'walk'] as const
@@ -156,6 +170,8 @@ function setView(mode: ViewMode) {
   creating.value = false
   const { view: _view, stage: _stage, release: _release, walk: _walk, ...query } = route.query
   if (mode === 'journey') { void router.push({ path: `/p/${encodeURIComponent(routeKey.value)}`, query: { view: 'journey' } }); return }
+  if (mode === 'knowledge') { void router.push({ path: `/p/${encodeURIComponent(routeKey.value)}/knowledge` }); return }
+  if (viewMode.value === 'knowledge') { void router.push({ path: `/p/${encodeURIComponent(routeKey.value)}`, query: mode === 'outline' ? { view: 'outline' } : {} }); return }
   const path = viewMode.value === 'journey' ? `/p/${encodeURIComponent(routeKey.value)}` : route.path
   void router.replace({ path, query: mode === 'outline' ? { ...query, view: 'outline' } : query })
 }
@@ -179,7 +195,7 @@ function toggleGroup(key: string) {
 const queryKey = computed(() => projectId.value ? JSON.stringify(apiParams(projectId.value, filters.value)) : '')
 // The Outline without filters loads its own levels; the list query then only supplies
 // counts. With filters or Hide closed, the Outline needs the list's whole match set.
-const listLoadMode = computed(() => journeyActive.value ? 'counts' : !outlineActive.value ? 'list' : outline.matchMode.value ? 'all' : 'counts')
+const listLoadMode = computed(() => journeyActive.value || knowledgeActive.value ? 'counts' : !outlineActive.value ? 'list' : outline.matchMode.value ? 'all' : 'counts')
 watch([queryKey, listLoadMode], async ([value, mode], old) => {
   if (!value) return
   // Switching views on the same query reuses the rows already loaded.
@@ -419,8 +435,14 @@ function removed(item: ListItem) {
 }
 
 // Commands from the palette: New ticket in this project.
-watch(command, value => {
+watch(command, async value => {
   const next = value?.command
+  if (next?.name === 'new-knowledge' && project.value && next.projectKey === project.value.routeKey) {
+    consume()
+    if (!knowledgeActive.value || knowledgeEntryOpen.value) await router.push({ path: `/p/${encodeURIComponent(routeKey.value)}/knowledge`, query: knowledgeListQuery.value })
+    setTimeout(() => knowledgeTab.value?.openCreate(), 0)
+    return
+  }
   if (next?.name !== 'new-ticket' || !project.value || next.projectKey !== project.value.routeKey) return
   consume()
   if (ticketKey.value) closePanel()
@@ -432,14 +454,32 @@ watch(panelItem, item => {
 })
 watch(project, current => { if (current) remember({ type: 'project', key: current.routeKey, title: current.title }) }, { immediate: true })
 
+// ---------- Knowledge: the list's place in the URL, and closing an entry ----------
+function updateKnowledge(patch: Partial<KnowledgeFilters>) {
+  void router.replace({ path: route.path, query: knowledgeQuery({ ...knowledgeFilters.value, ...patch }) })
+}
+let entryFromList = false
+watch(() => route.fullPath, (_path, old) => {
+  if (!knowledgeEntryOpen.value) { entryFromList = false; return }
+  if (old && /\/knowledge(\?|$)/.test(old.split('#')[0]) && !/\/knowledge\/[^/]+\//.test(old)) entryFromList = true
+})
+async function closeKnowledgeEntry() {
+  const id = knowledgeEntry.value?.entryId() ?? null
+  const back = entryFromList && typeof window.history.state?.back === 'string' && /\/knowledge(\?|$)/.test(window.history.state.back.split('#')[0])
+  if (back) router.back()
+  else await router.push({ path: `/p/${encodeURIComponent(routeKey.value)}/knowledge`, query: knowledgeListQuery.value })
+  if (id) setTimeout(() => knowledgeTab.value?.reveal(id), 60)
+}
+
 // ---------- Unsaved changes ----------
-function dirty() { return !!panel.value?.isDirty() }
+function dirty() { return !!panel.value?.isDirty() || !!knowledgeEntry.value?.isDirty() }
 async function confirmDiscard() {
   if (skipGuard || !dirty()) return true
   return confirmAction({ title: 'Discard unsaved changes?', body: 'You have edits in this ticket that are not saved yet.', confirmLabel: 'Discard changes', danger: true })
 }
 onBeforeRouteUpdate(async (to, from) => {
   if (to.params.ticketKey !== from.params.ticketKey || to.params.projectKey !== from.params.projectKey) return confirmDiscard()
+  if (from.params.slug && (to.params.slug !== from.params.slug || to.params.knowledgeType !== from.params.knowledgeType)) return confirmDiscard()
 })
 onBeforeRouteLeave(async () => (await confirmDiscard()) && (!table.value?.createDirty() || skipGuard || confirmAction({ title: 'Discard the new ticket?', body: 'Its title has not been created yet.', confirmLabel: 'Discard', danger: true })))
 function beforeUnload(event: BeforeUnloadEvent) { if (dirty() || table.value?.createDirty()) { event.preventDefault(); event.returnValue = '' } }
@@ -477,6 +517,8 @@ async function move(step: number) {
 }
 function keydown(event: KeyboardEvent) {
   if (event.altKey && event.key === 'ArrowLeft' && ticketKey.value && trail.value.length && !typing(event.target as HTMLElement | null)) { event.preventDefault(); trailBack(); return }
+  // The Knowledge tab and its entries have their own keys.
+  if (knowledgeActive.value) return
   if (event.defaultPrevented || event.metaKey || event.ctrlKey || event.altKey) return
   if (document.querySelector('dialog[open]')) return
   const target = event.target as HTMLElement | null
@@ -569,21 +611,22 @@ onBeforeUnmount(() => {
   resize?.disconnect()
   stick?.disconnect()
   list.invalidate()
+  knowledge.stop()
 })
 
 // ---------- Document title ----------
-watch([project, panelItem], ([current, item]) => {
-  if (!current) return
-  setPageTitle(item ? `${item.key} ${item.title}` : `${current.routeKey} ${current.title}`)
+watch([project, panelItem, knowledgeActive, knowledgeEntryOpen], ([current, item, knowledgeOn, entryOn]) => {
+  if (!current || entryOn) return
+  setPageTitle(item ? `${item.key} ${item.title}` : knowledgeOn ? `Knowledge · ${current.routeKey} ${current.title}` : `${current.routeKey} ${current.title}`)
 }, { immediate: true })
 
 
 </script>
 
 <template>
-  <section class="project-page" :class="{ 'panel-open': !!ticketKey && !fullView, 'full-view': fullView }" :style="{ '--toolbar-h': `${toolbarHeight}px` }" :aria-labelledby="project ? 'project-title' : undefined">
+  <section class="project-page" :class="{ 'panel-open': !!ticketKey && !fullView, 'full-view': fullView, 'knowledge-entry': knowledgeEntryOpen }" :style="{ '--toolbar-h': `${toolbarHeight}px` }" :aria-labelledby="project && !knowledgeEntryOpen ? 'project-title' : undefined">
     <template v-if="project">
-      <div v-show="!fullView" class="list-view">
+      <div v-show="!fullView && !knowledgeEntryOpen" class="list-view">
       <header class="project-head">
         <div class="head-main">
           <div class="title-line">
@@ -626,6 +669,10 @@ watch([project, panelItem], ([current, item]) => {
         :can-write="writable" :person="session.identity?.principal.kind !== 'agent'" :me="me?.id ?? null"
         @stage="journeyStageTo" @release="journeyReleaseTo" @walk="journeyWalkTo" @open="openKey"
       />
+      <KnowledgeTab
+        v-else-if="knowledgeActive" ref="knowledgeTab" :project="{ id: project.id, routeKey: project.routeKey, title: project.title }" :state="knowledge"
+        :filters="knowledgeFilters" :can-write="writable" :now="now" :paused="knowledgeEntryOpen" @update="updateKnowledge"
+      />
       <TicketTable
         v-else ref="table" :expected-rows="expectedRows" :groups="groups" :group="filters.group" :rows-by-id="rowsById" :cursor-id="cursorId" :open-id="panelItem?.id ?? null"
         :query="filters.q" :sort="filters.sort" :density="density"
@@ -643,12 +690,16 @@ watch([project, panelItem], ([current, item]) => {
         @retry="outlineActive ? outline.reload() : list.load()" @more="outlineActive ? outline.loadMoreRoot() : list.loadMore()" @grid-focus="focusFirst" @clear-filters="clearFilters" @show-closed="update({ showClosed: true })"
       />
 
-      <p v-if="!journeyActive" class="hint">
+      <p v-if="!journeyActive && !knowledgeActive" class="hint">
         <kbd class="keycap">j</kbd><kbd class="keycap">k</kbd> move · <kbd class="keycap"><AppIcon name="enter" /></kbd> open · <kbd class="keycap">/</kbd> search ·
         <button type="button" class="hint-link" @click="run({ name: 'shortcuts' })"><kbd class="keycap">?</kbd> all shortcuts</button>
       </p>
       </div>
 
+      <KnowledgeEntryPage
+        v-if="knowledgeEntryOpen && knowledgeType" ref="knowledgeEntry" :project="{ id: project.id, routeKey: project.routeKey, title: project.title }"
+        :type="knowledgeType" :slug="knowledgeSlug" :state="knowledge" :can-write="writable" :now="now" :list-query="knowledgeListQuery" @close="closeKnowledgeEntry"
+      />
       <PanelSplitter v-if="ticketKey && !fullView" />
       <TicketWorkspace
         v-if="ticketKey" ref="panel" :item="panelItem" :ticket-key="ticketKey.toUpperCase()" :resolving="panelLoading" :resolve-error="panelError"
@@ -659,7 +710,7 @@ watch([project, panelItem], ([current, item]) => {
       />
       <StatusMenu v-if="statusMenu" :anchor="statusMenu.anchor" :current="statusMenu.row.state" :known-states="knownStates" :ticket-key="statusMenu.row.key" @choose="chooseStatus" @close="closeStatus" />
       <FilterSheet
-        ref="filterSheet" :filters="filters" :options="options" :total="total" :view="viewMode === 'journey' ? 'list' : viewMode" @expand-all="outline.expandAll()" @collapse-all="outline.collapseAll()"
+        ref="filterSheet" :filters="filters" :options="options" :total="total" :view="viewMode === 'journey' || viewMode === 'knowledge' ? 'list' : viewMode" @expand-all="outline.expandAll()" @collapse-all="outline.collapseAll()"
         @toggle="toggleValue" @clear-all="clearFilters" @show-closed="value => update({ showClosed: value })" @group="setGroup"
         @opened="list.resolveNames(options('assignee').map(o => o.value))"
       />
@@ -712,6 +763,7 @@ watch([project, panelItem], ([current, item]) => {
 .hint-link { display: inline-flex; align-items: center; gap: 5px; padding: 0; border: 0; background: transparent; color: var(--ink-3); font-size: 12px; }
 .hint-link:hover { color: var(--teal-ink); }
 .project-page.full-view { padding-top: 12px; }
+.project-page.knowledge-entry { padding-top: 0; }
 /* Wide screens dock the ticket panel: the list reflows beside it instead of under it. */
 @media (min-width: 1100px) {
   .project-page.panel-open { width: 100%; margin: 0; padding-right: calc(var(--panel-w) + 22px); }

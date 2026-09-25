@@ -135,7 +135,7 @@ func TestCreateReadListAndIsolation(t *testing.T) {
 	if deploy.Project == nil || deploy.Project.ID != f.project || deploy.Author == nil || deploy.Author.Name != "Markus Barta" || deploy.UpdatedBy == nil || deploy.EventID == nil {
 		t.Fatalf("created entry context %+v", deploy)
 	}
-	if deploy.Excerpt != "Build the image, then roll out to csb1. Rollback Pin the previous tag." {
+	if deploy.Excerpt != "Build the image, then roll out to csb1. Rollback: Pin the previous tag." {
 		t.Fatalf("excerpt %q", deploy.Excerpt)
 	}
 	// external-system needs its kind: created on first use, with kind.created.
@@ -380,7 +380,7 @@ func TestLinksAuthorAndImportedEntries(t *testing.T) {
 
 func TestExcerpt(t *testing.T) {
 	body := "# Deploy flow\n\n```sh\nmake image\n```\n\n- [x] Build **the** image with `make`\n- See [the guide](https://x.example) for external_system notes\n\n| a | b |\n|---|---|\n| 1 | 2 |"
-	if got := excerpt(body, "Deploy flow", nil, false); got != "Build the image with make See the guide for external_system notes a b 1 2" {
+	if got := excerpt(body, "Deploy flow", nil, false); got != "Build the image with make, See the guide for external_system notes, a b 1 2" {
 		t.Fatalf("excerpt %q", got)
 	}
 	long := strings.Repeat("alpha beta gamma ", 30) + "needle here " + strings.Repeat("delta ", 40)

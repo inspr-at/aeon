@@ -16,7 +16,7 @@ const props = defineProps<{
   loading: boolean
   density: 'comfortable' | 'compact'
   stuck: boolean
-  view: 'list' | 'outline' | 'journey'
+  view: 'list' | 'outline' | 'journey' | 'knowledge'
   // The table's columns for the Display menu's picker.
   columns?: { order: ColumnId[]; visible: ColumnId[]; customised: boolean } | null
 }>()
@@ -31,7 +31,7 @@ const emit = defineEmits<{
   openSheet: []
   needNames: []
   create: []
-  view: [value: 'list' | 'outline' | 'journey']
+  view: [value: 'list' | 'outline' | 'journey' | 'knowledge']
   expandAll: []
   collapseAll: []
   columns: [order: ColumnId[], visible: ColumnId[]]
@@ -98,13 +98,14 @@ defineExpose({ focusSearch, input })
 </script>
 
 <template>
-  <div ref="root" class="toolbar" :class="{ stuck }" role="toolbar" aria-label="Ticket list controls">
+  <div ref="root" class="toolbar" :class="{ stuck, knowledge: view === 'knowledge' }" role="toolbar" :aria-label="view === 'knowledge' ? 'Knowledge controls' : 'Ticket list controls'">
     <div class="seg view-seg" role="radiogroup" aria-label="View">
       <button type="button" role="radio" :aria-checked="view === 'list'" aria-label="List view" data-tip="List view · flat, sortable, groupable" @click="emit('view', 'list')"><AppIcon name="list" :size="14" /><span class="view-label">List</span></button>
       <button type="button" role="radio" :aria-checked="view === 'outline'" aria-label="Outline view" data-tip="Outline view · epics, tickets and tasks as a tree" @click="emit('view', 'outline')"><AppIcon name="outline" :size="14" /><span class="view-label">Outline</span></button>
       <button type="button" role="radio" :aria-checked="view === 'journey'" aria-label="Journey view" data-tip="Journey · from the first conversation to live, with the next step" @click="emit('view', 'journey')"><AppIcon name="journey" :size="14" /><span class="view-label">Journey</span></button>
+      <button type="button" role="radio" :aria-checked="view === 'knowledge'" aria-label="Knowledge" data-tip="Knowledge · runbooks, guidelines and memory agents read" @click="emit('view', 'knowledge')"><AppIcon name="book" :size="14" /><span class="view-label">Knowledge</span></button>
     </div>
-    <template v-if="view !== 'journey'">
+    <template v-if="view === 'list' || view === 'outline'">
     <label class="search-field list-search">
       <AppIcon name="search" :size="14" />
       <input ref="input" v-model="draft" class="field" type="search" :placeholder="narrow ? 'Search' : 'Search this list'" aria-label="Search tickets in this project" aria-keyshortcuts="/" autocomplete="off" spellcheck="false" @keydown="searchKey" />
@@ -154,6 +155,8 @@ defineExpose({ focusSearch, input })
     </button>
 
     </template>
+    <!-- The Knowledge tab teleports its own controls here (KnowledgeTab.vue). -->
+    <div v-else-if="view === 'knowledge'" id="knowledge-controls" class="knowledge-controls" />
     <span v-else class="spacer" />
     <slot name="journey" />
 
@@ -229,6 +232,7 @@ defineExpose({ focusSearch, input })
 .column-picker { margin-top: 8px; padding-top: 10px; border-top: 1px solid var(--line); }
 .outline-actions { display: grid; grid-template-columns: 1fr 1fr; gap: 6px; }
 .view-seg { flex-shrink: 0; }
+.knowledge-controls { display: contents; }
 .view-seg button { height: 26px; padding: 0 11px; }
 .seg.wide { display: grid; grid-auto-flow: column; grid-auto-columns: 1fr; }
 .seg.wide button { height: 30px; }
@@ -254,5 +258,8 @@ defineExpose({ focusSearch, input })
   .new-btn { order: 3; width: 44px; height: 44px; padding: 0; }
   .new-label { display: none; }
   .count { display: none; }
+  /* Knowledge on a phone: the view switch on its own line, search and filters below. */
+  .toolbar.knowledge { flex-wrap: wrap; }
+  .knowledge-controls { display: flex; flex: 1 1 100%; align-items: center; gap: 8px; min-width: 0; }
 }
 </style>

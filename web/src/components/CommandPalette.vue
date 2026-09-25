@@ -3,9 +3,10 @@
 import { computed, nextTick, onBeforeUnmount, ref, watch } from 'vue'
 import { useRoute, useRouter } from 'vue-router'
 import { listNodes, searchNodes, type ListItem, type WorkNode } from '../lib/api'
+import { entryPath, listKnowledge, typeMeta, type KnowledgeItem } from '../lib/knowledge'
 import { visibleSections } from '../lib/settings'
 import { run } from '../lib/commands'
-import { actionResults, assemble, keyPrefixOf, keyQuery, projectResults, recentResults, ticketResults, type ActionResult, type Group, type Result, type TicketResult } from '../lib/palette'
+import { actionResults, assemble, keyPrefixOf, keyQuery, knowledgeResults, projectResults, recentResults, ticketResults, type ActionResult, type Group, type Result, type TicketResult } from '../lib/palette'
 import { recents } from '../lib/recents'
 import { dark, toggleTheme } from '../lib/theme'
 import { toast } from '../lib/toast'
@@ -36,6 +37,7 @@ const loading = ref(false)
 const failed = ref('')
 const listed = ref<ListItem[]>([])
 const hits = ref<WorkNode[]>([])
+const knowledgeHits = ref<KnowledgeItem[]>([])
 const workKinds = ref(new Map<string, string>())
 // Phones get a shorter placeholder and a Cancel button in place of the Esc keycap.
 const narrowQuery = window.matchMedia('(max-width: 600px)')
@@ -56,9 +58,12 @@ const actions = computed<ActionResult[]>(() => {
   const here = routeProject.value
   const out: ActionResult[] = []
   if (here && props.canWrite) out.push({ type: 'action', id: 'new-ticket', label: `New ticket in ${here.routeKey}`, hint: here.title, icon: 'plus', keys: ['n'] })
+  const inKnowledge = route.path.includes('/knowledge')
   if (here) {
     const outline = route.query.view === 'outline'
     out.push({ type: 'action', id: outline ? 'go-list' : 'go-outline', label: outline ? 'Go to List' : 'Go to Outline', hint: here.title, icon: outline ? 'list' : 'outline' })
+    if (!inKnowledge) out.push({ type: 'action', id: 'go-knowledge', label: 'Go to Knowledge', hint: `${here.title}: runbooks, guidelines, memory`, icon: 'book' })
+    if (props.canWrite) out.push({ type: 'action', id: 'new-knowledge', label: `New knowledge entry in ${here.routeKey}`, hint: 'Runbook, guideline, memory and more', icon: 'plus', searchOnly: !inKnowledge })
   }
   if (route.path !== '/') out.push({ type: 'action', id: 'go-projects', label: 'Go to Projects', icon: 'folder', keys: ['g', 'p'] })
   if (!route.path.startsWith('/agents')) out.push({ type: 'action', id: 'go-agents', label: 'Go to Agents', hint: 'Sessions, approvals and pacing', icon: 'agent', keys: ['g', 'a'] })
@@ -74,6 +79,10 @@ const actions = computed<ActionResult[]>(() => {
   out.push({ type: 'action', id: 'theme', label: dark.value ? 'Switch to light theme' : 'Switch to dark theme', icon: dark.value ? 'sun' : 'moon' })
   out.push({ type: 'action', id: 'releases', label: 'Release history', hint: 'What changed, release by release', icon: 'history' })
   out.push({ type: 'action', id: 'shortcuts', label: 'Keyboard shortcuts', icon: 'keyboard', keys: ['?'] })
+  // Knowledge in every project: a search when something is typed, the page otherwise.
+  const typed = query.value
+  if (typed.length >= 2 && !keyQuery(typed)) out.push({ type: 'action', id: 'search-knowledge', label: `Search all knowledge for “${typed}”`, hint: 'Every project', icon: 'book' })
+  else if (route.path !== '/knowledge') out.push({ type: 'action', id: 'search-knowledge', label: 'Search all knowledge', hint: 'Runbooks, guidelines and memory in every project', icon: 'book', searchOnly: !!here })
   return out
 })
 
@@ -85,18 +94,19 @@ function projectFor(key: string) {
 const groups = computed<Group[]>(() => assemble(query.value, {
   recent: recentResults(recents, scope.value),
   tickets: ticketResults(searched, listed.value, hits.value, workKinds.value, projectFor, scope.value),
+  knowledge: knowledgeResults(knowledgeHits.value, id => projects.byId(id)?.routeKey ?? null, scope.value),
   projects: scope.value ? [] : projectResults(query.value, projects.projects.map(p => ({ id: p.id, routeKey: p.routeKey, title: p.title, description: p.description, archived: p.archived }))),
   actions: actionResults(query.value, actions.value),
 }))
 const flat = computed(() => groups.value.flatMap(group => group.items))
-const showSkeleton = computed(() => loading.value && !!query.value && !listed.value.length && !hits.value.length)
+const showSkeleton = computed(() => loading.value && !!query.value && !listed.value.length && !hits.value.length && !knowledgeHits.value.length)
 const empty = computed(() => !!query.value && !loading.value && !failed.value && searched === query.value && !flat.value.length)
 watch(flat, () => { if (active.value >= flat.value.length) active.value = 0 })
 
 async function search() {
   const q = query.value
   controller?.abort()
-  if (!q) { listed.value = []; hits.value = []; loading.value = false; searched = ''; return }
+  if (!q) { listed.value = []; hits.value = []; knowledgeHits.value = []; loading.value = false; searched = ''; return }
   controller = new AbortController()
   const signal = controller.signal
   loading.value = true; failed.value = ''
@@ -105,13 +115,16 @@ async function search() {
   try {
     if (!workKinds.value.size) workKinds.value = new Map((await kinds()).filter(k => ['ticket', 'task', 'epic'].includes(k.slug)).map(k => [k.id, k.slug]))
     // A key prefix ("PHAROS-29") is a key lookup; words also go to the hybrid search.
-    const [page, found] = await Promise.all([
+    const [page, found, knowledge] = await Promise.all([
       listNodes({ q, kind: ['ticket', 'task', 'epic'], within, sort: key ? 'key' : '-updated_at', limit: 8 }, { signal }),
       key ? Promise.resolve({ items: [] }) : searchNodes(q, { limit: 12 }, { signal }).catch(() => ({ items: [] })),
+      // Knowledge reads titles, slugs and text; it never holds up the rest.
+      key ? Promise.resolve({ items: [] as KnowledgeItem[] }) : listKnowledge({ q, project_id: within, limit: 8 }, signal).catch(() => ({ items: [] as KnowledgeItem[] })),
     ])
     if (signal.aborted) return
     listed.value = page.items
     hits.value = found.items.map(hit => hit.node)
+    knowledgeHits.value = knowledge.items
     searched = q
     active.value = 0
   } catch (e) {
@@ -133,7 +146,7 @@ async function open() {
   if (dialog.value?.open) { input.value?.select(); return }
   opener = document.activeElement as HTMLElement
   scope.value = routeProject.value?.routeKey ?? null
-  term.value = ''; listed.value = []; hits.value = []; failed.value = ''; active.value = 0; searched = ''
+  term.value = ''; listed.value = []; hits.value = []; knowledgeHits.value = []; failed.value = ''; active.value = 0; searched = ''
   void projects.load()
   dialog.value?.showModal()
   await nextTick()
@@ -143,6 +156,7 @@ function close() { controller?.abort(); dialog.value?.close(); opener?.focus({ p
 function hrefOf(result: Result): string | null {
   if (result.type === 'project') return `/p/${encodeURIComponent(result.key)}`
   if (result.type === 'ticket' && result.projectKey) return `/p/${encodeURIComponent(result.projectKey)}/${encodeURIComponent(result.key)}`
+  if (result.type === 'knowledge' && result.projectKey) return entryPath(result.projectKey, result.kind, result.slug)
   return null
 }
 async function resolveTicket(result: TicketResult): Promise<string | null> {
@@ -157,8 +171,12 @@ async function resolveTicket(result: TicketResult): Promise<string | null> {
 function act(id: string) {
   const here = routeProject.value
   if (id === 'new-ticket' && here) run({ name: 'new-ticket', projectKey: here.routeKey })
+  else if (id === 'go-knowledge' && here) void router.push(`/p/${encodeURIComponent(here.routeKey)}/knowledge`)
+  else if (id === 'new-knowledge' && here) run({ name: 'new-knowledge', projectKey: here.routeKey })
+  else if (id === 'search-knowledge') void router.push({ path: '/knowledge', query: query.value && !keyQuery(query.value) ? { q: query.value } : {} })
   else if (id === 'go-outline' || id === 'go-list') {
-    const { view: _view, ...rest } = route.query
+    // The Knowledge tab's search and filters are not the list's.
+    const { view: _view, ...rest } = route.path.includes('/knowledge') ? { view: undefined } : route.query
     void router.push({ path: here ? `/p/${encodeURIComponent(here.routeKey)}` : route.path, query: id === 'go-outline' ? { ...rest, view: 'outline' } : rest })
   } else if (id === 'go-projects') void router.push('/')
   else if (id === 'go-agents') void router.push('/agents')
@@ -177,7 +195,7 @@ async function choose(result: Result | undefined, newTab = false) {
   if (!result) return
   if (result.type === 'action') { close(); act(result.id); return }
   const href = result.type === 'ticket' ? await resolveTicket(result) : hrefOf(result)
-  if (!href) { toast(`${result.key} is not part of a project, so it has no list to open in.`); return }
+  if (!href) { toast(`${result.type === 'knowledge' ? result.slug : result.key} is not part of a project, so it has no list to open in.`); return }
   if (newTab) { window.open(href, '_blank', 'noopener'); return }
   close()
   await router.push(href)
@@ -212,7 +230,9 @@ function backdrop(event: MouseEvent) { if (event.target === dialog.value) close(
 function indexOf(result: Result) { return flat.value.indexOf(result) }
 onBeforeUnmount(() => { clearTimeout(timer); controller?.abort(); narrowQuery.removeEventListener('change', onNarrow) })
 defineExpose({ open })
-const iconOf = (result: Result): BizIconName => result.type === 'action' ? result.icon as BizIconName : result.type === 'project' ? 'folder' : result.kind === 'epic' ? 'epic' : result.kind === 'task' ? 'task' : 'ticket'
+// A body match explains itself with the excerpt; a title match needs nothing more.
+const titleMatches = (title: string) => query.value.toLowerCase().split(/\s+/).some(word => word.length > 1 && title.toLowerCase().includes(word))
+const iconOf = (result: Result): BizIconName => result.type === 'action' ? result.icon as BizIconName : result.type === 'project' ? 'folder' : result.type === 'knowledge' ? typeMeta(result.kind).icon : result.kind === 'epic' ? 'epic' : result.kind === 'task' ? 'task' : 'ticket'
 </script>
 
 <template>
@@ -261,6 +281,14 @@ const iconOf = (result: Result): BizIconName => result.type === 'action' ? resul
                 <span class="key"><template v-for="(part, i) in highlight(result.key, group.id === 'recent' || !keyQuery(query) ? '' : query)" :key="i"><mark v-if="part.match">{{ part.text }}</mark><template v-else>{{ part.text }}</template></template></span>
                 <AppIcon :name="iconOf(result) as IconName" :size="13" class="kind" :class="result.kind" />
                 <span class="title"><template v-for="(part, i) in highlight(result.title, group.id === 'recent' ? '' : query)" :key="i"><mark v-if="part.match">{{ part.text }}</mark><template v-else>{{ part.text }}</template></template></span>
+                <span v-if="result.projectKey && result.projectKey !== scope" class="project-chip">{{ result.projectKey }}</span>
+              </template>
+              <template v-else-if="result.type === 'knowledge'">
+                <span class="knowledge-mark" :data-tip="typeMeta(result.kind).label"><AppIcon :name="typeMeta(result.kind).icon" :size="13" /></span>
+                <span class="title"><template v-for="(part, i) in highlight(result.title, query)" :key="i"><mark v-if="part.match">{{ part.text }}</mark><template v-else>{{ part.text }}</template></template></span>
+                <span v-if="result.excerpt && !titleMatches(result.title)" class="desc match"><template v-for="(part, i) in highlight(result.excerpt, query.split(/\s+/)[0] ?? '')" :key="i"><mark v-if="part.match">{{ part.text }}</mark><template v-else>{{ part.text }}</template></template></span>
+                <span class="slug">{{ result.kind }}/{{ result.slug }}</span>
+                <span v-if="result.archived" class="archived-chip">Archived</span>
                 <span v-if="result.projectKey && result.projectKey !== scope" class="project-chip">{{ result.projectKey }}</span>
               </template>
               <template v-else-if="result.type === 'project'">
@@ -338,7 +366,10 @@ const iconOf = (result: Result): BizIconName => result.type === 'action' ? resul
 .kind.epic { color: var(--gold); }
 .title { flex: 0 1 auto; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 .desc { flex: 1 1 0; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; font-size: 12.5px; color: var(--ink-3); }
-.item.ticket .title { flex: 1 1 auto; }
+.item.ticket .title, .item.knowledge .title { flex: 1 1 auto; }
+.knowledge-mark { display: grid; place-items: center; flex-shrink: 0; width: 22px; height: 22px; border-radius: 7px; background: var(--chip-teal-bg); box-shadow: inset 0 0 0 1px var(--chip-teal-line); color: var(--teal-ink); }
+.slug { flex-shrink: 1; min-width: 0; max-width: 220px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; font: 500 11px/1 var(--mono); color: var(--ink-3); font-variant-ligatures: none; }
+.archived-chip { flex-shrink: 0; height: 18px; padding: 0 7px; border-radius: 999px; background: var(--chip-bg); box-shadow: inset 0 0 0 1px var(--chip-line); color: var(--ink-2); font: 600 9.5px/18px var(--mono); letter-spacing: .08em; text-transform: uppercase; font-variant-ligatures: none; }
 .project-chip { flex-shrink: 0; height: 20px; padding: 0 8px; border-radius: 6px; background: var(--code-bg); color: var(--ink-2); font: 500 10.5px/20px var(--mono); letter-spacing: .04em; font-variant-ligatures: none; }
 .project-mark, .action-mark { display: grid; place-items: center; flex-shrink: 0; width: 22px; height: 22px; border-radius: 7px; background: var(--chip-bg); box-shadow: inset 0 0 0 1px var(--chip-line); color: var(--ink-2); }
 .item.active .action-mark, .item.active .project-mark { color: var(--teal-ink); box-shadow: inset 0 0 0 1px var(--chip-teal-line); }
@@ -383,5 +414,11 @@ const iconOf = (result: Result): BizIconName => result.type === 'action' ? resul
   .item.ticket .project-chip { grid-area: chip; }
   .item.ticket .title { grid-area: ttl; white-space: normal; display: -webkit-box; -webkit-box-orient: vertical; -webkit-line-clamp: 2; line-clamp: 2; line-height: 1.35; }
   .item.ticket .enter { display: none; }
+  .item.knowledge { display: grid; grid-template-columns: 22px minmax(0, 1fr) auto; grid-template-areas: "mark ttl chip" ". slug slug"; align-items: center; column-gap: 10px; row-gap: 3px; padding: 9px 12px; }
+  .item.knowledge .knowledge-mark { grid-area: mark; }
+  .item.knowledge .title { grid-area: ttl; white-space: normal; display: -webkit-box; -webkit-box-orient: vertical; -webkit-line-clamp: 2; line-clamp: 2; line-height: 1.35; }
+  .item.knowledge .slug { grid-area: slug; max-width: none; }
+  .item.knowledge .project-chip { grid-area: chip; }
+  .item.knowledge .archived-chip, .item.knowledge .enter { display: none; }
 }
 </style>

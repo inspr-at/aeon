@@ -237,18 +237,36 @@ var (
 	spaces      = regexp.MustCompile(`\s+`)
 )
 
-// plainText strips Markdown to readable prose for list excerpts.
+// plainText strips Markdown to readable prose for list excerpts. A heading
+// reads as a lead-in ("Steps: ...") and a list item without its own ending
+// is separated from the next one by a comma.
 func plainText(body string) string {
-	s := fence.ReplaceAllString(body, " ")
+	s := fence.ReplaceAllString(body, "\n")
 	s = image.ReplaceAllString(s, "$1")
 	s = linkText.ReplaceAllString(s, "$1")
-	s = headingMark.ReplaceAllString(s, "")
-	s = listMark.ReplaceAllString(s, "")
-	s = quoteMark.ReplaceAllString(s, "")
-	s = tableRule.ReplaceAllString(s, " ")
-	s = strings.ReplaceAll(s, "|", " ")
-	s = emphasis.ReplaceAllString(s, "")
-	return strings.TrimSpace(spaces.ReplaceAllString(s, " "))
+	s = tableRule.ReplaceAllString(s, "")
+	var parts []string
+	for _, line := range strings.Split(s, "\n") {
+		heading := headingMark.MatchString(line)
+		item := listMark.MatchString(line)
+		line = headingMark.ReplaceAllString(line, "")
+		line = listMark.ReplaceAllString(line, "")
+		line = quoteMark.ReplaceAllString(line, "")
+		line = strings.ReplaceAll(line, "|", " ")
+		line = emphasis.ReplaceAllString(line, "")
+		line = strings.TrimSpace(spaces.ReplaceAllString(line, " "))
+		if line == "" {
+			continue
+		}
+		if ended := strings.ContainsAny(line[len(line)-1:], ".:!?;,"); !ended && heading {
+			line += ":"
+		} else if !ended && item {
+			line += ","
+		}
+		parts = append(parts, line)
+	}
+	out := strings.Join(parts, " ")
+	return strings.TrimSuffix(out, ",")
 }
 
 const excerptRunes = 200
@@ -263,7 +281,7 @@ func excerpt(body, title string, words []string, cut bool) string {
 			text = "…" + strings.TrimSpace(text[i:])
 		}
 	} else if t := strings.TrimSpace(title); t != "" && strings.HasPrefix(strings.ToLower(text), strings.ToLower(t)) {
-		text = strings.TrimSpace(text[len(t):])
+		text = strings.TrimLeft(text[len(t):], ":.;, ")
 	}
 	runes := []rune(text)
 	if len(runes) <= excerptRunes {
