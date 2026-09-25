@@ -52,7 +52,7 @@ void props
   <header class="panel-bar" :class="[mode, { 'has-trail': !!trail?.length }]">
     <button v-if="mode === 'full'" type="button" class="icon-btn sm flat" aria-label="Back to the list" data-tip="Back to the list · Esc" @click="emit('close')"><AppIcon name="chevron-left" :size="16" /></button>
     <template v-if="trail?.length">
-      <button type="button" class="icon-btn sm flat back-btn" :aria-label="`Back to ${trail[trail.length - 1]}`" aria-keyshortcuts="Alt+ArrowLeft" :data-tip="`Back to ${trail[trail.length - 1]} · ${mac ? '⌥' : 'Alt'}←`" @click="emit('back', 1)"><AppIcon name="arrow-left" :size="15" /></button>
+      <button type="button" class="icon-btn sm flat back-btn" :aria-label="`Back to ${trail[trail.length - 1]}`" aria-keyshortcuts="Alt+ArrowLeft" :data-tip="`Back to ${trail[trail.length - 1]} · ${mac ? 'Option' : 'Alt'} Left arrow`" @click="emit('back', 1)"><AppIcon name="arrow-left" :size="15" /></button>
       <nav class="trail" aria-label="Followed tickets">
         <span v-if="trail.length > 1" class="trail-more" :class="{ always: trail.length > 2 }" aria-hidden="true">…</span>
         <span v-for="crumb in crumbs()" :key="crumb.key + crumb.steps" class="crumb-item">
@@ -75,7 +75,7 @@ void props
     <template v-if="editing">
       <span v-if="dirty" class="unsaved" aria-live="polite">Unsaved</span>
       <button type="button" class="btn sm ghost" :disabled="saving" aria-keyshortcuts="Escape" data-tip="Cancel · Esc" @click="emit('cancel')">Cancel</button>
-      <button type="button" class="btn sm primary" :disabled="saving" :aria-keyshortcuts="mac ? 'Meta+Enter' : 'Control+Enter'" :data-tip="`Save · ${mac ? '⌘' : 'Ctrl'}↵`" @click="emit('save')"><AppIcon name="check" :size="13" />{{ saving ? 'Saving…' : 'Save' }}</button>
+      <button type="button" class="btn sm primary" :disabled="saving" :aria-keyshortcuts="mac ? 'Meta+Enter' : 'Control+Enter'" :data-tip="`Save · ${mac ? 'Cmd' : 'Ctrl'} Enter`" @click="emit('save')"><AppIcon name="check" :size="13" />{{ saving ? 'Saving…' : 'Save' }}</button>
     </template>
     <template v-else>
     <button v-if="canWrite" type="button" class="btn sm edit-btn" aria-keyshortcuts="e" data-tip="Edit title, text and properties · e" @click="emit('edit')"><AppIcon name="edit" :size="13" />Edit</button>

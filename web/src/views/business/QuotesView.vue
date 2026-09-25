@@ -302,7 +302,7 @@ watch(openId, id => { if (id) store.cursor = id })
       </template>
 
       <details v-if="creatorNotices.length" class="acceptance-notices">
-        <summary>Recently accepted offers you created <span>{{ creatorNotices.length }}</span></summary>
+        <summary><AppIcon name="chevron-right" :size="12" class="disclosure-chev" />Recently accepted offers you created <span>{{ creatorNotices.length }}</span></summary>
         <ol>
           <li v-for="notice in creatorNotices" :key="`${notice.quote_node_id}:${notice.version}`">
             <RouterLink :to="`/business/quotes/${notice.quote_node_id}`">{{ noticeName(notice.quote_node_id) }} · version {{ notice.version }}</RouterLink>
@@ -381,7 +381,7 @@ watch(openId, id => { if (id) store.cursor = id })
 .acceptance-notices { min-width: 0; margin: 0 0 12px; padding: 9px 12px; border-radius: 10px; background: var(--surface-raised-2); box-shadow: inset 0 0 0 1px var(--line-2); color: var(--ink); }
 .acceptance-notices summary { width: fit-content; cursor: pointer; font-size: 13px; font-weight: 600; }
 .acceptance-notices summary:focus-visible { border-radius: 4px; box-shadow: var(--focus-ring); }
-.acceptance-notices summary span { margin-left: 5px; color: var(--ink-2); font-variant-numeric: tabular-nums; }
+.acceptance-notices summary span { color: var(--ink-2); font-variant-numeric: tabular-nums; }
 .acceptance-notices ol { display: grid; gap: 4px; max-height: 210px; overflow: auto; margin: 8px 0 0; padding: 0; list-style: none; }
 .acceptance-notices li { display: flex; flex-wrap: wrap; gap: 3px 12px; min-width: 0; padding: 4px 0; font-size: 12.5px; }
 .acceptance-notices a { color: var(--teal-ink); font-weight: 600; overflow-wrap: anywhere; }

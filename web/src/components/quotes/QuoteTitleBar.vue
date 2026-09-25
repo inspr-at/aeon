@@ -28,7 +28,8 @@ const emit = defineEmits<{
   close: []; expand: []; collapse: []; duplicate: []; archive: []; copyNumber: []; issue: []
 }>()
 const mac = /Mac|iPhone|iPad/.test(navigator.platform || navigator.userAgent)
-const mod = mac ? '⌘' : 'Ctrl+'
+// Tooltips spell keys as words, as everywhere else ("Close · Esc").
+const mod = mac ? 'Cmd ' : 'Ctrl '
 const stateLabel = computed(() => props.revising ? 'Revising' : STATUS_META[props.status].label)
 const saveText = computed(() => ({
   loading: 'Opening…', clean: 'Saved', dirty: 'Unsaved changes', saving: 'Saving…', offline: 'Offline, kept here', failed: 'Not saved', conflict: 'Changed elsewhere', 'read-only': 'Read only',
@@ -88,7 +89,7 @@ function menuKeys(event: KeyboardEvent) {
       <QuotePeople v-if="!compact" :presence="presence" :principal-id="principalId" />
       <div v-if="editing" class="history" role="group" aria-label="History">
         <button type="button" class="icon-btn sm flat" :disabled="!canUndo" aria-label="Undo" :aria-keyshortcuts="mac ? 'Meta+Z' : 'Control+Z'" :data-tip="`Undo · ${mod}Z`" @mousedown.prevent @click="emit('undo')"><QuoteIcon name="undo" :size="15" /></button>
-        <button type="button" class="icon-btn sm flat" :disabled="!canRedo" aria-label="Redo" :aria-keyshortcuts="mac ? 'Meta+Shift+Z' : 'Control+Shift+Z'" :data-tip="`Redo · ${mac ? '⇧⌘' : 'Ctrl+Shift+'}Z`" @mousedown.prevent @click="emit('redo')"><QuoteIcon name="redo" :size="15" /></button>
+        <button type="button" class="icon-btn sm flat" :disabled="!canRedo" aria-label="Redo" :aria-keyshortcuts="mac ? 'Meta+Shift+Z' : 'Control+Shift+Z'" :data-tip="`Redo · ${mac ? 'Shift Cmd ' : 'Ctrl Shift '}Z`" @mousedown.prevent @click="emit('redo')"><QuoteIcon name="redo" :size="15" /></button>
       </div>
       <div class="print-pair">
         <button type="button" class="btn sm pdf" :disabled="printing" data-tip="Print or save as PDF" aria-label="PDF" @click="emit('print')"><QuoteIcon name="print" :size="15" /><span class="pdf-text">PDF</span></button>

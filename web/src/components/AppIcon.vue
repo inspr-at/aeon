@@ -9,6 +9,7 @@ export type IconName =
   | 'pause' | 'stop' | 'shield' | 'send' | 'bolt' | 'gauge' | 'interrupt' | 'halt'
   | 'minus' | 'compare' | 'download' | 'paperclip' | 'image' | 'upload' | 'info' | 'journey'
   | 'users' | 'history' | 'sparkle' | 'wrench' | 'bug' | 'gear' | 'commit' | 'tag' | 'box' | 'rollback'
+  | 'command' | 'option' | 'backspace'
 </script>
 <script setup lang="ts">
 withDefaults(defineProps<{ name: IconName; size?: number }>(), { size: 16 })
@@ -91,6 +92,10 @@ withDefaults(defineProps<{ name: IconName; size?: number }>(), { size: 16 })
     <template v-else-if="name === 'tag'"><path d="M2.2 2.9v4.3c0 .3.1.6.4.8l5.6 5.6c.4.4 1 .4 1.4 0l3.9-3.9c.4-.4.4-1 0-1.4L7.9 2.7a1.1 1.1 0 0 0-.8-.3H2.7a.5.5 0 0 0-.5.5Z" /><circle cx="5.2" cy="5.4" r=".6" fill="currentColor" stroke="none" /></template>
     <template v-else-if="name === 'box'"><path d="M8 1.8 13.6 4.9v6.2L8 14.2l-5.6-3.1V4.9Z" /><path d="M2.4 4.9 8 8l5.6-3.1M8 8v6.2" /></template>
     <path v-else-if="name === 'rollback'" d="M5.6 3.2 2.8 6l2.8 2.8M2.8 6h6.6a3.8 3.8 0 0 1 0 7.6H6.8" />
+    <!-- Keys drawn on keycaps: Command, Option and Backspace (never their text symbols). -->
+    <path v-else-if="name === 'command'" d="M6 6V4.2A1.8 1.8 0 1 0 4.2 6h7.6A1.8 1.8 0 1 0 10 4.2v7.6a1.8 1.8 0 1 0 1.8-1.8H4.2A1.8 1.8 0 1 0 6 11.8Z" />
+    <path v-else-if="name === 'option'" d="M2.2 4h3.6l4.4 8h3.6M9.6 4h4.2" />
+    <template v-else-if="name === 'backspace'"><path d="M5.8 3.4h6.8c.8 0 1.4.6 1.4 1.4v6.4c0 .8-.6 1.4-1.4 1.4H5.8L1.8 8Z" /><path d="m7.6 6.2 3.6 3.6M11.2 6.2l-3.6 3.6" /></template>
     <template v-else-if="name === 'info'"><circle cx="8" cy="8" r="6.2" /><path d="M8 7.4v3.8M8 4.9v.05" /></template>
     <template v-else><circle cx="8" cy="8" r="6.2" /><path d="M10.6 5.4 9.2 9.2l-3.8 1.4 1.4-3.8Z" /></template>
   </svg>

@@ -1,7 +1,7 @@
 <!-- SPDX-License-Identifier: AGPL-3.0-only -->
 <script setup lang="ts">
 import { computed, nextTick, ref } from 'vue'
-import AppIcon from '../AppIcon.vue'
+import KeyCap from '../KeyCap.vue'
 import PersonAvatar from './PersonAvatar.vue'
 
 // Write a comment: Markdown, Cmd/Ctrl+Enter posts, c focuses it from the panel.
@@ -10,7 +10,6 @@ const draft = ref('')
 const busy = ref(false)
 const focused = ref(false)
 const area = ref<HTMLTextAreaElement>()
-const mac = /Mac|iPhone|iPad/.test(navigator.platform || navigator.userAgent)
 const open = computed(() => focused.value || !!draft.value)
 function grow() { const el = area.value; if (el) { el.style.height = 'auto'; el.style.height = `${Math.min(el.scrollHeight + 2, 240)}px` } }
 async function submit() {
@@ -37,7 +36,7 @@ defineExpose({ focus, isDirty: () => !!draft.value.trim() })
         aria-label="Add a comment" aria-keyshortcuts="c" :disabled="disabled || busy" @input="grow" @keydown="keydown" @focus="focused = true; grow()" @blur="focused = false"
       />
       <div v-if="open" class="composer-foot">
-        <span class="keys"><kbd class="keycap">{{ mac ? '⌘' : 'Ctrl' }}</kbd><kbd class="keycap"><AppIcon name="enter" /></kbd> to send</span>
+        <span class="keys"><KeyCap k="mod" /><KeyCap k="enter" /> to send</span>
         <button type="button" class="btn sm on" :disabled="busy || !draft.trim()" @mousedown.prevent @click="submit">{{ busy ? 'Sending…' : 'Comment' }}</button>
       </div>
     </div>

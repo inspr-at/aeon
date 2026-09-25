@@ -13,6 +13,7 @@ import { kinds } from '../lib/useTicket'
 import { highlight, statusMeta } from '../lib/work'
 import { useProjects } from '../stores/projects'
 import AppIcon, { type IconName } from './AppIcon.vue'
+import KeyCap from './KeyCap.vue'
 import BizIcon, { type BizIconName } from './business/BizIcon.vue'
 import { useBusiness } from '../stores/business'
 import StatusIcon from './work/StatusIcon.vue'
@@ -36,7 +37,6 @@ const failed = ref('')
 const listed = ref<ListItem[]>([])
 const hits = ref<WorkNode[]>([])
 const workKinds = ref(new Map<string, string>())
-const mac = /Mac|iPhone|iPad/.test(navigator.platform || navigator.userAgent)
 // Phones get a shorter placeholder and a Cancel button in place of the Esc keycap.
 const narrowQuery = window.matchMedia('(max-width: 600px)')
 const narrow = ref(narrowQuery.matches)
@@ -285,9 +285,9 @@ const iconOf = (result: Result): BizIconName => result.type === 'action' ? resul
       <footer class="foot">
         <span><kbd class="keycap"><AppIcon name="arrow-up" /></kbd><kbd class="keycap"><AppIcon name="arrow-down" /></kbd> move</span>
         <span><kbd class="keycap"><AppIcon name="enter" /></kbd> open</span>
-        <span><kbd class="keycap">{{ mac ? '⌘' : 'Ctrl' }}</kbd><kbd class="keycap"><AppIcon name="enter" /></kbd> new tab</span>
+        <span><KeyCap k="mod" /><KeyCap k="enter" /> new tab</span>
         <span><kbd class="keycap">tab</kbd> next group</span>
-        <span v-if="scope" class="scope-hint"><kbd class="keycap wide">⌫</kbd> all projects</span>
+        <span v-if="scope" class="scope-hint"><KeyCap k="backspace" class="wide" /> all projects</span>
       </footer>
     </div>
   </dialog>

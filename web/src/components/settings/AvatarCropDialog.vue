@@ -4,6 +4,7 @@ import { computed, nextTick, onBeforeUnmount, onMounted, ref } from 'vue'
 import { centred, cropOf, MAX_ZOOM, MIN_ZOOM, pan, scaleOf, zoomAt, type CropView } from '../../lib/avatar'
 import { uploadAvatar, type Profile } from '../../lib/profile'
 import AppIcon from '../AppIcon.vue'
+import KeyCap from '../KeyCap.vue'
 
 // Crop a new photo: a square crop under a circular mask. Drag (or arrows) to move,
 // the slider, the wheel, a pinch (or + and −) to zoom; previews show it at 32, 64
@@ -124,7 +125,7 @@ onBeforeUnmount(() => { upload?.abort(); URL.revokeObjectURL(url) })
           </div>
           <p id="crop-help" class="help">
             <span>Drag to move · scroll or pinch to zoom</span>
-            <span class="keys"><kbd class="keycap">←</kbd><kbd class="keycap">→</kbd> move · <kbd class="keycap">+</kbd><kbd class="keycap">−</kbd> zoom · <kbd class="keycap">0</kbd> reset</span>
+            <span class="keys"><KeyCap k="left" /><KeyCap k="right" /> move · <kbd class="keycap">+</kbd><kbd class="keycap">−</kbd> zoom · <kbd class="keycap">0</kbd> reset</span>
           </p>
         </div>
         <div class="previews" role="group" aria-label="Previews">

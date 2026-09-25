@@ -13,6 +13,7 @@ import { toast } from '../../lib/toast'
 import { useBusiness } from '../../stores/business'
 import { useCustomers } from '../../stores/customers'
 import AppIcon from '../../components/AppIcon.vue'
+import KeyCap from '../../components/KeyCap.vue'
 import Avatar from '../../components/Avatar.vue'
 import BizIcon from '../../components/business/BizIcon.vue'
 import BusinessPage from '../../components/business/BusinessPage.vue'
@@ -204,7 +205,7 @@ async function remove() {
   }
 }
 
-// ---------- Keyboard: e edits; in edit mode ⌘↵ saves and Esc cancels ----------
+// ---------- Keyboard: e edits; in edit mode Cmd/Ctrl+Enter saves and Esc cancels ----------
 function typing(target: EventTarget | null) {
   return target instanceof HTMLElement && (target.isContentEditable || ['INPUT', 'TEXTAREA', 'SELECT'].includes(target.tagName))
 }
@@ -240,7 +241,7 @@ watch(id, value => { if (!value || !route.path.startsWith('/business/customers/'
       <template v-if="editing">
         <span v-if="dirty" class="unsaved" aria-live="polite">Unsaved</span>
         <button type="button" class="btn sm ghost" :disabled="saving" aria-keyshortcuts="Escape" data-tip="Cancel · Esc" @click="cancel">Cancel</button>
-        <button type="button" class="btn sm primary" :disabled="saving" :aria-keyshortcuts="mac ? 'Meta+Enter' : 'Control+Enter'" :data-tip="`Save · ${mac ? '⌘' : 'Ctrl'}↵`" @click="save"><AppIcon name="check" :size="13" />{{ saving ? 'Saving…' : conflict ? 'Save anyway' : 'Save' }}</button>
+        <button type="button" class="btn sm primary" :disabled="saving" :aria-keyshortcuts="mac ? 'Meta+Enter' : 'Control+Enter'" :data-tip="`Save · ${mac ? 'Cmd' : 'Ctrl'} Enter`" @click="save"><AppIcon name="check" :size="13" />{{ saving ? 'Saving…' : conflict ? 'Save anyway' : 'Save' }}</button>
       </template>
       <template v-else>
         <button v-if="canQuote" type="button" class="btn sm" data-tip="A quote for this customer" @click="newQuote"><AppIcon name="plus" :size="13" />New quote</button>
@@ -282,7 +283,7 @@ watch(id, value => { if (!value || !route.path.startsWith('/business/customers/'
       <p v-if="conflict" class="f-error" role="alert"><AppIcon name="alert" :size="14" /><span><strong>Changed elsewhere while you were editing.</strong> Your changes are kept below; saving again replaces the newer version.</span></p>
       <CustomerForm :draft="draft" :problems="problems" :touched="touched" />
       <footer class="edit-foot">
-        <p class="f-hint"><kbd class="keycap">{{ mac ? '⌘' : 'Ctrl' }}</kbd><kbd class="keycap"><AppIcon name="enter" /></kbd> save · <kbd class="keycap">esc</kbd> cancel</p>
+        <p class="f-hint"><KeyCap k="mod" /><KeyCap k="enter" /> save · <kbd class="keycap">esc</kbd> cancel</p>
         <span v-if="dirty" class="unsaved">Unsaved</span>
         <button type="button" class="btn" :disabled="saving" @click="cancel">Cancel</button>
         <button type="submit" class="btn primary" :disabled="saving"><AppIcon name="check" :size="14" />{{ saving ? 'Saving…' : conflict ? 'Save anyway' : 'Save' }}</button>

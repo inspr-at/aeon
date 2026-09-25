@@ -107,7 +107,7 @@ async function configure(provider: Provider, enabled: boolean) {
       </li>
     </ul>
     <details v-if="admin && providers?.length" class="provider-config">
-      <summary>Provider settings</summary>
+      <summary><AppIcon name="chevron-right" :size="12" class="disclosure-chev" />Provider settings</summary>
       <p>Use an operator-provisioned <code>secret://</code> reference. Credentials never go in this form.</p>
       <div v-for="provider in providers" :key="provider.id" class="config-row">
         <strong>{{ provider.id }}</strong><span>{{ provider.enabled ? 'Enabled' : provider.configured ? 'Configured, off' : 'Off' }}</span>

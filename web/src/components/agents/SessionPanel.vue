@@ -8,6 +8,7 @@ import { absoluteTime, relativeTime } from '../../lib/work'
 import { useAgents, type SessionView } from '../../stores/agents'
 import { useSession } from '../../stores/session'
 import AppIcon from '../AppIcon.vue'
+import KeyCap from '../KeyCap.vue'
 import Avatar from '../Avatar.vue'
 import LiveDot from './LiveDot.vue'
 
@@ -196,7 +197,7 @@ defineExpose({ focus: () => root.value?.focus({ preventScroll: true }) })
             <button type="button" role="radio" :aria-checked="level === 'simple'" data-tip="Waits until the agent reads its inbox" @click="level = 'simple'">Simple</button>
             <button type="button" role="radio" :aria-checked="level === 'steer'" data-tip="Reaches the agent during its current turn" @click="level = 'steer'"><AppIcon name="bolt" :size="11" />Steer</button>
           </div>
-          <span class="compose-hint" aria-hidden="true"><kbd class="keycap">⌘</kbd><kbd class="keycap"><AppIcon name="enter" /></kbd></span>
+          <span class="compose-hint" aria-hidden="true"><KeyCap k="mod" /><KeyCap k="enter" /></span>
           <button type="submit" class="btn sm primary" :disabled="!draft.trim() || sending || !canWrite"><AppIcon name="send" :size="13" />{{ sending ? 'Sending…' : 'Send' }}</button>
         </div>
       </form>

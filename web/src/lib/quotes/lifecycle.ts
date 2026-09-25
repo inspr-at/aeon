@@ -96,7 +96,7 @@ export const receiptBusy = (state: ReceiptState | undefined) => state === 'pendi
 const ISSUE_ERRORS: [RegExp, string][] = [
   [/title and position/, 'Add a title and at least one position before issuing.'],
   [/incomplete position/, 'Every position needs a text and a quantity above zero.'],
-  [/sender or recipient/, 'The sender (Settings › Business) or the recipient’s name, address or email is missing.'],
+  [/sender or recipient/, 'The sender (in the Business settings) or the recipient’s name, address or email is missing.'],
   [/validity has expired/, 'The valid-until date has passed. Choose a later date first.'],
   [/cost unit rate/, 'A position priced from a rate has no rate on the quote’s date.'],
   [/recipient contact/, 'The recipient contact no longer belongs to this customer.'],

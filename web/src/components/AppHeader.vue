@@ -20,6 +20,7 @@ import { accountEmail, accountName } from '../lib/api'
 import { placeOf, sequence, visiblePlaces, type PlaceId } from '../lib/places'
 import { SETTINGS_SECTIONS, sectionOf } from '../lib/settings'
 import AppIcon from './AppIcon.vue'
+import KeyCap from './KeyCap.vue'
 import BizIcon from './business/BizIcon.vue'
 import CommandPalette from './CommandPalette.vue'
 import VersionDisplay from './VersionDisplay.vue'
@@ -44,7 +45,6 @@ const themes: { value: ThemeChoice; label: string; icon: 'sun' | 'moon' | 'monit
 const writable = computed(() => canWrite(session.identity?.principal.roles))
 const name = computed(() => session.identity ? accountName(session.identity) : '')
 const email = computed(() => session.identity ? accountEmail(session.identity) : '')
-const mac = /Mac|iPhone|iPad/.test(navigator.platform || navigator.userAgent)
 
 // The legacy workspace view keeps its own search; everywhere else search is global.
 const globalSearch = computed(() => !!session.identity)
@@ -202,7 +202,7 @@ onBeforeUnmount(() => { document.removeEventListener('pointerdown', outside); wi
     <button v-if="globalSearch" class="search-pill" type="button" aria-label="Search everything" aria-keyshortcuts="Control+K Meta+K" @click="palette?.open()">
       <AppIcon name="search" :size="15" />
       <span class="pill-text">Search</span>
-      <span class="pill-keys"><kbd class="keycap">{{ mac ? '⌘' : 'Ctrl' }}</kbd><kbd class="keycap">K</kbd></span>
+      <span class="pill-keys"><KeyCap k="mod" /><KeyCap k="K" /></span>
     </button>
     <button class="icon-btn header-btn theme-btn" type="button" :aria-label="dark ? 'Switch to light theme' : 'Switch to dark theme'" :data-tip="dark ? 'Light theme' : 'Dark theme'" @click="toggleTheme()">
       <AppIcon :name="dark ? 'sun' : 'moon'" />

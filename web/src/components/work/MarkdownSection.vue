@@ -51,7 +51,7 @@ defineExpose({ start, isDirty: () => dirty.value, editing })
         <AppIcon name="alert" :size="14" />
         <div>
           <p><strong>Changed elsewhere while you were editing.</strong> Your draft is kept below; saving again replaces the newer version.</p>
-          <details><summary>Show the newer version</summary><MarkdownBody :body="value || '*Empty*'" /></details>
+          <details><summary><AppIcon name="chevron-right" :size="12" class="disclosure-chev" />Show the newer version</summary><MarkdownBody :body="value || '*Empty*'" /></details>
         </div>
       </div>
       <MarkdownEditor ref="editor" v-model="draft" :label="title" :saving="saving" :attachment-id="attachmentId" :save-label="conflict ? 'Save anyway' : 'Save'" @save="commit" @cancel="cancel" />

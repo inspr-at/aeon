@@ -2,6 +2,7 @@
 <script setup lang="ts">
 import { computed, nextTick, onMounted, ref } from 'vue'
 import AppIcon from '../AppIcon.vue'
+import KeyCap from '../KeyCap.vue'
 import MarkdownBody from '../MarkdownBody.vue'
 
 // A plain Markdown textarea with a live preview toggle. Cmd/Ctrl+Enter saves,
@@ -12,7 +13,6 @@ const props = withDefaults(defineProps<{ modelValue: string; label: string; savi
 const emit = defineEmits<{ 'update:modelValue': [value: string]; save: []; cancel: [] }>()
 const area = ref<HTMLTextAreaElement>()
 const preview = ref(false)
-const mac = /Mac|iPhone|iPad/.test(navigator.platform || navigator.userAgent)
 const empty = computed(() => !props.modelValue.trim())
 
 function grow() {
@@ -81,7 +81,7 @@ defineExpose({ focus, insert })
       <p v-else class="nothing">Nothing to preview yet.</p>
     </div>
     <div v-if="!bare" class="editor-foot">
-      <span class="keys"><kbd class="keycap">{{ mac ? '⌘' : 'Ctrl' }}</kbd><kbd class="keycap"><AppIcon name="enter" /></kbd> save · <kbd class="keycap">esc</kbd> cancel</span>
+      <span class="keys"><KeyCap k="mod" /><KeyCap k="enter" /> save · <kbd class="keycap">esc</kbd> cancel</span>
       <span class="spacer" />
       <button type="button" class="btn sm" :disabled="saving" @click="emit('cancel')">Cancel</button>
       <button type="button" class="btn sm on" :disabled="saving || empty" @click="emit('save')">{{ saving ? 'Saving…' : saveLabel }}</button>

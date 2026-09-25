@@ -5,9 +5,13 @@ import AppIcon, { type IconName } from '../AppIcon.vue'
 
 type Key = string | { icon: IconName; label: string }
 const mac = /Mac|iPhone|iPad/.test(navigator.platform || navigator.userAgent)
+// Symbol keys are drawn, never typed: Command and Option on a Mac, words elsewhere.
+const MOD: Key = mac ? { icon: 'command', label: 'Command' } : 'Ctrl'
+const ALT: Key = mac ? { icon: 'option', label: 'Option' } : 'Alt'
+const BACKSPACE: Key = { icon: 'backspace', label: 'Backspace' }
 const sections: { title: string; rows: { keys: Key[][]; label: string; joiner?: string }[] }[] = [
   { title: 'Anywhere', rows: [
-    { keys: [[mac ? '⌘' : 'Ctrl', 'K']], label: 'Search tickets, projects and actions' },
+    { keys: [[MOD, 'K']], label: 'Search tickets, projects and actions' },
     { keys: [['/']], label: 'Search, on pages without a list' },
     { keys: [['g'], ['p']], joiner: 'then', label: 'Go to Projects' },
     { keys: [['g'], ['a']], joiner: 'then', label: 'Go to Agents' },
@@ -17,8 +21,8 @@ const sections: { title: string; rows: { keys: Key[][]; label: string; joiner?: 
   { title: 'Search', rows: [
     { keys: [[{ icon: 'arrow-down', label: 'Down arrow' }], [{ icon: 'arrow-up', label: 'Up arrow' }]], label: 'Move through results' },
     { keys: [['Tab']], label: 'Next group of results' },
-    { keys: [[mac ? '⌘' : 'Ctrl', { icon: 'enter', label: 'Enter' }]], label: 'Open in a new tab' },
-    { keys: [['⌫']], label: 'Search all projects, not only this one' },
+    { keys: [[MOD, { icon: 'enter', label: 'Enter' }]], label: 'Open in a new tab' },
+    { keys: [[BACKSPACE]], label: 'Search all projects, not only this one' },
   ] },
   { title: 'Agents', rows: [
     { keys: [['j'], ['k']], label: 'Next and previous request or session' },
@@ -62,15 +66,15 @@ const sections: { title: string; rows: { keys: Key[][]; label: string; joiner?: 
   { title: 'Open ticket', rows: [
     { keys: [['j'], ['k']], label: 'Next and previous ticket, the list follows' },
     { keys: [['e']], label: 'Edit the whole ticket' },
-    { keys: [[mac ? '⌘' : 'Ctrl', { icon: 'enter', label: 'Enter' }]], label: 'Save the edit' },
-    { keys: [[mac ? '⌥' : 'Alt', { icon: 'arrow-left', label: 'Left arrow' }]], label: 'Back along followed links' },
-    { keys: [[mac ? '⌘' : 'Ctrl', 'V']], label: 'Paste a screenshot as an attachment' },
+    { keys: [[MOD, { icon: 'enter', label: 'Enter' }]], label: 'Save the edit' },
+    { keys: [[ALT, { icon: 'arrow-left', label: 'Left arrow' }]], label: 'Back along followed links' },
+    { keys: [[MOD, 'V']], label: 'Paste a screenshot as an attachment' },
     { keys: [['s']], label: 'Status' },
     { keys: [['p']], label: 'Priority' },
     { keys: [['a']], label: 'Assignee' },
     { keys: [['c']], label: 'Write a comment' },
     { keys: [['f']], label: 'Full page and back' },
-    { keys: [[mac ? '⌘' : 'Ctrl', { icon: 'enter', label: 'Enter' }]], label: 'Save a description, notes or comment' },
+    { keys: [[MOD, { icon: 'enter', label: 'Enter' }]], label: 'Save a description, notes or comment' },
   ] },
   { title: 'Create', rows: [
     { keys: [['n']], label: 'New ticket at the top of the list' },
