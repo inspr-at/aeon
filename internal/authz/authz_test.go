@@ -56,6 +56,13 @@ func TestLegacyMappingAndOwnerProtection(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
+	err = db.InTenant(ctx, d.App, tid, func(tx pgx.Tx) error {
+		_, err := tx.Exec(ctx, `UPDATE roles SET name='Changed' WHERE tenant_id=$1::uuid AND key='owner'`, tid)
+		return err
+	})
+	if err == nil {
+		t.Fatal("built-in role changed in database")
+	}
 	ids := map[string]string{}
 	for _, role := range []string{"super_admin", "admin", "member", "reviewer", "external", "customer", "system"} {
 		err = db.InTenant(ctx, d.App, tid, func(tx pgx.Tx) error {

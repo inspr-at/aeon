@@ -61,6 +61,29 @@ ALTER TABLE role_bindings FORCE ROW LEVEL SECURITY;
 CREATE POLICY role_bindings_tenant ON role_bindings USING (tenant_id = NULLIF(current_setting('aeon.tenant_id',true),'')::uuid)
     WITH CHECK (tenant_id = NULLIF(current_setting('aeon.tenant_id',true),'')::uuid);
 
+CREATE FUNCTION aeon_builtin_role_immutable() RETURNS trigger LANGUAGE plpgsql AS $$
+BEGIN
+    IF OLD.builtin THEN RAISE EXCEPTION 'built-in roles are immutable' USING ERRCODE='23514'; END IF;
+    RETURN CASE WHEN TG_OP='DELETE' THEN OLD ELSE NEW END;
+END;
+$$;
+CREATE TRIGGER roles_builtin_immutable BEFORE UPDATE OR DELETE ON roles
+    FOR EACH ROW EXECUTE FUNCTION aeon_builtin_role_immutable();
+CREATE FUNCTION aeon_builtin_role_permissions_immutable() RETURNS trigger LANGUAGE plpgsql AS $$
+DECLARE target_id uuid;
+DECLARE target_tenant uuid;
+BEGIN
+    target_id := CASE WHEN TG_OP='DELETE' THEN OLD.role_id ELSE NEW.role_id END;
+    target_tenant := CASE WHEN TG_OP='DELETE' THEN OLD.tenant_id ELSE NEW.tenant_id END;
+    IF EXISTS (SELECT 1 FROM roles WHERE tenant_id=target_tenant AND id=target_id AND builtin) THEN
+        RAISE EXCEPTION 'built-in role permissions are immutable' USING ERRCODE='23514';
+    END IF;
+    RETURN CASE WHEN TG_OP='DELETE' THEN OLD ELSE NEW END;
+END;
+$$;
+CREATE TRIGGER role_permissions_builtin_immutable BEFORE INSERT OR UPDATE OR DELETE ON role_permissions
+    FOR EACH ROW EXECUTE FUNCTION aeon_builtin_role_permissions_immutable();
+
 CREATE FUNCTION aeon_seed_builtin_roles(target uuid) RETURNS void
 LANGUAGE plpgsql SECURITY DEFINER SET search_path=public,pg_temp AS $$
 BEGIN

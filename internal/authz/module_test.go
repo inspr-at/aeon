@@ -17,7 +17,7 @@ import (
 func TestRolesNoEscalationAndBuiltinImmutability(t *testing.T) {
 	d := dbtest.Open(t)
 	ctx := t.Context()
-	var tid, ownerID, adminID, builtinID string
+	var tid, ownerID, adminID, builtinID, ownerRoleID string
 	err := db.InTenant(ctx, d.App, "00000000-0000-0000-0000-000000000000", func(tx pgx.Tx) error {
 		return tx.QueryRow(ctx, `INSERT INTO tenants(slug,name) VALUES('az1-roles','AZ1 roles') RETURNING id::text`).Scan(&tid)
 	})
@@ -37,7 +37,10 @@ func TestRolesNoEscalationAndBuiltinImmutability(t *testing.T) {
 				return err
 			}
 		}
-		return tx.QueryRow(ctx, `SELECT id::text FROM roles WHERE tenant_id=$1::uuid AND key='admin'`, tid).Scan(&builtinID)
+		if err := tx.QueryRow(ctx, `SELECT id::text FROM roles WHERE tenant_id=$1::uuid AND key='admin'`, tid).Scan(&builtinID); err != nil {
+			return err
+		}
+		return tx.QueryRow(ctx, `SELECT id::text FROM roles WHERE tenant_id=$1::uuid AND key='owner'`, tid).Scan(&ownerRoleID)
 	})
 	if err != nil {
 		t.Fatal(err)
@@ -69,5 +72,11 @@ func TestRolesNoEscalationAndBuiltinImmutability(t *testing.T) {
 	}
 	if code := request("PUT", "/api/members/"+ownerID+"/workspace-role", `{"role_id":null}`, ownerID); code != 409 {
 		t.Errorf("last owner removed: %d", code)
+	}
+	if code := request("PUT", "/api/members/"+adminID+"/workspace-role", `{"role_id":"`+ownerRoleID+`"}`, ownerID); code != 200 {
+		t.Errorf("owner granted ownership: %d", code)
+	}
+	if code := request("PUT", "/api/members/"+ownerID+"/workspace-role", `{"role_id":"`+builtinID+`"}`, ownerID); code != 200 {
+		t.Errorf("owner transferred ownership: %d", code)
 	}
 }

@@ -37,4 +37,16 @@ describe('can()', () => {
     await accessChanged()
     expect(can('keys.manage')).toBe(false)
   })
+  it('ignores an answer started before sign-out', async () => {
+    let finishOld!: (value: { ok: boolean; json: () => Promise<unknown> }) => void
+    const old = new Promise<{ ok: boolean; json: () => Promise<unknown> }>(resolve => { finishOld = resolve })
+    const fetch = vi.fn().mockImplementationOnce(() => old).mockImplementationOnce(async () => ({ ok: true, json: async () => ({ workspace: { role: null, permissions: [] }, project: null }) }))
+    vi.stubGlobal('fetch', fetch)
+    const pending = refreshPermissions()
+    clearPermissions()
+    await refreshPermissions()
+    finishOld({ ok: true, json: async () => ({ workspace: { role: null, permissions: ['keys.manage'] }, project: null }) })
+    await pending
+    expect(can('keys.manage')).toBe(false)
+  })
 })

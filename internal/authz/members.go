@@ -187,7 +187,7 @@ func (m *Module) putWorkspaceRole(w http.ResponseWriter, r *http.Request) {
 				return err
 			}
 			if targetRole.Key == "owner" {
-				if err := Require(r.Context(), "ownership.transfer", Scope{}); err != nil {
+				if err := Require(BindPool(r.Context(), m.pool), "ownership.transfer", Scope{}); err != nil {
 					return err
 				}
 			}
@@ -214,7 +214,7 @@ func (m *Module) putWorkspaceRole(w http.ResponseWriter, r *http.Request) {
 			return err
 		}
 		if priorKey != nil && *priorKey == "owner" {
-			if err := Require(r.Context(), "ownership.transfer", Scope{}); err != nil {
+			if err := Require(BindPool(r.Context(), m.pool), "ownership.transfer", Scope{}); err != nil {
 				return err
 			}
 		}
