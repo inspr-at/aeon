@@ -3,7 +3,9 @@
 package authz
 
 import (
+	"context"
 	"errors"
+	"strings"
 	"testing"
 
 	"github.com/inspr-at/aeon/internal/db"
@@ -44,6 +46,25 @@ func TestRegistryAndBuiltins(t *testing.T) {
 			t.Errorf("%s %s: want %v", tc.role, tc.permission, tc.allow)
 		}
 	}
+	for pattern, declaration := range RoutePermissions {
+		if declaration == PublicRoute {
+			continue
+		}
+		for _, key := range strings.Split(declaration, "|") {
+			if _, ok := Lookup(key); !ok {
+				t.Errorf("route %q declares unknown permission %q", pattern, key)
+			}
+		}
+	}
+}
+
+func TestRouteDeclarationsFailClosed(t *testing.T) {
+	if err := RequirePattern(context.Background(), "GET /api/undeclared", Scope{}); !errors.Is(err, ErrForbidden) {
+		t.Fatalf("undeclared route: %v", err)
+	}
+	if err := RequirePattern(context.Background(), "GET /api/health", Scope{}); err != nil {
+		t.Fatalf("public health: %v", err)
+	}
 }
 
 func TestLegacyMappingAndOwnerProtection(t *testing.T) {
@@ -64,10 +85,10 @@ func TestLegacyMappingAndOwnerProtection(t *testing.T) {
 		t.Fatal("built-in role changed in database")
 	}
 	ids := map[string]string{}
-	for _, role := range []string{"super_admin", "admin", "member", "reviewer", "external", "customer", "system"} {
+	for _, role := range []string{"super_admin", "admin", "member", "reviewer", "external", "customer", "system", "importer", "operator", "embedding", "quote_public_service"} {
 		err = db.InTenant(ctx, d.App, tid, func(tx pgx.Tx) error {
 			kind := "person"
-			if role == "system" {
+			if role == "system" || role == "importer" || role == "operator" || role == "embedding" || role == "quote_public_service" {
 				kind = "agent"
 			}
 			var id string
@@ -93,12 +114,14 @@ func TestLegacyMappingAndOwnerProtection(t *testing.T) {
 				t.Errorf("%s mapped to %s, want %s", old, got, want)
 			}
 		}
-		var count int
-		if err := tx.QueryRow(ctx, `SELECT count(*) FROM role_bindings WHERE principal_id=$1::uuid`, ids["system"]).Scan(&count); err != nil {
-			return err
-		}
-		if count != 0 {
-			t.Error("service principal received a binding")
+		for _, service := range []string{"system", "importer", "operator", "embedding", "quote_public_service"} {
+			var count int
+			if err := tx.QueryRow(ctx, `SELECT count(*) FROM role_bindings WHERE principal_id=$1::uuid`, ids[service]).Scan(&count); err != nil {
+				return err
+			}
+			if count != 0 {
+				t.Errorf("%s service principal received a binding", service)
+			}
 		}
 		// An existing binding survives a changed legacy label and a rerun.
 		if _, err := tx.Exec(ctx, `UPDATE principals SET roles=ARRAY['customer'] WHERE id=$1::uuid`, ids["admin"]); err != nil {

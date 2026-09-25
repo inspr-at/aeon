@@ -28,7 +28,7 @@ type Module struct{ pool *pgxpool.Pool }
 
 func New(pool *pgxpool.Pool) httpapi.Module { return &Module{pool: pool} }
 func (m *Module) Mount(mux *http.ServeMux) {
-	Handle(mux, m.pool, "GET /api/authz/permissions", "authz.read", m.permissions)
+	Handle(mux, m.pool, "GET /api/authz/permissions", "roles.read", m.permissions)
 	Handle(mux, m.pool, "GET /api/me/permissions", "authz.read", m.mePermissions)
 	Handle(mux, m.pool, "GET /api/roles", "roles.read", m.roles)
 	Handle(mux, m.pool, "POST /api/roles", "roles.manage", m.createRole)
