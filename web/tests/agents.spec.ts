@@ -16,8 +16,8 @@ const world: AgentWorld = {
 const session = (n: number) => `5e000000-0000-4000-8000-0000000000${String(n).padStart(2, '0')}`
 const camy = session(1), nova = session(2), kite = session(4)
 
-async function setup(page: Page, options: AgentMockOptions & { empty?: boolean; readOnly?: boolean } = {}) {
-  await mockWork(page, fixtures(), { readOnly: options.readOnly })
+async function setup(page: Page, options: AgentMockOptions & { empty?: boolean; readOnly?: boolean; member?: boolean } = {}) {
+  await mockWork(page, fixtures(), { readOnly: options.readOnly, admin: !options.member })
   const data = agentData({ ...world, empty: options.empty })
   const calls = await mockAgents(page, data, options)
   return { data, calls }
@@ -101,6 +101,18 @@ test('approvals: j and k move, a opens a reason, Enter records the decision', as
   expect(calls.filter(c => c.path.endsWith('/decision'))).toHaveLength(1)
   await queue(page).getByRole('button', { name: /^Decided/ }).click()
   await expect(queue(page).locator('.past')).toHaveCount(5)
+})
+
+test('members can decide lower risk requests but not high risk requests', async ({ page }) => {
+  await setup(page, { member: true })
+  await openAgents(page)
+  const items = queue(page).locator('.item')
+  await expect(items.first()).toContainText('High risk')
+  await expect(items.first().getByRole('button', { name: 'Approve' })).toHaveCount(0)
+  await items.first().focus()
+  await page.keyboard.press('a')
+  await expect(items.first().getByLabel('Reason (optional)')).toHaveCount(0)
+  await expect(items.nth(1).getByRole('button', { name: 'Approve' })).toBeVisible()
 })
 
 test('a failed decision keeps the reason and says why', async ({ page }) => {

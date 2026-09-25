@@ -107,6 +107,19 @@ func TestProfileBundleApplyAndDraftAssignment(t *testing.T) {
 		t.Fatalf("replay changed state: %+v", replay)
 	}
 	if err := db.InTenant(ctx, database.App, tenantID, func(tx pgx.Tx) error {
+		if _, err := tx.Exec(ctx, `INSERT INTO principals(tenant_id,kind,name,roles) VALUES($1::uuid,'agent','Renamed bootstrap',ARRAY['operator']::text[])`, tenantID); err != nil {
+			return err
+		}
+		_, err := tx.Exec(ctx, `INSERT INTO principals(tenant_id,kind,name,roles) VALUES($1::uuid,'agent','Tenant bootstrap','{}'::text[])`, tenantID)
+		return err
+	}); err != nil {
+		t.Fatal(err)
+	}
+	roleReplay, err := ApplyProfileBundle(ctx, database.App, tenantID, "", filesDir, "classic-test", bundle, true, true)
+	if err != nil || roleReplay.Action != "unchanged" {
+		t.Fatalf("operator role lookup: %+v: %v", roleReplay, err)
+	}
+	if err := db.InTenant(ctx, database.App, tenantID, func(tx pgx.Tx) error {
 		var defaultID, selectedID string
 		var draftRevision int64
 		if err := tx.QueryRow(ctx, `SELECT default_profile_id::text FROM quote_settings`).Scan(&defaultID); err != nil {

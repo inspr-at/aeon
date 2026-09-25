@@ -6,7 +6,6 @@ import (
 	"context"
 	"encoding/json"
 	"errors"
-	"slices"
 
 	"github.com/jackc/pgx/v5"
 
@@ -81,7 +80,7 @@ func undoWith(ctx context.Context, tx pgx.Tx, p tenant.Principal, e events.Event
 	if err != nil {
 		return events.Change{}, err
 	}
-	if current.OwnerPrincipal != p.ID && !slices.Contains(p.Roles, "admin") {
+	if current.OwnerPrincipal != p.ID && !tenant.IsAdmin(p) {
 		return events.Change{}, events.ErrForbidden
 	}
 	if !current.UpdatedAt.Equal(after.UpdatedAt) {

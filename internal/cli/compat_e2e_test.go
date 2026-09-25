@@ -133,6 +133,7 @@ func TestCompatEndToEnd(t *testing.T) {
 		t.Fatal(err)
 	}
 	seedProject(t, srv.URL, worker.Token)
+	seedKnowledgeKinds(t, srv.URL)
 	t.Setenv("PAIMOS_API_KEY", worker.Token)
 
 	code, out, errOut := runCLI([]string{"paimos", "--config", missing, "whoami"}, "")
@@ -470,7 +471,9 @@ func mintAgent(t *testing.T, base, name string) mintedKey {
 	if err := json.Unmarshal(raw, &me); err != nil {
 		t.Fatal(err)
 	}
-	status, raw = doJSON(t, hc, http.MethodPost, base+"/api/agent-keys", `{"name":"`+name+`","scopes":["inbox.send","nodes.read","nodes.write","nodes.configure","relations.read","relations.write","events.read","events.undo","search.read","views.read","views.write"]}`, nil)
+	// Compat whoami and tell resolve /api/me with account.manage; listen and
+	// ACK need inbox.read, tell uses inbox.send, and model resolve needs models.read.
+	status, raw = doJSON(t, hc, http.MethodPost, base+"/api/agent-keys", `{"name":"`+name+`","scopes":["account.manage","inbox.read","inbox.send","models.read","nodes.read","nodes.write","nodes.configure","relations.read","relations.write","events.read","events.undo","search.read","views.read","views.write"]}`, nil)
 	if status != http.StatusCreated {
 		t.Fatalf("agent key %s %d %s", name, status, raw)
 	}
@@ -517,6 +520,31 @@ func seedProject(t *testing.T, base, token string) {
 	status, raw = doJSON(t, hc, http.MethodPost, base+"/api/nodes", body, authz)
 	if status != http.StatusCreated {
 		t.Fatalf("project %d %s", status, raw)
+	}
+}
+
+func seedKnowledgeKinds(t *testing.T, base string) {
+	t.Helper()
+	jar, err := cookiejar.New(nil)
+	if err != nil {
+		t.Fatal(err)
+	}
+	hc := &http.Client{Jar: jar}
+	status, raw := doJSON(t, hc, http.MethodPost, base+"/api/auth/dev-login", `{"email":"admin@example.com","tenant":"aeon"}`, nil)
+	if status != http.StatusOK {
+		t.Fatalf("schema admin login %d %s", status, raw)
+	}
+	// Schema changes are person-admin work. The compat agent can then create
+	// ordinary knowledge nodes without receiving schema authority.
+	for _, spec := range []struct{ slug, label, prefix string }{
+		{"external_system", "External system", "EXT"},
+		{"related_project", "Related project", "RPR"},
+	} {
+		body := fmt.Sprintf(`{"slug":%q,"label":%q,"short_prefix":%q,"icon":%q,"field_schema":{}}`, spec.slug, spec.label, spec.prefix, spec.slug)
+		status, raw = doJSON(t, hc, http.MethodPost, base+"/api/kinds", body, nil)
+		if status != http.StatusCreated {
+			t.Fatalf("schema kind %s: %d %s", spec.slug, status, raw)
+		}
 	}
 }
 

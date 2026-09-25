@@ -6,7 +6,6 @@ package auth
 import (
 	"context"
 	"net/http"
-	"slices"
 	"strconv"
 	"strings"
 	"sync"
@@ -118,12 +117,12 @@ func (m *Module) Middleware(next http.Handler) http.Handler {
 			}
 			return
 		}
-		if kind == credSession && p.Kind == tenant.Person && !slices.Contains(p.Roles, "admin") && !slices.Contains(p.Roles, "member") && !customerRouteAllowed(r, p) {
+		if kind == credSession && p.Kind == tenant.Person && !tenant.IsAdmin(p) && !hasRole(p, "member") && !customerRouteAllowed(r, p) {
 			httpapi.WriteError(w, http.StatusForbidden, "customer access denied")
 			return
 		}
 		if kind == credAgent {
-			if scope, controlled := coreAgentScope(r); controlled && (scope == "" || !hasScope(p.Scopes, scope)) {
+			if scope, controlled := coreAgentScope(r); !controlled || scope == "" || !agentHasScope(p.Scopes, scope) {
 				httpapi.WriteError(w, http.StatusForbidden, "agent key scope required")
 				return
 			}
@@ -169,10 +168,13 @@ func customerRouteAllowed(r *http.Request, p tenant.Principal) bool {
 	return len(parts) == 6 && (parts[5] == "accept" && r.Method == http.MethodPost || parts[5] == "export" && r.Method == http.MethodGet)
 }
 
-// General work APIs predate module-local agent grants. Apply key scopes before
-// they reach those handlers; specialised agent modules keep their own checks.
+// The key is an outer ceiling for every agent route. Modules retain their own
+// resource, grant and actor checks. Unlisted paths have no agent authority.
 func coreAgentScope(r *http.Request) (string, bool) {
-	path := r.URL.Path
+	parts := strings.Split(strings.TrimPrefix(r.URL.Path, "/api/"), "/")
+	if !strings.HasPrefix(r.URL.Path, "/api/") || len(parts) == 0 {
+		return "", false
+	}
 	read := r.Method == http.MethodGet || r.Method == http.MethodHead
 	scope := func(resource string) (string, bool) {
 		if read {
@@ -180,29 +182,156 @@ func coreAgentScope(r *http.Request) (string, bool) {
 		}
 		return resource + ".write", true
 	}
-	switch {
-	case path == "/api/projects", path == "/api/nodes", strings.HasPrefix(path, "/api/nodes/"), strings.HasPrefix(path, "/api/node-keys/"):
+	switch parts[0] {
+	case "projects":
+		if len(parts) == 1 && read {
+			return "nodes.read", true
+		}
+		if len(parts) < 3 {
+			break
+		}
+		switch parts[2] {
+		case "messages", "message-targets", "message-deliveries":
+			if read {
+				return "inbox.read", true
+			}
+			return "inbox.send", true
+		case "intake":
+			return scope("intake")
+		case "journey", "requirements", "releases":
+			if read {
+				return "journey.read", true
+			}
+		case "harness-sessions":
+			return harnessScope(parts[3:], read), true
+		case "baseline-batches":
+			return "stage.<op>", true
+		}
+	case "nodes":
+		if len(parts) > 2 && parts[2] == "time-totals" && read {
+			return "hours.read", true
+		}
+		if len(parts) > 2 && parts[2] == "activity" && read {
+			return "nodes.read", true
+		}
+		if len(parts) > 2 && parts[2] == "comments" {
+			return scope("nodes")
+		}
+		if len(parts) > 2 && parts[2] == "attachments" {
+			return scope("nodes")
+		}
 		return scope("nodes")
-	case path == "/api/kinds", strings.HasPrefix(path, "/api/kinds/"):
+	case "node-keys":
+		if read {
+			return "nodes.read", true
+		}
+	case "tags":
+		return "nodes.configure", true
+	case "attachments":
+		return scope("nodes")
+	case "kinds":
 		if !read {
 			return "nodes.configure", true
 		}
 		return "nodes.read", true
-	case path == "/api/relations", strings.HasPrefix(path, "/api/relations/"):
+	case "relations":
 		return scope("relations")
-	case path == "/api/events", strings.HasPrefix(path, "/api/events/"):
+	case "events":
 		if read {
 			return "events.read", true
 		}
 		return "events.undo", true
-	case path == "/api/search":
-		return "search.read", true
-	case path == "/api/views", strings.HasPrefix(path, "/api/views/"), strings.HasPrefix(path, "/api/preferences/"),
-		path == "/api/project-groups", strings.HasPrefix(path, "/api/project-groups/"):
+	case "search":
+		if read {
+			return "search.read", true
+		}
+	case "views", "preferences", "project-groups":
 		return scope("views")
-	default:
-		return "", false
+	case "knowledge":
+		return scope("knowledge")
+	case "approvals":
+		if len(parts) == 1 {
+			if read {
+				return "approvals.read", true
+			}
+			if r.Method == http.MethodPost {
+				return "approvals.request", true
+			}
+		}
+	case "inbox":
+		if read {
+			return "inbox.read", true
+		}
+		return "inbox.send", true
+	case "models":
+		if read {
+			return "models.read", true
+		}
+	case "plugins":
+		if read {
+			return "plugins.read", true
+		}
+	case "work-orders":
+		if len(parts) > 2 && parts[2] == "runs" {
+			return "run.create", true
+		}
+		return scope("work_orders")
+	case "runs":
+		if read {
+			return "run.read", true
+		}
+		if len(parts) > 2 {
+			switch parts[2] {
+			case "claim":
+				return "run.claim", true
+			case "telemetry":
+				return "run.telemetry", true
+			}
+		}
+	case "harness-sessions":
+		return harnessScope(parts[1:], read), true
+	case "agent-accounts":
+		return "account.manage", true
+	case "stage-handoffs":
+		return "stage.<op>", true
+	case "me":
+		if len(parts) == 1 && read {
+			return "account.manage", true
+		}
+	case "time-entries", "time-periods":
+		return scope("hours")
 	}
+	return "", false
+}
+
+func harnessScope(parts []string, read bool) string {
+	if read {
+		return "harness.read"
+	}
+	for _, part := range parts {
+		if part == "controls" {
+			return "harness.control"
+		}
+	}
+	if len(parts) > 0 {
+		switch parts[len(parts)-1] {
+		case "heartbeat", "yield", "drain", "complete-delivery", "complete", "stop":
+			return "harness.worker"
+		}
+	}
+	return "harness.write"
+}
+
+func agentHasScope(have []string, want string) bool {
+	if want == "stage.<op>" {
+		for _, op := range []string{"prepare", "deploy", "verify", "apply"} {
+			if hasScope(have, "stage."+op) {
+				return true
+			}
+		}
+		return false
+	}
+	return hasScope(have, want)
 }
 
 func isPublicAPI(path string) bool {
@@ -302,6 +431,15 @@ func hasScope(have []string, want string) bool {
 	want = strings.ReplaceAll(want, ":", ".")
 	for _, s := range have {
 		if strings.ReplaceAll(s, ":", ".") == want {
+			return true
+		}
+	}
+	return false
+}
+
+func hasRole(p tenant.Principal, role string) bool {
+	for _, candidate := range p.Roles {
+		if candidate == role {
 			return true
 		}
 	}

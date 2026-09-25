@@ -87,7 +87,7 @@ onMounted(() => { void loadMembers(); void loadKeys() })
             <tr v-for="key in keys!" :key="key.id" :class="keyState(key)">
               <th scope="row">{{ key.name }}<span class="sub">Created {{ relativeTime(key.created_at, { long: true }) }}</span></th>
               <td class="mono">aeon_{{ key.prefix }}_…</td>
-              <td><span v-if="!key.scopes.length" class="muted">All</span><span v-for="scope in key.scopes" :key="scope" class="scope mono">{{ scope }}</span></td>
+              <td><span v-if="!key.scopes.length" class="muted">None</span><span v-for="scope in key.scopes" :key="scope" class="scope mono">{{ scope }}</span></td>
               <td><time v-if="key.last_used_at" :datetime="key.last_used_at" :data-tip="absoluteTime(key.last_used_at)">{{ relativeTime(key.last_used_at, { long: true }) }}</time><span v-else class="muted">Never</span></td>
               <td><span class="state" :class="keyState(key)">{{ STATE[keyState(key)] }}</span><span v-if="key.expires_at && keyState(key) === 'active'" class="sub">until {{ absoluteTime(key.expires_at) }}</span></td>
             </tr>
