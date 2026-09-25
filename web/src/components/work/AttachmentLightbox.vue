@@ -1,6 +1,6 @@
 <!-- SPDX-License-Identifier: AGPL-3.0-only -->
 <script setup lang="ts">
-import { computed, nextTick, onBeforeUnmount, ref, watch } from 'vue'
+import { computed, nextTick, onBeforeUnmount, reactive, ref, watch } from 'vue'
 import { contentUrl, fileKind, fileSize, isImage, markdownRef, type Attachment } from '../../lib/attachments'
 import { absoluteTime } from '../../lib/work'
 import { toast } from '../../lib/toast'
@@ -27,6 +27,9 @@ const slider = ref(0.5)
 const onion = ref(0.5)
 const caption = ref('')
 const loaded = ref(false)
+// The picture could not be read (its bytes are not stored here): say so instead of a broken image.
+const unreadable = ref(false)
+const brokenThumbs = reactive(new Set<string>())
 let opener: HTMLElement | null = null
 
 const current = computed(() => props.items[index.value])
@@ -54,7 +57,7 @@ function go(step: number) {
   if (compare.value && compare.value.with === index.value) compare.value.with = (index.value + 1) % props.items.length
   reset()
 }
-function reset() { mode.value = 'fit'; offset.value = { x: 0, y: 0 }; loaded.value = false; caption.value = current.value?.caption ?? ''; void nextTick(fit) }
+function reset() { mode.value = 'fit'; offset.value = { x: 0, y: 0 }; loaded.value = false; unreadable.value = false; caption.value = current.value?.caption ?? ''; void nextTick(fit) }
 // Fit: the whole image in the stage with a margin; never enlarged past 100%.
 function fit() {
   const item = current.value, box = stage.value?.getBoundingClientRect()
@@ -226,14 +229,15 @@ const transform = computed(() => `translate(${offset.value.x}px, ${offset.value.
           </template>
           <!-- One attachment -->
           <img
-            v-else-if="isImage(current)" :key="current.id" class="photo" :class="{ ready: loaded }" :src="contentUrl(current.id, variant)" :alt="current.caption || current.name"
-            :width="current.width ?? undefined" :height="current.height ?? undefined" :style="{ transform }" draggable="false" @load="loaded = true"
+            v-else-if="isImage(current) && !unreadable" :key="current.id" class="photo" :class="{ ready: loaded }" :src="contentUrl(current.id, variant)" :alt="current.caption || current.name"
+            :width="current.width ?? undefined" :height="current.height ?? undefined" :style="{ transform }" draggable="false" @load="loaded = true" @error="unreadable = true"
           />
           <div v-else class="file-stage">
             <span class="file-badge">{{ fileKind(current) }}</span>
             <p class="file-name">{{ current.name }}</p>
             <p class="file-meta">{{ fileSize(current.size) }} · {{ current.content_type }}</p>
-            <a class="btn primary" :href="contentUrl(current.id, 'original')" :download="current.name"><AppIcon name="download" :size="14" />Download</a>
+            <p v-if="unreadable" class="file-meta" role="status">This picture cannot be shown: its file is not stored here.</p>
+            <a v-if="!unreadable" class="btn primary" :href="contentUrl(current.id, 'original')" :download="current.name"><AppIcon name="download" :size="14" />Download</a>
           </div>
 
           <button v-if="items.length > 1" type="button" class="nav prev" aria-label="Previous attachment" aria-keyshortcuts="ArrowLeft" @click="go(-1)"><AppIcon name="chevron-left" :size="20" /></button>
@@ -269,7 +273,7 @@ const transform = computed(() => `translate(${offset.value.x}px, ${offset.value.
               type="button" class="thumb" :class="{ on: i === index, b: compare?.with === i }" :aria-current="i === index ? 'true' : undefined"
               :aria-label="`${compare && i !== index ? 'Compare with' : 'Show'} ${item.caption || item.name}`" @click="pickStrip(i)"
             >
-              <img v-if="isImage(item)" :src="contentUrl(item.id, 'thumb')" alt="" loading="lazy" />
+              <img v-if="isImage(item) && !brokenThumbs.has(item.id)" :src="contentUrl(item.id, 'thumb')" alt="" loading="lazy" @error="brokenThumbs.add(item.id)" />
               <span v-else class="thumb-file">{{ fileKind(item) }}</span>
               <span v-if="compare?.with === i" class="b-tag">B</span>
             </button>
@@ -345,7 +349,7 @@ figcaption { display: flex; align-items: center; gap: 8px; font-size: 12.5px; co
 .nav.prev { left: 18px; } .nav.next { right: 18px; }
 .file-stage { display: grid; justify-items: center; gap: 10px; padding: 40px; border-radius: 18px; background: var(--lb-glass); box-shadow: inset 0 0 0 1px var(--lb-edge); }
 .file-badge { display: grid; place-items: center; width: 72px; height: 88px; border-radius: 12px; background: rgba(237, 244, 240, .1); box-shadow: inset 0 0 0 1px var(--lb-edge); font: 700 14px/1 var(--mono); color: #a4e5df; }
-.file-name { font-size: 16px; font-weight: 600; }
+.file-name { font-size: 16px; font-weight: 600; color: var(--lb-ink); }
 .file-meta { font-size: 12.5px; color: var(--lb-ink-2); }
 .details { display: grid; align-content: start; gap: 10px; padding: 20px; background: var(--lb-glass); border-left: 1px solid var(--lb-edge); overflow: auto; }
 .details .eyebrow { margin-top: 6px; }
