@@ -126,6 +126,13 @@ func serveListener(ctx context.Context, cfg config.Config, ln net.Listener) erro
 		}
 		messagingMod = m
 		extraPlugins = append(extraPlugins, inbox.MessagingPlugin)
+		// CP1: receiver-owned grok_bot_routine webhook wakes, one runner per tenant.
+		dispatcher, err := inbox.NewRoutineDispatcher(pool, cfg.MessagingKey)
+		if err != nil {
+			_ = ln.Close()
+			return fmt.Errorf("routine dispatcher: %w", err)
+		}
+		go runRoutineDispatchers(ctx, pool, dispatcher)
 	} else {
 		slog.Warn("messaging disabled: AEON_MESSAGING_KEY_FILE is not set")
 	}
@@ -385,4 +392,29 @@ func resolveWeb(cfg config.Config) (fs.FS, error) {
 // settleUsage lets finished runs settle their account allowance projections (R2).
 func settleUsage(ctx context.Context, tx pgx.Tx, p tenant.Principal, run agentruns.Run, _ agentruns.Telemetry) error {
 	return agentaccounts.Settle(ctx, tx, p, run.ID)
+}
+
+// runRoutineDispatchers starts one routine dispatcher per tenant that exists at
+// startup; a tenant created later is picked up on the next restart.
+func runRoutineDispatchers(ctx context.Context, pool *pgxpool.Pool, d *inbox.RoutineDispatcher) {
+	rows, err := pool.Query(ctx, `SELECT id::text FROM tenants ORDER BY id`)
+	if err != nil {
+		slog.Error("routine dispatcher: list tenants", "err", err)
+		return
+	}
+	var ids []string
+	for rows.Next() {
+		var id string
+		if rows.Scan(&id) == nil {
+			ids = append(ids, id)
+		}
+	}
+	rows.Close()
+	for _, id := range ids {
+		go func(tenantID string) {
+			if err := d.Run(ctx, tenantID); err != nil && ctx.Err() == nil {
+				slog.Error("routine dispatcher stopped", "tenant", tenantID, "err", err)
+			}
+		}(id)
+	}
 }
