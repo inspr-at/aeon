@@ -212,7 +212,7 @@ function menuKeys(event: KeyboardEvent) {
 .right { justify-content: flex-end; gap: 6px; }
 /* Controls keep their size; the bar folds instead of squeezing them. */
 .right > *, .win > * { flex-shrink: 0; }
-.center { display: flex; justify-content: center; }
+.center { display: flex; align-items: center; justify-content: center; }
 .back { flex-shrink: 0; }
 .identity { display: flex; align-items: center; gap: 8px; min-width: 0; }
 .number { font: 600 14px/1.2 var(--mono); color: var(--ink); white-space: nowrap; overflow: hidden; text-overflow: ellipsis; font-variant-ligatures: none; }
@@ -257,11 +257,11 @@ function menuKeys(event: KeyboardEvent) {
 .menu-item:disabled { color: var(--ink-3); cursor: default; }
 .menu-sep { height: 1px; margin: 4px 6px; background: var(--line); }
 /* Narrow: labels step aside; phones and the docked panel stack the bar in two rows. */
-.compact { grid-template-columns: minmax(min-content, 1fr) max-content; grid-template-areas: "left left" "center right"; row-gap: 6px; padding: 6px 12px 8px; }
-.compact .left { grid-area: left; }
-.compact .center { grid-area: center; justify-content: flex-start; }
-.compact .right { grid-area: right; gap: 4px; }
-.compact .pdf-text, .compact .pane-text { display: none; }
+.titlebar.compact { grid-template-columns: minmax(min-content, 1fr) max-content; grid-template-areas: "left left" "center right"; row-gap: 6px; padding: 6px 12px 8px; }
+.titlebar.compact .left { grid-area: left; }
+.titlebar.compact .center { grid-area: center; justify-content: flex-start; }
+.titlebar.compact .right { grid-area: right; gap: 4px; }
+.titlebar.compact .pdf-text, .titlebar.compact .pane-text { display: none; }
 /* Folded (measured, not guessed): labels first, then the save state's words. */
 .fold-1 .pdf-text, .fold-1 .pane-text, .fold-2 .pdf-text, .fold-2 .pane-text, .fold-3 .pdf-text, .fold-3 .pane-text, .fold-4 .pdf-text, .fold-4 .pane-text { display: none; }
 .fold-1 .pdf, .fold-2 .pdf, .fold-3 .pdf, .fold-4 .pdf, .fold-1 .pane-btn, .fold-2 .pane-btn, .fold-3 .pane-btn, .fold-4 .pane-btn { width: 32px; padding: 0; justify-content: center; }
@@ -274,29 +274,29 @@ function menuKeys(event: KeyboardEvent) {
 .menu-label { padding: 6px 10px 2px; font: 500 10.5px/1.4 var(--mono); letter-spacing: .12em; text-transform: uppercase; color: var(--ink-3); font-variant-ligatures: none; }
 .menu-hint { margin-left: auto; font: 500 11px/1 var(--mono); color: var(--ink-3); font-variant-numeric: tabular-nums; }
 .menu-item[aria-current="true"] { color: var(--teal-ink); font-weight: 600; }
-.compact .pdf, .compact .pane-btn { width: 32px; padding: 0; justify-content: center; }
-.compact .history { padding-right: 4px; }
-.compact .divider { display: none; }
+.titlebar.compact .pdf, .titlebar.compact .pane-btn { width: 32px; padding: 0; justify-content: center; }
+.titlebar.compact .history { padding-right: 4px; }
+.titlebar.compact .divider { display: none; }
 /* Phones: every control in the bar is a 40 px button, 6 px apart in both directions,
    like the app header's round buttons above it; each reaches 44 px for a finger
    (base.css) without reaching into its neighbour's. */
 @media (max-width: 600px) {
-  .compact { row-gap: 6px; padding: 4px 10px; }
-  .compact .left, .compact .right, .compact .win, .compact .history, .compact .print-pair { gap: 6px; }
-  .compact .history { padding-right: 0; border-right: 0; margin-right: 0; }
-  .compact .icon-btn.sm, .compact .btn.sm, .compact .save-btn, .compact :deep(.btn.sm) { height: 40px; min-width: 40px; border-radius: 12px; }
-  .compact .pdf, .compact .pane-btn, .compact .save-btn, .compact :deep(.compact.picker), .compact :deep(.compact.frozen-profile) { width: 40px; height: 40px; }
-  .compact :deep(.compact.frozen-profile) { display: inline-flex; align-items: center; }
-  .compact .save-btn { position: relative; }
-  .compact .save-btn::before { content: ''; position: absolute; top: 50%; left: 50%; width: 44px; height: 44px; transform: translate(-50%, -50%); }
+  .titlebar.compact { row-gap: 6px; padding: 4px 10px; }
+  .titlebar.compact .left, .titlebar.compact .right, .titlebar.compact .win, .titlebar.compact .history, .titlebar.compact .print-pair { gap: 6px; }
+  .titlebar.compact .history { padding-right: 0; border-right: 0; margin-right: 0; }
+  .titlebar.compact .icon-btn.sm, .titlebar.compact .btn.sm, .titlebar.compact .save-btn, .titlebar.compact :deep(.btn.sm) { height: 40px; min-width: 40px; border-radius: 12px; }
+  .titlebar.compact .pdf, .titlebar.compact .pane-btn, .titlebar.compact .save-btn, .titlebar.compact :deep(.compact.picker), .titlebar.compact :deep(.compact.frozen-profile) { width: 40px; height: 40px; }
+  .titlebar.compact :deep(.compact.frozen-profile) { display: inline-flex; align-items: center; }
+  .titlebar.compact .save-btn { position: relative; }
+  .titlebar.compact .save-btn::before { content: ''; position: absolute; top: 50%; left: 50%; width: 44px; height: 44px; transform: translate(-50%, -50%); }
   /* The first row holds the way back, the number, the state and the draft's
      controls: the state speaks by its icon (its words stay for screen readers and
      the notice below says what went wrong), Save by its icon, so the zoom keeps
      its place on the second row. */
-  .compact .save-state { height: 40px; min-width: 0; padding: 0 2px; }
-  .compact .save-text { position: absolute; width: 1px; height: 1px; overflow: hidden; clip-path: inset(50%); white-space: nowrap; }
-  .compact .save-caption { display: none; }
+  .titlebar.compact .save-state { height: 40px; min-width: 0; padding: 0 2px; }
+  .titlebar.compact .save-text { position: absolute; width: 1px; height: 1px; overflow: hidden; clip-path: inset(50%); white-space: nowrap; }
+  .titlebar.compact .save-caption { display: none; }
   /* Docked on a phone the quote fills the screen: its own page is one step away in the … menu. */
-  .compact .win .expand-btn { display: none; }
+  .titlebar.compact .win .expand-btn { display: none; }
 }
 </style>

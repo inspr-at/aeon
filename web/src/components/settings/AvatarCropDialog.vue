@@ -171,6 +171,8 @@ onBeforeUnmount(() => { upload?.abort(); URL.revokeObjectURL(url) })
 @media (max-width: 600px) { .slider { height: 44px; } }
 .help { display: grid; justify-items: center; gap: 4px; font-size: 12px; color: var(--ink-2); text-align: center; line-height: 1.6; }
 .help .keys { display: inline-flex; flex-wrap: wrap; justify-content: center; align-items: center; gap: 3px 4px; }
+/* Touch screens have no keys to press: the drag and pinch line says it all. */
+@media (hover: none) and (pointer: coarse) { .help .keys { display: none; } }
 .previews { display: grid; gap: 10px; align-content: start; }
 .previews .eyebrow { margin: 0; }
 .preview-row { display: flex; align-items: flex-end; gap: 14px; flex-wrap: wrap; }

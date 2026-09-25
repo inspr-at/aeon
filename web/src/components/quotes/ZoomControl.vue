@@ -72,7 +72,7 @@ function gridKeys(event: KeyboardEvent) {
 .steps { display: inline-flex; gap: 2px; }
 .step, .face { display: inline-flex; align-items: center; justify-content: center; height: 28px; border: 0; border-radius: 8px; background: transparent; color: var(--ink-2); }
 .step { width: 28px; padding: 0; }
-.face { gap: 4px; min-width: 70px; padding: 0 8px 0 10px; font: 600 12.5px/1 var(--font); font-variant-numeric: tabular-nums; color: var(--ink); }
+.face { flex-shrink: 0; gap: 4px; min-width: 70px; padding: 0 8px 0 10px; font: 600 12.5px/1 var(--font); font-variant-numeric: tabular-nums; color: var(--ink); white-space: nowrap; }
 .face-chev { color: var(--ink-3); }
 @media (hover: hover) { .step:hover:not(:disabled), .face:hover { color: var(--ink); background: var(--row-hover); } }
 .face[aria-expanded="true"] { background: var(--seg-on); box-shadow: inset 0 0 0 1px var(--glass-edge); }
