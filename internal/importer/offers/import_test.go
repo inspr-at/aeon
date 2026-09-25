@@ -101,6 +101,19 @@ func TestImportVersionAndIsolation(t *testing.T) {
 			t.Fatal(err)
 		}
 	}
+	var profileID string
+	if err := db.InTenant(ctx, d.App, tenantID, func(tx pgx.Tx) error {
+		if err := tx.QueryRow(ctx, `INSERT INTO quote_document_profiles(tenant_id,name,current_revision) VALUES($1::uuid,'Synthetic print',1) RETURNING id::text`, tenantID).Scan(&profileID); err != nil {
+			return err
+		}
+		if _, err := tx.Exec(ctx, `INSERT INTO quote_document_profile_revisions(tenant_id,profile_id,revision,name,definition,created_by_principal_id) VALUES($1::uuid,$2::uuid,1,'Synthetic print','{"schema":"inspr.document-profile.v1","layout_variant":"classic-v1"}'::jsonb,$3::uuid)`, tenantID, profileID, adminID); err != nil {
+			return err
+		}
+		_, err := tx.Exec(ctx, `INSERT INTO quote_settings(tenant_id,revision,numbering_time_zone,default_currency,sender,defaults,layout,updated_by_principal_id,default_profile_id) VALUES($1::uuid,1,'Europe/Vienna','EUR','{}'::jsonb,'{}'::jsonb,'{}'::jsonb,$2::uuid,$3::uuid)`, tenantID, adminID, profileID)
+		return err
+	}); err != nil {
+		t.Fatal(err)
+	}
 	b := syntheticBundle()
 	report, err := Import(ctx, d.App, tenantID, adminID, "synthetic", b, true)
 	if err != nil {
@@ -111,13 +124,13 @@ func TestImportVersionAndIsolation(t *testing.T) {
 	}
 	quoteID := report.Mappings[2].NodeID
 	if err := db.InTenant(ctx, d.App, tenantID, func(tx pgx.Tx) error {
-		var state, number, body string
+		var state, number, body, importedProfileID string
 		var version int
 		var total int64
-		if err := tx.QueryRow(ctx, `SELECT q.state,q.offer_no,q.current_version,s.document->'sections'->0->'nodes'->0->>'text', (s.document->>'net_total_cents')::bigint FROM business_quotes q JOIN quote_version_snapshots s ON s.tenant_id=q.tenant_id AND s.quote_node_id=q.quote_node_id AND s.version=q.current_version WHERE q.quote_node_id=$1::uuid`, quoteID).Scan(&state, &number, &version, &body, &total); err != nil {
+		if err := tx.QueryRow(ctx, `SELECT q.state,q.offer_no,q.current_version,s.document->'sections'->0->'nodes'->0->>'text', (s.document->>'net_total_cents')::bigint,s.document->'profile'->>'id' FROM business_quotes q JOIN quote_version_snapshots s ON s.tenant_id=q.tenant_id AND s.quote_node_id=q.quote_node_id AND s.version=q.current_version WHERE q.quote_node_id=$1::uuid`, quoteID).Scan(&state, &number, &version, &body, &total, &importedProfileID); err != nil {
 			return err
 		}
-		if state != "issued" || number != "A260101-01" || version != 1 || body != "Pay within 14 days" || total != 126 {
+		if state != "issued" || number != "A260101-01" || version != 1 || body != "Pay within 14 days" || total != 126 || importedProfileID != profileID {
 			t.Fatalf("incorrect issued snapshot: %s %s %d %s %d", state, number, version, body, total)
 		}
 		var sequence int64

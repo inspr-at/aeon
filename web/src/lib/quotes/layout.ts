@@ -2,7 +2,7 @@
 import type { QuotePosition } from './types'
 export const PAGE_MM = { width: 210, height: 297, marginTop: 20, marginRight: 21, marginBottom: 20, marginLeft: 21 } as const
 export const CONTENT_HEIGHT_MM = PAGE_MM.height - PAGE_MM.marginTop - PAGE_MM.marginBottom - 12
-export interface PagePlan { kind: 'cover' | 'sections' | 'positions'; sectionIds: string[]; positionIds: string[]; acceptance: boolean }
+export interface PagePlan { kind: 'cover' | 'sections' | 'positions'; heading?: 'terms' | 'positions'; sectionIds: string[]; positionIds: string[]; acceptance: boolean }
 export interface PaginationResult { ready: boolean; overflow: string | null; pages: PagePlan[] }
 export const decimalCents = (cents: number): string => {
   if (!Number.isSafeInteger(cents)) throw new Error('Invalid minor-unit amount')
@@ -70,6 +70,48 @@ export function fitWholeBlocks(coverPx: number, sections: { id: string; px: numb
   }
   if (acceptancePx > usablePx) overflow ??= 'Acceptance exceeds one page'
   if (acceptancePx > remaining) pages.push({ kind: 'positions', sectionIds: [], positionIds: [], acceptance: false })
+  pages.at(-1)!.acceptance = true
+  return { ready: !overflow, overflow, pages }
+}
+
+// The classic print sheet keeps one terms heading for the whole ordered block
+// list, adds a small continuation inset, and reserves measured table chrome.
+// Measurements are browser pixels, so pagination follows the loaded fonts.
+export function fitClassicBlocks(
+  coverPx: number, sections: { id: string; px: number }[], positions: { id: string; px: number }[],
+  acceptancePx: number, usablePx: number,
+  chrome: { terms: number; positions: number; table: number; continuation: number },
+): PaginationResult {
+  const pages: PagePlan[] = [{ kind: 'cover', sectionIds: [], positionIds: [], acceptance: false }]
+  let overflow: string | null = coverPx > usablePx ? 'Cover exceeds one page' : null
+  let remaining = usablePx - coverPx
+  for (const [index, section] of sections.entries()) {
+    const height = section.px + 17
+    const headingHeight = index === 0 ? chrome.terms : 0
+    if (height + headingHeight > usablePx - (index === 0 ? 0 : chrome.continuation)) overflow ??= `Section ${section.id} exceeds one page`
+    if (height + headingHeight > remaining) {
+      pages.push({ kind: 'sections', sectionIds: [], positionIds: [], acceptance: false })
+      remaining = usablePx - (index === 0 ? 0 : chrome.continuation)
+    }
+    if (index === 0) pages.at(-1)!.heading = 'terms'
+    pages.at(-1)!.sectionIds.push(section.id)
+    remaining -= height + headingHeight
+  }
+  pages.push({ kind: 'positions', heading: 'positions', sectionIds: [], positionIds: [], acceptance: false })
+  remaining = usablePx - chrome.positions - chrome.table
+  for (const [index, position] of positions.entries()) {
+    const height = position.px + 2
+    if (height > usablePx - chrome.table - (index === 0 ? chrome.positions : chrome.continuation)) overflow ??= `Position ${position.id} exceeds one page`
+    if (height > remaining && index > 0) {
+      pages.push({ kind: 'positions', sectionIds: [], positionIds: [], acceptance: false })
+      remaining = usablePx - chrome.continuation - chrome.table
+    }
+    pages.at(-1)!.positionIds.push(position.id)
+    remaining -= height
+  }
+  const acceptanceHeight = acceptancePx + 28
+  if (acceptanceHeight > usablePx - chrome.continuation) overflow ??= 'Acceptance exceeds one page'
+  if (acceptanceHeight > remaining) pages.push({ kind: 'positions', sectionIds: [], positionIds: [], acceptance: false })
   pages.at(-1)!.acceptance = true
   return { ready: !overflow, overflow, pages }
 }

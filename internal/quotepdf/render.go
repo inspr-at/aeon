@@ -60,8 +60,10 @@ func LoadProfileAssets(ctx context.Context, pool *pgxpool.Pool, store attachment
 					AssetID string `json:"asset_id"`
 				} `json:"fonts"`
 				Footer struct {
-					AssetID string `json:"asset_id"`
+					AssetID     string `json:"asset_id"`
+					DotsAssetID string `json:"dots_asset_id"`
 				} `json:"footer"`
+				Cover map[string]string `json:"cover"`
 			} `json:"definition"`
 		} `json:"profile"`
 	}
@@ -79,7 +81,13 @@ func LoadProfileAssets(ctx context.Context, pool *pgxpool.Pool, store attachment
 	if id := wrapped.Profile.Definition.Footer.AssetID; id != "" {
 		ids[id] = true
 	}
-	if len(ids) > 13 {
+	if id := wrapped.Profile.Definition.Footer.DotsAssetID; id != "" {
+		ids[id] = true
+	}
+	if id := wrapped.Profile.Definition.Cover["brand_asset_id"]; id != "" {
+		ids[id] = true
+	}
+	if len(ids) > 15 {
 		return nil, errors.New("too many profile assets")
 	}
 	var size int64

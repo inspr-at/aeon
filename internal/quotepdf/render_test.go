@@ -124,6 +124,68 @@ func TestSyntheticPDFGoldenTextAndGeometry(t *testing.T) {
 	}
 }
 
+func TestSyntheticClassicV1PDFGolden(t *testing.T) {
+	if !Available() {
+		t.Skip("Chromium unavailable")
+	}
+	if _, err := os.Stat("../../web/dist/quote-print.html"); err != nil {
+		t.Skip("build web assets first")
+	}
+	if _, err := exec.LookPath("pdftotext"); err != nil {
+		t.Skip("pdftotext unavailable")
+	}
+	var document map[string]json.RawMessage
+	if err := json.Unmarshal(sampleDocument(), &document); err != nil {
+		t.Fatal(err)
+	}
+	document["profile"] = json.RawMessage(`{
+	  "id":"aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa","revision":1,"definition":{
+	    "schema":"inspr.document-profile.v1","layout_variant":"classic-v1","locale":"de-AT","fonts":[],
+	    "colors":{"ink":"#1e2727","muted":"#6f7d7b","soft":"#a3aeac","accent":"#55d0c0","rule":"#dfe6e5","paper":"#ffffff"},
+	    "typography":{"body_pt":"10","title_pt":"17","section_pt":"18","table_pt":"9.6","footer_pt":"7.5"},
+	    "page":{"width_mm":"210","height_mm":"297","top_mm":"18","right_mm":"20","bottom_mm":"16","left_mm":"22"},
+	    "cover":{"top_mm":"11","title_gap_mm":"7","columns_gap_mm":"8","columns_padding_mm":"6"},
+	    "sections":{"numbering":"upper-roman","heading_case":"upper"},
+	    "positions_table":{"columns":[{"key":"position","width_mm":"9"},{"key":"description","width_mm":"71"},{"key":"quantity","width_mm":"15"},{"key":"unit","width_mm":"22"},{"key":"unit_price","width_mm":"24"},{"key":"total","width_mm":"27"}],"separator":"rule","repeat_header":true},
+	    "totals":{"vat":"note","discount":"hidden","net_label":"Net total"},
+	    "payment_terms":{"position":"sections","heading":"Payment"},
+	    "acceptance":{"signature_columns":2,"gap_mm":"14","lead_mm":"28"},
+	    "footer":{"width_mm":"33","offset_mm":"0","page_number_format":"PAGE {page} OF {total}"},
+	    "labels":{"quote":"QUOTE","terms":"TERMS","positions":"ITEMS","signature_customer":"Customer signature","signature_sender":"Studio signature"}
+	  }
+	}`)
+	raw, err := json.Marshal(document)
+	if err != nil {
+		t.Fatal(err)
+	}
+	ctx, cancel := context.WithTimeout(t.Context(), 45*time.Second)
+	defer cancel()
+	pdf, err := Render(ctx, os.DirFS("../../web/dist"), Payload{Document: raw, OfferNo: "S-001"})
+	if err != nil {
+		t.Fatal(err)
+	}
+	cmd := exec.CommandContext(ctx, "pdftotext", "-layout", "-", "-")
+	cmd.Stdin = bytes.NewReader(pdf)
+	output, err := cmd.Output()
+	if err != nil {
+		t.Fatal(err)
+	}
+	pages := strings.Split(strings.TrimSuffix(string(output), "\f"), "\f")
+	if len(pages) != 2 {
+		t.Fatalf("classic golden pages = %d, want 2", len(pages))
+	}
+	for _, wanted := range []string{"Synthetic quote", "I. TERMS", "Scope", "PAGE 1 OF 2"} {
+		if !strings.Contains(pages[0], wanted) {
+			t.Errorf("classic cover missing %q", wanted)
+		}
+	}
+	for _, wanted := range []string{"II. ITEMS", "01", "Service", "Net total", "€ 1,00", "PAGE 2 OF 2"} {
+		if !strings.Contains(pages[1], wanted) {
+			t.Errorf("classic positions missing %q", wanted)
+		}
+	}
+}
+
 func sampleDocument() json.RawMessage {
 	return json.RawMessage(`{
 	  "schema_version":1,"minimum_writer_version":1,"title":"Synthetic quote","subtitle":"A neutral example","project_ref":"TEST-1",
