@@ -34,7 +34,8 @@ const props = defineProps<{
   item: ListItem | null; ticketKey: string; resolving: boolean; resolveError: string
   position: { index: number; count: number } | null; now: number; mode: 'panel' | 'full'
   project: { id: string; routeKey: string }; names: Map<string, string>
-  me: { id: string; name: string } | null; canWrite: boolean; people: { id: string; name: string }[]
+  me: { id: string; name: string } | null; canWrite: boolean; canDelete: boolean; canMove: boolean
+  canComment: boolean; canDeleteComment: boolean; canAttach: boolean; people: { id: string; name: string }[]
   // Tickets followed to get here, oldest first (the panel's back trail).
   trail?: string[]
 }>()
@@ -52,6 +53,11 @@ const ticket = useTicket(item, {
 })
 const activity = useActivity(computed(() => props.item?.id ?? null))
 const editable = computed(() => props.canWrite && !ticket.readOnly.value && !ticket.gone.value)
+const deletable = computed(() => props.canDelete && !ticket.readOnly.value && !ticket.gone.value)
+const movable = computed(() => props.canMove && !ticket.readOnly.value && !ticket.gone.value)
+const commentable = computed(() => props.canComment && !ticket.readOnly.value && !ticket.gone.value)
+const commentDeletable = computed(() => props.canDeleteComment && !ticket.readOnly.value && !ticket.gone.value)
+const attachable = computed(() => props.canAttach && !ticket.readOnly.value && !ticket.gone.value)
 const attachments = useAttachments(computed(() => props.item?.id ?? null))
 const lightbox = ref<InstanceType<typeof AttachmentLightbox>>()
 
@@ -170,18 +176,18 @@ watch(editing, value => { if (!value) editMenu.value = null })
 const dropping = ref(false)
 let dragDepth = 0
 const hasFiles = (event: DragEvent) => !!event.dataTransfer?.types.includes('Files')
-function dragEnter(event: DragEvent) { if (!hasFiles(event) || !editable.value) return; event.preventDefault(); dragDepth++; dropping.value = true }
-function dragOverRoot(event: DragEvent) { if (!hasFiles(event) || !editable.value) return; event.preventDefault(); if (event.dataTransfer) event.dataTransfer.dropEffect = 'copy' }
+function dragEnter(event: DragEvent) { if (!hasFiles(event) || !attachable.value) return; event.preventDefault(); dragDepth++; dropping.value = true }
+function dragOverRoot(event: DragEvent) { if (!hasFiles(event) || !attachable.value) return; event.preventDefault(); if (event.dataTransfer) event.dataTransfer.dropEffect = 'copy' }
 function dragLeaveRoot(event: DragEvent) { if (!hasFiles(event)) return; dragDepth = Math.max(0, dragDepth - 1); if (!dragDepth) dropping.value = false }
 function dropFiles(event: DragEvent) {
-  if (!hasFiles(event) || !editable.value) return
+  if (!hasFiles(event) || !attachable.value) return
   event.preventDefault(); dragDepth = 0; dropping.value = false
   const files = [...(event.dataTransfer?.files ?? [])]
   if (files.length) void attachments.add(files)
 }
 function pasteFiles(event: ClipboardEvent) {
   const target = event.target as HTMLElement
-  if (!editable.value || target.closest('input, textarea, [contenteditable="true"]')) return
+  if (!attachable.value || target.closest('input, textarea, [contenteditable="true"]')) return
   const files = [...(event.clipboardData?.files ?? [])]
   if (!files.length) return
   event.preventDefault()
@@ -231,7 +237,7 @@ function copy(text: string, label: string) {
   navigator.clipboard.writeText(text).then(() => toast(`Copied ${label}`), () => toast(`${label} could not be copied`, { tone: 'error' }))
 }
 function anchorFor(shortcut: string) { return root.value?.querySelector<HTMLElement>(`[aria-keyshortcuts="${shortcut}"]`) ?? null }
-function openMenu(kind: 'priority' | 'assignee' | 'epic', anchor: HTMLElement | null) { if (anchor && editable.value) menu.value = { kind, anchor } }
+function openMenu(kind: 'priority' | 'assignee' | 'epic', anchor: HTMLElement | null) { if (anchor && (kind === 'epic' ? movable.value : editable.value)) menu.value = { kind, anchor } }
 function closeMenu(restore: boolean) { const anchor = menu.value?.anchor; menu.value = null; if (restore) anchor?.focus() }
 async function choosePriority(value: string) { const anchor = menu.value?.anchor; menu.value = null; anchor?.focus(); await ticket.setPriority(value || null) }
 async function chooseAssignee(value: string) {
@@ -245,7 +251,7 @@ async function chooseEpic(epic: { id: string; key: string; title: string } | nul
 }
 async function remove() {
   const target = props.item
-  if (!target) return
+  if (!target || !deletable.value) return
   const ok = await confirmAction({
     title: `Delete ${target.key}?`,
     body: `“${target.title}” leaves the project list. ${target.children_count ? 'Its children must be moved or deleted first.' : 'The history stays in the audit log.'}`,
@@ -281,7 +287,7 @@ defineExpose({
   >
     <TicketHeaderBar
       :ticket-key="item?.key ?? ticketKey" :kind="item?.kind_slug ?? null" :position="position" :mode="mode" :can-write="editable"
-      :can-move="item?.kind_slug === 'ticket'" :trail="trail" :editing="editing" :saving="saving" :dirty="editDirty"
+      :can-delete="deletable" :can-move="movable && item?.kind_slug === 'ticket'" :trail="trail" :editing="editing" :saving="saving" :dirty="editDirty"
       @copy-key="copy(item?.key ?? ticketKey, item?.key ?? ticketKey)" @copy-link="copy(link(), 'link')" @prev="emit('prev')" @next="emit('next')"
       @expand="emit('expand')" @collapse="emit('collapse')" @new-tab="emit('newTab')" @close="emit('close')"
       @move="anchor => openMenu('epic', anchor)" @delete="remove" @back="steps => emit('trailBack', steps)"
@@ -357,17 +363,17 @@ defineExpose({
             · Created <time :datetime="item.created_at" :data-tip="absoluteTime(item.created_at)">{{ relativeTime(item.created_at, { now, long: true }) }}</time>
           </p>
           <AttachmentStrip
-            v-if="!contextColumn && (attachments.count.value || editable)" class="ws-attachments" layout="strip" :items="attachments.items.value" :uploads="attachments.uploads.value"
-            :can-write="editable" :loading="attachments.loading.value" :error="attachments.error.value"
+            v-if="!contextColumn && (attachments.count.value || attachable)" class="ws-attachments" layout="strip" :items="attachments.items.value" :uploads="attachments.uploads.value"
+            :can-write="attachable" :loading="attachments.loading.value" :error="attachments.error.value"
             @open="openAttachment" @add="files => attachments.add(files)" @remove="attachments.remove" @reorder="attachments.reorder" @caption="attachments.setCaption"
             @retry="attachments.retry" @cancel="attachments.cancel" @reload="attachments.load"
           />
           <div class="divider" />
 
           <div class="sections">
-            <MarkdownSection ref="descSection" title="Description" :value="item.body" :editable="editable" :save="ticket.setBody" :attachment-id="attachmentId" empty-text="Add a description" @open-attachment="openAttachment" />
-            <MarkdownSection v-if="acceptance.trim() || showAcceptance" ref="acSection" title="Acceptance criteria" :value="acceptance" :editable="editable" :save="value => ticket.setField('acceptance_criteria', value)" :attachment-id="attachmentId" @open-attachment="openAttachment" />
-            <MarkdownSection v-if="notes.trim() || showNotes" ref="notesSection" title="Notes" :value="notes" :editable="editable" :save="value => ticket.setField('notes', value)" :attachment-id="attachmentId" @open-attachment="openAttachment" />
+            <MarkdownSection ref="descSection" title="Description" :value="item.body" :editable="editable" :save="ticket.setBody" :attachment-id="attachable ? attachmentId : undefined" empty-text="Add a description" @open-attachment="openAttachment" />
+            <MarkdownSection v-if="acceptance.trim() || showAcceptance" ref="acSection" title="Acceptance criteria" :value="acceptance" :editable="editable" :save="value => ticket.setField('acceptance_criteria', value)" :attachment-id="attachable ? attachmentId : undefined" @open-attachment="openAttachment" />
+            <MarkdownSection v-if="notes.trim() || showNotes" ref="notesSection" title="Notes" :value="notes" :editable="editable" :save="value => ticket.setField('notes', value)" :attachment-id="attachable ? attachmentId : undefined" @open-attachment="openAttachment" />
             <div v-if="editable && (!(acceptance.trim() || showAcceptance) || !(notes.trim() || showNotes))" class="add-sections">
               <button v-if="!(acceptance.trim() || showAcceptance)" type="button" class="add-section" @click="addSection('acceptance')"><AppIcon name="plus" :size="12" />Acceptance criteria</button>
               <button v-if="!(notes.trim() || showNotes)" type="button" class="add-section" @click="addSection('notes')"><AppIcon name="plus" :size="12" />Notes</button>
@@ -384,18 +390,18 @@ defineExpose({
             <RelationList class="ws-block" :class="{ 'only-narrow': mode === 'full' }" :related="ticket.related.value" @open="openLinked" />
             <ActivityTimeline
               ref="timeline" class="ws-block" :entries="activity.timeline.value" :loading="activity.loading.value" :loading-older="activity.loadingOlder.value"
-              :has-older="!!activity.cursor.value" :error="activity.error.value" :me="me?.id" :now="now" :can-write="editable"
+              :has-older="!!activity.cursor.value" :error="activity.error.value" :me="me?.id" :now="now" :can-write="commentable" :can-delete="commentDeletable"
               :edit="activity.edit" :remove="activity.remove" @older="activity.loadOlder" @retry="activity.load"
             />
-            <CommentComposer v-if="mode === 'full'" ref="composer" class="ws-block inline-composer" :me="me?.name ?? '?'" :me-id="me?.id ?? null" :post="activity.add" :disabled="!editable" />
+            <CommentComposer v-if="mode === 'full'" ref="composer" class="ws-block inline-composer" :me="me?.name ?? '?'" :me-id="me?.id ?? null" :post="activity.add" :disabled="!commentable" />
           </template>
         </div>
 
         <!-- Wide: a context column beside the reading column -->
         <aside v-if="contextColumn" class="ws-context" aria-label="Attachments, relations and activity">
           <AttachmentStrip
-            v-if="attachments.count.value || editable" layout="gallery" :items="attachments.items.value" :uploads="attachments.uploads.value"
-            :can-write="editable" :loading="attachments.loading.value" :error="attachments.error.value"
+            v-if="attachments.count.value || attachable" layout="gallery" :items="attachments.items.value" :uploads="attachments.uploads.value"
+            :can-write="attachable" :loading="attachments.loading.value" :error="attachments.error.value"
             @open="openAttachment" @add="files => attachments.add(files)" @remove="attachments.remove" @reorder="attachments.reorder" @caption="attachments.setCaption"
             @retry="attachments.retry" @cancel="attachments.cancel" @reload="attachments.load"
           />
@@ -403,10 +409,10 @@ defineExpose({
           <RelationList v-if="mode === 'panel' || ticket.related.value.length" class="ctx-block" :related="ticket.related.value" @open="openLinked" />
           <ActivityTimeline
             ref="timeline" class="ctx-block" :entries="activity.timeline.value" :loading="activity.loading.value" :loading-older="activity.loadingOlder.value"
-            :has-older="!!activity.cursor.value" :error="activity.error.value" :me="me?.id" :now="now" :can-write="editable"
+            :has-older="!!activity.cursor.value" :error="activity.error.value" :me="me?.id" :now="now" :can-write="commentable" :can-delete="commentDeletable"
             :edit="activity.edit" :remove="activity.remove" @older="activity.loadOlder" @retry="activity.load"
           />
-          <CommentComposer v-if="mode === 'full'" ref="composer" class="ctx-block inline-composer" :me="me?.name ?? '?'" :me-id="me?.id ?? null" :post="activity.add" :disabled="!editable" />
+          <CommentComposer v-if="mode === 'full'" ref="composer" class="ctx-block inline-composer" :me="me?.name ?? '?'" :me-id="me?.id ?? null" :post="activity.add" :disabled="!commentable" />
           </template>
         </aside>
 
@@ -424,13 +430,13 @@ defineExpose({
     </div>
 
     <footer v-if="mode === 'panel' && item && !ticket.gone.value && !editing" class="ws-composer">
-      <CommentComposer ref="composer" :me="me?.name ?? '?'" :me-id="me?.id ?? null" :post="activity.add" :disabled="!editable" />
+      <CommentComposer ref="composer" :me="me?.name ?? '?'" :me-id="me?.id ?? null" :post="activity.add" :disabled="!commentable" />
     </footer>
 
     <div v-if="dropping" class="drop-overlay" aria-hidden="true">
       <div class="drop-card"><AppIcon name="upload" :size="22" /><strong>Drop to attach to {{ item?.key ?? ticketKey }}</strong><span>Images show as thumbnails; other files as cards.</span></div>
     </div>
-    <AttachmentLightbox ref="lightbox" :items="attachments.items.value" :ticket-key="item?.key ?? ticketKey" :can-write="editable" :set-caption="attachments.setCaption" :names="names" />
+    <AttachmentLightbox ref="lightbox" :items="attachments.items.value" :ticket-key="item?.key ?? ticketKey" :can-write="attachable" :set-caption="attachments.setCaption" :names="names" />
 
     <OptionMenu v-if="menu?.kind === 'priority' && item" :anchor="menu.anchor" title="Priority" :subject="item.key" kind="priority" :options="priorityOptions" :current="item.priority ?? ''" @choose="choosePriority" @close="closeMenu" />
     <OptionMenu v-if="menu?.kind === 'assignee' && item" :anchor="menu.anchor" title="Assignee" :subject="item.key" kind="assignee" :options="assigneeOptions" :current="item.assignee?.id ?? ''" searchable @choose="chooseAssignee" @close="closeMenu" />

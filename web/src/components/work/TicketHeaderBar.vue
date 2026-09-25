@@ -6,7 +6,7 @@ import FloatingPanel from './FloatingPanel.vue'
 
 const props = defineProps<{
   ticketKey: string; kind: string | null; position: { index: number; count: number } | null
-  mode: 'panel' | 'full'; canWrite: boolean; canMove: boolean
+  mode: 'panel' | 'full'; canWrite: boolean; canMove: boolean; canDelete: boolean
   // Keys of the tickets followed to get here (oldest first), and the edit state.
   trail?: string[]; editing?: boolean; saving?: boolean; dirty?: boolean
 }>()
@@ -94,9 +94,9 @@ void props
         </template>
         <button type="button" role="menuitem" class="menu-item" data-autofocus @click="pick('copyLink')"><AppIcon name="link" :size="14" />Copy link</button>
         <button type="button" role="menuitem" class="menu-item" @click="pick('copyKey')"><AppIcon name="copy" :size="14" />Copy key</button>
-        <button v-if="canMove" type="button" role="menuitem" class="menu-item" :disabled="!canWrite" @click="pickMove"><AppIcon name="epic" :size="14" />Move to another epic…</button>
-        <div class="menu-sep" role="separator" />
-        <button type="button" role="menuitem" class="menu-item danger" :disabled="!canWrite" @click="pick('delete')"><AppIcon name="trash" :size="14" />Delete {{ kind === 'epic' ? 'epic' : kind === 'task' ? 'task' : 'ticket' }}…</button>
+        <button v-if="canMove" type="button" role="menuitem" class="menu-item" @click="pickMove"><AppIcon name="epic" :size="14" />Move to another epic…</button>
+        <div v-if="canMove || canDelete" class="menu-sep" role="separator" />
+        <button v-if="canDelete" type="button" role="menuitem" class="menu-item danger" @click="pick('delete')"><AppIcon name="trash" :size="14" />Delete {{ kind === 'epic' ? 'epic' : kind === 'task' ? 'task' : 'ticket' }}…</button>
       </div>
     </FloatingPanel>
   </header>

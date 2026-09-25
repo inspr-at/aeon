@@ -5,6 +5,10 @@ package authz
 import (
 	"context"
 	"errors"
+	"io/fs"
+	"os"
+	"path/filepath"
+	"regexp"
 	"strings"
 	"testing"
 
@@ -64,6 +68,33 @@ func TestRouteDeclarationsFailClosed(t *testing.T) {
 	}
 	if err := RequirePattern(context.Background(), "GET /api/health", Scope{}); err != nil {
 		t.Fatalf("public health: %v", err)
+	}
+}
+
+// Every current module declares literal ServeMux patterns. This source walk
+// catches a new route even when its module is mounted only in production.
+func TestRouteSourceCoverage(t *testing.T) {
+	pattern := regexp.MustCompile(`"((?:GET|POST|PUT|PATCH|DELETE|HEAD) /api/[^"\n]+)"`)
+	err := filepath.WalkDir("..", func(path string, entry fs.DirEntry, walkErr error) error {
+		if walkErr != nil {
+			return walkErr
+		}
+		if entry.IsDir() || !strings.HasSuffix(path, ".go") || strings.HasSuffix(path, "_test.go") || filepath.Base(path) == "route_map.go" {
+			return nil
+		}
+		body, err := os.ReadFile(path)
+		if err != nil {
+			return err
+		}
+		for _, match := range pattern.FindAllSubmatch(body, -1) {
+			if _, ok := PermissionForPattern(string(match[1])); !ok {
+				t.Errorf("undeclared API pattern %s in %s", match[1], path)
+			}
+		}
+		return nil
+	})
+	if err != nil {
+		t.Fatal(err)
 	}
 }
 
