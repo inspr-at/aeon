@@ -2,21 +2,11 @@
 
 // Package cli is the agent command line for the aeon binary.
 //
-// RunMessaging is the complete CLI entry point called from cmd/aeon. This package
-// does not mount an httpapi.Module and does not register a plugin manifest:
-// the verbs below call the APIs the coordinator already mounts (nodes, search,
-// models, inbox, auth). When argv[0] is paimos, programName selects
-// compatibility mode: the same verbs, ~/.paimos/config.yaml routing,
-// PAIMOS_URL / PAIMOS_API_KEY, and the classic text shapes documented by the
-// paimos CLI. Run remains available for
-// callers that intentionally need the earlier command tree.
-// RunMessaging is the constructor cmd/aeon calls for the complete CLI tree.
-// Run remains available for callers explicitly testing the base tree. This package
-// does not mount an httpapi.Module and does not register a plugin manifest:
-// the verbs below call the APIs the coordinator already mounts (nodes, search,
-// models, inbox, auth). When argv[0] is paimos, programName selects
-// compatibility mode: the same verbs, PAIMOS_URL / PAIMOS_API_KEY, and the
-// classic text and JSON shapes documented by the paimos CLI.
+// RunMessaging is the complete CLI constructor called from cmd/aeon. Run is
+// available for callers that need the base command tree. This package does
+// not mount an httpapi.Module or register a plugin manifest. Its commands
+// call existing server modules. When argv[0] is paimos, the CLI reads
+// ~/.paimos/config.yaml or PAIMOS_URL / PAIMOS_API_KEY.
 //
 // Served compatibility verbs (issue, project list, knowledge for memory, runbook, guideline,
 // external-system and related-project, search, model resolve, onboard,
@@ -30,6 +20,13 @@
 // detect drift. run-agent watch executes local Claude work orders and reports
 // evidence to Aeon. baseline-batch report-built resolves classic batch aliases
 // to stage handoffs and records typed built evidence.
+// CP3 adds relation add, project create/show/update and resource reads, tag
+// catalog commands, attachment upload/list/get/rm, declarative apply, schema,
+// doctor, and authenticated curl. External-stage request/pull/report/result
+// call Aeon's server-fenced stage handoff API. Classic one-time credentials,
+// reporter registrations and launch admission cannot grant Aeon authority;
+// those commands return exit 3 and point to first-party plugins and journey
+// approvals. The coordinator wires the CLI constructor into cmd/aeon.
 //
 // This package exports no httpapi.Module and no plugins.Plugin. The nine
 // starter kinds stay as they are. external_system and related_project are
