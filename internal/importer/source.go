@@ -46,6 +46,15 @@ type SkippedItem struct {
 	Status int    `json:"status"`
 }
 
+// SourceProgress reports completed snapshot work. The callback passed to
+// ReadWithProgress is serialized, even while issue details are read in parallel.
+type SourceProgress struct {
+	Project  string
+	Projects int
+	Issues   int
+	Skipped  int
+}
+
 type sourceHTTPError struct {
 	method string
 	path   string
@@ -170,8 +179,27 @@ func (s *HTTPSource) get(ctx context.Context, path string, out any) error {
 }
 
 func (s *HTTPSource) Read(ctx context.Context, projectKey string) (Snapshot, error) {
+	return s.ReadWithProgress(ctx, projectKey, nil)
+}
+
+// ReadWithProgress has the same GET-only behavior as Read. On cancellation it
+// returns the snapshot collected so far alongside the context error.
+func (s *HTTPSource) ReadWithProgress(ctx context.Context, projectKey string, onProgress func(SourceProgress)) (Snapshot, error) {
 	snap := Snapshot{Details: map[int64]Details{}}
 	snap.SourceID = s.InstanceID()
+	progress := SourceProgress{}
+	var progressMu sync.Mutex
+	emit := func(project string, projects, issues, skipped int) {
+		progressMu.Lock()
+		progress.Project = project
+		progress.Projects += projects
+		progress.Issues += issues
+		progress.Skipped += skipped
+		if onProgress != nil {
+			onProgress(progress)
+		}
+		progressMu.Unlock()
+	}
 	var projects []Record
 	if err := s.get(ctx, "/projects?status=all", &projects); err != nil {
 		return snap, err
@@ -208,6 +236,7 @@ func (s *HTTPSource) Read(ctx context.Context, projectKey string) (Snapshot, err
 			if isNotFound(err) {
 				snap.Skipped = append(snap.Skipped, SkippedItem{Type: "project", ID: id, Path: issuesPath, Status: http.StatusNotFound})
 				skippedProjects[id] = true
+				emit(stringField(p, "key"), 1, 0, 1)
 				continue
 			}
 			return snap, err
@@ -218,6 +247,7 @@ func (s *HTTPSource) Read(ctx context.Context, projectKey string) (Snapshot, err
 			if isNotFound(err) {
 				snap.Skipped = append(snap.Skipped, SkippedItem{Type: "project", ID: id, Path: knowledgePath, Status: http.StatusNotFound})
 				skippedProjects[id] = true
+				emit(stringField(p, "key"), 1, 0, 1)
 				continue
 			}
 			return snap, err
@@ -243,6 +273,7 @@ func (s *HTTPSource) Read(ctx context.Context, projectKey string) (Snapshot, err
 					snap.Skipped = append(snap.Skipped, SkippedItem{Type: "issue", ID: kid, Path: issuePath, Status: http.StatusNotFound})
 					skippedIssues[kid] = true
 					seen[kid] = true
+					emit(stringField(p, "key"), 0, 1, 1)
 					continue
 				}
 				return snap, err
@@ -257,6 +288,7 @@ func (s *HTTPSource) Read(ctx context.Context, projectKey string) (Snapshot, err
 			seen[kid] = true
 		}
 		snap.Projects = append(snap.Projects, Project{Record: p, Issues: issues})
+		emit(stringField(p, "key"), 1, 0, 0)
 	}
 	if projectKey != "" && !selectedFound {
 		return snap, fmt.Errorf("project %q not found", projectKey)
@@ -379,6 +411,19 @@ func (s *HTTPSource) Read(ctx context.Context, projectKey string) (Snapshot, err
 	var wg sync.WaitGroup
 	var detailsMu sync.Mutex
 	var skippedMu sync.Mutex
+	issueProject := map[int64]string{}
+	for _, p := range snap.Projects {
+		for _, issue := range p.Issues {
+			if id, ok := intField(issue, "id"); ok {
+				issueProject[id] = stringField(p.Record, "key")
+			}
+		}
+	}
+	for _, issue := range snap.Orphans {
+		if id, ok := intField(issue, "id"); ok {
+			issueProject[id] = "(orphans)"
+		}
+	}
 	for n := 0; n < s.concurrency && n < len(allIssues); n++ {
 		wg.Add(1)
 		go func() {
@@ -394,6 +439,7 @@ func (s *HTTPSource) Read(ctx context.Context, projectKey string) (Snapshot, err
 						snap.Skipped = append(snap.Skipped, SkippedItem{Type: "issue", ID: iid, Path: httpErr.path, Status: httpErr.status})
 						skippedIssues[iid] = true
 						skippedMu.Unlock()
+						emit(issueProject[iid], 0, 1, 1)
 						continue
 					}
 					select {
@@ -406,6 +452,7 @@ func (s *HTTPSource) Read(ctx context.Context, projectKey string) (Snapshot, err
 				detailsMu.Lock()
 				snap.Details[id] = detail
 				detailsMu.Unlock()
+				emit(issueProject[id], 0, 1, 0)
 			}
 		}()
 	}
@@ -423,9 +470,6 @@ sendLoop:
 	case err := <-errCh:
 		return snap, err
 	default:
-	}
-	if err := ctx.Err(); err != nil {
-		return snap, err
 	}
 	for n := range snap.Projects {
 		kept := snap.Projects[n].Issues[:0]
@@ -454,6 +498,9 @@ sendLoop:
 		}
 		return snap.Skipped[i].Path < snap.Skipped[j].Path
 	})
+	if err := ctx.Err(); err != nil {
+		return snap, err
+	}
 	return snap, nil
 }
 
