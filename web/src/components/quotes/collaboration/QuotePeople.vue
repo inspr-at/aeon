@@ -1,6 +1,7 @@
 <!-- SPDX-License-Identifier: AGPL-3.0-only -->
 <script setup lang="ts">
-import { computed, ref } from 'vue'
+import { computed, ref, watch } from 'vue'
+import { learnPictures } from '../../../lib/avatar'
 import { collaboratorColor, type PresenceSnapshot } from '../../../lib/quotePresence'
 import Avatar from '../../Avatar.vue'
 import FloatingPanel from '../../work/FloatingPanel.vue'
@@ -11,6 +12,8 @@ import FloatingPanel from '../../work/FloatingPanel.vue'
 const props = defineProps<{ presence: PresenceSnapshot | null; principalId: string; compact?: boolean }>()
 interface Person { id: string; name: string; mode: 'viewing' | 'editing' | 'idle'; tabs: number }
 const RANK = { editing: 0, viewing: 1, idle: 2 } as const
+// Presence says who has a picture; the avatars ask only for those.
+watch(() => props.presence?.sessions, sessions => learnPictures((sessions ?? []).map(s => ({ id: s.principal_id, has_avatar: s.has_avatar }))), { immediate: true })
 const people = computed<Person[]>(() => {
   const map = new Map<string, Person>()
   for (const s of props.presence?.sessions ?? []) {

@@ -1,6 +1,7 @@
 // SPDX-License-Identifier: AGPL-3.0-only
 import { ref, watch, type Ref } from 'vue'
-import { APIError, createNode, deleteNode, getKinds, getNode, getRelations, listNodes, lookupNodes, moveNode, updateNode, type Kind, type ListItem, type ListParent, type NodePatch, type Relation, type WorkNode } from './api'
+import { APIError, createNode, createRelation, deleteNode, deleteRelation, getKinds, getNode, getRelations, listNodes, lookupNodes, moveNode, updateNode, type Kind, type ListItem, type ListParent, type NodePatch, type Relation, type WorkNode } from './api'
+import { linkBody, linkedSentence, relationLabel, unlinkedSentence, type RelationChoice } from './relations'
 import { toast } from './toast'
 import { statusMeta } from './work'
 
@@ -52,7 +53,8 @@ export async function guardedMove(item: ListItem, parent: ListParent, after?: (i
     return 'error'
   }
 }
-export interface RelatedNode { relation: Relation; label: string; node: { id: string; key: string; title: string; state: string } | null }
+export interface RelatedTicket { id: string; key: string; title: string; state: string }
+export interface RelatedNode { relation: Relation; label: string; node: RelatedTicket | null }
 
 // State and writes for one open ticket. Every write sends the ticket's
 // updated_at as a precondition; a 412 loads the newer version and reports a
@@ -130,14 +132,8 @@ export function useTicket(item: Ref<ListItem | null>, context: {
         catch { /* Preserve unavailable chips when previews cannot be loaded. */ }
       }
       const resolved = items.map(relation => {
-        const outgoing = relation.source_node_id === target.id
-        const otherId = outgoing ? relation.target_node_id : relation.source_node_id
-        const label = relation.type === 'blocks' ? (outgoing ? 'Blocks' : 'Blocked by')
-          : relation.type === 'duplicates' ? (outgoing ? 'Duplicates' : 'Duplicated by')
-          : relation.type === 'implements' ? (outgoing ? 'Implements' : 'Implemented by')
-          : relation.type === 'cites' ? (outgoing ? 'Cites' : 'Cited by')
-          : 'Relates to'
-        return { relation, label, node: previews.get(otherId) ?? null }
+        const otherId = relation.source_node_id === target.id ? relation.target_node_id : relation.source_node_id
+        return { relation, label: relationLabel(relation, target.id), node: previews.get(otherId) ?? null }
       })
       if (item.value?.id === target.id) related.value = resolved
     } catch { /* relations are optional context */ }
@@ -219,6 +215,59 @@ export function useTicket(item: Ref<ListItem | null>, context: {
     }
   }
 
+  // ---------- Links to other tickets ----------
+  // Link this ticket to another. A refusal comes back as the server's reason in
+  // words (an existing link, or the loop it would make) for the picker to show.
+  async function link(choice: RelationChoice, other: RelatedTicket): Promise<string | null> {
+    const target = item.value
+    if (!target) return 'This ticket is no longer open.'
+    try {
+      const relation = await createRelation(linkBody(choice, target.id, other.id))
+      const entry: RelatedNode = { relation, label: choice.label, node: other }
+      if (item.value?.id === target.id) related.value = [...related.value, entry]
+      const [source, dest] = choice.outgoing ? [target.key, other.key] : [other.key, target.key]
+      toast(linkedSentence(choice.type, source, dest), { action: { label: 'Undo', run: () => void unlink(entry, target) } })
+      return null
+    } catch (e) {
+      if (e instanceof APIError && e.status === 403) { readOnly.value = true; return `You can read ${target.key} but not change its links.` }
+      if (e instanceof APIError && e.status === 404) return `${other.key} is no longer available.`
+      return message(e)
+    }
+  }
+
+  // Remove one link (the caller confirms first). Undo links the same two
+  // tickets the same way again; the server checks it like any new link.
+  async function unlink(entry: RelatedNode, owner: ListItem | null = item.value): Promise<boolean> {
+    const target = owner
+    if (!target) return false
+    const { relation } = entry
+    const otherKey = entry.node?.key ?? 'the other ticket'
+    const [source, dest] = relation.type === 'relates' || relation.source_node_id === target.id ? [target.key, otherKey] : [otherKey, target.key]
+    const drop = () => { if (item.value?.id === target.id) related.value = related.value.filter(other => other.relation.id !== relation.id) }
+    try {
+      await deleteRelation(relation.id)
+      drop()
+    } catch (e) {
+      // Already gone elsewhere: the list catches up, nothing to undo.
+      if (e instanceof APIError && e.status === 404) { drop(); return true }
+      if (e instanceof APIError && e.status === 403) readOnly.value = true
+      toast(`The link was not removed: ${message(e)}`, { tone: 'error' })
+      return false
+    }
+    toast(unlinkedSentence(relation.type, source, dest), {
+      action: {
+        label: 'Undo',
+        run: () => void createRelation({ source_node_id: relation.source_node_id, target_node_id: relation.target_node_id, type: relation.type })
+          .then(restored => {
+            if (item.value?.id === target.id) related.value = [...related.value, { ...entry, relation: restored }]
+            toast(linkedSentence(relation.type, source, dest))
+          })
+          .catch(e => toast(`The link was not restored: ${message(e)}`, { tone: 'error' })),
+      },
+    })
+    return true
+  }
+
   // Inline child creation: an epic gets tickets, a ticket gets tasks.
   async function addChild(title: string, routeKey: string | undefined): Promise<ListItem | null> {
     const target = item.value
@@ -246,5 +295,5 @@ export function useTicket(item: Ref<ListItem | null>, context: {
     return { done, total: scope.length, percent: scope.length ? Math.round((done / scope.length) * 100) : 0 }
   }
 
-  return { loading, error, gone, readOnly, children, childrenLoading, related, relationsReady, refresh, patch, setTitle, setBody, setField, setPriority, setAssignee, moveTo, remove, addChild, childProgress }
+  return { loading, error, gone, readOnly, children, childrenLoading, related, relationsReady, refresh, patch, setTitle, setBody, setField, setPriority, setAssignee, moveTo, remove, addChild, childProgress, link, unlink }
 }

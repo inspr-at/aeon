@@ -103,7 +103,8 @@ export function fixtures(options: MockOptions = {}) {
   // U22 saved views and bulk batches (their before and after, for undo).
   const views: MockView[] = []
   const batches: { id: number; before: MockNode[]; after: MockNode[]; undone: boolean }[] = []
-  return { projects, nodes, people: [me, mira], activity, relations, attachments, preferences, events, views, batches, counter: { next: 100 } }
+  const people: { id: string; name: string; has_avatar?: boolean }[] = [me, mira]
+  return { projects, nodes, people, activity, relations, attachments, preferences, events, views, batches, counter: { next: 100 } }
 }
 // A 1x1 PNG for every attachment variant.
 export const PNG = Buffer.from('iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAYAAAAfFcSJAAAADUlEQVR42mNk+M9QDwADhgGAWjR9awAAAABJRU5ErkJggg==', 'base64')
@@ -115,7 +116,10 @@ function item(node: MockNode, data: Fixtures) {
   const kindIds: Record<string, string> = { epic: 'k-epic', ticket: 'k-ticket', task: 'k-task', project: 'k-project' }
   const parent = node.parent_id ? data.nodes.find(n => n.id === node.parent_id) : undefined
   const project = data.projects.find(p => p.id === node.project)!
-  const assignee = typeof node.fields.assignee === 'string' ? data.people.find(p => p.id === node.fields.assignee) ?? null : null
+  // has_avatar as the server sends it (U27), when the spec gives it; absent,
+  // the payload reads like an older server's.
+  const person = typeof node.fields.assignee === 'string' ? data.people.find(p => p.id === node.fields.assignee) : undefined
+  const assignee = person ? { id: person.id, name: person.name, ...(person.has_avatar === undefined ? {} : { has_avatar: person.has_avatar }) } : null
   return {
     id: node.id, key: node.key, kind_id: kindIds[node.kind_slug], title: node.title, body: node.body, fields: node.fields, state: node.state,
     parent_id: node.parent_id, position: '0', created_at: node.created_at, updated_at: node.updated_at, deleted_at: null,
@@ -305,6 +309,35 @@ export async function mockWork(page: Page, data: Fixtures, options: MockOptions 
     }
     if (path === '/api/me') return route.fulfill({ json: { principal: { id: me.id, name: me.name, kind: 'person', roles: options.readOnly ? ['viewer'] : options.admin ? ['admin'] : ['member'] }, tenant: { id: 't1', name: 'INSPR Studio' } } })
     if (path === '/api/kinds') return route.fulfill({ json: { items: ['epic', 'ticket', 'task', 'project'].map(slug => ({ id: `k-${slug}`, slug, label: slug[0].toUpperCase() + slug.slice(1), short_prefix: slug.slice(0, 3).toUpperCase(), icon: slug, allowed_child_kinds: null, field_schema: {} })) } })
+    // Relations (U27): the server's refusals, in its words, for the picker to show.
+    if (path === '/api/relations' && method === 'POST') {
+      if (options.readOnly) return route.fulfill({ status: 403, json: { code: 'forbidden', message: 'forbidden' } })
+      const input = body as { source_node_id: string; target_node_id: string; type: string }
+      let source = input.source_node_id, target = input.target_node_id
+      if (source === target) return route.fulfill({ status: 400, json: { code: 'invalid_request', message: 'an item cannot be linked to itself' } })
+      if (input.type === 'relates' && source > target) [source, target] = [target, source]
+      const keyOf = (id: string) => data.nodes.find(n => n.id === id)?.key ?? 'an item'
+      const verb = RELATION_VERBS[input.type] ?? [input.type, input.type]
+      if (data.relations.some(r => r.source_node_id === source && r.target_node_id === target && r.type === input.type)) {
+        return route.fulfill({ status: 409, json: { code: 'conflict', message: `${keyOf(source)} already ${verb[0]} ${keyOf(target)}.` } })
+      }
+      const loop = ['blocks', 'implements', 'duplicates'].includes(input.type) ? loopPath(data.relations, input.type, target, source) : null
+      if (loop) {
+        const chain = loop.length === 2 ? `${keyOf(loop[0])} already ${verb[0]} ${keyOf(loop[1])}` : loop.slice(1).reduce((text, id, i) => i === 0 ? `${keyOf(loop[0])} ${verb[0]} ${keyOf(id)}` : `${text}, which ${verb[0]} ${keyOf(id)}`, '')
+        return route.fulfill({ status: 409, json: { code: 'conflict', message: `${keyOf(source)} cannot ${verb[1]} ${keyOf(target)}: ${chain}, so this link would make a loop.` } })
+      }
+      const relation = { id: `r-new-${data.counter.next++}`, source_node_id: source, target_node_id: target, type: input.type, created_at: new Date(now + calls.length * 1000).toISOString() }
+      data.relations.push(relation)
+      return route.fulfill({ status: 201, json: relation })
+    }
+    const relationPath = /^\/api\/relations\/([^/]+)$/.exec(path)
+    if (relationPath && method === 'DELETE') {
+      if (options.readOnly) return route.fulfill({ status: 403, json: { code: 'forbidden', message: 'forbidden' } })
+      const index = data.relations.findIndex(r => r.id === relationPath[1])
+      if (index === -1) return route.fulfill({ status: 404, json: { code: 'not_found', message: 'relation or node not found' } })
+      data.relations.splice(index, 1)
+      return route.fulfill({ status: 204 })
+    }
     if (path === '/api/relations') return route.fulfill({ json: { items: data.relations.filter(r => r.source_node_id === query.get('node_id') || r.target_node_id === query.get('node_id')), next_cursor: null } })
     if (path === '/api/nodes/lookup') {
       const ids = (query.get('ids') ?? '').split(',')
@@ -358,7 +391,7 @@ export async function mockWork(page: Page, data: Fixtures, options: MockOptions 
       return route.fulfill({ json: { items: data.projects.filter(p => archived || p.state !== 'archived').map(p => {
         const inside = data.nodes.filter(n => n.project === p.id).map(n => normal(n.state))
         const count = (states: string[]) => inside.filter(state => states.includes(state)).length
-        return { id: p.id, key: p.key, title: p.title, state: p.state, open: count(['new', 'backlog']), in_progress: count(['in_progress', 'qa']), done: count(['done', 'delivered', 'accepted']), cancelled: count(['cancelled']), total: inside.length, last_activity: p.last, people: (p.id === 'p-pharos' ? [mira, me] : p.id === 'p-aeon' ? [me] : []).map(person => ({ ...person, kind: 'person' })) }
+        return { id: p.id, key: p.key, title: p.title, state: p.state, open: count(['new', 'backlog']), in_progress: count(['in_progress', 'qa']), done: count(['done', 'delivered', 'accepted']), cancelled: count(['cancelled']), total: inside.length, last_activity: p.last, people: (p.id === 'p-pharos' ? [mira, me] : p.id === 'p-aeon' ? [me] : []).map(person => ({ ...data.people.find(x => x.id === person.id) ?? person, kind: 'person' })) }
       }) } })
     }
     if (path === '/api/nodes' && method === 'GET') {
@@ -452,6 +485,28 @@ export async function mockWork(page: Page, data: Fixtures, options: MockOptions 
     return route.fulfill({ status: 404, json: { error: 'Unmocked route' } })
   })
   return calls
+}
+
+const RELATION_VERBS: Record<string, [string, string]> = { blocks: ['blocks', 'block'], relates: ['relates to', 'relate to'], implements: ['implements', 'implement'], cites: ['cites', 'cite'], duplicates: ['duplicates', 'duplicate'] }
+// The shortest chain of one relation type from `from` to `to`, as the server finds it.
+function loopPath(relations: { source_node_id: string; target_node_id: string; type: string }[], type: string, from: string, to: string): string[] | null {
+  const parent = new Map<string, string>([[from, '']])
+  let frontier = [from]
+  while (frontier.length) {
+    const next: string[] = []
+    for (const r of relations.filter(r => r.type === type && frontier.includes(r.source_node_id))) {
+      if (parent.has(r.target_node_id)) continue
+      parent.set(r.target_node_id, r.source_node_id)
+      if (r.target_node_id === to) {
+        const path: string[] = []
+        for (let at = to; at; at = parent.get(at)!) path.unshift(at)
+        return path
+      }
+      next.push(r.target_node_id)
+    }
+    frontier = next
+  }
+  return null
 }
 
 export function watchErrors(page: Page) {

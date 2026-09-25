@@ -98,6 +98,7 @@ const sections: { title: string; rows: { keys: Key[][]; label: string; joiner?: 
     { keys: [['s']], label: 'Status' },
     { keys: [['p']], label: 'Priority' },
     { keys: [['a']], label: 'Assignee' },
+    { keys: [['r']], label: 'Link to another ticket' },
     { keys: [['c']], label: 'Write a comment' },
     { keys: [['f']], label: 'Full page and back' },
     { keys: [[MOD, { icon: 'enter', label: 'Enter' }]], label: 'Save a description, notes or comment' },

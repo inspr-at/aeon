@@ -39,6 +39,10 @@ func (m *module) writeComment(ctx context.Context, p tenant.Principal, node stri
 			return err
 		}
 		p.ID = canonical
+		avatar, err := hasAvatar(ctx, tx, p.TenantID, canonical)
+		if err != nil {
+			return err
+		}
 		change := events.Change{NodeID: &node, Type: "comment.created", After: commentSnapshot{Body: body}}
 		var at time.Time
 		if id != 0 {
@@ -93,7 +97,7 @@ func (m *module) writeComment(ctx context.Context, p tenant.Principal, node stri
 		if id == 0 {
 			id, at = e.ID, e.At
 		}
-		item = Item{ID: strconv.FormatInt(id, 10), At: at, Type: "comment", Author: Author{ID: &p.ID, Name: name}, BodyMarkdown: &body}
+		item = Item{ID: strconv.FormatInt(id, 10), At: at, Type: "comment", Author: Author{ID: &p.ID, Name: name, HasAvatar: avatar}, BodyMarkdown: &body}
 		return nil
 	})
 	return item, err

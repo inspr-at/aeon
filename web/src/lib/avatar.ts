@@ -19,6 +19,33 @@ export function avatarSources(id: string, px: number, hashes: Record<string, str
   return { src: avatarUrl(id, base, hashes[String(base)]), srcset }
 }
 
+// ---------- Who has a picture ----------
+// People payloads (list assignees, project people, activity authors, the
+// directory, quote presence) say whether a person has a picture. A picture is
+// asked for only when one is known to exist, so people without one never cost a
+// request (or a 404 in the console); their initials show at once.
+const pictures = new Map<string, boolean>()
+const listeners = new Set<() => void>()
+export interface PictureHint { id?: string | null; has_avatar?: boolean }
+export function learnPictures(people: Iterable<PictureHint | null | undefined>) {
+  let changed = false
+  for (const person of people) {
+    if (!person?.id || typeof person.has_avatar !== 'boolean' || pictures.get(person.id) === person.has_avatar) continue
+    pictures.set(person.id, person.has_avatar)
+    changed = true
+  }
+  if (changed) for (const listener of listeners) listener()
+}
+export function pictureKnown(id: string): boolean | undefined { return pictures.get(id) }
+export function onPictures(listener: () => void): () => void { listeners.add(listener); return () => { listeners.delete(listener) } }
+// Whether an avatar asks the server for a picture: people only, with an id, not
+// already found missing; my own when my profile says so; anyone else only when
+// a payload said they have one.
+export function shouldRequestAvatar(p: { kind: 'person' | 'agent'; id: string | null | undefined; mine: boolean; myPicture: boolean; known: boolean | undefined; missing: boolean }): boolean {
+  if (p.kind !== 'person' || !p.id || p.missing) return false
+  return p.mine ? p.myPicture : p.known === true
+}
+
 // ---------- Initials and their colour ----------
 // The twelve muted palette tokens, in the server's order (internal/profile).
 export const AVATAR_PALETTE = ['slate', 'sage', 'moss', 'ocean', 'steel', 'denim', 'iris', 'plum', 'rose', 'clay', 'sand', 'teal'] as const

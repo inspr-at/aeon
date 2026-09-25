@@ -14,6 +14,8 @@ export function accountEmail(identity: Identity) {
   return identity.identity?.email?.trim() || identity.principal.email || ''
 }
 
+import { learnPictures } from './avatar.ts'
+
 export interface Version { version: string; scheme: string; brand?: import('./brand').Brand }
 
 export async function api(path: string, init: RequestInit = {}) {
@@ -80,7 +82,9 @@ async function json<T>(path: string, method = 'GET', body?: unknown, headers: Re
     // A session that ended mid-work: the page keeps what was typed, and the shell
     // offers to sign in again beside it (AEON-140), instead of the bare word "unauthorized".
     if (response.status === 401) { sessionEnded.handler?.(); throw new APIError(401, 'your session has ended', data && typeof data === 'object' ? data : {}) }
-    throw new APIError(response.status, typeof data?.error === 'string' ? data.error : `Request failed (${response.status})`, data && typeof data === 'object' ? data : {})
+    // Modules answer {error} or {code, message}; either reads as the reason.
+    const reason = typeof data?.error === 'string' && data.error ? data.error : typeof data?.message === 'string' && data.message ? data.message : `Request failed (${response.status})`
+    throw new APIError(response.status, reason, data && typeof data === 'object' ? data : {})
   }
   return response.status === 204 ? undefined as T : response.json()
 }
@@ -108,7 +112,8 @@ export const deleteNode = (id: string) => json<void>(`/nodes/${idPath(id)}`, 'DE
 export const searchNodes = (q: string, params: { kind_id?: string; state?: string; cursor?: string; limit?: number } = {}, options: { signal?: AbortSignal } = {}) =>
   json<Page<SearchHit>>(`/search${query({ q, ...params })}`, 'GET', undefined, {}, options.signal)
 // B1 list and project-summary wire types (api/openapi.yaml NodeListItem, listProjects).
-export interface ListPerson { id: string; name: string }
+// has_avatar: the person has a picture; avatars ask for one only then.
+export interface ListPerson { id: string; name: string; has_avatar?: boolean }
 export interface ListParent { id: string; key: string; title: string; kind_slug: string }
 export interface ListProject { id: string; key: string; title: string }
 export interface ListItem extends WorkNode {
@@ -133,7 +138,7 @@ export interface ProjectSummary {
   // The people (and agents) most recently active in the project, newest first; absent on older servers.
   people?: ProjectPerson[]
 }
-export interface ProjectPerson { id: string; name: string; kind: 'person' | 'agent' }
+export interface ProjectPerson { id: string; name: string; kind: 'person' | 'agent'; has_avatar?: boolean }
 function listQuery(params: ListQuery): string {
   const values: Record<string, string | number | boolean | undefined> = {}
   for (const [key, value] of Object.entries(params)) {
@@ -143,6 +148,7 @@ function listQuery(params: ListQuery): string {
   return query(values)
 }
 export const listNodes = (params: ListQuery, options: { signal?: AbortSignal } = {}) => json<ListPage>(`/nodes${listQuery(params)}`, 'GET', undefined, {}, options.signal)
+  .then(page => { learnPictures(page.items.map(item => item.assignee)); return page })
 // U22 saved views: a project's list state with a name, own or shared (api/openapi.yaml SavedView).
 export interface SavedView {
   id: string; owner_principal_id: string; project_id: string | null; name: string
@@ -164,6 +170,7 @@ export interface BulkResult { event_id: number | null; items: WorkNode[]; unchan
 export const bulkChange = (body: BulkChange) => json<BulkResult>('/nodes/bulk', 'POST', body)
 export const undoEvent = (eventId: number) => json<unknown>(`/events/${eventId}/undo`, 'POST')
 export const getProjects = (includeArchived = false) => json<{ items: ProjectSummary[] }>(`/projects${includeArchived ? '?include_archived=true' : ''}`)
+  .then(page => { learnPictures(page.items.flatMap(project => project.people ?? [])); return page })
 // Shared project groups (AEON-136): everyone reads them; admins write, and every
 // write answers the event that POST /events/{id}/undo reverses.
 export interface SharedProjectGroup { id: string; name: string; position: number; project_ids: string[]; created_by: string; created_at: string; updated_at: string }
@@ -179,19 +186,24 @@ export type ChangeField = 'status' | 'priority' | 'assignee' | 'title' | 'parent
 export interface ActivityChange { field: ChangeField; from: string | null; to: string | null }
 export interface ActivityItem {
   id: string; at: string; type: 'comment' | 'change' | 'created'
-  author: { id: string | null; name: string }
+  author: { id: string | null; name: string; has_avatar?: boolean }
   body_markdown?: string; changes?: ActivityChange[]
 }
+const authored = <T extends ActivityItem | { items: ActivityItem[] }>(value: T): T => { learnPictures('items' in value ? value.items.map(item => item.author) : [value.author]); return value }
 export const getActivity = (nodeId: string, cursor?: string | null) =>
-  json<{ items: ActivityItem[]; next_cursor: string | null }>(`/nodes/${idPath(nodeId)}/activity${query({ limit: 50, cursor: cursor ?? undefined })}`)
-export const createComment = (nodeId: string, body_markdown: string) => json<ActivityItem>(`/nodes/${idPath(nodeId)}/comments`, 'POST', { body_markdown })
+  json<{ items: ActivityItem[]; next_cursor: string | null }>(`/nodes/${idPath(nodeId)}/activity${query({ limit: 50, cursor: cursor ?? undefined })}`).then(authored)
+export const createComment = (nodeId: string, body_markdown: string) => json<ActivityItem>(`/nodes/${idPath(nodeId)}/comments`, 'POST', { body_markdown }).then(authored)
 export const updateComment = (nodeId: string, commentId: string, body_markdown: string) =>
-  json<ActivityItem>(`/nodes/${idPath(nodeId)}/comments/${idPath(commentId)}`, 'PATCH', { body_markdown })
+  json<ActivityItem>(`/nodes/${idPath(nodeId)}/comments/${idPath(commentId)}`, 'PATCH', { body_markdown }).then(authored)
 export const deleteComment = (nodeId: string, commentId: string) => json<void>(`/nodes/${idPath(nodeId)}/comments/${idPath(commentId)}`, 'DELETE')
 
 export type RelationType = 'blocks' | 'relates' | 'implements' | 'cites' | 'duplicates' | 'customer_of' | 'contact_for'
 export interface Relation { id: string; source_node_id: string; target_node_id: string; type: RelationType; created_at: string }
 export const getRelations = (nodeId: string) => json<{ items: Relation[]; next_cursor: string | null }>(`/relations${query({ node_id: nodeId, limit: 100 })}`)
+// A 409 carries the server's reason in words (an existing link, or a loop it
+// spells out by key); callers show error.message as it stands.
+export const createRelation = (body: { source_node_id: string; target_node_id: string; type: RelationType }) => json<Relation>('/relations', 'POST', body)
+export const deleteRelation = (id: string) => json<void>(`/relations/${idPath(id)}`, 'DELETE')
 export interface NodePreview { id: string; key: string; title: string; state: string }
 export const lookupNodes = (ids: string[]) => json<{ items: NodePreview[] }>(`/nodes/lookup${query({ ids })}`)
 
