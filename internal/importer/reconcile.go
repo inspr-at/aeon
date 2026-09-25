@@ -46,10 +46,38 @@ type ReconcileProject struct {
 }
 
 type ReconcileReport struct {
-	SourceID string             `json:"source_id"`
-	Tenant   string             `json:"tenant"`
-	Projects []ReconcileProject `json:"projects"`
-	Summary  string             `json:"summary"`
+	SourceID     string             `json:"source_id"`
+	Tenant       string             `json:"tenant"`
+	Projects     []ReconcileProject `json:"projects"`
+	Skipped      []ReconcileFinding `json:"skipped"`
+	SkippedCount int                `json:"skipped_count"`
+	Progress     ReconcileProgress  `json:"progress"`
+	Partial      bool               `json:"partial"`
+	Summary      string             `json:"summary"`
+}
+
+// ReconcileFinding identifies a classic item that could not be read. These
+// findings are evidence gaps, not differences between the two systems.
+type ReconcileFinding struct {
+	Kind      string `json:"kind"`
+	ClassicID string `json:"classic_id"`
+	Reason    string `json:"reason"`
+}
+
+type ReconcileProgress struct {
+	Project     string `json:"project"`
+	Projects    int    `json:"projects"`
+	Issues      int    `json:"issues"`
+	Attachments int    `json:"attachments"`
+	Skipped     int    `json:"skipped"`
+}
+
+// ReconcileOptions controls progress and cancellation output. A nil writer
+// disables its output. Every defaults to 100 completed items.
+type ReconcileOptions struct {
+	Progress io.Writer
+	Partial  io.Writer
+	Every    int
 }
 
 type reconcileSet map[int64]map[string]map[string]string
@@ -144,19 +172,61 @@ func projectOf(issue Record) int64 {
 // --api-key-file FILE --tenant SLUG` and encode the returned report as JSON;
 // Summary is the accompanying short human-readable line.
 func Reconcile(ctx context.Context, source *HTTPSource, pool *pgxpool.Pool, store attachments.Store, tenant, project string) (ReconcileReport, error) {
+	return ReconcileWithOptions(ctx, source, pool, store, tenant, project, ReconcileOptions{Progress: os.Stderr, Partial: os.Stdout, Every: 100})
+}
+
+// ReconcileWithOptions emits a partial JSON report to opts.Partial if the
+// context is canceled. A partial report contains completed counts and skipped
+// findings, but no unverified target differences.
+func ReconcileWithOptions(ctx context.Context, source *HTTPSource, pool *pgxpool.Pool, store attachments.Store, tenant, project string, opts ReconcileOptions) (report ReconcileReport, err error) {
 	if source == nil || pool == nil {
 		return ReconcileReport{}, errors.New("source and database pool are required")
 	}
-	snap, err := source.Read(ctx, project)
+	if opts.Every <= 0 {
+		opts.Every = 100
+	}
+	progress := ReconcileProgress{}
+	lastLogged := 0
+	logProgress := func(force bool) {
+		completed := progress.Projects + progress.Issues + progress.Attachments
+		if opts.Progress != nil && (force || completed-lastLogged >= opts.Every) {
+			_, _ = fmt.Fprintf(opts.Progress, "reconcile: project=%s projects=%d issues=%d attachments=%d skipped=%d\n", progress.Project, progress.Projects, progress.Issues, progress.Attachments, progress.Skipped)
+			lastLogged = completed
+		}
+	}
+	snap := Snapshot{SourceID: source.InstanceID()}
+	findings := []ReconcileFinding{}
+	defer func() {
+		if ctx.Err() == nil {
+			return
+		}
+		if err == nil {
+			err = ctx.Err()
+		}
+		if len(findings) == 0 {
+			findings = snapshotFindings(snap.Skipped)
+		}
+		progress.Skipped = len(findings)
+		logProgress(true)
+		report = ReconcileReport{SourceID: source.InstanceID(), Tenant: tenant, Projects: []ReconcileProject{}, Skipped: findings, SkippedCount: len(findings), Progress: progress, Partial: true,
+			Summary: fmt.Sprintf("interrupted after %d projects, %d issues, %d attachments; %d skipped classic items", progress.Projects, progress.Issues, progress.Attachments, len(findings))}
+		if opts.Partial != nil {
+			if encodeErr := json.NewEncoder(opts.Partial).Encode(report); encodeErr != nil {
+				err = fmt.Errorf("write partial reconcile report: %w", encodeErr)
+			}
+		}
+	}()
+	snap, err = source.ReadWithProgress(ctx, project, func(p SourceProgress) {
+		progress.Project, progress.Projects, progress.Issues, progress.Skipped = p.Project, p.Projects, p.Issues, p.Skipped
+		logProgress(false)
+	})
 	if err != nil {
 		return ReconcileReport{}, err
 	}
 	if snap.SourceID != source.InstanceID() {
 		return ReconcileReport{}, errors.New("source identity mismatch")
 	}
-	if len(snap.Skipped) != 0 {
-		return ReconcileReport{}, fmt.Errorf("classic snapshot incomplete: %d skipped items", len(snap.Skipped))
-	}
+	findings = snapshotFindings(snap.Skipped)
 	sourceSet, targetSet := reconcileSet{}, reconcileSet{}
 	projectKeys := map[int64]string{}
 	for _, p := range snap.Projects {
@@ -230,7 +300,11 @@ func Reconcile(ctx context.Context, source *HTTPSource, pool *pgxpool.Pool, stor
 			attachmentID, _ := strconv.ParseInt(id, 10, 64)
 			body, err := source.downloadAttachment(ctx, attachmentID)
 			if isNotFound(err) {
-				sourceSet.put(pid, "attachments", id, "source-file-missing")
+				findings = append(findings, ReconcileFinding{Kind: "attachment", ClassicID: id, Reason: "HTTP 404 GET /attachments/" + id})
+				progress.Skipped = len(findings)
+				progress.Project = projectKeys[pid]
+				progress.Attachments++
+				logProgress(false)
 				continue
 			}
 			if err != nil {
@@ -246,6 +320,9 @@ func Reconcile(ctx context.Context, source *HTTPSource, pool *pgxpool.Pool, stor
 				return ReconcileReport{}, closeErr
 			}
 			sourceSet.put(pid, "attachments", id, hex.EncodeToString(h.Sum(nil)))
+			progress.Project = projectKeys[pid]
+			progress.Attachments++
+			logProgress(false)
 		}
 	}
 	tenantID, err := tenantbootstrap.ResolveSlug(ctx, pool, tenant)
@@ -253,12 +330,41 @@ func Reconcile(ctx context.Context, source *HTTPSource, pool *pgxpool.Pool, stor
 		return ReconcileReport{}, fmt.Errorf("resolve tenant: %w", err)
 	}
 	err = db.InTenant(ctx, pool, tenantID, func(tx pgx.Tx) error {
-		return readReconcileTarget(ctx, tx, tenantID, snap.SourceID, project, projectKeys, store, targetSet)
+		return readReconcileTarget(ctx, tx, tenantID, snap.SourceID, project, projectKeys, store, targetSet, snap.Skipped)
 	})
 	if err != nil {
 		return ReconcileReport{}, err
 	}
-	return finishReconcile(snap.SourceID, tenant, sourceSet, targetSet, projectKeys), nil
+	for _, finding := range findings {
+		if finding.Kind == "attachment" {
+			for _, categories := range targetSet {
+				delete(categories["attachments"], finding.ClassicID)
+			}
+		}
+	}
+	sort.Slice(findings, func(i, j int) bool {
+		if findings[i].Kind != findings[j].Kind {
+			return findings[i].Kind < findings[j].Kind
+		}
+		if findings[i].ClassicID != findings[j].ClassicID {
+			return findings[i].ClassicID < findings[j].ClassicID
+		}
+		return findings[i].Reason < findings[j].Reason
+	})
+	progress.Skipped = len(findings)
+	logProgress(true)
+	report = finishReconcile(snap.SourceID, tenant, sourceSet, targetSet, projectKeys)
+	report.Skipped, report.SkippedCount, report.Progress = findings, len(findings), progress
+	report.Summary += fmt.Sprintf("; %d skipped classic items", len(findings))
+	return report, nil
+}
+
+func snapshotFindings(skipped []SkippedItem) []ReconcileFinding {
+	findings := make([]ReconcileFinding, 0, len(skipped))
+	for _, item := range skipped {
+		findings = append(findings, ReconcileFinding{Kind: item.Type, ClassicID: strconv.FormatInt(item.ID, 10), Reason: fmt.Sprintf("HTTP %d GET %s", item.Status, item.Path)})
+	}
+	return findings
 }
 
 func addSourceIssue(set reconcileSet, pid int64, issue Record) error {
@@ -299,7 +405,16 @@ type targetNode struct {
 	Project, ClassicID                          int64
 }
 
-func readReconcileTarget(ctx context.Context, tx pgx.Tx, tenantID, sourceID, selectedProject string, projectKeys map[int64]string, store attachments.Store, target reconcileSet) error {
+func readReconcileTarget(ctx context.Context, tx pgx.Tx, tenantID, sourceID, selectedProject string, projectKeys map[int64]string, store attachments.Store, target reconcileSet, skipped []SkippedItem) error {
+	skippedProjects, skippedIssues := map[int64]bool{}, map[int64]bool{}
+	for _, item := range skipped {
+		if item.Type == "project" {
+			skippedProjects[item.ID] = true
+		}
+		if item.Type == "issue" {
+			skippedIssues[item.ID] = true
+		}
+	}
 	rows, err := tx.Query(ctx, `SELECT n.id::text,n.key,k.slug,n.title,n.body,n.state,n.fields,coalesce(n.parent_id::text,'')
 	 FROM nodes n JOIN node_kinds k ON k.tenant_id=n.tenant_id AND k.id=n.kind_id
 	 WHERE n.tenant_id=$1 AND n.fields->'classic'->>'source_id'=$2`, tenantID, sourceID)
@@ -329,6 +444,9 @@ func readReconcileTarget(ctx context.Context, tx pgx.Tx, tenantID, sourceID, sel
 			if _, included := projectKeys[n.Project]; !included {
 				continue
 			}
+		}
+		if skippedProjects[n.Project] || n.Kind != "project" && skippedIssues[n.ClassicID] {
+			continue
 		}
 		nodes[n.ID] = n
 		if _, found := projectKeys[n.Project]; !found {

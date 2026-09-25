@@ -2,6 +2,7 @@
 package importer
 
 import (
+	"bytes"
 	"context"
 	"crypto/sha256"
 	"encoding/hex"
@@ -20,6 +21,122 @@ import (
 	"github.com/inspr-at/aeon/internal/tenantbootstrap"
 	"github.com/jackc/pgx/v5"
 )
+
+type cancelOnWrite struct {
+	bytes.Buffer
+	cancel context.CancelFunc
+}
+
+func (w *cancelOnWrite) Write(p []byte) (int, error) {
+	n, err := w.Buffer.Write(p)
+	w.cancel()
+	return n, err
+}
+
+func TestReconcileReportsClassic404Findings(t *testing.T) {
+	ctx := context.Background()
+	source, closeSource := fakeClassic(t)
+	defer closeSource()
+	d := dbtest.Open(t)
+	tenantID, err := tenantbootstrap.Create(ctx, d.App, "reconcileskips", "Reconcile skips")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if _, err := (Importer{Source: source, Writer: PostgresWriter{Pool: d.App}}).RunDelta(ctx, "reconcileskips", ""); err != nil {
+		t.Fatal(err)
+	}
+	snap, err := source.Read(ctx, "")
+	if err != nil {
+		t.Fatal(err)
+	}
+	var actorID string
+	if err := db.InTenant(ctx, d.App, tenantID, func(tx pgx.Tx) error {
+		return tx.QueryRow(ctx, `SELECT id::text FROM principals WHERE tenant_id=$1 AND name='Classic Paimos importer'`, tenantID).Scan(&actorID)
+	}); err != nil {
+		t.Fatal(err)
+	}
+	store := attachments.Store{FilesDir: t.TempDir()}
+	if _, err := ImportAttachments(ctx, d.App, store, source, snap, tenantID, actorID); err != nil {
+		t.Fatal(err)
+	}
+	transport := source.client.Transport
+	source.client.Transport = roundTripFunc(func(r *http.Request) (*http.Response, error) {
+		if r.Method != http.MethodGet {
+			t.Errorf("classic write: %s", r.Method)
+		}
+		if r.URL.Path == "/api/issues/10/relations" || r.URL.Path == "/api/attachments/50" {
+			return &http.Response{StatusCode: http.StatusNotFound, Body: io.NopCloser(strings.NewReader("")), Header: http.Header{}, Request: r}, nil
+		}
+		return transport.RoundTrip(r)
+	})
+	var progress bytes.Buffer
+	report, err := ReconcileWithOptions(ctx, source, d.App, store, "reconcileskips", "", ReconcileOptions{Progress: &progress, Every: 1})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if report.Partial || report.SkippedCount != 2 || report.Progress.Skipped != 2 {
+		t.Fatalf("report: %+v", report)
+	}
+	if report.Skipped[0] != (ReconcileFinding{Kind: "attachment", ClassicID: "50", Reason: "HTTP 404 GET /attachments/50"}) ||
+		report.Skipped[1] != (ReconcileFinding{Kind: "issue", ClassicID: "10", Reason: "HTTP 404 GET /issues/10/relations"}) {
+		t.Fatalf("findings: %+v", report.Skipped)
+	}
+	for _, p := range report.Projects {
+		if p.ClassicID == 3 {
+			if len(p.Categories["tickets"].Extra) != 0 || len(p.Categories["attachments"].Extra) != 0 {
+				t.Fatalf("skipped items became extra: %+v", p.Categories)
+			}
+		}
+	}
+	if !strings.Contains(progress.String(), "project=PAI") || !strings.Contains(progress.String(), "skipped=2") {
+		t.Fatal(progress.String())
+	}
+	encoded, err := json.Marshal(report)
+	if err != nil || !strings.Contains(string(encoded), `"skipped_count":2`) {
+		t.Fatalf("JSON %s: %v", encoded, err)
+	}
+	source.client.Transport = roundTripFunc(func(r *http.Request) (*http.Response, error) {
+		if r.Method != http.MethodGet {
+			t.Errorf("classic write: %s", r.Method)
+		}
+		if r.URL.Path == "/api/projects/3/issues" {
+			return &http.Response{StatusCode: http.StatusNotFound, Body: io.NopCloser(strings.NewReader("")), Header: http.Header{}, Request: r}, nil
+		}
+		return transport.RoundTrip(r)
+	})
+	report, err = ReconcileWithOptions(ctx, source, d.App, store, "reconcileskips", "PAI", ReconcileOptions{})
+	if err != nil || report.SkippedCount != 1 || report.Skipped[0].Kind != "project" || report.Skipped[0].ClassicID != "3" {
+		t.Fatalf("skipped project: %+v %v", report, err)
+	}
+	source.client.Transport = roundTripFunc(func(r *http.Request) (*http.Response, error) {
+		return &http.Response{StatusCode: http.StatusUnauthorized, Body: io.NopCloser(strings.NewReader("")), Header: http.Header{}, Request: r}, nil
+	})
+	var partial bytes.Buffer
+	if _, err := ReconcileWithOptions(ctx, source, d.App, store, "reconcileskips", "", ReconcileOptions{Partial: &partial}); err == nil || !strings.Contains(err.Error(), "HTTP 401") || partial.Len() != 0 {
+		t.Fatalf("auth failure must abort without partial report: %v %q", err, partial.String())
+	}
+}
+
+func TestReconcileWritesPartialOnInterrupt(t *testing.T) {
+	source, closeSource := fakeClassic(t)
+	defer closeSource()
+	d := dbtest.Open(t)
+	ctx, cancel := context.WithCancel(context.Background())
+	defer cancel()
+	progress := &cancelOnWrite{cancel: cancel}
+	var partial bytes.Buffer
+	_, err := ReconcileWithOptions(ctx, source, d.App, attachments.Store{FilesDir: t.TempDir()}, "unused", "", ReconcileOptions{Progress: progress, Partial: &partial, Every: 1})
+	if err == nil {
+		t.Fatal("expected interruption")
+	}
+	var report ReconcileReport
+	if err := json.Unmarshal(partial.Bytes(), &report); err != nil {
+		t.Fatalf("partial JSON: %v (%q)", err, partial.String())
+	}
+	if !report.Partial || report.Progress.Projects < 1 || len(report.Projects) != 0 {
+		t.Fatalf("partial report: %+v", report)
+	}
+}
 
 type roundTripFunc func(*http.Request) (*http.Response, error)
 

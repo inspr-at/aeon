@@ -128,13 +128,21 @@
 // URL --api-key-file FILE --tenant SLUG`, construct an HTTPSource, configure
 // its GET request cap/delay, open the target pool, and call
 // Reconcile(ctx, source, pool, attachments.Store{FilesDir: cfg.FilesDir}, slug,
-// projectKey). JSON-encode ReconcileReport and print Summary as the short text
+// projectKey). Reconcile prints progress every 100 completed items to stderr,
+// and writes one explicitly partial JSON report to stdout on SIGINT/SIGTERM
+// before returning the cancellation error. ReconcileWithOptions accepts
+// progress/partial writers and an interval for callers that manage output.
+// JSON-encode a successful ReconcileReport and print Summary as the short text
 // result. Reconcile reads classic projects, issues, comments, relations,
 // attachment bytes, knowledge and user links; it reads actual Aeon attachment
 // bytes through Store.Open. Per-project categories include counts, aggregate
-// checksums, and missing/extra/changed classic IDs. A skipped source record
-// fails reconciliation rather than producing a false clean result. It never
-// writes either system and classic requests are GET only.
+// checksums, and missing/extra/changed classic IDs. Unreadable classic project,
+// issue and attachment items are skipped findings with kind, classic ID and
+// HTTP reason; skipped_count and Summary expose their total. A skipped item is
+// excluded from differences, so it cannot create a false extra target item.
+// A partial report has progress and findings but no unverified differences.
+// Authentication, network, malformed data and target read failures still abort.
+// Reconcile never writes either system and classic requests are GET only.
 //
 // `aeon import paimos` can invoke Importer.RunDelta for the final delta. It
 // scans a complete classic GET snapshot because several classic record types
