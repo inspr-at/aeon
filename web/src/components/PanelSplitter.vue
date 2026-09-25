@@ -4,20 +4,28 @@ import { onBeforeUnmount, ref, watchEffect } from 'vue'
 import { usePreference } from '../lib/preferences'
 
 // The handle between a list and its docked panel. Dragging sets the panel width
-// for every docked panel (tickets and agent sessions); double-click or Home goes
-// back to the default. The width is the person's preference on the server.
-const pref = usePreference<{ panel?: number }>('layout')
+// (by default for every docked panel: tickets and agent sessions); double-click or
+// Home goes back to the default. The width is the person's preference on the
+// server. A panel with its own width (the docked quote) names its preference
+// field, its CSS variable, the panel element, and how much the list keeps.
+const props = withDefaults(defineProps<{ field?: string; cssVar?: string; target?: string; reserve?: number }>(), { field: 'panel', cssVar: '--panel-user-w', target: '', reserve: 0 })
+const pref = usePreference<Record<string, number | undefined>>('layout')
 const dragging = ref(false)
 const MIN = 380
 const root = document.documentElement
 watchEffect(() => {
-  const width = pref.value.value?.panel
-  if (typeof width === 'number' && width >= MIN) root.style.setProperty('--panel-user-w', `${Math.round(width)}px`)
-  else root.style.removeProperty('--panel-user-w')
+  const width = pref.value.value?.[props.field]
+  if (typeof width === 'number' && width >= MIN) root.style.setProperty(props.cssVar, `${Math.round(width)}px`)
+  else root.style.removeProperty(props.cssVar)
 })
-function current() { return parseFloat(getComputedStyle(root).getPropertyValue('--panel-w')) || document.querySelector<HTMLElement>('.ticket-ws.panel, .session-panel, .quote-dock')?.getBoundingClientRect().width || 560 }
-function clamp(width: number) { return Math.round(Math.max(MIN, Math.min(window.innerWidth * 0.72, width))) }
-function set(width: number, delay = 400) { pref.save({ ...(pref.value.value ?? {}), panel: clamp(width) }, delay) }
+function current() {
+  const panel = props.target ? document.querySelector<HTMLElement>(props.target) : null
+  if (panel) return panel.getBoundingClientRect().width
+  return parseFloat(getComputedStyle(root).getPropertyValue('--panel-w')) || document.querySelector<HTMLElement>('.ticket-ws.panel, .session-panel, .quote-dock')?.getBoundingClientRect().width || 560
+}
+// Never narrower than MIN, never wider than 72 % of the window or than leaves the list its room.
+function clamp(width: number) { return Math.round(Math.max(MIN, Math.min(window.innerWidth * 0.72, window.innerWidth - props.reserve, width))) }
+function set(width: number, delay = 400) { pref.save({ ...(pref.value.value ?? {}), [props.field]: clamp(width) }, delay) }
 let lastPress = -Infinity
 function start(event: PointerEvent) {
   if (event.button !== 0) return
@@ -32,18 +40,19 @@ function start(event: PointerEvent) {
 function move(event: PointerEvent) {
   if (!dragging.value) return
   // The panel sits 10px from the right edge.
-  root.style.setProperty('--panel-user-w', `${clamp(window.innerWidth - event.clientX - 10)}px`)
+  root.style.setProperty(props.cssVar, `${clamp(window.innerWidth - event.clientX - 10)}px`)
 }
 let startX = 0
 function end(event: PointerEvent) {
   if (!dragging.value) return
   dragging.value = false
   // A press without a drag changes nothing (so a double press can reset).
-  if (Math.abs(event.clientX - startX) < 3) { const saved = pref.value.value?.panel; if (typeof saved === 'number') root.style.setProperty('--panel-user-w', `${saved}px`); else root.style.removeProperty('--panel-user-w'); return }
+  if (Math.abs(event.clientX - startX) < 3) { const saved = pref.value.value?.[props.field]; if (typeof saved === 'number') root.style.setProperty(props.cssVar, `${saved}px`); else root.style.removeProperty(props.cssVar); return }
   set(window.innerWidth - event.clientX - 10)
 }
 function reset() {
-  const { panel: _panel, ...rest } = pref.value.value ?? {}
+  const rest = { ...(pref.value.value ?? {}) }
+  delete rest[props.field]
   pref.save(rest, 0)
 }
 function keydown(event: KeyboardEvent) {
@@ -72,4 +81,6 @@ onBeforeUnmount(() => { dragging.value = false })
 .splitter:hover .grip, .splitter:focus-visible .grip, .splitter.dragging .grip { opacity: 1; background: var(--teal); height: 64px; }
 .splitter:focus-visible .grip { box-shadow: var(--focus-ring); }
 @media (max-width: 1099px) { .splitter { display: none; } }
+/* A panel that splits the window from 900px (the docked quote) shows its handle there too. */
+@media (min-width: 900px) and (max-width: 1099px) { .splitter.early { display: grid; } }
 </style>

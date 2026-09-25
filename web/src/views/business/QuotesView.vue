@@ -365,7 +365,7 @@ watch(openId, id => { if (id) store.cursor = id })
         <span><kbd class="keycap">j</kbd><kbd class="keycap">k</kbd> move</span><span><kbd class="keycap"><AppIcon name="enter" /></kbd> open</span><span><kbd class="keycap">shift</kbd><kbd class="keycap"><AppIcon name="enter" /></kbd> own page</span><span><kbd class="keycap">shift</kbd><kbd class="keycap">F10</kbd> actions</span><span><kbd class="keycap">/</kbd> search</span><span v-if="business.staff"><kbd class="keycap">n</kbd> new quote</span>
       </p>
     </BusinessPage>
-    <PanelSplitter v-if="openId" class="quote-panel-splitter" />
+    <PanelSplitter v-if="openId" class="quote-panel-splitter early" field="quotePanel" css-var="--quote-panel-user-w" target=".quote-dock" :reserve="480" />
     <div v-if="openId" class="quote-dock">
       <QuoteWorkspace ref="workspace" :quote-id="openId" layout="dock" @close="closeDock" @expand="openFull(openId)" @open="id => open({ quote_node_id: id })" />
     </div>
@@ -375,8 +375,10 @@ watch(openId, id => { if (id) store.cursor = id })
 </template>
 
 <style scoped>
-/* Quotes dock a little wider than tickets: a page of paper needs the room. */
-.quotes-view { --panel-default: clamp(560px, calc(640px + (100vw - 1440px) * .4), 48vw); --panel-w: min(var(--panel-user-w, var(--panel-default)), 72vw); }
+/* Quotes dock a little wider than tickets (a page of paper needs the room), with
+   a width of its own: dragged, it is the person's, and the list always keeps
+   480px of the window, so the two share it without a gap. */
+.quotes-view { --panel-default: clamp(560px, calc(640px + (100vw - 1440px) * .4), 48vw); --panel-w: min(var(--quote-panel-user-w, var(--panel-default)), 72vw, calc(100vw - 480px)); }
 .summary-skeleton { display: inline-block; width: 220px; }
 .acceptance-notices { min-width: 0; margin: 0 0 12px; padding: 9px 12px; border-radius: 10px; background: var(--surface-raised-2); box-shadow: inset 0 0 0 1px var(--line-2); color: var(--ink); }
 .acceptance-notices summary { width: fit-content; cursor: pointer; font-size: 13px; font-weight: 600; }
@@ -414,6 +416,11 @@ watch(openId, id => { if (id) store.cursor = id })
 }
 .quote-dock > * { flex: 1; min-height: 0; }
 @media (min-width: 1100px) { .quote-dock { width: var(--panel-w); } }
+/* Between 900 and 1100px the list and the quote still split the window. */
+@media (min-width: 900px) and (max-width: 1099px) {
+  .quote-dock { width: var(--panel-w); }
+  .quotes-list-page.panel-open { max-width: none; margin: 0; padding-right: calc(var(--panel-w) + 22px); }
+}
 @media (prefers-reduced-motion: no-preference) {
   .quote-dock { animation: dock-in .22s cubic-bezier(.2, .7, .2, 1); }
   @keyframes dock-in { from { opacity: 0; transform: translateX(24px); } to { opacity: 1; transform: none; } }

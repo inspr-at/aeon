@@ -428,9 +428,9 @@ defineExpose({ focus: () => root.value?.focus({ preventScroll: true }), issue, r
       @save="save" @undo="undo" @redo="redo" @zoom="setZoom" @print="print" @toggle-header="toggleHeader" @pane="setPane"
       @close="emit('close')" @expand="emit('expand')" @collapse="emit('collapse')" @duplicate="duplicate" @archive="archive" @copy-number="copyNumber" @issue="issue"
     >
-      <template v-if="document && (isDraft ? staff : true)" #profile>
+      <template v-if="document && (isDraft ? staff : true)" #profile="{ folded }">
         <QuoteProfilePicker
-          :current="currentProfile" :name="profileName" :profiles="profiles" :editable="editable" :busy="profileBusy" :compact="compact" :admin="admin"
+          :current="currentProfile" :name="profileName" :profiles="profiles" :editable="editable" :busy="profileBusy" :compact="compact || folded" :admin="admin"
           @open="loadProfiles" @choose="id => chooseProfile(id)"
         />
       </template>

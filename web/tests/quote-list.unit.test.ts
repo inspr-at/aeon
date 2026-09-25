@@ -5,7 +5,7 @@
 import { readFileSync, readdirSync } from 'node:fs'
 import { join } from 'node:path'
 import { describe, expect, it } from 'vitest'
-import { amountBounds, blankFilter, clampWidth, dateRange, dayText, matchesQuote, narrowed, numberOf, sortQuotes, statusOf, visibleColumns, type QuoteRow } from '../src/lib/quotes/list'
+import { amountBounds, blankFilter, clampWidth, dateRange, dayText, fitColumns, matchesQuote, narrowed, numberOf, sortQuotes, statusOf, TITLE_FLOOR, visibleColumns, type QuoteRow } from '../src/lib/quotes/list'
 import { conflictPlace, conflictValue } from '../src/lib/quotes/conflicts'
 import { lifecycleError, shortDigest } from '../src/lib/quotes/lifecycle'
 import { APIError } from '../src/lib/api'
@@ -61,6 +61,18 @@ describe('quote list rules', () => {
     expect(clampWidth('customer', undefined)).toBe(220)
     expect(visibleColumns(2000)).toEqual(['number', 'title', 'customer', 'status', 'date', 'valid', 'amount'])
     expect(visibleColumns(760)).toEqual(['number', 'title', 'customer', 'status'])
+  })
+  // U20: beside a docked quote the table is narrow; the title must never collapse to "C…".
+  it('gives the title its room before anything else when the table is narrow', () => {
+    const ids = visibleColumns(420, { number: 240 })
+    expect(ids).toEqual(['number', 'title', 'status'])
+    const widths = fitColumns(ids, 420, { number: 240 })
+    // The dragged number gives back first (down to its whole chip), then the status to its minimum.
+    expect(widths.number).toBe(126)
+    expect(widths.status).toBe(104)
+    expect(widths.title).toBe(420 - 126 - 104)
+    expect(fitColumns(['number', 'title', 'status'], 300).title).toBe(TITLE_FLOOR)
+    expect(fitColumns(['number', 'title', 'customer', 'status'], 1200)).toEqual({ number: 150, customer: 220, status: 124, title: 706 })
   })
 })
 

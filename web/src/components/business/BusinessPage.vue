@@ -30,6 +30,9 @@ onMounted(() => { void business.loadPlugins() })
 
 <template>
   <section class="biz-page" :class="{ 'panel-open': panelOpen, wide }" :aria-labelledby="`${area ?? 'business'}-title`">
+    <!-- The head measures its own width, so a page squeezed beside a docked panel
+         stacks its actions and folds its tabs the way a phone does. -->
+    <div class="head-zone">
     <header class="page-head">
       <div class="head-main">
         <p class="eyebrow"><slot name="eyebrow">{{ session.identity?.tenant.name ?? 'Workspace' }}</slot></p>
@@ -43,6 +46,7 @@ onMounted(() => { void business.loadPlugins() })
         <AppIcon :name="tab.icon" :size="14" /><span>{{ tab.label }}</span>
       </RouterLink>
     </nav>
+    </div>
 
     <div v-if="!loaded && !business.pluginsError" class="gate-skeleton skeleton-body" role="status" aria-label="Loading"><span class="skeleton" /><span class="skeleton short" /></div>
     <div v-else-if="!loaded" class="gate glass-card" role="alert">
@@ -88,9 +92,22 @@ onMounted(() => { void business.loadPlugins() })
 .gate-skeleton { display: grid; gap: 12px; padding: 20px 0; }
 .gate-skeleton .skeleton { width: 100%; height: 44px; border-radius: 12px; }
 .gate-skeleton .short { width: 60%; height: 10px; }
-/* Wide screens dock the panel: the page reflows beside it. */
+/* Wide screens dock the panel: the page reflows beside it and takes all the
+   width the panel leaves, so no gap opens between them. */
 @media (min-width: 1100px) {
-  .biz-page.panel-open { margin: 0; padding-right: calc(var(--panel-w) + 22px); }
+  .biz-page.panel-open { max-width: none; margin: 0; padding-right: calc(var(--panel-w) + 22px); }
+}
+.head-zone { container: biz-head / inline-size; }
+/* A narrow page (a panel beside it, or a small window): the actions go under the
+   title and summary, and the tabs share the row, icon over label. */
+@container biz-head (max-width: 700px) {
+  .page-head { flex-direction: column; align-items: stretch; gap: 12px; }
+  .head-actions { flex-wrap: wrap; }
+}
+@container biz-head (max-width: 560px) {
+  .biz-tabs { display: grid; grid-auto-flow: column; grid-auto-columns: minmax(0, 1fr); gap: 2px; width: auto; overflow: visible; border-radius: 16px; }
+  .biz-tab { flex-direction: column; justify-content: center; gap: 3px; height: 50px; padding: 0 2px; border-radius: 13px; font-size: 11px; }
+  .biz-tab span { max-width: 100%; overflow: hidden; text-overflow: ellipsis; }
 }
 @media (max-width: 720px) {
   .biz-page { padding: 14px 12px 20px; }
