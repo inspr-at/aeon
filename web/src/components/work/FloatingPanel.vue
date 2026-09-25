@@ -10,7 +10,8 @@ const emit = defineEmits<{ close: [restoreFocus: boolean] }>()
 const panel = ref<HTMLElement>()
 const x = ref(-9999)
 const y = ref(-9999)
-const maxHeight = ref(360)
+// Until placed (off-screen), the content may take its full height so place() measures it.
+const maxHeight = ref(props.tallest)
 const above = ref(false)
 
 function place() {

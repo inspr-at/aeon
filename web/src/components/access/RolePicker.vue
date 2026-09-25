@@ -45,13 +45,24 @@ function keys(event: KeyboardEvent) {
   if (event.key === 'ArrowDown' || event.key === 'ArrowUp') {
     event.preventDefault()
     picked.value = ids[(at + (event.key === 'ArrowDown' ? 1 : -1) + ids.length) % ids.length]!
-    document.getElementById(`${id}-${picked.value}`)?.focus()
+    document.getElementById(`${id}-${picked.value}`)?.focus({ preventScroll: true })
   } else if (event.key === 'Enter' && changed.value && !pickedReason.value) { event.preventDefault(); apply() }
 }
 function apply() { if (!changed.value || pickedReason.value || props.busy) return; emit('choose', picked.value === NONE ? null : picked.value) }
-onMounted(() => { document.getElementById(`${id}-${picked.value}`)?.focus() })
+onMounted(() => { document.getElementById(`${id}-${picked.value}`)?.focus({ preventScroll: true }); void nextTick(reveal) })
 // The preview grows when a role is picked; the picked role stays in view.
-watch(picked, () => void nextTick(() => document.getElementById(`${id}-${picked.value}`)?.scrollIntoView({ block: 'nearest' })))
+const list = ref<HTMLElement>()
+// Keeps the picked role in view by scrolling the list alone: scrollIntoView would
+// also move the page behind the menu.
+function reveal() {
+  const box = list.value, item = document.getElementById(`${id}-${picked.value}`)
+  if (!box || !item) return
+  const top = item.getBoundingClientRect().top - box.getBoundingClientRect().top + box.scrollTop, bottom = top + item.offsetHeight
+  if (top < box.scrollTop) box.scrollTop = top
+  else if (bottom > box.scrollTop + box.clientHeight) box.scrollTop = bottom - box.clientHeight
+}
+// The preview grows when a role is picked; the list gives way and the picked role stays in view.
+watch(picked, () => void nextTick(reveal))
 </script>
 
 <template>
@@ -59,7 +70,7 @@ watch(picked, () => void nextTick(() => document.getElementById(`${id}-${picked.
     <div class="picker" @keydown="keys">
       <p class="eyebrow title">{{ scope === 'workspace' ? 'Workspace role' : 'Project role' }} · {{ subject }}</p>
       <p v-if="locked" :id="`${id}-locked`" class="locked"><AppIcon name="shield" :size="14" /><span>{{ LAST_OWNER_REASON }}</span></p>
-      <div class="options" role="radiogroup" :aria-label="`Role for ${subject}`">
+      <div ref="list" class="options" role="radiogroup" :aria-label="`Role for ${subject}`">
         <button
           v-for="option in options" :id="`${id}-${option.id}`" :key="option.id" type="button" role="radio" class="option"
           :aria-checked="picked === option.id" :tabindex="picked === option.id ? 0 : -1" :class="{ off: !!reasonFor(option.role) }"
@@ -74,15 +85,17 @@ watch(picked, () => void nextTick(() => document.getElementById(`${id}-${picked.
           </span>
         </button>
       </div>
-      <div v-if="changed" class="preview" aria-live="polite">
+      <!-- Always in place, so the menu opens where the full preview will fit. -->
+      <div v-if="!locked" class="preview" :class="{ idle: !changed }" aria-live="polite">
         <p class="eyebrow">What changes</p>
-        <p class="effect">{{ pickedRole ? effectLine(pickedRole.permissions, registry) : scope === 'workspace' ? 'Only the projects they are given, nothing in the workspace.' : 'No access on this project beyond their workspace role.' }}</p>
-        <div v-if="change.added.length" class="delta">
+        <p v-if="!changed" class="effect idle-text">Pick another role to see what it adds or takes away.</p>
+        <p v-else class="effect">{{ pickedRole ? effectLine(pickedRole.permissions, registry) : scope === 'workspace' ? 'Only the projects they are given, nothing in the workspace.' : 'No access on this project beyond their workspace role.' }}</p>
+        <div v-if="changed && change.added.length" class="delta">
           <span class="delta-h gain"><AppIcon name="plus" :size="11" />Gains {{ change.added.length }}</span>
           <span v-for="key in change.added.slice(0, 6)" :key="key" class="perm" :class="{ high: risky([key]).length }">{{ permissionLabel(key) }}<RiskBadge v-if="risky([key]).length" risk="high" compact /></span>
           <span v-if="change.added.length > 6" class="more">and {{ change.added.length - 6 }} more</span>
         </div>
-        <div v-if="change.removed.length" class="delta">
+        <div v-if="changed && change.removed.length" class="delta">
           <span class="delta-h lose"><AppIcon name="minus" :size="11" />Loses {{ change.removed.length }}</span>
           <span v-for="key in change.removed.slice(0, 6)" :key="key" class="perm">{{ permissionLabel(key) }}</span>
           <span v-if="change.removed.length > 6" class="more">and {{ change.removed.length - 6 }} more</span>
@@ -100,14 +113,16 @@ watch(picked, () => void nextTick(() => document.getElementById(`${id}-${picked.
 </template>
 
 <style scoped>
-/* The choices scroll; what changes and the buttons always stay in view. */
+/* The choices and what changes each give way when space is short; the buttons always stay in view. */
 .picker { display: flex; flex-direction: column; gap: 8px; max-height: calc(var(--floating-max, 620px) - 14px); padding: 4px 4px 2px; }
 .picker > * { flex-shrink: 0; }
 .picker > .options { flex: 1 1 auto; min-height: 96px; }
+/* The list gives way first; what changes only shrinks (and scrolls) when it must. */
+.picker > .preview { flex: 0 .1 auto; min-height: 76px; overflow: auto; overscroll-behavior: contain; }
 .title { padding: 2px 6px 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 .locked { display: grid; grid-template-columns: 14px 1fr; gap: 8px; margin: 0 2px; padding: 9px 10px; border-radius: 10px; background: var(--surface-2); font-size: 12.5px; line-height: 1.45; color: var(--ink-2); }
 .locked svg { margin-top: 2px; color: var(--teal-ink); }
-.options { display: grid; gap: 1px; max-height: 262px; overflow: auto; }
+.options { display: grid; align-content: start; gap: 1px; max-height: 262px; overflow: auto; overscroll-behavior: contain; }
 .option { display: grid; grid-template-columns: 18px minmax(0, 1fr); gap: 10px; align-items: start; width: 100%; padding: 7px 10px; border: 0; border-radius: 10px; background: transparent; color: var(--ink); text-align: left; }
 @media (hover: hover) { .option:hover { background: var(--row-hover); } }
 .option[aria-checked="true"] { background: var(--row-selected); box-shadow: inset 0 0 0 1px var(--chip-teal-line); }
@@ -126,6 +141,7 @@ watch(picked, () => void nextTick(() => document.getElementById(`${id}-${picked.
 .option.off .name { color: var(--ink-2); }
 .preview { display: grid; gap: 6px; margin: 2px 2px 0; padding: 10px 12px; border-radius: 12px; background: var(--surface-sunken); box-shadow: inset 0 0 0 1px var(--line); }
 .effect { font-size: 13px; line-height: 1.45; color: var(--ink); }
+.idle-text { color: var(--ink-3); }
 .delta { display: flex; flex-wrap: wrap; align-items: center; gap: 4px 6px; }
 .delta-h { display: inline-flex; align-items: center; gap: 4px; margin-right: 2px; font: 600 11px/1 var(--mono); letter-spacing: .04em; font-variant-ligatures: none; }
 .delta-h.gain { color: var(--ok); }

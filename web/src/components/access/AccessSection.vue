@@ -64,7 +64,7 @@ onMounted(() => { void access.load() })
           <p class="lead">Who works here, with which role and on which projects. {{ brand.short_name }} decides access; an INSPR ID only proves who someone is.</p>
         </div>
       </header>
-      <div ref="tabBar" class="tabs" role="tablist" aria-label="Access" @keydown="tabKeys">
+      <div ref="tabBar" class="tabs" :class="{ drilled: !!detail && (tab === 'roles' || tab === 'projects') }" role="tablist" aria-label="Access" @keydown="tabKeys">
         <RouterLink
           v-for="t in tabs" :id="`access-tab-${t.id}`" :key="t.id" :to="`/settings/access/${t.id}`" class="tab" role="tab" :aria-selected="tab === t.id" :tabindex="tab === t.id ? 0 : -1"
           :aria-controls="`access-panel-${t.id}`"
@@ -107,5 +107,7 @@ h2 { font: 600 15px/1.35 var(--font); color: var(--ink); }
   .tabs { display: grid; grid-template-columns: repeat(3, minmax(0, 1fr)); margin: 14px -2px 0; overflow: visible; }
   .tab { height: 44px; padding: 0 6px; gap: 5px; font-size: 12.5px; }
   .tab .n { display: none; }
+  /* A role or project opened on a phone replaces its list; its back link returns to the tabs. */
+  .tabs.drilled { display: none; }
 }
 </style>

@@ -20,7 +20,7 @@ import { domAudit, expectedMockConsole, decorativeVersionContrast, installLayout
 import { mockQuoteEditor, QUOTE_ID } from './quote-inspector-fixtures'
 import { knowledgeWorld, mockKnowledge } from './knowledge-fixtures'
 import { groupsWorld, mockProjectGroups } from './project-groups-fixtures'
-import { ME as ACCESS_ME, accessWorld, mockAccess } from './access-fixtures'
+import { JONAS as ACCESS_JONAS, ME as ACCESS_ME, accessWorld, mockAccess } from './access-fixtures'
 
 type Finding = Raw & { id: string; route: string; state: string; viewport: string; theme: string; screenshot: string }
 type Setup = 'default' | 'editor' | 'journey' | 'public' | 'signed-out' | 'groups' | 'cards' | 'views'
@@ -108,7 +108,9 @@ const scenarios: Scenario[] = [
   { state: 'projects selection', route: '/', setup: 'cards', act: async page => { await visible('.card')(page); await page.locator('.card-link').first().focus(); await page.keyboard.press('x'); await expect(page.getByRole('toolbar', { name: /selected project/ })).toBeVisible() } },
   // AEON-148: Settings -> Access on the mocked authz contract.
   { state: 'access people', route: '/settings/access/people', act: visible('table.people') },
-  { state: 'access role picker', route: '/settings/access/people', act: async page => { await visible('table.people')(page); await page.getByRole('button', { name: /Workspace role of Jonas Weber/ }).click(); await page.getByRole('radio', { name: /^Admin/ }).click() } },
+  // Opened from the person's sheet, which sits at the top at every width: the table row
+  // would first scroll the page on a phone and put the list under the sticky header.
+  { state: 'access role picker', route: `/settings/access/people/${ACCESS_JONAS}`, act: async page => { const sheet = page.getByRole('dialog', { name: /, access$/ }); await expect(sheet).toBeVisible(); await sheet.getByRole('button', { name: 'Change role', exact: true }).first().click(); await page.getByRole('radio', { name: /^Admin/ }).click() } },
   { state: 'access person', route: `/settings/access/people/${ACCESS_ME}`, act: async page => { await expect(page.getByRole('dialog', { name: /, access$/ })).toBeVisible() } },
   { state: 'access invite', route: '/settings/access/invites', act: async page => { await visible('.invites')(page); await page.getByRole('button', { name: 'Invite people' }).click(); await expect(page.getByRole('dialog', { name: 'Invite people' })).toBeVisible() } },
   { state: 'access roles', route: '/settings/access/roles', act: visible('.roles') },
