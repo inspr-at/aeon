@@ -11,7 +11,7 @@ import AppIcon from '../AppIcon.vue'
 // sees) and held action requests. Decided and expired requests fold into a history.
 type Held = ProjectMessage & { projectId: string }
 const props = defineProps<{
-  pending: Approval[]; held: Held[]; history: Approval[]; now: number; cursor: string; canDecide: boolean
+  pending: Approval[]; held: Held[]; history: Approval[]; now: number; cursor: string; canDecide: boolean; loaded: boolean
   asker: (principalId: string) => Asker; resource: (approval: Approval) => Resource
   decide: (approval: Approval, decision: 'approved' | 'denied', reason: string) => Promise<void>
   revoke: (approval: Approval) => Promise<void>
@@ -87,7 +87,10 @@ defineExpose({ begin, cancel, isOpen: () => !!open.value })
       <p v-if="count && canDecide" class="keys" aria-hidden="true"><kbd class="keycap">j</kbd><kbd class="keycap">k</kbd> move · <kbd class="keycap">a</kbd> approve or resolve · <kbd class="keycap">d</kbd> deny or dismiss</p>
     </header>
 
-    <p v-if="!count" class="all-clear"><AppIcon name="check" :size="15" />Nothing waits on you. New permission requests appear here the moment an agent asks.</p>
+    <div v-if="!loaded" class="skeleton-rows" role="status" aria-label="Loading requests">
+      <div v-for="i in 2" :key="i" class="sk-row"><span class="skeleton mark-sk" /><span class="sk-lines"><span class="skeleton" :style="{ width: `${34 + i * 9}%` }" /><span class="skeleton" style="width: 22%" /></span></div>
+    </div>
+    <p v-else-if="!count" class="all-clear"><AppIcon name="check" :size="15" />Nothing waits on you. New permission requests appear here the moment an agent asks.</p>
 
     <ul v-else class="items" aria-label="Requests waiting for you">
       <li
@@ -177,7 +180,7 @@ defineExpose({ begin, cancel, isOpen: () => !!open.value })
       </li>
     </ul>
 
-    <footer v-if="history.length" class="history">
+    <footer v-if="loaded && history.length" class="history">
       <button type="button" class="history-toggle" :aria-expanded="showHistory" aria-controls="approval-history" @click="showHistory = !showHistory">
         <AppIcon name="chevron-right" :size="12" class="chev" :class="{ turned: showHistory }" />Decided<span class="mono">{{ history.length }}</span>
       </button>
@@ -203,6 +206,10 @@ defineExpose({ begin, cancel, isOpen: () => !!open.value })
 .spacer { flex: 1; }
 .keys { display: inline-flex; align-items: center; gap: 4px; font-size: 12px; color: var(--ink-3); }
 .all-clear { display: flex; align-items: center; gap: 8px; padding: 4px 18px 18px; font-size: 13px; color: var(--ink-2); }
+.skeleton-rows { display: grid; gap: 4px; padding: 0 8px 8px; }
+.sk-row { display: flex; align-items: center; gap: 12px; padding: 12px 12px 12px 10px; }
+.mark-sk { flex-shrink: 0; width: 30px; height: 30px; border-radius: 9px; }
+.sk-lines { display: grid; gap: 8px; flex: 1; min-width: 0; }
 .all-clear svg { color: var(--ok); }
 .items { margin: 0; padding: 0 8px 8px; list-style: none; display: grid; grid-template-columns: minmax(0, 1fr); gap: 4px; }
 .item { display: grid; grid-template-columns: 30px minmax(0, 1fr) auto; gap: 12px; align-items: start; padding: 12px 12px 12px 10px; border-radius: 12px; outline: none; cursor: default; }
@@ -223,7 +230,7 @@ defineExpose({ begin, cancel, isOpen: () => !!open.value })
 .expiry { display: inline-flex; align-items: center; gap: 4px; font-size: 12px; color: var(--ink-3); }
 .expiry.soon { color: var(--gold-ink); font-weight: 600; }
 .line2 { display: flex; align-items: center; flex-wrap: wrap; gap: 6px; font-size: 12.5px; color: var(--ink-2); }
-.who { display: inline-flex; align-items: center; gap: 6px; height: 22px; padding: 0 8px 0 3px; border: 0; border-radius: 999px; background: var(--chip-bg); box-shadow: inset 0 0 0 1px var(--chip-line); color: var(--ink); font-size: 12.5px; font-weight: 600; }
+.who { display: inline-flex; align-items: center; gap: 6px; height: 24px; padding: 0 8px 0 3px; border: 0; border-radius: 999px; background: var(--chip-bg); box-shadow: inset 0 0 0 1px var(--chip-line); color: var(--ink); font-size: 12.5px; font-weight: 600; }
 .who:hover { box-shadow: inset 0 0 0 1px var(--chip-teal-line); color: var(--teal-ink); }
 .who:focus-visible { box-shadow: var(--focus-ring); }
 .harness { display: inline-flex; align-items: center; height: 16px; padding: 0 6px; border-radius: 999px; background: var(--surface-raised); font: 500 10px/1 var(--mono); letter-spacing: .04em; color: var(--ink-2); font-variant-ligatures: none; }

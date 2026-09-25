@@ -297,7 +297,7 @@ test('nothing is clipped at 390: stats in a grid, the count on its own line, ful
   await expect(stats.getByText('Median gap')).toHaveCount(0)
   await stats.getByRole('button', { name: 'More stats' }).click()
   await expect(stats.getByText('Median gap')).toBeVisible()
-  await expect(sheet(page).locator('.result-count')).toHaveText('6 · 1 reserved')
+  await expect(sheet(page).locator('.result-count')).toHaveText('6 published · 1 reserved')
   const clipped = () => page.evaluate(() => {
     const out: string[] = []
     for (const el of document.querySelectorAll<HTMLElement>('dialog[open] *')) {

@@ -22,6 +22,27 @@ const hasMark = computed(() => !!(props.document.layout.logo_file_id || props.do
 const markWidth = computed(() => { const n = Number(props.document.layout.logo_width_mm); return Number.isFinite(n) && props.document.layout.logo_width_mm ? n : MARK_DEFAULT_MM })
 const markOffset = computed(() => { const n = Number(props.document.layout.logo_offset_mm); return Number.isFinite(n) ? n : 0 })
 const markMoved = computed(() => !!props.document.layout.logo_width_mm || !!props.document.layout.logo_offset_mm)
+// The page as this quote prints it: its document profile's geometry and language,
+// or the built-in standard page when it has none.
+const page = computed(() => {
+  const p = props.document.profile?.definition.page
+  const mm = (value: string | undefined, fallback: number) => { const n = Number(value); return value && Number.isFinite(n) ? n : fallback }
+  return {
+    width: mm(p?.width_mm, PAGE_MM.width), height: mm(p?.height_mm, PAGE_MM.height),
+    top: mm(p?.top_mm, PAGE_MM.marginTop), right: mm(p?.right_mm, PAGE_MM.marginRight), bottom: mm(p?.bottom_mm, PAGE_MM.marginBottom), left: mm(p?.left_mm, PAGE_MM.marginLeft),
+  }
+})
+const pageSize = computed(() => {
+  const { width, height } = page.value
+  if (width === 210 && height === 297) return 'A4 portrait'
+  if (width === 297 && height === 210) return 'A4 landscape'
+  return `${width} by ${height} mm`
+})
+const margins = computed(() => {
+  const { top, right, bottom, left } = page.value
+  return top === bottom && left === right ? `${top} mm top and bottom, ${left} mm left and right` : `${top} mm top, ${right} mm right, ${bottom} mm bottom, ${left} mm left`
+})
+const language = computed(() => props.document.profile?.definition.locale === 'en' ? 'English' : 'German (Austria)')
 const dateProblem = computed(() => props.document.valid_until && props.document.offer_date && props.document.valid_until < props.document.offer_date ? 'Valid until is before the quote date.' : '')
 function days(from: string, to: string) {
   if (!from || !to) return ''
@@ -54,12 +75,12 @@ function currency(event: Event) {
     <section class="group" aria-labelledby="doc-page">
       <h3 id="doc-page" class="group-title">Page</h3>
       <dl class="facts">
-        <div><dt>Size</dt><dd>A4 portrait</dd></div>
-        <div><dt>Margins</dt><dd>{{ PAGE_MM.marginTop }} mm top and bottom, {{ PAGE_MM.marginLeft }} mm left and right</dd></div>
-        <div><dt>Language</dt><dd>German</dd></div>
+        <div><dt>Size</dt><dd>{{ pageSize }}</dd></div>
+        <div><dt>Margins</dt><dd>{{ margins }}</dd></div>
+        <div><dt>Language</dt><dd>{{ language }}</dd></div>
         <div><dt>Numbers</dt><dd>Sections 1, 2, 3; set per section on the Section tab</dd></div>
       </dl>
-      <p class="note">Page size, margins and type come from the quote layout, the same for every quote and its PDF.</p>
+      <p class="note">{{ document.profile ? 'Page size, margins, language and type come from the document profile picked in the title bar; the PDF matches.' : 'This quote uses the built-in standard page. A document profile, picked in the title bar, sets its own size, margins, language and type.' }}</p>
     </section>
 
     <section v-if="hasMark" id="quote-footer-mark" class="group" aria-labelledby="doc-mark">

@@ -74,21 +74,21 @@ defineExpose({ focus: () => root.value?.focus({ preventScroll: true }) })
     <!-- The identity stays in view while runs and messages scroll below it. -->
     <header class="panel-head">
       <div class="head-top">
-        <template v-if="view">
+        <template v-if="view && !loading">
           <LiveDot :tone="view.status.tone" />
           <span class="harness">{{ view.harness }}</span>
           <h2 class="name">{{ view.name }}</h2>
           <span class="state-text" :class="view.status.group">{{ view.status.label }}</span>
         </template>
         <span class="spacer" />
-        <template v-if="view && view.status.group !== 'stopped'">
+        <template v-if="view && !loading && view.status.group !== 'stopped'">
           <button type="button" class="icon-btn sm flat" :aria-label="`Interrupt ${view.name}`" :aria-disabled="!!controlBlock(view, 'interrupt')" :data-tip="controlBlock(view, 'interrupt') || 'Interrupt: stop the current turn, keep the session'" @click="control('interrupt')"><AppIcon name="interrupt" :size="16" /></button>
           <button type="button" class="icon-btn sm flat stop" :aria-label="`Stop ${view.name}`" :aria-disabled="!!controlBlock(view, 'stop')" :data-tip="controlBlock(view, 'stop') || 'Stop: end this session'" @click="control('stop')"><AppIcon name="halt" :size="16" /></button>
           <span class="bar-sep" aria-hidden="true" />
         </template>
         <button type="button" class="icon-btn sm flat" aria-label="Close session details" aria-keyshortcuts="Escape" data-tip="Close · Esc" @click="emit('close')"><AppIcon name="close" :size="15" /></button>
       </div>
-      <p v-if="view" class="head-sub">
+      <p v-if="view && !loading" class="head-sub">
         <RouterLink v-if="view.ticket" class="ticket-chip" :to="view.ticket.href" :aria-label="`Ticket ${view.ticket.key}: ${view.ticket.title}`">{{ view.ticket.key }}</RouterLink>
         <span v-if="view.ticket" class="head-ticket">{{ view.ticket.title }}</span>
         <span v-else class="muted">Not bound to a ticket</span>
@@ -96,7 +96,9 @@ defineExpose({ focus: () => root.value?.focus({ preventScroll: true }) })
       </p>
     </header>
 
-    <div v-if="!view && loading" class="scroll" role="status" aria-label="Loading session">
+    <!-- Until the first load completes the body stays a placeholder, so runs and
+         messages arrive together instead of pushing each other down. -->
+    <div v-if="loading" class="scroll" role="status" aria-label="Loading session">
       <div class="sk"><span class="skeleton w40" /><span class="skeleton w70" /><span class="skeleton w90" /><span class="skeleton w60" /></div>
     </div>
     <div v-else-if="!view" class="scroll">
@@ -185,7 +187,7 @@ defineExpose({ focus: () => root.value?.focus({ preventScroll: true }) })
       </section>
     </div>
 
-    <footer v-if="view" class="composer">
+    <footer v-if="view && !loading" class="composer">
       <p v-if="composeBlock" class="compose-block"><AppIcon name="inbox" :size="13" />{{ composeBlock }}</p>
       <form v-else class="compose" @submit.prevent="send">
         <p v-if="replyTo" class="replying"><span>Replying to “{{ replyTo.body.slice(0, 80) }}{{ replyTo.body.length > 80 ? '…' : '' }}”</span><button type="button" class="icon-btn sm flat" aria-label="Cancel the reply" @click="replyTo = null"><AppIcon name="close" :size="12" /></button></p>
@@ -257,12 +259,12 @@ defineExpose({ focus: () => root.value?.focus({ preventScroll: true }) })
 .block h3 { margin-bottom: 10px; }
 .telemetry { display: grid; grid-template-columns: repeat(4, minmax(0, 1fr)); gap: 8px; }
 .metric { display: grid; gap: 4px; padding: 10px 12px; border-radius: 10px; background: var(--code-bg); }
-.metric-label { font-size: 11.5px; color: var(--ink-3); }
+.metric-label { font-size: 11.5px; color: var(--ink-2); }
 .metric b { font: 600 15px/1.2 var(--mono); color: var(--ink); font-variant-numeric: tabular-nums; }
 .run-chip { justify-self: start; display: inline-flex; align-items: center; height: 20px; padding: 0 8px; border-radius: 999px; font: 600 10.5px/1 var(--mono); letter-spacing: .04em; font-variant-ligatures: none; background: var(--chip-bg); color: var(--ink-2); box-shadow: inset 0 0 0 1px var(--chip-line); }
-.run-chip.ok { background: rgba(47, 122, 90, .1); color: var(--ok); box-shadow: inset 0 0 0 1px rgba(47, 122, 90, .3); }
+.run-chip.ok { background: rgba(47, 122, 90, .1); color: color-mix(in oklab, var(--ok), var(--ink) 28%); box-shadow: inset 0 0 0 1px rgba(47, 122, 90, .3); }
 .run-chip.busy { background: var(--chip-teal-bg); color: var(--teal-ink); box-shadow: inset 0 0 0 1px var(--chip-teal-line); }
-.run-chip.bad { background: var(--danger-bg); color: var(--danger); box-shadow: inset 0 0 0 1px var(--danger-line); }
+.run-chip.bad { background: var(--danger-bg); color: color-mix(in oklab, var(--danger), var(--ink) 28%); box-shadow: inset 0 0 0 1px var(--danger-line); }
 .empty-line { font-size: 13px; color: var(--ink-3); }
 .runs { display: grid; grid-template-columns: minmax(0, 1fr); }
 .run-row { display: grid; grid-template-columns: 92px minmax(0, 1fr) 48px 56px 68px; align-items: center; gap: 10px; min-height: 36px; border-bottom: 1px solid var(--line); font-size: 12.5px; }

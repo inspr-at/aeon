@@ -37,6 +37,9 @@ function gateNote(state: AreaAvailability | null) {
     default: return ''
   }
 }
+// Until the parts are read, each row holds its place without claiming a state,
+// so nothing jumps when the answer lands.
+const ready = computed(() => !!business.plugins || !!business.pluginsError)
 const rows = computed(() => AREAS.map(area => {
   const section = businessSections.find(s => s.id === area.id)!
   const state = business.plugins ? availability(section, business.plugins) : null
@@ -85,22 +88,25 @@ void props
           : 'Enable or disable each part for everyone in this workspace. Disabling closes a part; nothing is deleted.' }}</p>
       </div>
     </header>
-    <ul class="areas" aria-label="Business parts">
+    <ul class="areas" aria-label="Business parts" :aria-busy="!ready">
       <li v-for="row in rows" :key="row.id" class="area" :class="{ on: row.on }">
         <span class="area-icon"><AppIcon :name="row.icon" :size="15" /></span>
         <span class="area-text">
           <span class="area-name">{{ row.label }}<span v-if="row.on" class="state-chip on">Enabled</span><span v-else-if="row.status && row.status !== 'Not enabled'" class="state-chip">{{ row.status }}</span></span>
           <span class="area-summary">{{ row.summary }}</span>
-          <span v-if="row.note" class="area-needs">{{ row.note }}</span>
-          <span v-if="!row.on && !row.absent && row.missing.length" class="area-needs">Also enables {{ row.missing.map(id => LABEL[id]).join(' and ') }}.</span>
+          <template v-if="ready">
+            <span v-if="row.note" class="area-needs">{{ row.note }}</span>
+            <span v-if="!row.on && !row.absent && row.missing.length" class="area-needs">Also enables {{ row.missing.map(id => LABEL[id]).join(' and ') }}.</span>
+          </template>
         </span>
-        <label class="switch" :data-tip="row.on ? `Disable ${row.label}` : `Enable ${row.label}`">
+        <span v-if="!ready" class="skeleton switch-sk" aria-hidden="true" />
+        <label v-else class="switch" :data-tip="row.on ? `Disable ${row.label}` : `Enable ${row.label}`">
           <input type="checkbox" :checked="row.on" :disabled="!!busy || !business.admin || row.absent" :aria-label="`${row.label} enabled`" @click.prevent="toggle(row.id, row.on)" />
         </label>
       </li>
     </ul>
     <p v-if="error" class="setup-error" role="alert"><AppIcon name="alert" :size="14" />{{ error }}</p>
-    <footer v-if="closedIds.length > 1 && business.admin" class="setup-foot">
+    <footer v-if="ready && closedIds.length > 1 && business.admin" class="setup-foot">
       <span class="foot-note">You can disable any part later from this overview.</span>
       <button type="button" class="btn primary" :disabled="!!busy" @click="enable(closedIds)"><AppIcon name="check" :size="14" />{{ busy === 'all' ? 'Enabling…' : closedIds.length === rows.length ? 'Enable Business' : 'Enable the rest' }}</button>
     </footer>
@@ -121,6 +127,7 @@ void props
 .area-name { display: flex; align-items: center; gap: 8px; font-size: 14px; font-weight: 650; color: var(--ink); }
 .area-summary { font-size: 12.5px; color: var(--ink-2); }
 .area-needs { font-size: 12px; color: var(--gold-ink); }
+.switch-sk { flex-shrink: 0; width: 34px; height: 20px; }
 .state-chip { display: inline-flex; align-items: center; height: 18px; padding: 0 7px; border-radius: 999px; background: var(--chip-bg); box-shadow: inset 0 0 0 1px var(--chip-line); color: var(--ink-2); font: 600 10px/1 var(--mono); letter-spacing: .06em; text-transform: uppercase; font-variant-ligatures: none; }
 .state-chip.on { background: rgba(47, 122, 90, .1); box-shadow: inset 0 0 0 1px rgba(47, 122, 90, .3); color: var(--ok); }
 .setup-error { display: flex; align-items: center; gap: 8px; margin-top: 12px; padding: 8px 12px; border-radius: 10px; background: var(--danger-bg); color: var(--danger); font-size: 13px; }
