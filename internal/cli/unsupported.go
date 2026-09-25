@@ -47,5 +47,4 @@ var unsupportedCompat = []struct {
 	{"baseline-batch report-built", []string{"baseline-batch", "report-built"}, reasonBaseline},
 	{"issue move", []string{"issue", "move", "AEON-1", "--to", "OPS"}, reasonIssueMove},
 	{"paimos-agentd serve", nil, reasonAgentd},
-	{"listen --follow", []string{"listen", "--project", "AEON", "--follow"}, reasonListenFollow},
 }

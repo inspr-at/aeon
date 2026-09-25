@@ -406,11 +406,11 @@ func TestMessagingCompatEndToEnd(t *testing.T) {
 		return out
 	}
 	first := call([]string{"tell", "codex:receiver", "--project", "AEON", "--expects-reply", "--idempotency-key", "retry-key", "-m", "reply with validation"})
-	var sent inbox.CompatMessage
+	var sent classicMessageView
 	if err := json.Unmarshal([]byte(first), &sent); err != nil {
 		t.Fatal(err)
 	}
-	if sent.ReplyObligation != "open" {
+	if !sent.ExpectsReply || sent.MessageID == "" {
 		t.Fatal("no reply obligation")
 	}
 	call([]string{"tell", "codex:receiver", "--project", "AEON", "--action-request", "-m", "held action fixture"})
@@ -419,19 +419,26 @@ func TestMessagingCompatEndToEnd(t *testing.T) {
 	if !strings.Contains(page, "reply with validation") || strings.Contains(page, "held action fixture") {
 		t.Fatal("listen exposed held content or lost accepted content")
 	}
-	page = call([]string{"listen", "--as", "codex:receiver", "--project", "AEON"})
+	code, page, stderr := runMessagingCLI([]string{"--config", missing, "--json", "listen", "--as", "codex:receiver", "--project", "AEON"}, "")
+	if code != 3 || stderr != "" {
+		t.Fatalf("empty inbox: code %d, %s", code, stderr)
+	}
 	if strings.Contains(page, "reply with validation") {
 		t.Fatal("JSON --ack did not acknowledge")
 	}
-	call([]string{"tell", "paimos:sender", "--project", "AEON", "--reply-to", sent.ID, "-m", "validation complete"})
+	replyJSON := call([]string{"tell", "paimos:sender", "--project", "AEON", "--reply-to", sent.MessageID, "-m", "validation complete"})
+	var reply classicMessageView
+	if err := json.Unmarshal([]byte(replyJSON), &reply); err != nil || reply.ThreadID != sent.MessageID || reply.Hop != 2 {
+		t.Fatalf("reply thread and hop: %s, %v", replyJSON, err)
+	}
 	t.Setenv("PAIMOS_API_KEY", sender.Token)
 	replay := call([]string{"tell", "codex:receiver", "--project", "AEON", "--expects-reply", "--idempotency-key", "retry-key", "-m", "reply with validation"})
-	var replayed inbox.CompatMessage
+	var replayed classicMessageView
 	if err := json.Unmarshal([]byte(replay), &replayed); err != nil {
 		t.Fatal(err)
 	}
-	if replayed.ReplyObligation != "closed" {
-		t.Fatal("reply did not close obligation")
+	if replayed.MessageID != sent.MessageID {
+		t.Fatal("idempotent replay changed message")
 	}
 	assertEvent(t, opened, sender.TenantID, "inbox.reply_obligation_opened")
 	assertEvent(t, opened, sender.TenantID, "inbox.reply_obligation_closed")

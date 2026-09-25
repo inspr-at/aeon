@@ -10,13 +10,14 @@ import (
 	"github.com/inspr-at/aeon/internal/version"
 )
 
-// RunMessaging is the coordinator entry point for P5.4. In cmd/aeon/main.go,
-// replace cli.Run with cli.RunMessaging after mounting inbox.NewMessaging in
-// serve. It preserves the full existing command tree and overrides only tell,
-// listen and message. This adapter keeps compat_cmds.go and run.go untouched
-// while those shared files are owned by other release packages.
+// RunMessaging is the shipped entry point for CP1. It preserves the existing
+// command tree and replaces tell, listen, and message with messaging parity.
 func RunMessaging(args []string, stdin io.Reader, stdout, stderr io.Writer) int {
-	rt := &runtime{stdin: stdin, stdout: stdout, stderr: stderr, program: "aeon"}
+	return runMessaging(args, stdin, stdout, stderr, nil)
+}
+
+func runMessaging(args []string, stdin io.Reader, stdout, stderr io.Writer, deliver localDeliverer) int {
+	rt := &runtime{stdin: stdin, stdout: stdout, stderr: stderr, program: "aeon", messagingDeliverer: deliver}
 	if len(args) > 0 {
 		rt.program = programName(args[0])
 	}
