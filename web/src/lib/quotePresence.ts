@@ -6,7 +6,7 @@ import { avatarColor, type AvatarColor } from './avatar'
 import type { QuoteDocumentData, EditorSelection } from './quotes/types'
 
 export interface PresenceAnchor { section_id: string; node_id?: string; observed_revision: number; text_sha256?: string; anchor?: number; focus?: number; fidelity: 'section'|'precise' }
-export interface CollaboratorSession { session_id: string; principal_id: string; name: string; mode: 'viewing'|'editing'|'idle'; anchor?: PresenceAnchor; observed_revision: number; expires_at: string }
+export interface CollaboratorSession { session_id: string; principal_id: string; name: string; has_avatar?: boolean; mode: 'viewing'|'editing'|'idle'; anchor?: PresenceAnchor; observed_revision: number; expires_at: string }
 export interface PresenceSnapshot { sessions: CollaboratorSession[]; draft_revision: number; quote_revision: number; state: 'draft'|'issued'|'accepted'|'void' }
 export interface QuoteNotice { id: number; quote_node_id: string; type: string; actor_principal_id: string; draft_revision: number; quote_revision: number; state: string; client_session_id?: string; mutation_id?: string }
 type Listener = (snapshot: PresenceSnapshot) => void

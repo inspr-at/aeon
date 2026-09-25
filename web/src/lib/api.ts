@@ -14,6 +14,8 @@ export function accountEmail(identity: Identity) {
   return identity.identity?.email?.trim() || identity.principal.email || ''
 }
 
+import { learnPictures } from './avatar.ts'
+
 export interface Version { version: string; scheme: string; brand?: import('./brand').Brand }
 
 export async function api(path: string, init: RequestInit = {}) {
@@ -110,7 +112,8 @@ export const deleteNode = (id: string) => json<void>(`/nodes/${idPath(id)}`, 'DE
 export const searchNodes = (q: string, params: { kind_id?: string; state?: string; cursor?: string; limit?: number } = {}, options: { signal?: AbortSignal } = {}) =>
   json<Page<SearchHit>>(`/search${query({ q, ...params })}`, 'GET', undefined, {}, options.signal)
 // B1 list and project-summary wire types (api/openapi.yaml NodeListItem, listProjects).
-export interface ListPerson { id: string; name: string }
+// has_avatar: the person has a picture; avatars ask for one only then.
+export interface ListPerson { id: string; name: string; has_avatar?: boolean }
 export interface ListParent { id: string; key: string; title: string; kind_slug: string }
 export interface ListProject { id: string; key: string; title: string }
 export interface ListItem extends WorkNode {
@@ -135,7 +138,7 @@ export interface ProjectSummary {
   // The people (and agents) most recently active in the project, newest first; absent on older servers.
   people?: ProjectPerson[]
 }
-export interface ProjectPerson { id: string; name: string; kind: 'person' | 'agent' }
+export interface ProjectPerson { id: string; name: string; kind: 'person' | 'agent'; has_avatar?: boolean }
 function listQuery(params: ListQuery): string {
   const values: Record<string, string | number | boolean | undefined> = {}
   for (const [key, value] of Object.entries(params)) {
@@ -145,6 +148,7 @@ function listQuery(params: ListQuery): string {
   return query(values)
 }
 export const listNodes = (params: ListQuery, options: { signal?: AbortSignal } = {}) => json<ListPage>(`/nodes${listQuery(params)}`, 'GET', undefined, {}, options.signal)
+  .then(page => { learnPictures(page.items.map(item => item.assignee)); return page })
 // U22 saved views: a project's list state with a name, own or shared (api/openapi.yaml SavedView).
 export interface SavedView {
   id: string; owner_principal_id: string; project_id: string | null; name: string
@@ -166,6 +170,7 @@ export interface BulkResult { event_id: number | null; items: WorkNode[]; unchan
 export const bulkChange = (body: BulkChange) => json<BulkResult>('/nodes/bulk', 'POST', body)
 export const undoEvent = (eventId: number) => json<unknown>(`/events/${eventId}/undo`, 'POST')
 export const getProjects = (includeArchived = false) => json<{ items: ProjectSummary[] }>(`/projects${includeArchived ? '?include_archived=true' : ''}`)
+  .then(page => { learnPictures(page.items.flatMap(project => project.people ?? [])); return page })
 // Shared project groups (AEON-136): everyone reads them; admins write, and every
 // write answers the event that POST /events/{id}/undo reverses.
 export interface SharedProjectGroup { id: string; name: string; position: number; project_ids: string[]; created_by: string; created_at: string; updated_at: string }
@@ -181,14 +186,15 @@ export type ChangeField = 'status' | 'priority' | 'assignee' | 'title' | 'parent
 export interface ActivityChange { field: ChangeField; from: string | null; to: string | null }
 export interface ActivityItem {
   id: string; at: string; type: 'comment' | 'change' | 'created'
-  author: { id: string | null; name: string }
+  author: { id: string | null; name: string; has_avatar?: boolean }
   body_markdown?: string; changes?: ActivityChange[]
 }
+const authored = <T extends ActivityItem | { items: ActivityItem[] }>(value: T): T => { learnPictures('items' in value ? value.items.map(item => item.author) : [value.author]); return value }
 export const getActivity = (nodeId: string, cursor?: string | null) =>
-  json<{ items: ActivityItem[]; next_cursor: string | null }>(`/nodes/${idPath(nodeId)}/activity${query({ limit: 50, cursor: cursor ?? undefined })}`)
-export const createComment = (nodeId: string, body_markdown: string) => json<ActivityItem>(`/nodes/${idPath(nodeId)}/comments`, 'POST', { body_markdown })
+  json<{ items: ActivityItem[]; next_cursor: string | null }>(`/nodes/${idPath(nodeId)}/activity${query({ limit: 50, cursor: cursor ?? undefined })}`).then(authored)
+export const createComment = (nodeId: string, body_markdown: string) => json<ActivityItem>(`/nodes/${idPath(nodeId)}/comments`, 'POST', { body_markdown }).then(authored)
 export const updateComment = (nodeId: string, commentId: string, body_markdown: string) =>
-  json<ActivityItem>(`/nodes/${idPath(nodeId)}/comments/${idPath(commentId)}`, 'PATCH', { body_markdown })
+  json<ActivityItem>(`/nodes/${idPath(nodeId)}/comments/${idPath(commentId)}`, 'PATCH', { body_markdown }).then(authored)
 export const deleteComment = (nodeId: string, commentId: string) => json<void>(`/nodes/${idPath(nodeId)}/comments/${idPath(commentId)}`, 'DELETE')
 
 export type RelationType = 'blocks' | 'relates' | 'implements' | 'cites' | 'duplicates' | 'customer_of' | 'contact_for'

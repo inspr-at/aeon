@@ -3,6 +3,7 @@
 // through a binary float: responses are parsed with their exact number
 // spelling, and request bodies write validated decimal strings as JSON numbers.
 import { api, APIError } from './api'
+import { learnPictures } from './avatar'
 import { parseJSONExact } from '../components/business/money'
 
 export type Unit = 'hour' | 'day' | 'item'
@@ -53,7 +54,7 @@ export interface TimeEntry {
 export interface EntryPatch { node_id?: string; cost_unit_node_id?: string; started_at?: string; duration_seconds?: number; note?: string }
 export interface TimeTotals { node_id: string; duration_seconds: number; amounts: { currency: string; amount: string }[] }
 export interface Binding { principal_id: string; contact_node_id: string; bound_by_principal_id: string; bound_at: string; principal_name: string; principal_kind: 'person' | 'agent' }
-export interface Principal { id: string; kind: 'person' | 'agent'; name: string; roles: string[] }
+export interface Principal { id: string; kind: 'person' | 'agent'; name: string; roles: string[]; has_avatar?: boolean }
 
 // A validated decimal written as a JSON number, never through Number().
 export class Decimal { readonly text: string; constructor(text: string) { this.text = text } }
@@ -131,7 +132,8 @@ export const createRate = (costUnitId: string, body: CostRateWrite) => call<Cost
 // ---------- CRM ----------
 export const listBindings = (contactId: string) => call<Binding[]>(`/crm/contacts/${id(contactId)}/principals`)
 export const bindContact = (contactId: string, principalId: string) => call<Binding>(`/crm/contacts/${id(contactId)}/principals`, 'POST', { principal_id: principalId })
-export const listPrincipals = () => call<Principal[]>('/business/principals')
+// Teaches the avatars who has a picture (lib/avatar), for every list of members.
+export const listPrincipals = () => call<Principal[]>('/business/principals').then(items => { learnPictures(items); return items })
 
 // ---------- Hours ----------
 export const listPeriods = async (principalId?: string) => (await call<TimePeriod[]>(`/time-periods${principalId ? `?principal_id=${id(principalId)}` : ''}`)).map(period)

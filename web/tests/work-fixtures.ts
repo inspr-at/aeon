@@ -103,7 +103,8 @@ export function fixtures(options: MockOptions = {}) {
   // U22 saved views and bulk batches (their before and after, for undo).
   const views: MockView[] = []
   const batches: { id: number; before: MockNode[]; after: MockNode[]; undone: boolean }[] = []
-  return { projects, nodes, people: [me, mira], activity, relations, attachments, preferences, events, views, batches, counter: { next: 100 } }
+  const people: { id: string; name: string; has_avatar?: boolean }[] = [me, mira]
+  return { projects, nodes, people, activity, relations, attachments, preferences, events, views, batches, counter: { next: 100 } }
 }
 // A 1x1 PNG for every attachment variant.
 export const PNG = Buffer.from('iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAYAAAAfFcSJAAAADUlEQVR42mNk+M9QDwADhgGAWjR9awAAAABJRU5ErkJggg==', 'base64')
@@ -115,7 +116,10 @@ function item(node: MockNode, data: Fixtures) {
   const kindIds: Record<string, string> = { epic: 'k-epic', ticket: 'k-ticket', task: 'k-task', project: 'k-project' }
   const parent = node.parent_id ? data.nodes.find(n => n.id === node.parent_id) : undefined
   const project = data.projects.find(p => p.id === node.project)!
-  const assignee = typeof node.fields.assignee === 'string' ? data.people.find(p => p.id === node.fields.assignee) ?? null : null
+  // has_avatar as the server sends it (U27), when the spec gives it; absent,
+  // the payload reads like an older server's.
+  const person = typeof node.fields.assignee === 'string' ? data.people.find(p => p.id === node.fields.assignee) : undefined
+  const assignee = person ? { id: person.id, name: person.name, ...(person.has_avatar === undefined ? {} : { has_avatar: person.has_avatar }) } : null
   return {
     id: node.id, key: node.key, kind_id: kindIds[node.kind_slug], title: node.title, body: node.body, fields: node.fields, state: node.state,
     parent_id: node.parent_id, position: '0', created_at: node.created_at, updated_at: node.updated_at, deleted_at: null,
@@ -387,7 +391,7 @@ export async function mockWork(page: Page, data: Fixtures, options: MockOptions 
       return route.fulfill({ json: { items: data.projects.filter(p => archived || p.state !== 'archived').map(p => {
         const inside = data.nodes.filter(n => n.project === p.id).map(n => normal(n.state))
         const count = (states: string[]) => inside.filter(state => states.includes(state)).length
-        return { id: p.id, key: p.key, title: p.title, state: p.state, open: count(['new', 'backlog']), in_progress: count(['in_progress', 'qa']), done: count(['done', 'delivered', 'accepted']), cancelled: count(['cancelled']), total: inside.length, last_activity: p.last, people: (p.id === 'p-pharos' ? [mira, me] : p.id === 'p-aeon' ? [me] : []).map(person => ({ ...person, kind: 'person' })) }
+        return { id: p.id, key: p.key, title: p.title, state: p.state, open: count(['new', 'backlog']), in_progress: count(['in_progress', 'qa']), done: count(['done', 'delivered', 'accepted']), cancelled: count(['cancelled']), total: inside.length, last_activity: p.last, people: (p.id === 'p-pharos' ? [mira, me] : p.id === 'p-aeon' ? [me] : []).map(person => ({ ...data.people.find(x => x.id === person.id) ?? person, kind: 'person' })) }
       }) } })
     }
     if (path === '/api/nodes' && method === 'GET') {

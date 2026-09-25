@@ -135,6 +135,10 @@ func TestLeasesAndAuthorization(t *testing.T) {
 	if len(sessions) != 1 {
 		t.Fatalf("sessions %v", sessions)
 	}
+	// No picture yet: the avatar is not asked for (U27).
+	if has, ok := sessions[0].(map[string]any)["has_avatar"].(bool); !ok || has {
+		t.Fatalf("has_avatar %v", sessions[0])
+	}
 	anchor := sessions[0].(map[string]any)["anchor"].(map[string]any)
 	if anchor["fidelity"] != "section" {
 		t.Fatalf("unverified cursor stayed precise: %v", anchor)
