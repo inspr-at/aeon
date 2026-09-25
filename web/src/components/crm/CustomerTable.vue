@@ -6,15 +6,22 @@ import { highlight } from '../../lib/work'
 import AppIcon from '../AppIcon.vue'
 import Avatar from '../Avatar.vue'
 import BizIcon from '../business/BizIcon.vue'
+import type { RowMenuAnchor } from '../../lib/rowActions'
 
 // The customer list: the ticket list's table (sortable headers, columns that
 // follow the table's width, edges to drag or fit, a keyboard cursor) with one row
-// per customer. Phones get one card per customer instead of columns.
+// per customer. Phones get one card per customer instead of columns. A row's
+// actions show on hover and focus (a new quote, then all of them under …); the
+// same menu opens on right-click, the context-menu key and Shift+F10.
 const props = defineProps<{
   rows: Customer[]; loading: boolean; query: string; sort: { key: SortKey; dir: 'asc' | 'desc' }
   cursorId: string | null; widths: Partial<Record<ColumnId, number>>; contact: (c: Customer) => ContactCard | undefined
+  canQuote?: boolean; menuId?: string | null
 }>()
-const emit = defineEmits<{ sort: [key: SortKey]; cursor: [id: string]; open: [customer: Customer]; widths: [widths: Partial<Record<ColumnId, number>>]; gridFocus: [] }>()
+const emit = defineEmits<{
+  sort: [key: SortKey]; cursor: [id: string]; open: [customer: Customer]; widths: [widths: Partial<Record<ColumnId, number>>]; gridFocus: []
+  action: [customer: Customer, id: 'quote']; menu: [customer: Customer, anchor: RowMenuAnchor]
+}>()
 
 const card = ref<HTMLElement>()
 const grid = ref<HTMLTableElement>()
@@ -119,7 +126,17 @@ function tipIfCut(event: PointerEvent) {
 }
 const skeletonRows = 8
 const money = (c: Customer) => minorMoney(c.hourly_rate_minor, c.currency)
-defineExpose({ focus: () => (phone.value ? card.value?.querySelector<HTMLElement>('.card-link') : grid.value)?.focus() })
+function contextMenu(event: MouseEvent, c: Customer) {
+  event.preventDefault()
+  emit('cursor', c.id)
+  emit('menu', c, { x: event.clientX, y: event.clientY })
+}
+function more(event: MouseEvent, c: Customer) {
+  emit('cursor', c.id)
+  emit('menu', c, event.currentTarget as HTMLElement)
+}
+const moreButton = (id: string) => document.querySelector<HTMLElement>(`#customer-${CSS.escape(id)} .row-more`)
+defineExpose({ focus: () => (phone.value ? card.value?.querySelector<HTMLElement>('.card-link') : grid.value)?.focus(), moreButton })
 </script>
 
 <template>
@@ -129,12 +146,13 @@ defineExpose({ focus: () => (phone.value ? card.value?.querySelector<HTMLElement
       <template v-if="loading && !rows.length">
         <li v-for="i in 5" :key="i" class="card-row ghost" aria-hidden="true"><span class="skeleton sk-name" /><span class="skeleton sk-line" /></li>
       </template>
-      <li v-for="c in rows" :id="`customer-${c.id}`" :key="c.id" class="card-row" :class="{ cursor: cursorId === c.id }">
+      <li v-for="c in rows" :id="`customer-${c.id}`" :key="c.id" class="card-row" :class="{ cursor: cursorId === c.id, archived: c.archived }" @contextmenu="contextMenu($event, c)">
         <RouterLink class="card-link" :to="`/business/customers/${c.id}`" @click="emit('cursor', c.id)">
           <span class="card-top">
             <span class="card-name"><template v-for="(part, i) in highlight(c.name, query)" :key="i"><mark v-if="part.match">{{ part.text }}</mark><template v-else>{{ part.text }}</template></template></span>
             <span v-if="c.customer_no" class="number mono">{{ c.customer_no }}</span>
           </span>
+          <span v-if="c.archived" class="archived-chip">Archived</span>
           <span v-if="c.legal_name && c.legal_name !== c.name" class="card-sub">{{ c.legal_name }}</span>
           <span class="card-meta">
             <span v-if="contact(c)" class="meta-item"><AppIcon name="user" :size="12" />{{ contact(c)!.name }}</span>
@@ -142,10 +160,11 @@ defineExpose({ focus: () => (phone.value ? card.value?.querySelector<HTMLElement
             <span v-if="money(c)" class="meta-item mono">{{ money(c) }}/h</span>
           </span>
         </RouterLink>
+        <button type="button" class="icon-btn sm flat row-more card-more" :aria-label="`Actions for ${c.name}`" aria-haspopup="menu" :aria-expanded="menuId === c.id" @click="more($event, c)"><AppIcon name="more" :size="16" /></button>
       </li>
     </ul>
 
-    <table v-else ref="grid" class="customers" role="grid" aria-label="Customers" :aria-busy="loading" tabindex="0" :aria-activedescendant="cursorId && rows.some(r => r.id === cursorId) ? `customer-${cursorId}` : undefined" @focus="emit('gridFocus')">
+    <table v-else ref="grid" class="customers" role="grid" aria-label="Customers" :aria-busy="loading" tabindex="0" :aria-activedescendant="cursorId && rows.some(r => r.id === cursorId) ? `customer-${cursorId}` : undefined" @focus="emit('gridFocus')" @contextmenu.self.prevent>
       <colgroup>
         <col v-for="column in columns" :key="column.id" :style="colWidth(column.id) ? { width: `${colWidth(column.id)}px` } : undefined" />
       </colgroup>
@@ -172,8 +191,8 @@ defineExpose({ focus: () => (phone.value ? card.value?.querySelector<HTMLElement
       </tbody>
       <tbody v-else :class="{ dim: loading }">
         <tr
-          v-for="c in rows" :id="`customer-${c.id}`" :key="c.id" class="row" :class="{ cursor: cursorId === c.id }"
-          :aria-selected="cursorId === c.id" @click="rowClick($event, c)"
+          v-for="c in rows" :id="`customer-${c.id}`" :key="c.id" class="row" :class="{ cursor: cursorId === c.id, archived: c.archived }"
+          :aria-selected="cursorId === c.id" @click="rowClick($event, c)" @contextmenu="contextMenu($event, c)"
         >
           <template v-for="column in columns" :key="column.id">
             <td v-if="column.id === 'name'" class="c-name">
@@ -182,8 +201,13 @@ defineExpose({ focus: () => (phone.value ? card.value?.querySelector<HTMLElement
                 <RouterLink class="name-link" :to="`/business/customers/${c.id}`" tabindex="-1">
                   <template v-for="(part, i) in highlight(c.name, query)" :key="i"><mark v-if="part.match">{{ part.text }}</mark><template v-else>{{ part.text }}</template></template>
                 </RouterLink>
+                <span v-if="c.archived" class="archived-chip">Archived</span>
                 <span v-if="c.legal_name && c.legal_name !== c.name" class="legal">{{ c.legal_name }}</span>
               </div>
+              <span class="row-actions" :class="{ solo: !canQuote || c.archived }">
+                <button v-if="canQuote && !c.archived" type="button" class="icon-btn sm flat" :aria-label="`New quote for ${c.name}`" data-tip="New quote for this customer" @click.stop="emit('cursor', c.id); emit('action', c, 'quote')"><BizIcon name="document" :size="14" /></button>
+                <button type="button" class="icon-btn sm flat row-more" :aria-label="`Actions for ${c.name}`" aria-haspopup="menu" :aria-expanded="menuId === c.id" data-tip="All actions · Shift F10" @click.stop="more($event, c)"><AppIcon name="more" :size="15" /></button>
+              </span>
             </td>
             <td v-else-if="column.id === 'number'" class="c-number">
               <div class="cell">
@@ -249,6 +273,21 @@ tbody .row:last-child td { border-bottom: 0; }
 tbody.dim { opacity: .55; }
 .org-mark { display: grid; place-items: center; flex-shrink: 0; width: 24px; height: 24px; border-radius: 7px; background: var(--code-bg); color: var(--ink-2); }
 .row.cursor .org-mark { background: var(--chip-teal-bg); color: var(--teal-ink); }
+/* Row actions float over the end of the name cell, shown on hover, on the cursor
+   row and while one of them has focus; the name fades out beneath them. */
+td.c-name { position: relative; }
+.row-actions { position: absolute; top: 50%; right: 8px; display: inline-flex; gap: 2px; transform: translateY(-50%); visibility: hidden; }
+.row-actions .icon-btn { width: 26px; height: 26px; color: var(--ink-3); }
+@media (hover: hover) { .row-actions .icon-btn:hover { color: var(--teal-ink); } }
+.row.cursor .row-actions, .row-actions:focus-within { visibility: visible; }
+@media (hover: hover) { .row:hover .row-actions { visibility: visible; } }
+.row.cursor td.c-name .cell, td.c-name:focus-within .cell { -webkit-mask-image: linear-gradient(to left, transparent 60px, #000 88px); mask-image: linear-gradient(to left, transparent 60px, #000 88px); }
+@media (hover: hover) { .row:hover td.c-name .cell { -webkit-mask-image: linear-gradient(to left, transparent 60px, #000 88px); mask-image: linear-gradient(to left, transparent 60px, #000 88px); } }
+.row.cursor td.c-name:has(.solo) .cell, td.c-name:has(.solo):focus-within .cell { -webkit-mask-image: linear-gradient(to left, transparent 32px, #000 60px); mask-image: linear-gradient(to left, transparent 32px, #000 60px); }
+@media (hover: hover) { .row:hover td.c-name:has(.solo) .cell { -webkit-mask-image: linear-gradient(to left, transparent 32px, #000 60px); mask-image: linear-gradient(to left, transparent 32px, #000 60px); } }
+.archived-chip { flex: 0 0 auto; height: 18px; padding: 0 7px; border-radius: 999px; background: var(--surface-2); box-shadow: inset 0 0 0 1px var(--line-2); color: var(--ink-2); font: 600 10px/18px var(--mono); letter-spacing: .06em; text-transform: uppercase; font-variant-ligatures: none; }
+.row.archived .name-link { color: var(--ink-2); }
+.card-row .archived-chip { justify-self: start; }
 .name-link { flex: 0 1 auto; min-width: 0; overflow: hidden; text-overflow: ellipsis; color: var(--ink); font-weight: 600; text-decoration: none; }
 .name-link:focus-visible { box-shadow: var(--focus-ring); border-radius: 4px; }
 .legal { flex: 0 0 auto; min-width: 0; overflow: hidden; text-overflow: ellipsis; color: var(--ink-3); font-size: 12.5px; }
@@ -262,7 +301,9 @@ tbody.dim { opacity: .55; }
 
 /* Phones */
 .cards { margin: 0; padding: 0; list-style: none; }
-.card-row { border-bottom: 1px solid var(--line); }
+.card-row { position: relative; border-bottom: 1px solid var(--line); }
+.card-more { position: absolute; top: 8px; right: 8px; z-index: 1; width: 36px; height: 36px; color: var(--ink-2); }
+.card-row .card-link { padding-right: 52px; }
 .card-row:last-child { border-bottom: 0; }
 .card-row.ghost { display: grid; gap: 10px; padding: 16px; }
 .sk-name { width: 55%; height: 12px; } .sk-line { width: 80%; }

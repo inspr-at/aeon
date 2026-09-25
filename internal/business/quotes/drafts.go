@@ -35,7 +35,7 @@ type draftRow struct {
 
 func readDraft(ctx context.Context, tx pgx.Tx, id string, lock bool) (draftRow, error) {
 	var d draftRow
-	q := `SELECT d.document,d.draft_revision,q.revision,d.schema_version,d.minimum_writer_version,d.base_version,d.updated_at,d.updated_by_principal_id::text FROM quote_drafts d JOIN business_quotes q ON q.tenant_id=d.tenant_id AND q.quote_node_id=d.quote_node_id WHERE d.quote_node_id=$1::uuid`
+	q := `SELECT d.document,d.draft_revision,q.revision,d.schema_version,d.minimum_writer_version,d.base_version,d.updated_at,d.updated_by_principal_id::text FROM quote_drafts d JOIN business_quotes q ON q.tenant_id=d.tenant_id AND q.quote_node_id=d.quote_node_id WHERE d.quote_node_id=$1::uuid AND q.deleted_at IS NULL`
 	if lock {
 		q += ` FOR UPDATE OF d`
 	}

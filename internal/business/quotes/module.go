@@ -51,6 +51,7 @@ func (m *Module) Mount(mux *http.ServeMux) {
 	mux.HandleFunc("GET /api/quotes", m.list)
 	mux.HandleFunc("POST /api/quotes", m.create)
 	mux.HandleFunc("GET /api/quotes/{quoteId}", m.get)
+	mux.HandleFunc("DELETE /api/quotes/{quoteId}", m.remove)
 	mux.HandleFunc("GET /api/quotes/settings", m.settingsGet)
 	mux.HandleFunc("PATCH /api/quotes/settings", m.settingsPatch)
 	mux.HandleFunc("GET /api/quotes/{quoteId}/draft", m.draftGet)
@@ -265,7 +266,7 @@ type createWrite struct {
 }
 
 func readQuote(ctx context.Context, tx pgx.Tx, id string, lock bool) (quote, error) {
-	q := `SELECT quote_node_id::text,coalesce(project_node_id::text,''),customer_org_node_id::text,current_version,state,revision,coalesce(offer_no,''),archived_at IS NOT NULL,project_ref FROM business_quotes WHERE quote_node_id=$1::uuid`
+	q := `SELECT quote_node_id::text,coalesce(project_node_id::text,''),customer_org_node_id::text,current_version,state,revision,coalesce(offer_no,''),archived_at IS NOT NULL,project_ref FROM business_quotes WHERE quote_node_id=$1::uuid AND deleted_at IS NULL`
 	if lock {
 		q += ` FOR UPDATE`
 	}
@@ -370,7 +371,7 @@ func (m *Module) list(w http.ResponseWriter, r *http.Request) {
 			LEFT JOIN quote_version_snapshots s ON s.tenant_id=q.tenant_id AND s.quote_node_id=q.quote_node_id AND s.version=q.current_version
 			LEFT JOIN quote_issues i ON i.tenant_id=q.tenant_id AND i.quote_node_id=q.quote_node_id AND i.version=q.current_version
 			LEFT JOIN quote_decisions dec ON dec.tenant_id=q.tenant_id AND dec.quote_node_id=q.quote_node_id AND dec.version=q.current_version
-			WHERE ($1::text='' OR q.project_node_id=NULLIF($1,'')::uuid) AND ($2::text='' OR q.customer_org_node_id=NULLIF($2,'')::uuid) AND ($3::text='' OR q.state=$3) AND ($4::text='all' OR (q.archived_at IS NOT NULL)=($4::text='true')) AND ($5::timestamptz IS NULL OR q.created_at<$5::timestamptz OR (q.created_at=$5::timestamptz AND q.quote_node_id>$6::uuid)) ORDER BY q.created_at DESC,q.quote_node_id LIMIT $7`, project, org, state, archived, cursorTime, cursorID, limit+1)
+			WHERE q.deleted_at IS NULL AND ($1::text='' OR q.project_node_id=NULLIF($1,'')::uuid) AND ($2::text='' OR q.customer_org_node_id=NULLIF($2,'')::uuid) AND ($3::text='' OR q.state=$3) AND ($4::text='all' OR (q.archived_at IS NOT NULL)=($4::text='true')) AND ($5::timestamptz IS NULL OR q.created_at<$5::timestamptz OR (q.created_at=$5::timestamptz AND q.quote_node_id>$6::uuid)) ORDER BY q.created_at DESC,q.quote_node_id LIMIT $7`, project, org, state, archived, cursorTime, cursorID, limit+1)
 		if err != nil {
 			return err
 		}

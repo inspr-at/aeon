@@ -89,7 +89,7 @@ const summary = computed(() => {
   if (business.open.hours && hoursLoaded.value) parts.push(weekTotal.value ? `${formatSpan(weekTotal.value)} logged this week` : 'Nothing logged this week')
   if (business.open.hours && business.admin && hoursLoaded.value) parts.push(waiting.value.length ? `${plural(waiting.value.length, 'period')} to approve` : 'nothing to approve')
   if (business.open.costs && business.costUnitsLoaded) parts.push(`${plural(ratesInForce.value, 'rate')} in force`)
-  if (business.open.crm && customers.items) parts.push(plural(customers.items.length, 'customer'))
+  if (business.open.crm && customers.items) parts.push(plural(customers.items.filter(c => !c.archived).length, 'customer'))
   return parts.join(' · ')
 })
 async function load() {

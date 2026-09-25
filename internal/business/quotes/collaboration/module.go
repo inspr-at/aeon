@@ -209,7 +209,7 @@ func (m *Module) inQuote(ctx context.Context, p tenant.Principal, id string, wri
 }
 func readSnapshot(ctx context.Context, tx pgx.Tx, id string) (snapshot, error) {
 	s := snapshot{Sessions: []presence{}}
-	if err := tx.QueryRow(ctx, `SELECT d.draft_revision,q.revision,q.state FROM quote_drafts d JOIN business_quotes q ON q.tenant_id=d.tenant_id AND q.quote_node_id=d.quote_node_id WHERE d.quote_node_id=$1::uuid`, id).Scan(&s.DraftRevision, &s.QuoteRevision, &s.State); err != nil {
+	if err := tx.QueryRow(ctx, `SELECT d.draft_revision,q.revision,q.state FROM quote_drafts d JOIN business_quotes q ON q.tenant_id=d.tenant_id AND q.quote_node_id=d.quote_node_id WHERE d.quote_node_id=$1::uuid AND q.deleted_at IS NULL`, id).Scan(&s.DraftRevision, &s.QuoteRevision, &s.State); err != nil {
 		if errors.Is(err, pgx.ErrNoRows) {
 			return s, errMissing
 		}

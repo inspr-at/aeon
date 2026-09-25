@@ -38,6 +38,7 @@ func UndoHandlers(registries ...*plugins.Registry) map[string]events.UndoFunc {
 		"crm.project_customer_changed": m.undoProjectCustomer, "crm.document_metadata_changed": m.undoDocument, "crm.project_cooperation_changed": m.undoCooperation,
 		"crm.note_rewrite_drafted": m.undoDraft, "crm.provider_config_changed": m.undoProviderConfig,
 		"crm.customer_number_allocated": m.undoNumber, "crm.customer_number_converted": m.undoNumber,
+		EventCustomerVisibility: m.undoVisibility,
 	}
 }
 func (m *module) undoAuthority(ctx context.Context, tx pgx.Tx, p tenant.Principal, permission string) error {
@@ -639,5 +640,40 @@ func (m *module) undoBinding(ctx context.Context, tx pgx.Tx, p tenant.Principal,
 	}
 	change.NodeID = &expected.ContactNodeID
 	change.Before = current
+	return change, nil
+}
+
+// undoVisibility restores the archived state a customer had before, while
+// nothing else changed it since (QL1/AEON-109).
+func (m *module) undoVisibility(ctx context.Context, tx pgx.Tx, p tenant.Principal, e events.Event) (events.Change, error) {
+	change := events.Change{Type: e.Type}
+	if err := m.undoAuthority(ctx, tx, p, fence.PermNodesContribute); err != nil {
+		return change, err
+	}
+	id, err := undoID(e)
+	if err != nil {
+		return change, err
+	}
+	change.NodeID = &id
+	before, err := snapshotAs[Customer](e.Before)
+	if err != nil {
+		return change, err
+	}
+	after, err := snapshotAs[Customer](e.After)
+	if err != nil {
+		return change, err
+	}
+	current, err := customer(ctx, tx, id, true)
+	if err != nil || current.Revision != after.Revision || current.Archived != after.Archived {
+		return change, events.ErrConflict
+	}
+	if err = setCustomerArchived(ctx, tx, p, id, before.Archived); err != nil {
+		return change, err
+	}
+	restored, err := customer(ctx, tx, id, false)
+	if err != nil {
+		return change, err
+	}
+	change.Before, change.After = current, restored
 	return change, nil
 }

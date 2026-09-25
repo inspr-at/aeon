@@ -9,7 +9,9 @@ const x = ref(0)
 const y = ref(0)
 const below = ref(false)
 const tip = ref<HTMLElement>()
-// Inside a modal dialog the tooltip moves into it, above the page (the top layer).
+// Inside a modal dialog the tooltip moves into it, above the page (the top layer);
+// otherwise it sits at the end of <body>, above popovers and menus (which leave
+// the app's own stacking layer too).
 const layer = ref<HTMLElement | null>(null)
 let target: HTMLElement | null = null
 let timer: ReturnType<typeof setTimeout> | undefined
@@ -27,6 +29,17 @@ async function show(element: HTMLElement) {
   const rect = element.getBoundingClientRect()
   const width = tip.value?.offsetWidth ?? 0
   const height = tip.value?.offsetHeight ?? 0
+  // Menu entries say why beside the menu, so the entries around stay readable.
+  if (element.dataset.tipSide === 'end') {
+    const menu = element.closest<HTMLElement>('.floating')?.getBoundingClientRect() ?? rect
+    below.value = false
+    y.value = Math.round(Math.min(Math.max(8, rect.top + rect.height / 2 - height / 2), innerHeight - height - 8))
+    if (innerWidth - menu.right - 16 >= width) x.value = Math.round(menu.right + 8)
+    else if (menu.left - width - 16 >= 0) x.value = Math.round(menu.left - width - 8)
+    // No room on either side (a phone): under the entry, over the ones below it.
+    else { x.value = Math.round(Math.min(Math.max(8, rect.left), innerWidth - width - 8)); y.value = Math.round(Math.min(rect.bottom + 6, innerHeight - height - 8)) }
+    return
+  }
   below.value = rect.top - height - 8 < 8
   x.value = Math.round(Math.min(Math.max(8, rect.left + rect.width / 2 - width / 2), innerWidth - width - 8))
   y.value = Math.round(below.value ? rect.bottom + 8 : rect.top - height - 8)
@@ -63,7 +76,7 @@ onBeforeUnmount(() => {
 </script>
 
 <template>
-  <Teleport :to="layer ?? 'body'" :disabled="!layer">
+  <Teleport :to="layer ?? 'body'">
     <div v-if="text" ref="tip" class="tooltip" :class="{ below }" :style="{ transform: `translate(${x}px, ${y}px)` }" aria-hidden="true">{{ text }}</div>
   </Teleport>
 </template>

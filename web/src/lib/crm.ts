@@ -5,6 +5,7 @@
 // whole record and carries its revision; the server refuses a stale one with
 // 409. Undo goes through the event log. Free of Vue for unit tests.
 import { api, listNodes } from './api.ts'
+import type { RowAction } from './rowActions.ts'
 
 export interface Address { street: string; postal_code: string; city: string; country: string; freeform: string }
 export interface CustomerFields {
@@ -13,7 +14,7 @@ export interface CustomerFields {
   billing_address: Address | null; visiting_address: Address | null; hourly_rate_minor: number | null; lp_rate_minor: number | null
   external_provider: string; external_id: string; external_url: string
 }
-export interface Customer extends CustomerFields { id: string; key: string; name: string; revision: number; customer_no: string | null; primary_contact_node_id: string | null }
+export interface Customer extends CustomerFields { id: string; key: string; name: string; revision: number; customer_no: string | null; primary_contact_node_id: string | null; archived?: boolean }
 export interface ContactFields { email: string; phone: string; role: string; note: string; external_provider: string; external_id: string; external_url: string }
 export interface Contact extends ContactFields { id: string; key: string; organisation_node_id: string; name: string; revision: number; primary: boolean }
 export interface Cooperation { engagement: string; ownership: string; environment_responsibility: string; sla: string; report_contract: string; revision: number }
@@ -62,11 +63,12 @@ export function plainError(status: number, message: string) {
 export const errorText = (e: unknown, fallback = 'That did not work. Please try again.') => e instanceof Error && e.message ? e.message : fallback
 export const statusOf = (e: unknown) => e instanceof CRMError ? e.status : 0
 
-// Every customer, page by page (the list searches, sorts and filters in the browser).
+// Every customer, archived ones included, page by page (the list searches, sorts
+// and filters in the browser; pickers leave archived customers out).
 export async function listCustomers(): Promise<Customer[]> {
   const all: Customer[] = []
   for (let offset = 0, page = 0; page < 50; page++) {
-    const body = await send<{ items: Customer[]; next_offset: number | null }>(`/organisations?limit=100&offset=${offset}`)
+    const body = await send<{ items: Customer[]; next_offset: number | null }>(`/organisations?limit=100&offset=${offset}&archived=all`)
     all.push(...body.items)
     if (body.next_offset == null) break
     offset = body.next_offset
@@ -76,6 +78,8 @@ export async function listCustomers(): Promise<Customer[]> {
 const seg = encodeURIComponent
 export const getCustomer = (id: string) => send<Customer>(`/organisations/${seg(id)}`)
 export const createCustomer = (write: CustomerWrite) => send<Customer>('/organisations', 'POST', write)
+// Archiving hides a customer from lists and pickers; its quotes, projects and hours stay.
+export const setCustomerArchived = (id: string, expectedRevision: number, archived: boolean) => send<Customer>(`/organisations/${seg(id)}/visibility`, 'PATCH', { expected_revision: expectedRevision, archived })
 export const updateCustomer = (id: string, write: CustomerWrite, expectedRevision: number) => send<Customer>(`/organisations/${seg(id)}`, 'PATCH', { ...write, expected_revision: expectedRevision })
 export const deleteCustomer = (id: string) => send<void>(`/organisations/${seg(id)}`, 'DELETE')
 export const listContacts = (id: string) => send<Contact[]>(`/organisations/${seg(id)}/contacts`)
@@ -270,12 +274,13 @@ export const websiteHost = (url: string) => { try { return new URL(url).host.rep
 export const telHref = (phone: string) => `tel:${phone.replace(/[^\d+]/g, '')}`
 
 // ---------- List: search, filters, sort ----------
-export interface CustomerFilter { q: string; number: 'all' | 'with' | 'without'; countries: string[]; industries: string[] }
-export const NO_FILTER: CustomerFilter = { q: '', number: 'all', countries: [], industries: [] }
+export interface CustomerFilter { q: string; number: 'all' | 'with' | 'without'; countries: string[]; industries: string[]; archived: boolean }
+export const NO_FILTER: CustomerFilter = { q: '', number: 'all', countries: [], industries: [], archived: false }
 export const filtered = (f: CustomerFilter) => f.number !== 'all' || f.countries.length > 0 || f.industries.length > 0
 export type SortKey = 'name' | 'number' | 'contact' | 'place' | 'industry' | 'rate'
 const lower = (s: string | null | undefined) => (s ?? '').toLowerCase()
 export function matchesCustomer(c: Customer, f: CustomerFilter, contact?: ContactCard) {
+  if (c.archived && !f.archived) return false
   if (f.number === 'with' && !c.customer_no) return false
   if (f.number === 'without' && c.customer_no) return false
   if (f.countries.length && !f.countries.includes(countryOf(c))) return false
@@ -383,3 +388,18 @@ export function lineDiff(before: string, after: string): DiffLine[] {
   return out
 }
 export const diffCounts = (lines: DiffLine[]) => ({ added: lines.filter(l => l.kind === 'add').length, removed: lines.filter(l => l.kind === 'remove').length })
+
+// ---------- Row actions ----------
+// What a customer row offers: open it, start a quote for it, copy its number,
+// archive or restore it. Archiving is an admin's and can be undone; a customer
+// is deleted on its own page, where what depends on it is shown first.
+export type CustomerActionId = 'open' | 'quote' | 'copyNumber' | 'archive' | 'restore'
+export function customerActions(c: Customer, ctx: { admin: boolean; canQuote: boolean; busy?: CustomerActionId | null }): (RowAction & { id: CustomerActionId })[] {
+  const out: (RowAction & { id: CustomerActionId })[] = []
+  const add = (a: RowAction & { id: CustomerActionId }) => out.push(ctx.busy === a.id ? { ...a, busy: true } : a)
+  add({ id: 'open', label: 'Open', icon: 'expand', group: 0, keys: 'Enter' })
+  if (ctx.canQuote) add({ id: 'quote', label: 'New quote for this customer…', icon: 'document', group: 0, reason: c.archived ? 'Restore it from the archive first.' : undefined })
+  if (c.customer_no) add({ id: 'copyNumber', label: 'Copy customer number', icon: 'tag', group: 1 })
+  if (ctx.admin) add(c.archived ? { id: 'restore', label: 'Restore from the archive', icon: 'rollback', group: 2 } : { id: 'archive', label: 'Archive', icon: 'archive', group: 2 })
+  return out
+}

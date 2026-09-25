@@ -6,7 +6,11 @@ import { minorMoney } from '../../lib/crm'
 import { usePreference } from '../../lib/preferences'
 import { settingsLink } from '../../lib/settings'
 import { DEFAULT_SORT, STATUSES, STATUS_META, amountActive, blankFilter, dateActive, firstDir, matchesQuote, narrowed, sortQuotes, statusOf, todayIso, type ColumnId, type QuoteRow, type Sort } from '../../lib/quotes/list'
-import { acceptanceNotices, type AcceptanceNotice, type QuoteProjection } from '../../lib/quotes/lifecycle'
+import { acceptanceNotices, branchQuote, createLink, deleteQuote, duplicateQuote, finalizeQuote, getLink, getVersion, issueConfirm, issueError, lifecycleError, linkState, linkUrl, reviseConfirm, setArchived, undoQuote, type AcceptanceNotice, type QuoteProjection } from '../../lib/quotes/lifecycle'
+import { getDraft } from '../../lib/quotes/api'
+import { quoteActions, type LinkState, type QuoteActionId } from '../../lib/quotes/actions'
+import { confirmAction } from '../../lib/confirm'
+import { opensRowMenu, type RowMenuAnchor } from '../../lib/rowActions'
 import { toast } from '../../lib/toast'
 import { plural } from '../../lib/work'
 import { useBusiness } from '../../stores/business'
@@ -21,6 +25,7 @@ import PanelSplitter from '../../components/PanelSplitter.vue'
 import AmountFacet from '../../components/quotes/list/AmountFacet.vue'
 import DateFacet from '../../components/quotes/list/DateFacet.vue'
 import QuoteTable from '../../components/quotes/list/QuoteTable.vue'
+import RowMenu from '../../components/business/RowMenu.vue'
 
 // Business › Quotes: every quote in one list you can search, filter (status,
 // customer, date, amount), sort and size, with the ticket list's keyboard (j/k,
@@ -102,6 +107,120 @@ function created(quote: QuoteProjection) {
   openFull(quote.quote_node_id)
 }
 
+// ---------- Row actions: inline on hover and focus, all of them in the … menu ----------
+const menu = ref<{ row: QuoteRow; anchor: RowMenuAnchor; link: LinkState; url: string; narrow: boolean } | null>(null)
+const busy = ref<QuoteActionId | null>(null)
+const menuItems = computed(() => menu.value ? quoteActions(menu.value.row, { admin: business.admin, staff: business.staff, link: menu.value.link, busy: busy.value, narrow: menu.value.narrow }) : [])
+let opener: HTMLElement | null = null
+async function openMenu(row: QuoteRow, anchor: RowMenuAnchor) {
+  // The … button toggles its menu.
+  if (menu.value && menu.value.anchor === anchor) { menu.value = null; return }
+  opener = document.activeElement instanceof HTMLElement ? document.activeElement : null
+  store.cursor = row.quote_node_id
+  menu.value = { row, anchor, link: 'loading', url: '', narrow: matchMedia('(max-width: 720px)').matches }
+  // The customer link is read when the menu opens: copy it, or create one.
+  if (!business.admin || row.state === 'draft' || row.current_version < 1) return
+  try {
+    const link = await getLink(row.quote_node_id, row.current_version)
+    if (menu.value?.row.quote_node_id === row.quote_node_id) menu.value = { ...menu.value, link: linkState(link), url: link ? linkUrl(link) : '' }
+  } catch { if (menu.value?.row.quote_node_id === row.quote_node_id) menu.value = { ...menu.value, link: 'error' } }
+}
+// Focus goes back where the menu was opened from: the … button, or the list.
+function closeMenu(restore: boolean) {
+  menu.value = null
+  if (!restore) return
+  void nextTick(() => { if (opener?.isConnected && opener.checkVisibility()) opener.focus(); else table.value?.focus() })
+}
+const nameOf = (row: QuoteRow) => row.offer_no || row.title || 'The quote'
+const failed = (e: unknown, fallback: string) => toast(lifecycleError(e, fallback), { tone: 'error' })
+const undoing = (id: string, types: string[], after: () => void) => () => {
+  void undoQuote(id, types).then(async () => { await store.load(true); after() }).catch(e => toast(e instanceof Error ? e.message : 'Undo did not work.', { tone: 'error' }))
+}
+async function copyText(text: string, done: string) {
+  try { await navigator.clipboard.writeText(text); toast(done) } catch { toast('Copying did not work here.', { tone: 'error' }) }
+}
+async function act(row: QuoteRow, id: QuoteActionId) {
+  const state = menu.value?.row.quote_node_id === row.quote_node_id ? menu.value : null
+  if (id !== 'link') menu.value = null
+  const docked = openId.value === row.quote_node_id ? workspace.value : null
+  switch (id) {
+    case 'open': open(row, true); return
+    case 'openPage': openFull(row.quote_node_id); return
+    case 'copyNumber': await copyText(row.offer_no ?? '', `Copied ${row.offer_no}.`); return
+    case 'pdf': void router.push({ path: `/business/quotes/${encodeURIComponent(row.quote_node_id)}`, query: { print: '1' } }); return
+    case 'link': {
+      if (state?.link === 'copy' && state.url) { menu.value = null; await copyText(state.url, `Copied the customer link of ${nameOf(row)}.`); return }
+      busy.value = 'link'
+      try {
+        const link = await createLink(row.quote_node_id, row.current_version, new Date(Date.now() + 30 * 86_400_000).toISOString())
+        menu.value = null
+        const until = new Intl.DateTimeFormat('en-GB', { day: 'numeric', month: 'short', year: 'numeric' }).format(new Date(link.expires_at))
+        try { await navigator.clipboard.writeText(linkUrl(link)) } catch { /* the toast still says where it is */ }
+        toast(`Created a customer link for ${nameOf(row)}, open until ${until}, and copied it.`, { action: { label: 'Undo', run: undoing(row.quote_node_id, ['quote.public_link_created'], () => toast('The link is revoked again.')) }, timeout: 8000 })
+      } catch (e) { menu.value = null; failed(e, 'The link was not created. Nothing changed.') }
+      finally { busy.value = null }
+      return
+    }
+    case 'duplicate': {
+      try {
+        const copy = await duplicateQuote(row.quote_node_id, row.revision)
+        await store.load(true)
+        store.cursor = copy.quote_node_id
+        toast(`Duplicated ${nameOf(row)} as ${copy.offer_no ?? 'a new draft'}.`, {
+          actions: [
+            { label: 'Open', run: () => open({ quote_node_id: copy.quote_node_id }, true) },
+            { label: 'Undo', run: undoing(copy.quote_node_id, ['quote.duplicated'], () => { if (openId.value === copy.quote_node_id) closeDock() }) },
+          ],
+          timeout: 8000,
+        })
+      } catch (e) { failed(e, 'The quote was not duplicated.') }
+      return
+    }
+    case 'issue': {
+      if (docked) { await docked.issue(); await store.load(true); return }
+      if (!await confirmAction(issueConfirm(row.offer_no ?? '', row.current_version + 1))) return
+      try {
+        const draft = await getDraft(row.quote_node_id)
+        await finalizeQuote(row.quote_node_id, { expected_quote_revision: row.revision, expected_draft_revision: draft.draft_revision, expected_document_sha256: draft.document_sha256 })
+        await store.load(true)
+        toast(`Issued ${nameOf(row)} as version ${row.current_version + 1}. Its customer link is in Details.`, { action: { label: 'Open', run: () => open(row, true) } })
+      } catch (e) { toast(issueError(e), { tone: 'error' }); void store.load(true) }
+      return
+    }
+    case 'revise': {
+      if (docked) { await docked.revise(); await store.load(true); return }
+      if (!await confirmAction(reviseConfirm(row.current_version, row.state === 'accepted'))) return
+      try {
+        const version = await getVersion(row.quote_node_id, row.current_version)
+        await branchQuote(row.quote_node_id, { expected_quote_revision: row.revision, expected_version: row.current_version, expected_content_sha256: version.content_sha256 })
+        await store.load(true)
+        toast(`You are revising ${nameOf(row)}. Issue it when it is ready.`)
+        openFull(row.quote_node_id)
+      } catch (e) { failed(e, 'The quote could not be revised. Nothing changed.'); void store.load(true) }
+      return
+    }
+    case 'archive': case 'restore': {
+      const archiving = id === 'archive'
+      try {
+        await setArchived(row.quote_node_id, row.revision, archiving)
+        await store.load(true)
+        toast(archiving ? `Archived ${nameOf(row)}. It keeps its versions, evidence and files.` : `${nameOf(row)} is back in the list.`, {
+          action: { label: 'Undo', run: undoing(row.quote_node_id, ['quote.visibility_changed'], () => {}) }, timeout: 8000,
+        })
+      } catch (e) { failed(e, 'That did not work.'); void store.load(true) }
+      return
+    }
+    case 'delete': {
+      try {
+        await deleteQuote(row.quote_node_id, row.revision)
+        if (openId.value === row.quote_node_id) closeDock()
+        if (store.items) store.items = store.items.filter(q => q.quote_node_id !== row.quote_node_id)
+        toast(`Deleted draft ${nameOf(row)}.`, { action: { label: 'Undo', run: undoing(row.quote_node_id, ['quote.deleted'], () => { store.cursor = row.quote_node_id }) }, timeout: 8000 })
+      } catch (e) { failed(e, 'The draft was not deleted.'); void store.load(true) }
+    }
+  }
+}
+
 // ---------- Keyboard: j/k or arrows move, Enter opens, / searches, n adds ----------
 function typing(target: EventTarget | null) {
   return target instanceof HTMLElement && (target.isContentEditable || ['INPUT', 'TEXTAREA', 'SELECT'].includes(target.tagName))
@@ -140,6 +259,13 @@ function keys(event: KeyboardEvent) {
     event.preventDefault()
     if (event.shiftKey) openFull(row.quote_node_id); else open(row, true)
   } else if (key === 'Escape' && openId.value) { event.preventDefault(); closeDock() }
+  else if (opensRowMenu(event) && store.cursor) {
+    // The context-menu key or Shift+F10 opens the cursor row's menu at its … button.
+    const row = rows.value.find(q => q.quote_node_id === store.cursor)
+    if (!row) return
+    event.preventDefault()
+    void openMenu(row, table.value?.moreButton(row.quote_node_id) ?? { x: innerWidth / 2, y: innerHeight / 3 })
+  }
   else if (key === '/') { event.preventDefault(); search.value?.focus(); search.value?.select() }
   else if (key === 'n' && business.staff) { event.preventDefault(); openCreate() }
 }
@@ -221,8 +347,9 @@ watch(openId, id => { if (id) store.cursor = id })
         </div>
       </div>
       <QuoteTable
-        v-else ref="table" :rows="rows" :loading="store.loading && !store.items" :query="filter.q" :sort="sort" :cursor-id="store.cursor" :open-id="openId" :widths="widths" :today="today"
+        v-else ref="table" :rows="rows" :loading="store.loading && !store.items" :query="filter.q" :sort="sort" :cursor-id="store.cursor" :open-id="openId" :menu-id="menu?.row.quote_node_id ?? null" :can-duplicate="business.staff" :widths="widths" :today="today"
         @sort="setSort" @cursor="id => store.cursor = id" @open="row => open(row)" @widths="setWidths" @grid-focus="() => { if (!store.cursor && rows.length) store.cursor = rows[0]!.quote_node_id }"
+        @action="(row, id) => act(row, id)" @menu="(row, anchor) => openMenu(row, anchor)"
       >
         <div v-if="store.items && all.length && !rows.length" class="state inline">
           <span class="state-icon"><AppIcon name="search" :size="18" /></span>
@@ -235,7 +362,7 @@ watch(openId, id => { if (id) store.cursor = id })
         </div>
       </QuoteTable>
       <p v-if="store.items && rows.length" class="keys-hint dot-list" aria-hidden="true">
-        <span><kbd class="keycap">j</kbd><kbd class="keycap">k</kbd> move</span><span><kbd class="keycap"><AppIcon name="enter" /></kbd> open</span><span><kbd class="keycap">shift</kbd><kbd class="keycap"><AppIcon name="enter" /></kbd> own page</span><span><kbd class="keycap">/</kbd> search</span><span v-if="business.staff"><kbd class="keycap">n</kbd> new quote</span>
+        <span><kbd class="keycap">j</kbd><kbd class="keycap">k</kbd> move</span><span><kbd class="keycap"><AppIcon name="enter" /></kbd> open</span><span><kbd class="keycap">shift</kbd><kbd class="keycap"><AppIcon name="enter" /></kbd> own page</span><span><kbd class="keycap">shift</kbd><kbd class="keycap">F10</kbd> actions</span><span><kbd class="keycap">/</kbd> search</span><span v-if="business.staff"><kbd class="keycap">n</kbd> new quote</span>
       </p>
     </BusinessPage>
     <PanelSplitter v-if="openId" class="quote-panel-splitter" />
@@ -243,6 +370,7 @@ watch(openId, id => { if (id) store.cursor = id })
       <QuoteWorkspace ref="workspace" :quote-id="openId" layout="dock" @close="closeDock" @expand="openFull(openId)" @open="id => open({ quote_node_id: id })" />
     </div>
     <QuoteCreateDialog ref="create" @created="created" />
+    <RowMenu v-if="menu" :anchor="menu.anchor" :items="menuItems" :label="`Actions for ${menu.row.offer_no || menu.row.title || 'the quote'}`" @select="id => act(menu!.row, id as QuoteActionId)" @close="closeMenu" />
   </div>
 </template>
 

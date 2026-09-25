@@ -4,6 +4,7 @@
 // call sends the precondition the server asks for, so a stale view fails loudly
 // instead of changing a quote someone else just changed.
 import { api, APIError } from '../api'
+import { undoLatest } from '../crm'
 import type { QuoteDocumentData } from './types'
 import type { QuoteRow, QuoteState } from './list'
 
@@ -54,6 +55,8 @@ export const finalizeQuote = (id: string, pre: { expected_quote_revision: number
   send<QuoteProjection>(`${quote(id)}/finalize`, 'POST', pre)
 export const branchQuote = (id: string, pre: { expected_quote_revision: number; expected_version: number; expected_content_sha256: string }) =>
   send<unknown>(`${quote(id)}/draft/branch`, 'POST', pre)
+// Only a draft that was never issued can be deleted (hidden, number kept); undo restores it.
+export const deleteQuote = (id: string, expectedRevision: number) => send<unknown>(`${quote(id)}?expected_revision=${expectedRevision}`, 'DELETE')
 export const duplicateQuote = (id: string, expectedRevision: number) => send<QuoteProjection>(`${quote(id)}/duplicate`, 'POST', { expected_revision: expectedRevision })
 export const setArchived = (id: string, expectedRevision: number, archived: boolean) =>
   send<QuoteProjection>(`${quote(id)}/visibility`, 'PATCH', { expected_revision: expectedRevision, archived })
@@ -66,6 +69,12 @@ export async function getLink(id: string, version: number): Promise<PublicLink |
 }
 export const createLink = (id: string, version: number, expiresAt: string) => send<PublicLink>(`${quote(id)}/versions/${version}/public-link`, 'POST', { expires_at: expiresAt })
 export const revokeLink = (id: string, version: number) => send<PublicLink>(`${quote(id)}/versions/${version}/public-link/revoke`, 'POST', {})
+// What a row menu can do with the current version's link.
+export function linkState(link: PublicLink | null, now = Date.now()): 'none' | 'copy' | 'hidden' | 'ended' {
+  if (!link || link.revoked_at) return 'none'
+  if (Date.parse(link.expires_at) <= now) return 'ended'
+  return link.path ? 'copy' : 'hidden'
+}
 export const linkUrl = (link: Pick<PublicLink, 'path'>, origin = location.origin) => link.path ? `${origin}${link.path}` : ''
 
 // The acceptance receipt: an immutable PDF, rendered once after acceptance.
@@ -82,3 +91,27 @@ export const readiness = () => send<Readiness>('/quotes/readiness')
 export const shortDigest = (sha: string) => sha.length > 16 ? `${sha.slice(0, 8)}…${sha.slice(-6)}` : sha
 export const RECEIPT_PILL: Record<ReceiptState, string> = { pending: 'Waiting', rendering: 'Making', ready: 'Ready', sending: 'Sending', sent: 'Sent', failed: 'Failed', uncertain: 'Uncertain' }
 export const receiptBusy = (state: ReceiptState | undefined) => state === 'pending' || state === 'rendering' || state === 'sending'
+
+// ---------- Shared words for issuing and revising (workspace and list) ----------
+const ISSUE_ERRORS: [RegExp, string][] = [
+  [/title and position/, 'Add a title and at least one position before issuing.'],
+  [/incomplete position/, 'Every position needs a text and a quantity above zero.'],
+  [/sender or recipient/, 'The sender (Settings › Business) or the recipient’s name, address or email is missing.'],
+  [/validity has expired/, 'The valid-until date has passed. Choose a later date first.'],
+  [/cost unit rate/, 'A position priced from a rate has no rate on the quote’s date.'],
+  [/recipient contact/, 'The recipient contact no longer belongs to this customer.'],
+]
+export function issueError(e: unknown): string {
+  const message = e instanceof Error ? e.message : ''
+  return ISSUE_ERRORS.find(([pattern]) => pattern.test(message))?.[1] ?? lifecycleError(e, 'The quote was not issued. Nothing changed.')
+}
+export const issueConfirm = (number: string, next: number) => ({
+  title: `Issue ${number || 'this quote'} as version ${next}?`, confirmLabel: 'Issue quote',
+  body: `The saved document is frozen as version ${next} with a fingerprint (SHA-256) that the customer’s acceptance is bound to. Nothing is sent: you share it with a customer link or as a PDF. To change it later you revise it as version ${next + 1}; this version stays as issued.`,
+})
+export const reviseConfirm = (current: number, accepted: boolean) => ({
+  title: `Revise as version ${current + 1}?`, confirmLabel: 'Revise',
+  body: `Version ${current} stays exactly as issued, with its fingerprint${accepted ? ' and the customer’s acceptance' : ''}. You edit a new draft; issuing it makes version ${current + 1} of the same quote. Its customer link stops accepting.`,
+})
+// Undoes the newest of these events on a quote through the event log.
+export const undoQuote = (quoteId: string, types: string[]) => undoLatest([{ node: quoteId, types }])

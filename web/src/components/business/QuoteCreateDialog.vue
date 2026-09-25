@@ -36,8 +36,9 @@ const settings = ref<'loading' | 'ready' | 'missing' | 'error'>('loading')
 let opener: HTMLElement | null = null
 const mod = /Mac|iPhone|iPad/.test(navigator.platform || navigator.userAgent) ? '⌘' : 'Ctrl'
 
-const all = computed(() => customers.items ?? [])
-const chosen = computed(() => all.value.find(c => c.id === customerId.value) ?? null)
+// Archived customers are left out of the choice; one fixed by its page still shows.
+const all = computed(() => (customers.items ?? []).filter(c => !c.archived))
+const chosen = computed(() => customers.items?.find(c => c.id === customerId.value) ?? null)
 const matches = computed(() => {
   const q = search.value.trim().toLowerCase()
   const list = q ? all.value.filter(c => [c.name, c.legal_name, c.customer_no ?? ''].some(v => v.toLowerCase().includes(q))) : all.value

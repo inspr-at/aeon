@@ -11,7 +11,7 @@ import type { ConflictChoices } from '../../lib/quoteMerge'
 import { acquireQuote, dropQuote, releaseQuote, type LiveQuote, type Scope } from '../../lib/quoteWorkspace'
 import { getDraft } from '../../lib/quotes/api'
 import { QuoteEditor } from '../../lib/quotes/editor'
-import { branchQuote, duplicateQuote, finalizeQuote, getLink, getVersion, lifecycleError, linkUrl, setArchived, type QuoteVersion } from '../../lib/quotes/lifecycle'
+import { branchQuote, duplicateQuote, finalizeQuote, getLink, getVersion, issueConfirm, issueError, lifecycleError, linkUrl, reviseConfirm, setArchived, undoQuote, type QuoteVersion } from '../../lib/quotes/lifecycle'
 import { statusOf } from '../../lib/quotes/list'
 import { readZoom, zoomPercent, type ZoomMode } from '../../lib/quotes/zoom'
 import type { QuoteDocumentData } from '../../lib/quotes/types'
@@ -34,9 +34,9 @@ import AppIcon from '../AppIcon.vue'
 // docked beside the Quotes list; both borrow the live quote (P6 session,
 // presence and undo history) from lib/quoteWorkspace, so switching between them
 // keeps unsaved work and never rejoins. Its layout follows its own width.
-const props = defineProps<{ quoteId: string; layout: 'full' | 'dock' }>()
+const props = defineProps<{ quoteId: string; layout: 'full' | 'dock'; autoPrint?: boolean }>()
 const router = useRouter()
-const emit = defineEmits<{ close: []; expand: []; collapse: []; open: [quoteId: string] }>()
+const emit = defineEmits<{ close: []; expand: []; collapse: []; open: [quoteId: string]; printed: [] }>()
 const identity = useSession()
 const business = useBusiness()
 const quotes = useQuotes()
@@ -189,6 +189,12 @@ watch(root, el => { rootSizer?.disconnect(); if (el) { rootSizer = new ResizeObs
 
 // ---------- PDF: save first, then the browser's print (or Save as PDF) ----------
 const printing = ref(false)
+// Opened from the list's PDF action: print once the paper is laid out.
+watch(() => props.autoPrint && !!document.value && !!paper.value, ready => {
+  if (!ready) return
+  emit('printed')
+  void nextTick(() => print())
+}, { immediate: true })
 async function print() {
   if (printing.value) return
   if (!numericValid()) return
@@ -205,23 +211,12 @@ async function print() {
 
 // ---------- Lifecycle: issue, revise, duplicate, archive ----------
 const busy = ref('')
-const FINALIZE: [RegExp, string][] = [
-  [/title and position/, 'Add a title and at least one position before issuing.'],
-  [/incomplete position/, 'Every position needs a text and a quantity above zero.'],
-  [/sender or recipient/, 'The sender (Settings › Business) or the recipient’s name, address or email is missing.'],
-  [/validity has expired/, 'The valid-until date has passed. Choose a later date first.'],
-  [/cost unit rate/, 'A position priced from a rate has no rate on the quote’s date.'],
-  [/recipient contact/, 'The recipient contact no longer belongs to this customer.'],
-]
 async function issue() {
   const quote = live.value, current = projection.value
   if (!quote || !current || busy.value) return
   if (!numericValid()) return
   const next = current.current_version + 1
-  const ok = await confirmAction({
-    title: `Issue ${offerNo.value || 'this quote'} as version ${next}?`, confirmLabel: 'Issue quote',
-    body: `The saved document is frozen as version ${next} with a fingerprint (SHA-256) that the customer’s acceptance is bound to. Nothing is sent: you share it with a customer link or as a PDF. To change it later you revise it as version ${next + 1}; this version stays as issued.`,
-  })
+  const ok = await confirmAction(issueConfirm(offerNo.value, next))
   if (!ok) return
   busy.value = 'issue'
   try {
@@ -235,18 +230,14 @@ async function issue() {
     openPane('details')
     toast(`Issued as version ${next}. Share it with a customer link.`)
   } catch (e) {
-    const message = e instanceof Error ? e.message : ''
-    toast(FINALIZE.find(([pattern]) => pattern.test(message))?.[1] ?? lifecycleError(e, 'The quote was not issued. Nothing changed.'), { tone: 'error' })
+    toast(issueError(e), { tone: 'error' })
     void quote.refresh().catch(() => {})
   } finally { busy.value = '' }
 }
 async function revise() {
   const quote = live.value, current = projection.value, version = frozen.value
   if (!quote || !current || !version || busy.value || !scope.value) return
-  const ok = await confirmAction({
-    title: `Revise as version ${current.current_version + 1}?`, confirmLabel: 'Revise',
-    body: `Version ${current.current_version} stays exactly as issued, with its fingerprint${status.value === 'accepted' ? ' and the customer’s acceptance' : ''}. You edit a new draft; issuing it makes version ${current.current_version + 1} of the same quote. Its customer link stops accepting.`,
-  })
+  const ok = await confirmAction(reviseConfirm(current.current_version, status.value === 'accepted'))
   if (!ok) return
   busy.value = 'revise'
   try {
@@ -269,7 +260,10 @@ async function duplicate() {
   try {
     const copy = await duplicateQuote(props.quoteId, current.revision)
     void quotes.load(true)
-    toast(`Duplicated as ${copy.offer_no ?? 'a new draft'}.`)
+    toast(`Duplicated as ${copy.offer_no ?? 'a new draft'}.`, {
+      action: { label: 'Undo', run: () => { void undoQuote(copy.quote_node_id, ['quote.duplicated']).then(() => { void quotes.load(true); if (props.quoteId === copy.quote_node_id) emit('open', current.quote_node_id) }).catch(e => toast(e instanceof Error ? e.message : 'Undo did not work.', { tone: 'error' })) } },
+      timeout: 8000,
+    })
     emit('open', copy.quote_node_id)
   } catch (e) { toast(lifecycleError(e, 'The quote was not duplicated.'), { tone: 'error' }) }
   finally { busy.value = '' }
@@ -278,13 +272,17 @@ async function archive() {
   const quote = live.value, current = projection.value
   if (!quote || !current || busy.value) return
   const archiving = !current.archived
-  if (archiving && !await confirmAction({ title: `Archive ${offerNo.value || 'this quote'}?`, confirmLabel: 'Archive', body: 'It leaves the list but keeps its versions, evidence and files, and any customer link keeps working until it ends. You can restore it any time.' })) return
+  const id = props.quoteId, name = offerNo.value || 'The quote'
   busy.value = 'archive'
   try {
-    await setArchived(props.quoteId, current.revision, archiving)
+    // No question first: it keeps everything, and the toast undoes it.
+    await setArchived(id, current.revision, archiving)
     await quote.refresh()
-    quotes.patch(props.quoteId, { archived: archiving })
-    toast(archiving ? `${offerNo.value || 'The quote'} is archived.` : `${offerNo.value || 'The quote'} is back in the list.`)
+    quotes.patch(id, { archived: archiving })
+    toast(archiving ? `${name} is archived. It keeps its versions, evidence and files.` : `${name} is back in the list.`, {
+      action: { label: 'Undo', run: () => { void undoQuote(id, ['quote.visibility_changed']).then(async () => { await quote.refresh(); quotes.patch(id, { archived: !archiving }) }).catch(e => toast(e instanceof Error ? e.message : 'Undo did not work.', { tone: 'error' })) } },
+      timeout: 8000,
+    })
   } catch (e) { toast(lifecycleError(e, 'That did not work.'), { tone: 'error' }) }
   finally { busy.value = '' }
 }
@@ -373,7 +371,7 @@ function revealMark() {
   reveal.value = { tab: 'document', target: 'quote-footer-mark', n: (reveal.value?.n ?? 0) + 1 }
 }
 function jump(id: string) { paper.value?.jump(id); if (sideMode.value === 'sheet') floating.value = null }
-defineExpose({ focus: () => root.value?.focus({ preventScroll: true }) })
+defineExpose({ focus: () => root.value?.focus({ preventScroll: true }), issue, revise, dirty: () => canSave.value })
 </script>
 
 <template>

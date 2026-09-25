@@ -5,6 +5,7 @@ import (
 	"encoding/json"
 	"net/http"
 	"strconv"
+	"strings"
 	"testing"
 
 	"github.com/inspr-at/aeon/internal/db"
@@ -121,4 +122,43 @@ func TestCRMDeletionAndProjectUndo(t *testing.T) {
 	if c.PrimaryContactNodeID == nil || *c.PrimaryContactNodeID != contact.ID {
 		t.Fatalf("primary not restored %+v", c)
 	}
+}
+
+// QL1/AEON-109: archiving a customer hides it from the default list, keeps it
+// readable, and is undone through its event; members cannot archive.
+func TestCustomerArchiveListAndUndo(t *testing.T) {
+	f := setup(t)
+	withUndo(t, &f)
+	w := jsonRequest(t, f, f.admin, "POST", "/api/crm/organisations", map[string]any{"name": "Archive Me"})
+	expect(t, w, 201)
+	var c Customer
+	_ = json.Unmarshal(w.Body.Bytes(), &c)
+	expect(t, jsonRequest(t, f, f.admin, "PATCH", "/api/crm/organisations/"+c.ID+"/visibility", map[string]any{"archived": true}), 400)
+	expect(t, jsonRequest(t, f, f.admin, "PATCH", "/api/crm/organisations/"+c.ID+"/visibility", map[string]any{"archived": true, "expected_revision": c.Revision + 5}), 409)
+	w = jsonRequest(t, f, f.admin, "PATCH", "/api/crm/organisations/"+c.ID+"/visibility", map[string]any{"archived": true, "expected_revision": c.Revision})
+	expect(t, w, 200)
+	var archived Customer
+	_ = json.Unmarshal(w.Body.Bytes(), &archived)
+	if !archived.Archived || archived.Revision != c.Revision+1 {
+		t.Fatalf("archive %+v", archived)
+	}
+	listed := func(query string) bool {
+		t.Helper()
+		w := request(f.handler, f.admin, "GET", "/api/crm/organisations?limit=100"+query, "")
+		expect(t, w, 200)
+		return strings.Contains(w.Body.String(), c.ID)
+	}
+	if listed("") || !listed("&archived=all") || !listed("&archived=true") {
+		t.Fatal("archived customers leave only the default list")
+	}
+	expect(t, request(f.handler, f.admin, "GET", "/api/crm/organisations?archived=maybe", ""), 400)
+	expect(t, request(f.handler, f.admin, "GET", "/api/crm/organisations/"+c.ID, ""), 200)
+	undoEvent(t, f, eventOf(t, f, EventCustomerVisibility), 201)
+	w = request(f.handler, f.admin, "GET", "/api/crm/organisations/"+c.ID, "")
+	expect(t, w, 200)
+	_ = json.Unmarshal(w.Body.Bytes(), &c)
+	if c.Archived || !listed("") {
+		t.Fatal("archive undo did not restore the customer")
+	}
+	undoEvent(t, f, eventOf(t, f, EventCustomerVisibility), 409)
 }
