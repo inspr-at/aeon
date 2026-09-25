@@ -188,6 +188,32 @@ export function stepGroup(prefs: GroupPrefs, defs: GroupDef[], id: string, step:
   ;[order[index], order[to]] = [order[to], order[index]]
   return { ...prefs, order }
 }
+// Puts a deleted group back as it was in `before`: its name, place in the order,
+// shown or hidden, folded or not, and its projects. Everything else stays as now.
+export function restoreGroup(prefs: GroupPrefs, before: GroupPrefs, id: string): GroupPrefs {
+  const group = before.groups?.find(g => g.id === id)
+  if (!group) return prefs
+  const groups = (prefs.groups ?? []).filter(g => g.id !== id)
+  groups.splice(Math.min((before.groups ?? []).indexOf(group), groups.length), 0, group)
+  const back = (now: string[] | undefined, then: string[] | undefined) => {
+    if (!then?.includes(id)) return now?.filter(x => x !== id)
+    const list = (now ?? then.filter(x => x !== id)).filter(x => x !== id)
+    const after = then[then.indexOf(id) - 1]
+    list.splice(after === undefined ? 0 : list.indexOf(after) + 1, 0, id)
+    return list
+  }
+  const hidden = hiddenOf(prefs)
+  if (hiddenOf(before).has(id)) hidden.add(id); else hidden.delete(id)
+  const collapsed = new Set(prefs.collapsed ?? [])
+  if (before.collapsed?.includes(id)) collapsed.add(id); else collapsed.delete(id)
+  const place = { ...(prefs.place ?? {}) }
+  for (const [project, g] of Object.entries(before.place ?? {})) if (g === id) place[project] = id
+  return { ...prefs, groups, order: back(prefs.order, before.order), hidden: [...hidden], collapsed: [...collapsed], place }
+}
+// The placements of `ids` as they were in `before` (null where there was none).
+export function placementsOf(before: GroupPrefs, ids: string[]): Record<string, string | null> {
+  return Object.fromEntries(ids.map(id => [id, before.place?.[id] ?? null]))
+}
 export function withPlacements(prefs: GroupPrefs, changes: Record<string, string | null>): GroupPrefs {
   const place = { ...(prefs.place ?? {}) }
   for (const [project, group] of Object.entries(changes)) { if (group === null) delete place[project]; else place[project] = group }

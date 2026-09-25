@@ -4,8 +4,8 @@ import { computed, ref } from 'vue'
 import { APIError, assignProjectGroup, createProjectGroup, deleteProjectGroup, getProjectGroups, undoGroupEvent, updateProjectGroup, type SharedProjectGroup } from '../lib/api'
 import { usePreference } from '../lib/preferences'
 import {
-  ARCHIVED, NO_GROUP, addGroup, groupDefs, hiddenOf, isPersonal, isShared, newGroupId, placeOf, planMove, readPrefs, removeGroup,
-  renameGroup, reorderGroup, replaceGroup, setHidden, sharedId, sharedIndex, stepGroup, toggleCollapsed, uuidOf, withPlacements,
+  ARCHIVED, NO_GROUP, addGroup, groupDefs, hiddenOf, isPersonal, isShared, newGroupId, placeOf, placementsOf, planMove, readPrefs, removeGroup,
+  renameGroup, reorderGroup, replaceGroup, restoreGroup, setHidden, sharedId, sharedIndex, stepGroup, toggleCollapsed, uuidOf, withPlacements,
   type GroupDef, type GroupPrefs, type MoveItem,
 } from '../lib/projectGroups'
 import { useSession } from './session'
@@ -87,7 +87,8 @@ export const useProjectGroups = defineStore('projectGroups', () => {
     const before = prefs.value
     if (isPersonal(id)) {
       save(removeGroup(before, id))
-      return async () => { save(before) }
+      // Undo brings back this group only; anything changed since stays.
+      return async () => { save(restoreGroup(prefs.value, before, id)) }
     }
     const groupsBefore = shared.value
     shared.value = shared.value.filter(g => g.id !== uuidOf(id))
@@ -156,6 +157,8 @@ export const useProjectGroups = defineStore('projectGroups', () => {
     const plan = planMove(items, target, admin.value)
     if ('refused' in plan) throw new Error(plan.refused)
     const before = prefs.value
+    // Undo and failure put back only these projects' placements.
+    const inverse = placementsOf(before, Object.keys(plan.place))
     const states = new Map(list.map(p => [p.id, p.state]))
     const groupsBefore = shared.value
     if (Object.keys(plan.place).length) save(withPlacements(before, plan.place))
@@ -172,14 +175,14 @@ export const useProjectGroups = defineStore('projectGroups', () => {
       for (const id of plan.archive) { await projects.setState(id, ARCHIVED); archived.push(id) }
       for (const id of plan.restore) { await projects.setState(id, 'active'); restored.push(id) }
     } catch (error) {
-      save(before)
+      save(withPlacements(prefs.value, inverse))
       shared.value = groupsBefore
       if (eventId != null) await undoGroupEvent(eventId).catch(() => undefined)
       for (const id of [...archived, ...restored]) await projects.setState(id, states.get(id) ?? 'active').catch(() => undefined)
       throw error
     }
     const undo: Undo = async () => {
-      save(before)
+      save(withPlacements(prefs.value, inverse))
       if (eventId != null) { shared.value = groupsBefore; await undoGroupEvent(eventId) }
       for (const id of [...plan.archive, ...plan.restore]) await projects.setState(id, states.get(id) ?? 'active')
       if (eventId != null) await load(true)

@@ -2,8 +2,8 @@
 import { test } from 'node:test'
 import assert from 'node:assert/strict'
 import {
-  ARCHIVED, NO_GROUP, addGroup, bucket, groupDefs, hiddenOf, newGroupId, nameProblem, placeOf, planMove, readPrefs, removeGroup,
-  reorderGroup, replaceGroup, setHidden, sharedIndex, showsHeaders, stepGroup, toggleCollapsed, withPlacements, type GroupPrefs, type SharedGroup,
+  ARCHIVED, NO_GROUP, addGroup, bucket, groupDefs, hiddenOf, newGroupId, nameProblem, placeOf, placementsOf, planMove, readPrefs, removeGroup,
+  reorderGroup, replaceGroup, restoreGroup, setHidden, sharedIndex, showsHeaders, stepGroup, toggleCollapsed, withPlacements, type GroupPrefs, type SharedGroup,
 } from '../src/lib/projectGroups.ts'
 import { DEFAULT_PROJECT_COLUMNS, chosenProjectColumns, fittingProjectColumns, moveProjectColumn, projectColumnOrder } from '../src/lib/projectColumns.ts'
 
@@ -80,6 +80,20 @@ test('adding, renaming, removing, sharing, hiding, collapsing and reordering gro
   assert.equal(stepGroup(prefs, defs, 'g:paused', -1), prefs)
   assert.deepEqual(withPlacements(prefs, { p2: null, p9: 'g:focus' }).place, { p4: 'g:gone', p9: 'g:focus' })
   assert.match(newGroupId(() => 0.5), /^g:[0-9a-z]{8}$/)
+})
+
+test('undo puts back one deleted group, or some placements, and leaves later changes alone', () => {
+  const before: GroupPrefs = { ...prefs, order: ['g:focus', 'g:paused', NO_GROUP], hidden: ['g:paused'], collapsed: ['g:paused'] }
+  // Meanwhile Focus was hidden as well; undoing the delete keeps that.
+  const after = setHidden(removeGroup(before, 'g:paused'), ['g:focus'], true)
+  const back = restoreGroup(after, before, 'g:paused')
+  assert.deepEqual(back.groups, prefs.groups)
+  assert.deepEqual(back.order, ['g:focus', 'g:paused', NO_GROUP])
+  assert.deepEqual(new Set(back.hidden), new Set(['g:paused', 'g:focus']))
+  assert.deepEqual(back.collapsed, ['g:paused'])
+  assert.equal(back.place?.p2, 'g:paused')
+  assert.equal(restoreGroup(after, before, 'g:nope'), after)
+  assert.deepEqual(placementsOf(prefs, ['p2', 'p9']), { p2: 'g:paused', p9: null })
 })
 
 test('names are required, at most 60 characters and unique regardless of case', () => {
