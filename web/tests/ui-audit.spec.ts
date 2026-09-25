@@ -96,6 +96,8 @@ const scenarios: Scenario[] = [
   { state: 'knowledge edit', route: '/p/PHAROS/knowledge/external-system/hetzner', act: async page => { await visible('.e-where')(page); await page.getByRole('button', { name: /^Edit/ }).click(); await expect(page.getByRole('form', { name: 'Edit hetzner' })).toBeVisible() } },
   { state: 'knowledge new entry dialog', route: '/p/PHAROS/knowledge', act: async page => { await visible('.k-row')(page); await page.getByRole('button', { name: 'New knowledge entry' }).click(); await expect(page.getByRole('dialog', { name: 'New knowledge entry' })).toBeVisible() } },
   { state: 'knowledge across projects', route: '/knowledge?q=deploy', act: visible('.kp-row') },
+  { state: 'knowledge entry page direct', route: '/p/PHAROS/knowledge/runbook/deploy-release', act: visible('.e-body') },
+  { state: 'knowledge docked entry', route: '/p/PHAROS/knowledge?entry=runbook/deploy-release', act: async page => { if ((page.viewportSize()?.width ?? 0) >= 1200) await visible('.entry-page.dock .e-body')(page); else await visible('.e-body')(page) } },
   // AEON-136: project groups, the chip row, cards, menus, the move dialog and selection.
   { state: 'projects groups', route: '/', setup: 'groups', act: visible('.group-head') },
   { state: 'projects cards', route: '/', setup: 'cards', act: visible('.card') },

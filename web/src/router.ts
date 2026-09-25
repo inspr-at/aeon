@@ -7,7 +7,7 @@ import { useSession } from './stores/session'
 import ProjectsView from './views/ProjectsView.vue'
 import SignInView from './views/SignInView.vue'
 import NotFoundView from './views/NotFoundView.vue'
-import { isKnowledgeType } from './lib/knowledge'
+import { DOCK_MEDIA, isKnowledgeType, parseEntryParam } from './lib/knowledge'
 
 // Child records of the project page carry only the address; ProjectView renders
 // what they name, so they need a component that draws nothing.
@@ -23,7 +23,13 @@ export const router = createRouter({
     {
       path: '/p/:projectKey', component: () => import('./views/ProjectView.vue'), meta: { title: 'Project' },
       children: [
-        { path: 'knowledge', component: RouteMarker, meta: { title: 'Knowledge' } },
+        // A docked entry (?entry=<type>/<slug>) on a screen too narrow to dock it opens the entry's own page.
+        { path: 'knowledge', component: RouteMarker, meta: { title: 'Knowledge' }, beforeEnter: to => {
+          const entry = parseEntryParam(to.query.entry)
+          if (!entry || window.matchMedia(DOCK_MEDIA).matches) return true
+          const { entry: _entry, ...query } = to.query
+          return { path: `/p/${encodeURIComponent(String(to.params.projectKey))}/knowledge/${entry.type}/${encodeURIComponent(entry.slug)}`, query, hash: to.hash, replace: true }
+        } },
         // One kind: the tab filtered to it.
         { path: 'knowledge/:knowledgeType', redirect: to => ({ path: `/p/${encodeURIComponent(String(to.params.projectKey))}/knowledge`, query: isKnowledgeType(to.params.knowledgeType) ? { type: to.params.knowledgeType } : {} }) },
         { path: 'knowledge/:knowledgeType/:slug', component: RouteMarker, meta: { title: 'Knowledge' },

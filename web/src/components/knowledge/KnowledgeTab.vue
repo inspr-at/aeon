@@ -452,7 +452,7 @@ li + li .k-row::before { content: ''; position: absolute; top: 0; left: 12px; ri
   .k-frame .k-kind-icon { width: 24px; height: 24px; border-radius: 999px; background: transparent; box-shadow: none; }
   .k-frame .k-agents { display: none; }
 }
-@container klist (max-width: 640px) {
+@container klist (max-width: 760px) {
   .k-list .k-row { flex-direction: column; align-items: stretch; gap: 5px; min-height: 0; padding: 10px 10px 10px 12px; }
   .k-list .k-meta { gap: 12px; }
   .k-list .k-slug { flex: 1; max-width: none; }
@@ -482,7 +482,7 @@ li + li .k-row::before { content: ''; position: absolute; top: 0; left: 12px; ri
 }
 @media (max-width: 600px) {
   .k-kinds { margin: 0 -12px; padding: 2px 12px 4px; }
-  .k-kind { height: 44px; }
+  .k-kind, .k-frame .k-kind { height: 44px; }
   .k-search { flex: 1; width: auto; }
   .k-search .slash { display: none; }
   .k-search .field { height: 44px; font-size: 16px; }

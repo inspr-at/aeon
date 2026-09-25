@@ -114,6 +114,7 @@ const screens: [string, (page: Page) => Promise<void>, string, (page: Page) => P
   ['knowledge tab', signedIn, '/p/PHAROS/knowledge', async page => { await expect(page.locator('.k-row').first()).toBeVisible() }],
   ['knowledge entry', signedIn, '/p/PHAROS/knowledge/runbook/deploy-release', async page => { await expect(page.locator('.e-body')).toBeVisible() }],
   ['knowledge across projects', signedIn, '/knowledge?q=deploy', async page => { await expect(page.locator('.kp-row').first()).toBeVisible() }],
+  ['knowledge docked entry', signedIn, '/p/PHAROS/knowledge?entry=runbook/deploy-release', async page => { await page.setViewportSize({ width: 1440, height: 900 }); await expect(page.locator('.entry-page.dock .e-body')).toBeVisible() }],
   ['agents approve', signedIn, '/agents', async page => {
     await expect(page.locator('.agents-page .row').first()).toBeVisible()
     await page.keyboard.press('j'); await page.keyboard.press('a')

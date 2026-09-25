@@ -676,7 +676,7 @@ const whoUpdated = computed(() => entry.value?.imported ? 'imported' : entry.val
 
         <!-- Docked, what it is sits under the title: the pane has no side column. -->
         <dl v-if="dock" class="e-facts" aria-label="Details">
-          <div><dt>Slug</dt><dd><button type="button" class="slug-copy mono" :aria-label="`Copy the slug ${entry.slug}`" data-tip="Copy the slug" @click="copy(entry.slug, entry.slug)">{{ entry.slug }}<AppIcon name="copy" :size="11" /></button></dd></div>
+          <div :class="{ wide: entry.slug.length > 24 }"><dt>Slug</dt><dd><button type="button" class="slug-copy mono" :aria-label="`Copy the slug ${entry.slug}`" data-tip="Copy the slug" @click="copy(entry.slug, entry.slug)">{{ entry.slug }}<AppIcon name="copy" :size="11" /></button></dd></div>
           <div><dt>Status</dt><dd>{{ statusLabel(entry.status) }}</dd></div>
           <div><dt>Written by</dt><dd :class="{ unset: !entry.author }">{{ entry.author?.name ?? (entry.imported ? 'Imported' : 'Unknown') }}</dd></div>
           <div><dt>Key</dt><dd class="mono">{{ entry.key }}</dd></div>
@@ -1012,6 +1012,8 @@ a.link-row:focus-visible { box-shadow: var(--focus-ring); }
 .dock .e-bar-inner { max-width: none; height: 52px; }
 .dock .kind-chip { margin-left: 0; }
 .dock .e-scroll { flex: 1; min-height: 0; overflow: auto; overscroll-behavior: contain; padding: 22px 26px 30px; }
+/* Its own formatting context: a state's top margin stays inside, so the scroller never moves. */
+.e-scroll { display: flow-root; }
 .e-scroll.switching { opacity: .55; }
 @media (prefers-reduced-motion: no-preference) { .e-scroll { transition: opacity .15s ease .08s; } }
 .dock .e-grid, .dock .e-edit { display: block; max-width: none; margin: 0; padding: 0; }
