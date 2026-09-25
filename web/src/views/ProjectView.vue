@@ -988,6 +988,7 @@ watch([project, panelItem, knowledgeActive, knowledgeEntryOpen], ([current, item
     <template v-if="project">
       <div v-show="!fullView && !knowledgeEntryOpen" class="list-view" :class="{ selecting: selectable && selected.size }">
       <header class="project-head">
+        <div class="head-flex">
         <div class="head-main">
           <div class="title-line">
             <span class="key-badge big">{{ project.routeKey }}</span>
@@ -1012,6 +1013,7 @@ watch([project, panelItem, knowledgeActive, knowledgeEntryOpen], ([current, item
         </div>
         <div v-else class="head-stats head-stats-skeleton" aria-hidden="true">
           <span class="skeleton stat-placeholder" /><span class="skeleton progress-placeholder" /><span class="skeleton activity-placeholder" />
+        </div>
         </div>
       </header>
 
@@ -1126,7 +1128,10 @@ watch([project, panelItem, knowledgeActive, knowledgeEntryOpen], ([current, item
 <style scoped>
 /* Lists use the full width; the gutter grows with the screen. */
 .project-page { width: 100%; margin: 0; padding: 22px var(--gutter) 12px; }
-.project-head { display: flex; align-items: flex-end; justify-content: space-between; gap: 32px; padding: 4px 0 14px; }
+/* The header follows its own width, not the window's: a docked ticket panel can
+   leave the list as narrow as a phone on a wide screen (AEON-140). */
+.project-head { padding: 4px 0 14px; container: projecthead / inline-size; }
+.head-flex { display: flex; align-items: flex-end; justify-content: space-between; gap: 32px; }
 .head-main { min-width: 0; flex: 1; }
 .journey-chip-slot { min-height: 40px; }
 .title-line { display: flex; align-items: center; gap: 12px; min-width: 0; }
@@ -1173,11 +1178,13 @@ watch([project, panelItem, knowledgeActive, knowledgeEntryOpen], ([current, item
 .head-skeleton { display: grid; gap: 12px; padding: 12px 0; }
 .sk-a { width: 320px; height: 26px; border-radius: 8px; } .sk-b { width: 520px; } .sk-c { width: 100%; height: 44px; border-radius: 12px; margin-top: 18px; }
 @media (max-width: 1080px) { .progress-line { width: 200px; } .stat-line { gap: 12px; } }
-@media (max-width: 900px) {
-  .project-head { flex-direction: column; align-items: stretch; gap: 12px; }
+@container projecthead (max-width: 760px) {
+  .head-flex { flex-direction: column; align-items: stretch; gap: 12px; }
   .head-stats { justify-items: start; }
   .head-stats-skeleton { width: 100%; min-height: 103px; }
   .progress-line { width: 100%; }
+  .title-line h1 { font-size: 24px; }
+  .stat-line { flex-wrap: wrap; gap: 4px 14px; }
 }
 @media (max-width: 720px) {
   .project-page { padding: 14px 12px 8px; }
