@@ -282,7 +282,7 @@ func TestCompatEndToEnd(t *testing.T) {
 	}
 
 	code, out, errOut = runCLI([]string{"paimos", "--config", missing, "onboard", "--project", "AEON", "--agent", "worker"}, "")
-	if code != 0 || !strings.Contains(out, "# Welcome to AEON") || !strings.Contains(out, "paimos session start --project AEON --agent worker") || !strings.Contains(out, key) {
+	if code != 0 || !strings.Contains(out, "# Welcome to AEON") || !strings.Contains(out, "paimos session start --project AEON --agent worker") || strings.Contains(out, "## Recent context") {
 		t.Fatalf("onboard code %d out %q err %q", code, out, errOut)
 	}
 
