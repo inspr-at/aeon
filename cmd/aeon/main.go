@@ -17,6 +17,7 @@ import (
 	"github.com/jackc/pgx/v5/pgxpool"
 
 	"github.com/inspr-at/aeon/internal/cli"
+	offersimport "github.com/inspr-at/aeon/internal/importer/offers"
 	"github.com/inspr-at/aeon/internal/principallink"
 	"github.com/inspr-at/aeon/internal/profile"
 )
@@ -31,6 +32,13 @@ func main() {
 	}
 	if len(os.Args) > 2 && os.Args[1] == "import" && os.Args[2] == "paimos" {
 		if err := importPaimos(os.Args[3:], os.Stdout); err != nil {
+			fmt.Fprintln(os.Stderr, "import:", err)
+			os.Exit(1)
+		}
+		return
+	}
+	if len(os.Args) > 2 && os.Args[1] == "import" && os.Args[2] == "paimos-offers" {
+		if err := offersimport.RunCommand(context.Background(), os.Args[3:], os.Stdin, os.Stdout); err != nil {
 			fmt.Fprintln(os.Stderr, "import:", err)
 			os.Exit(1)
 		}
