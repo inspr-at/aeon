@@ -717,6 +717,50 @@ paths:
                 properties:
                   error: {type: string, const: node has changed}
                   node: {$ref: '#/components/schemas/Node'}
+  /node-keys/{key}:
+    get:
+      operationId: getNodeByKey
+      description: Resolve a current key or a historical key alias to the same live node.
+      security: *auth
+      parameters:
+        - {name: key, in: path, required: true, schema: {type: string}}
+      responses:
+        '200': {$ref: '#/components/responses/Node'}
+        '404': {$ref: '#/components/responses/Error'}
+  /nodes/{nodeId}/project-move:
+    parameters: [{$ref: '#/components/parameters/NodeId'}]
+    post:
+      operationId: moveNodeProject
+      description: Atomically move an issue under a target project, assign its next project key, retain all former keys as aliases, and append an undoable node.project_moved event. Issues with child nodes or feature projections cannot move.
+      security: *auth
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              additionalProperties: false
+              required: [project_id]
+              properties:
+                project_id: {type: string, format: uuid}
+      responses:
+        '200':
+          description: Moved issue and key change
+          content:
+            application/json:
+              schema:
+                type: object
+                required: [issue_id, old_key, new_key, project_id, detached, notes]
+                properties:
+                  issue_id: {type: string, format: uuid}
+                  old_key: {type: string}
+                  new_key: {type: string}
+                  project_id: {type: string, format: uuid}
+                  detached: {type: array, items: {type: string}}
+                  notes: {type: array, items: {type: string}}
+        '400': {$ref: '#/components/responses/Error'}
+        '404': {$ref: '#/components/responses/Error'}
+        '409': {$ref: '#/components/responses/Error'}
   /relations:
     get:
       operationId: listRelations
@@ -1520,6 +1564,47 @@ paths:
       responses:
         '200': {description: Safe handoff projection, content: {application/json: {schema: {$ref: '#/components/schemas/StageHandoff'}}}}
         '404': {$ref: '#/components/responses/Error'}
+  /stage-handoffs/{handoffId}/classic-batch-alias:
+    post:
+      operationId: bindClassicBatchAlias
+      summary: Bind an imported classic batch ID to an Aeon delivery handoff
+      description: Stores provenance for compatibility lookups; the handoff remains the delivery attempt and owner of evidence.
+      security: *auth
+      parameters: [{name: handoffId, in: path, required: true, schema: {type: string, format: uuid}}]
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              additionalProperties: false
+              required: [classic_batch_id, classic_project_id, classic_batch]
+              properties:
+                classic_batch_id: {type: integer, minimum: 1}
+                classic_project_id: {type: integer, minimum: 1}
+                classic_batch: {type: object}
+                implementation_execution: {type: integer, minimum: 0}
+                implementation_authority_epoch: {type: integer, minimum: 0}
+                account_key: {type: string}
+                runtime_generation: {type: string}
+      responses:
+        '201': {description: Alias bound to the handoff, content: {application/json: {schema: {type: object}}}}
+        '403': {$ref: '#/components/responses/Error'}
+        '409': {$ref: '#/components/responses/Error'}
+  /projects/{projectId}/baseline-batches/batches/{batchId}/built-receipt:
+    post:
+      operationId: reportClassicBatchBuilt
+      summary: Record classic shaped built evidence on the aliased Aeon handoff
+      security: *auth
+      parameters:
+        - {name: projectId, in: path, required: true, schema: {type: string, format: uuid}}
+        - {name: batchId, in: path, required: true, schema: {type: integer, minimum: 1}}
+      requestBody: {required: true, content: {application/json: {schema: {type: object}}}}
+      responses:
+        '200': {description: Classic batch projection from imported provenance, content: {application/json: {schema: {type: object}}}}
+        '400': {$ref: '#/components/responses/Error'}
+        '404': {$ref: '#/components/responses/Error'}
+        '409': {$ref: '#/components/responses/Error'}
   /stage-handoffs/{handoffId}/evidence:
     post:
       operationId: appendStageEvidence

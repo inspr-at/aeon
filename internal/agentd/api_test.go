@@ -18,6 +18,9 @@ func TestRemoteUsesAeonRunAndInboxContract(t *testing.T) {
 			w.WriteHeader(401)
 			return
 		}
+		if r.URL.Path == "/api/runs/run/telemetry" && (r.Header.Get("X-Aeon-Daemon-ID") != "daemon" || r.Header.Get("X-Aeon-Daemon-Generation") != "generation") {
+			t.Errorf("telemetry lacks daemon fencing headers")
+		}
 		mu.Lock()
 		seen[r.Method+" "+r.URL.Path] = true
 		mu.Unlock()

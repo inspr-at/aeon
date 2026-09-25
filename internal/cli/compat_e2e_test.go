@@ -358,11 +358,11 @@ func TestCompatEndToEnd(t *testing.T) {
 		t.Fatalf("sync drift code %d out %q err %q", code, out, errOut)
 	}
 	code, _, errOut = runCLI([]string{"paimos", "--config", missing, "run-agent", "watch"}, "")
-	if code != 3 || !strings.Contains(errOut, reasonRunAgent) {
+	if code != 2 || !strings.Contains(errOut, "--project is required") {
 		t.Fatalf("run-agent watch code %d err %q", code, errOut)
 	}
 	code, _, errOut = runCLI([]string{"paimos", "--config", missing, "baseline-batch", "report-built"}, "")
-	if code != 3 || !strings.Contains(errOut, reasonBaseline) {
+	if code != 2 || !strings.Contains(errOut, "--project is required") {
 		t.Fatalf("baseline-batch code %d err %q", code, errOut)
 	}
 

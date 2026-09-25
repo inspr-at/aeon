@@ -47,7 +47,7 @@ func (rt *runtime) cmdIssueMove() *Command {
 		if strings.TrimSpace(target) == "" {
 			return usagef("--to <project> is required")
 		}
-		return notYet(reasonIssueMove)
+		return rt.moveIssues(refs, target, dryRun)
 	}}
 }
 

@@ -544,8 +544,8 @@ func (rt *runtime) compatStubs() []*Command {
 	return []*Command{
 		rt.cmdAnchors(),
 		rt.cmdSkill(),
-		stubCommand("run-agent", "run-agent <watch>", reasonRunAgent, "watch"),
-		stubCommand("baseline-batch", "baseline-batch <report-built>", reasonBaseline, "report-built"),
+		rt.cmdRunAgent(),
+		rt.cmdBaselineBatch(),
 		rt.cmdSync(),
 		rt.cmdHarnessV2(),
 	}

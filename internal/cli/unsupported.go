@@ -12,10 +12,6 @@ package cli
 // and does not open a network connection.
 
 const (
-	reasonRunAgent = "run-agent watch is an operator-local vendor process; Aeon work orders do not spawn one"
-
-	reasonBaseline = "baseline-batch report-built is replaced by stage handoffs and is not a compat verb"
-
 	reasonAgentd = "paimos-agentd serve is a separate operator binary (cmd/aeon-agentd), not an aeon subcommand"
 
 	reasonHarnessAddress = "harness:agent addresses are classic encrypted targets; pass the recipient principal UUID to tell"
@@ -31,8 +27,6 @@ const (
 	reasonKnowledgeKind = "Aeon knowledge types are memory, runbook, guideline, external-system, and related-project"
 
 	reasonExpectsReply = "tell --expects-reply and --action-request open a classic obligation; Aeon inbox send has no held reply"
-
-	reasonIssueMove = "issue move cannot preserve classic re-key and old-key alias semantics because Aeon node keys are immutable"
 )
 
 // unsupportedCompat is the table of doctrine invocations Aeon does not serve.
@@ -43,9 +37,6 @@ var unsupportedCompat = []struct {
 	Args   []string
 	Reason string
 }{
-	{"run-agent watch", []string{"run-agent", "watch"}, reasonRunAgent},
-	{"baseline-batch report-built", []string{"baseline-batch", "report-built"}, reasonBaseline},
-	{"issue move", []string{"issue", "move", "AEON-1", "--to", "OPS"}, reasonIssueMove},
 	{"paimos-agentd serve", nil, reasonAgentd},
 	{"listen --follow", []string{"listen", "--project", "AEON", "--follow"}, reasonListenFollow},
 }

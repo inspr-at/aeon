@@ -20,9 +20,9 @@
 // builds the canonical agent artifact from the project node and its knowledge
 // children, passes it through a harness adapter (claude-code, codex, grok, pi,
 // cursor), and writes a file whose paimos-managed header lets sync check
-// detect drift. run-agent watch and baseline-batch report-built stay in
-// unsupportedCompat and exit 3 before any network call: watch is an
-// operator-local vendor process, and report-built is replaced by stage handoffs.
+// detect drift. run-agent watch executes local Claude work orders and reports
+// evidence to Aeon. baseline-batch report-built resolves classic batch aliases
+// to stage handoffs and records typed built evidence.
 //
 // This package exports no httpapi.Module and no plugins.Plugin. The nine
 // starter kinds stay as they are. external_system and related_project are
