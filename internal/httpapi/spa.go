@@ -50,6 +50,13 @@ func spaHandler(fsys fs.FS, b brand.Brand) http.Handler {
 				st, statErr := f.Stat()
 				f.Close()
 				if statErr == nil && !st.IsDir() {
+					// Vite fingerprints everything under assets/, so it never changes;
+					// other files (favicon, brand) revalidate.
+					if strings.HasPrefix(name, "assets/") {
+						w.Header().Set("Cache-Control", "public, max-age=31536000, immutable")
+					} else {
+						w.Header().Set("Cache-Control", "no-cache")
+					}
 					files.ServeHTTP(w, r)
 					return
 				}
@@ -86,6 +93,9 @@ func staticName(urlPath string) (string, bool) {
 }
 
 func writeHTML(w http.ResponseWriter, r *http.Request, body []byte) {
+	// index.html names the fingerprinted bundles of this release: a stale copy
+	// points a new tab at bundles a deploy removed (2026-09-25).
+	w.Header().Set("Cache-Control", "no-cache")
 	w.Header().Set("Content-Type", "text/html; charset=utf-8")
 	w.WriteHeader(http.StatusOK)
 	if r.Method == http.MethodHead {
