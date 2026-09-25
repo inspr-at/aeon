@@ -97,7 +97,9 @@ const knowledgeType = computed(() => isKnowledgeType(route.params.knowledgeType)
 const knowledgeSlug = computed(() => typeof route.params.slug === 'string' ? route.params.slug : '')
 const knowledgeEntryOpen = computed(() => knowledgeActive.value && !!knowledgeType.value && !!knowledgeSlug.value)
 const knowledgeFilters = computed(() => knowledgeFiltersFrom(route.query))
-const knowledgeListQuery = computed(() => knowledgeQuery(knowledgeFilters.value))
+// The display (?mode=graph) belongs to the list's place too: closing or leaving an entry returns to it.
+const knowledgeDisplay = computed((): Record<string, string> => route.query.mode === 'graph' ? { mode: 'graph' } : {})
+const knowledgeListQuery = computed(() => ({ ...knowledgeDisplay.value, ...knowledgeQuery(knowledgeFilters.value) }))
 const knowledge = useKnowledge(projectId, knowledgeFilters, knowledgeActive)
 const knowledgeTab = ref<InstanceType<typeof KnowledgeTabType>>()
 const knowledgeEntry = ref<InstanceType<typeof KnowledgeEntryPageType>>()
@@ -115,8 +117,9 @@ const shownEntry = computed<{ type: KnowledgeType; slug: string; mode: 'page' | 
   return docked ? { ...docked, mode: 'dock' } : null
 })
 // A docked link on a narrow screen (shared, or the window got narrower) opens the entry's page.
+// The graph keeps its selection there instead, shown in its own card.
 watch([dockEntry, knowledgeWide], ([entry, wide]) => {
-  if (entry && !wide) void router.replace({ path: entryPath(routeKey.value, entry.type, entry.slug), query: knowledgeListQuery.value, hash: route.hash })
+  if (entry && !wide && route.query.mode !== 'graph') void router.replace({ path: entryPath(routeKey.value, entry.type, entry.slug), query: knowledgeListQuery.value, hash: route.hash })
 }, { immediate: true })
 const fullViewQuery = computed(() => !!ticketKey.value && route.query.view === 'full')
 const lastListMode = ref<ViewMode>(modeOf(route.query.view))
@@ -585,17 +588,24 @@ watch(project, current => { if (current) remember({ type: 'project', key: curren
 
 // ---------- Knowledge: the list's place in the URL, and closing an entry ----------
 function updateKnowledge(patch: Partial<KnowledgeFilters>) {
-  // A docked entry stays open while the list is searched and filtered.
+  // A docked entry, and the graph, stay while the list is searched and filtered.
   const entry = typeof route.query.entry === 'string' ? { entry: route.query.entry } : {}
-  void router.replace({ path: route.path, query: { ...knowledgeQuery({ ...knowledgeFilters.value, ...patch }), ...entry } })
+  void router.replace({ path: route.path, query: { ...knowledgeDisplay.value, ...knowledgeQuery({ ...knowledgeFilters.value, ...patch }), ...entry } })
+}
+// The next navigation's outcome: true once it has landed, false when a guard kept the page.
+function landed() {
+  return new Promise<boolean>(resolve => { const stop = router.afterEach((_to, _from, failure) => { stop(); resolve(!failure) }) })
 }
 // Closing the docked entry: back to the list it was opened from, the row selected.
-function closeKnowledgeDock() {
+async function closeKnowledgeDock() {
   const id = knowledgeEntry.value?.entryId() ?? null
   const list = { path: `/p/${encodeURIComponent(routeKey.value)}/knowledge`, query: knowledgeListQuery.value }
+  const done = landed()
   if (window.history.state?.back === router.resolve(list).fullPath) router.back()
   else void router.replace(list)
-  if (id) setTimeout(() => knowledgeTab.value?.reveal(id, true), 60)
+  if (!(await done)) return
+  await nextTick()
+  if (id) knowledgeTab.value?.reveal(id, true)
 }
 let entryFromList = false
 watch(() => route.fullPath, (_path, old) => {
@@ -605,9 +615,12 @@ watch(() => route.fullPath, (_path, old) => {
 async function closeKnowledgeEntry() {
   const id = knowledgeEntry.value?.entryId() ?? null
   const back = entryFromList && typeof window.history.state?.back === 'string' && /\/knowledge(\?|$)/.test(window.history.state.back.split('#')[0])
+  const done = landed()
   if (back) router.back()
-  else await router.push({ path: `/p/${encodeURIComponent(routeKey.value)}/knowledge`, query: knowledgeListQuery.value })
-  if (id) setTimeout(() => knowledgeTab.value?.reveal(id), 60)
+  else void router.push({ path: `/p/${encodeURIComponent(routeKey.value)}/knowledge`, query: knowledgeListQuery.value })
+  if (!(await done)) return
+  await nextTick()
+  if (id) knowledgeTab.value?.reveal(id)
 }
 
 // ---------- Saved view actions ----------

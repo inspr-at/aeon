@@ -3,7 +3,7 @@
 import { computed, nextTick, onBeforeUnmount, ref, watch } from 'vue'
 import { useRoute, useRouter } from 'vue-router'
 import { listNodes, searchNodes, type ListItem, type WorkNode } from '../lib/api'
-import { DOCK_MEDIA, dockPath, entryPath, listKnowledge, typeMeta, type KnowledgeItem } from '../lib/knowledge'
+import { DOCK_MEDIA, dockPath, entryPath, kindToken, listKnowledge, typeMeta, type KnowledgeItem } from '../lib/knowledge'
 import { visibleSections } from '../lib/settings'
 import { run } from '../lib/commands'
 import { actionResults, assemble, keyPrefixOf, keyQuery, knowledgeResults, projectResults, recentResults, ticketResults, viewResults, type ActionResult, type Group, type Result, type TicketResult } from '../lib/palette'
@@ -308,7 +308,7 @@ const iconOf = (result: Result): BizIconName => result.type === 'action' ? resul
                 <span v-if="result.projectKey && result.projectKey !== scope" class="project-chip">{{ result.projectKey }}</span>
               </template>
               <template v-else-if="result.type === 'knowledge'">
-                <span class="knowledge-mark" :data-tip="typeMeta(result.kind).label"><AppIcon :name="typeMeta(result.kind).icon" :size="13" /></span>
+                <span class="knowledge-mark" :data-tip="typeMeta(result.kind).label" :style="{ '--kind': `var(${kindToken(result.kind)})` }"><AppIcon :name="typeMeta(result.kind).icon" :size="13" /></span>
                 <span class="title"><template v-for="(part, i) in highlight(result.title, query)" :key="i"><mark v-if="part.match">{{ part.text }}</mark><template v-else>{{ part.text }}</template></template></span>
                 <span v-if="result.excerpt && !titleMatches(result.title)" class="desc match"><template v-for="(part, i) in highlight(result.excerpt, query.split(/\s+/)[0] ?? '')" :key="i"><mark v-if="part.match">{{ part.text }}</mark><template v-else>{{ part.text }}</template></template></span>
                 <span class="slug">{{ result.kind }}/{{ result.slug }}</span>
@@ -392,7 +392,7 @@ const iconOf = (result: Result): BizIconName => result.type === 'action' ? resul
 .desc { flex: 1 1 0; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; font-size: 12.5px; color: var(--ink-3); }
 .item.ticket .title, .item.knowledge .title { flex: 1 1 auto; }
 .item.knowledge:has(.desc) .title { flex: 0 1 auto; }
-.knowledge-mark { display: grid; place-items: center; flex-shrink: 0; width: 22px; height: 22px; border-radius: 7px; background: var(--chip-teal-bg); box-shadow: inset 0 0 0 1px var(--chip-teal-line); color: var(--teal-ink); }
+.knowledge-mark { display: grid; place-items: center; flex-shrink: 0; width: 22px; height: 22px; border-radius: 7px; background: var(--surface-raised); box-shadow: inset 0 0 0 1px var(--line-2); color: var(--kind, var(--teal-ink)); }
 .slug { flex-shrink: 1; min-width: 0; max-width: 220px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; font: 500 11px/1 var(--mono); color: var(--ink-3); font-variant-ligatures: none; }
 .archived-chip { flex-shrink: 0; height: 18px; padding: 0 7px; border-radius: 999px; background: var(--chip-bg); box-shadow: inset 0 0 0 1px var(--chip-line); color: var(--ink-2); font: 600 9.5px/18px var(--mono); letter-spacing: .08em; text-transform: uppercase; font-variant-ligatures: none; }
 .project-chip { flex-shrink: 0; height: 20px; padding: 0 8px; border-radius: 6px; background: var(--code-bg); color: var(--ink-2); font: 500 10.5px/20px var(--mono); letter-spacing: .04em; font-variant-ligatures: none; }

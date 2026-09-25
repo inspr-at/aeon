@@ -7,7 +7,7 @@ import { brand, setPageTitle } from '../../lib/brand'
 import { confirmAction } from '../../lib/confirm'
 import { lineDiff } from '../../lib/crm'
 import {
-  DETAIL_FIELDS, STATUSES, cliCommand, deleteKnowledge, detailText, entryParam, entryPath, getKnowledge, KnowledgeError, mergeDetails, readingMinutes,
+  DETAIL_FIELDS, STATUSES, cliCommand, deleteKnowledge, detailText, entryParam, entryPath, getKnowledge, kindToken, KnowledgeError, mergeDetails, readingMinutes,
   resolveKnowledge, slugProblem, statusLabel, typeMeta, undoKnowledge, updateKnowledge, validUrl, wantsToc, withoutTitle,
   type Heading, type KnowledgeEntry, type KnowledgeLink, type KnowledgePatch, type KnowledgeStatus, type KnowledgeType,
 } from '../../lib/knowledge'
@@ -467,7 +467,8 @@ function keydown(event: KeyboardEvent) {
     // Docked, the list moves the selection (and so this pane) with j and k.
     case 'j': if (!dock.value) { event.preventDefault(); go(1) } break
     case 'k': if (!dock.value) { event.preventDefault(); go(-1) } break
-    case 'Escape': event.preventDefault(); emit('close'); break
+    // Beside the graph, Escape clears the graph's selection, which closes this pane too.
+    case 'Escape': if (dock.value && route.query.mode === 'graph') return; event.preventDefault(); emit('close'); break
   }
 }
 // Opening a new entry from the Create dialog starts in the text.
@@ -546,7 +547,7 @@ const whoUpdated = computed(() => entry.value?.imported ? 'imported' : entry.val
     </div>
     <div v-else-if="!entry" class="e-skeleton" role="status" aria-label="Loading the entry">
       <template v-if="listed">
-        <p class="e-eyebrow"><span class="e-type"><AppIcon :name="meta.icon" :size="13" />{{ meta.label }}</span></p>
+        <p class="e-eyebrow"><span class="e-type" :style="{ '--kind': `var(${kindToken(type)})` }"><AppIcon :name="meta.icon" :size="13" />{{ meta.label }}</span></p>
         <p class="e-title sk-known">{{ listed.title }}</p>
       </template>
       <template v-else><span class="skeleton sk-eyebrow" /><span class="skeleton sk-title" /></template>
@@ -655,7 +656,7 @@ const whoUpdated = computed(() => entry.value?.imported ? 'imported' : entry.val
       </nav>
 
       <div ref="article" class="e-article">
-        <p class="e-eyebrow"><span class="e-type"><AppIcon :name="meta.icon" :size="13" />{{ meta.label }}</span><span v-if="entry.status !== 'active'" class="k-status" :class="entry.status">{{ statusLabel(entry.status) }}</span></p>
+        <p class="e-eyebrow"><span class="e-type" :style="{ '--kind': `var(${kindToken(entry.type)})` }"><AppIcon :name="meta.icon" :size="13" />{{ meta.label }}</span><span v-if="entry.status !== 'active'" class="k-status" :class="entry.status">{{ statusLabel(entry.status) }}</span></p>
         <h1 class="e-title">{{ entry.title }}</h1>
         <p class="e-byline dot-list">
           <span>Updated <time :datetime="entry.updated_at" :data-tip="absoluteTime(entry.updated_at)">{{ relativeTime(entry.updated_at, { now, long: true }) }}</time> {{ whoUpdated }}</span>
@@ -773,7 +774,7 @@ const whoUpdated = computed(() => entry.value?.imported ? 'imported' : entry.val
 .e-grid, .e-edit { max-width: 1480px; margin-inline: auto; }
 /* ---------- The bar ---------- */
 .e-bar-inner { display: flex; align-items: center; gap: 6px; max-width: 1480px; height: 52px; margin: 0 auto; }
-.e-bar { position: sticky; top: 0; z-index: 6; margin: 0 calc(-1 * var(--gutter)); padding: 0 var(--gutter); background: var(--glass); box-shadow: 0 1px 0 var(--line); backdrop-filter: blur(18px) saturate(1.2); -webkit-backdrop-filter: blur(18px) saturate(1.2); }
+.e-bar { position: sticky; top: 0; z-index: 6; margin: 0 calc(-1 * var(--gutter)); padding: 0 var(--gutter); background: var(--glass); box-shadow: 0 1px 0 var(--line); -webkit-backdrop-filter: blur(18px) saturate(1.2); backdrop-filter: blur(18px) saturate(1.2); }
 .kind-chip { display: inline-flex; flex-shrink: 1; align-items: center; gap: 7px; min-width: 0; height: 28px; margin-left: 2px; padding: 0 10px 0 9px; border: 0; border-radius: 8px; background: var(--chip-teal-bg); box-shadow: inset 0 0 0 1px var(--chip-teal-line); color: var(--teal-ink); }
 .kind-chip:hover { box-shadow: inset 0 0 0 1px var(--teal); }
 .kind-chip:focus-visible { box-shadow: var(--focus-ring); }
@@ -804,6 +805,7 @@ const whoUpdated = computed(() => entry.value?.imported ? 'imported' : entry.val
 .e-article { min-width: 0; max-width: 760px; }
 .e-eyebrow { display: flex; align-items: center; gap: 10px; margin-bottom: 10px; }
 .e-type { display: inline-flex; align-items: center; gap: 6px; font: 500 10.5px/1.5 var(--mono); letter-spacing: .16em; text-transform: uppercase; color: var(--teal-ink); font-variant-ligatures: none; }
+.e-type svg { color: var(--kind, currentColor); }
 .k-status { display: inline-flex; align-items: center; height: 20px; padding: 0 8px; border-radius: 999px; font: 600 10px/1 var(--mono); letter-spacing: .08em; text-transform: uppercase; font-variant-ligatures: none; }
 .k-status.proposed { background: var(--gold-wash); box-shadow: inset 0 0 0 1px rgba(214, 155, 49, .45); color: var(--gold-ink); }
 .k-status.archived { background: var(--chip-bg); box-shadow: inset 0 0 0 1px var(--chip-line); color: var(--ink-2); }
@@ -1001,14 +1003,14 @@ a.link-row:focus-visible { box-shadow: var(--focus-ring); }
   display: flex; flex-direction: column; padding: 0; overflow: hidden;
   border-radius: var(--radius); border: 1px solid var(--glass-edge);
   background: linear-gradient(165deg, var(--surface-raised), var(--surface-raised-2)); box-shadow: var(--shadow-pop), var(--shadow);
-  backdrop-filter: blur(20px) saturate(1.15); -webkit-backdrop-filter: blur(20px) saturate(1.15);
+  -webkit-backdrop-filter: blur(20px) saturate(1.15); backdrop-filter: blur(20px) saturate(1.15);
 }
 .entry-page.dock:focus-visible { box-shadow: var(--shadow-pop), var(--focus-ring); }
 @media (prefers-reduced-motion: no-preference) {
   .entry-page.dock { animation: dock-in .22s cubic-bezier(.2, .7, .2, 1); }
   @keyframes dock-in { from { opacity: 0; transform: translateX(24px); } to { opacity: 1; transform: none; } }
 }
-.dock .e-bar { position: static; flex-shrink: 0; margin: 0; padding: 0 8px 0 12px; background: transparent; box-shadow: none; border-bottom: 1px solid var(--line); backdrop-filter: none; -webkit-backdrop-filter: none; }
+.dock .e-bar { position: static; flex-shrink: 0; margin: 0; padding: 0 8px 0 12px; background: transparent; box-shadow: none; border-bottom: 1px solid var(--line); -webkit-backdrop-filter: none; backdrop-filter: none; }
 .dock .e-bar-inner { max-width: none; height: 52px; }
 .dock .kind-chip { margin-left: 0; }
 .dock .e-scroll { flex: 1; min-height: 0; overflow: auto; overscroll-behavior: contain; padding: 22px 26px 30px; }
@@ -1022,7 +1024,7 @@ a.link-row:focus-visible { box-shadow: var(--focus-ring); }
 .dock .e-article { max-width: 72ch; }
 .dock .e-title { font-size: clamp(24px, 1.9vw, 30px); }
 .dock .e-body { margin-top: 22px; font-size: 14.5px; line-height: 1.7; }
-.dock .e-state { margin: 8px 0 0; padding: 40px 12px; border: 0; background: transparent; box-shadow: none; backdrop-filter: none; -webkit-backdrop-filter: none; }
+.dock .e-state { margin: 8px 0 0; padding: 40px 12px; border: 0; background: transparent; box-shadow: none; -webkit-backdrop-filter: none; backdrop-filter: none; }
 .dock .e-skeleton { max-width: 72ch; margin: 0; }
 .sk-known { margin-bottom: 4px; }
 /* One column: what it is under the title, the text, then how agents read it and its links. */

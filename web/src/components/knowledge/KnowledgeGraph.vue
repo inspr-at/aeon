@@ -12,7 +12,8 @@ import { STATUS_VIEWS, type KnowledgeFilters } from '../../lib/useKnowledge'
 import { fetchKnowledgeGraph, filterGraph, graphEntry, graphMatches, graphNeighbours, graphTypeLabel, graphTypeTokens, type GraphDimension, type GraphNode, type KnowledgeGraphData } from '../../lib/knowledgeGraph'
 import { createKnowledgeGraphRenderer, type KnowledgeGraphRenderer } from '../../lib/knowledgeGraphRenderer'
 
-const props = defineProps<{ project: { id: string; routeKey: string; title: string }; filters: KnowledgeFilters; canWrite: boolean }>()
+// docked: the selected entry is open in the preview pane beside the graph, so the card would repeat it.
+const props = defineProps<{ project: { id: string; routeKey: string; title: string }; filters: KnowledgeFilters; canWrite: boolean; docked?: boolean }>()
 const emit = defineEmits<{ create: []; reset: []; list: [] }>()
 const route = useRoute(), router = useRouter()
 const root = ref<HTMLElement>(), host = ref<HTMLElement>()
@@ -105,7 +106,7 @@ async function open(node: GraphNode) {
 }
 function keydown(event: KeyboardEvent) {
   if (event.defaultPrevented || event.ctrlKey || event.metaKey || event.altKey || (event.target instanceof HTMLElement && event.target.closest('input, textarea, select, [contenteditable="true"], dialog'))) return
-  if (event.key === 'Escape' && selected.value) { event.preventDefault(); clear() }
+  if (event.key === 'Escape' && selected.value) { event.preventDefault(); clear(); host.value?.focus({ preventScroll: true }) }
   if (event.key === 'Enter' && selected.value && event.target === host.value) { event.preventDefault(); open(selected.value) }
   if (event.target === host.value && ['ArrowRight', 'ArrowLeft'].includes(event.key)) {
     const list = visible.value.nodes, at = list.findIndex(n => n.id === selected.value?.id)
@@ -138,6 +139,7 @@ onMounted(() => {
   window.addEventListener('keydown', keydown); window.addEventListener('pointerdown', interact, { passive: true }); window.addEventListener('wheel', interact, { passive: true })
   void load(); void startRenderer()
 })
+defineExpose({ focus: () => host.value?.focus({ preventScroll: true }) })
 onBeforeUnmount(() => {
   mounted = false; loadController?.abort(); renderController?.abort(); resize?.disconnect(); theme?.disconnect()
   media.removeEventListener('change', onReduced); schemeMedia.removeEventListener('change', retheme)
@@ -153,11 +155,11 @@ onBeforeUnmount(() => {
       <KnowledgeGraphControls :dimension="dimension" :paused="paused" :tickets="tickets" :fallback="fallback" :reduced="reduced" @fit="fit" @dimension="setDimension" @pause="toggleMotion" @tickets="tickets = !tickets" />
     </header>
     <div class="kg-stage" @pointermove="move" @pointerleave="hovered = null">
-      <div ref="host" class="kg-canvas" role="img" tabindex="0" :aria-label="`Knowledge graph: ${summary}. Use List for accessible reading. Left and right arrows select entries; Enter opens; Escape clears.`" :data-dimension="dimension" :data-ready="ready" :data-motion="reduced || paused ? 'still' : 'on'" />
+      <div ref="host" class="kg-canvas" role="img" tabindex="0" :aria-label="`Knowledge graph: ${summary}. Use Entries for accessible reading. Left and right arrows select entries; Enter opens; Escape clears.`" :data-dimension="dimension" :data-ready="ready" :data-motion="reduced || paused ? 'still' : 'on'" />
       <div v-if="loading || error || renderError || !visible.nodes.length" class="kg-state">
         <span v-if="loading" class="kg-loading" aria-hidden="true"><AppIcon name="link" :size="24" /></span>
         <template v-if="error || renderError"><AppIcon name="alert" :size="24" /><h3>Connections are taking a moment</h3><p role="alert">{{ error || renderError }}</p><button class="btn" type="button" @click="error ? load() : startRenderer()">Try again</button></template>
-        <template v-else-if="!loading"><AppIcon name="book" :size="26" /><h3>{{ data.nodes.length ? 'No entries of this kind' : 'A place for connections to grow' }}</h3><p>Link entries with <code>[[slug]]</code> mentions or relations.</p><button v-if="data.nodes.length" class="btn" type="button" @click="emit('reset')">Show all knowledge</button><button v-else-if="canWrite" class="btn primary" type="button" @click="emit('create')"><AppIcon name="plus" :size="14" />Write the first entry</button><button v-else class="btn" type="button" @click="emit('list')">Go to list</button></template>
+        <template v-else-if="!loading"><AppIcon name="book" :size="26" /><h3>{{ data.nodes.length ? 'No entries of this kind' : 'A place for connections to grow' }}</h3><p>Link entries with <code>[[slug]]</code> mentions or relations.</p><button v-if="data.nodes.length" class="btn" type="button" @click="emit('reset')">Show all knowledge</button><button v-else-if="canWrite" class="btn primary" type="button" @click="emit('create')"><AppIcon name="plus" :size="14" />Write the first entry</button><button v-else class="btn" type="button" @click="emit('list')">Show the entries</button></template>
       </div>
       <div v-if="!loading && !error && query" class="kg-results">
         <p>{{ matches.size }} {{ matches.size === 1 ? 'match' : 'matches' }} <span>in this graph</span></p>
@@ -165,7 +167,7 @@ onBeforeUnmount(() => {
         <button v-if="!matches.size" type="button" @click="emit('reset')">Clear the filters<AppIcon name="close" :size="12" /></button>
       </div>
       <div v-if="!loading && visible.nodes.length && (!visible.edges.length || visible.nodes.length < 5) && !selected && !query" class="kg-sparse"><AppIcon name="link" :size="14" /><span>Add <code>[[slug]]</code> mentions or relations to connect these entries.</span><button class="btn sm" type="button" @click="open(visible.nodes[0])">Open an entry<AppIcon name="arrow" :size="12" /></button></div>
-      <div v-if="selected" class="kg-selection" aria-live="polite">
+      <div v-if="selected && !(docked && selected.kind === 'knowledge')" class="kg-selection" aria-live="polite">
         <div class="kg-selection-meta"><span class="kg-dot" :style="{ background: `var(${graphTypeTokens[selected.type]})` }" />{{ graphTypeLabel(selected) }}<span class="mono">{{ selected.degree }} {{ selected.degree === 1 ? 'link' : 'links' }}</span><button type="button" class="icon-btn sm flat" aria-label="Clear graph selection" @click="clear"><AppIcon name="close" :size="12" /></button></div>
         <h3>{{ selected.title }}</h3><p class="mono">{{ selected.slug || selected.key }}</p>
         <button type="button" class="btn sm" @click="open(selected)">Open {{ selected.kind === 'ticket' ? 'ticket' : 'entry' }}<AppIcon name="external" :size="12" /></button><span class="kg-enter"><kbd class="keycap">Enter</kbd></span>
@@ -195,7 +197,7 @@ onBeforeUnmount(() => {
 .kg-navigation { position: absolute; bottom: 12px; left: 0; right: 0; display: flex; justify-content: center; flex-wrap: wrap; gap: 16px; pointer-events: none; font-size: 11px; color: var(--ink-3); }
 .kg-navigation span { opacity: .8; }
 .kg-dot { width: 7px; height: 7px; flex: 0 0 auto; border-radius: 50%; }
-.kg-selection, .kg-results, .kg-tooltip { background: var(--surface-raised-2); border-radius: 12px; box-shadow: var(--shadow-pop); backdrop-filter: blur(14px); color: var(--ink); }
+.kg-selection, .kg-results, .kg-tooltip { background: var(--surface-raised-2); border-radius: 12px; box-shadow: var(--shadow-pop); -webkit-backdrop-filter: blur(14px); backdrop-filter: blur(14px); color: var(--ink); }
 .kg-selection { position: absolute; bottom: 18px; left: 22px; width: min(310px, calc(100% - 44px)); padding: 14px 16px; }
 .kg-selection-meta { display: flex; align-items: center; gap: 7px; font-size: 11px; color: var(--ink-2); }
 .kg-selection-meta .mono { margin-left: auto; font-size: 10px; }

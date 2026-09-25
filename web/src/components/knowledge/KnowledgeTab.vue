@@ -3,7 +3,7 @@
 import { computed, defineAsyncComponent, nextTick, onBeforeUnmount, onMounted, ref, watch } from 'vue'
 import { useRoute, useRouter } from 'vue-router'
 import { brand } from '../../lib/brand'
-import { SORTS, TYPES, entryParam, entryPath, highlightWords, statusLabel, type KnowledgeEntry, type KnowledgeItem, type KnowledgeStatus, type KnowledgeType, type SortBy } from '../../lib/knowledge'
+import { SORTS, TYPES, entryParam, entryPath, highlightWords, kindToken, statusLabel, type KnowledgeEntry, type KnowledgeItem, type KnowledgeStatus, type KnowledgeType, type SortBy } from '../../lib/knowledge'
 import { STATUS_VIEWS, type KnowledgeFilters, type KnowledgeState, type StatusView } from '../../lib/useKnowledge'
 import { toast } from '../../lib/toast'
 import { absoluteTime, plural, relativeTime } from '../../lib/work'
@@ -29,14 +29,14 @@ const router = useRouter()
 const route = useRoute()
 const KnowledgeGraph = defineAsyncComponent(() => import('./KnowledgeGraph.vue'))
 const graphMode = computed(() => route.query.mode === 'graph')
-function setMode(graph: boolean) { void router.replace({ query: { ...route.query, mode: graph ? 'graph' : undefined } }) }
-// ProjectView's current list filter handler rebuilds its query; preserve graph
-// and dock selection here until the coordinator merges the preview-pane wiring.
-function updateFilters(patch: Partial<KnowledgeFilters>) {
-  if (!graphMode.value) { emit('update', patch); return }
-  const next = { ...props.filters, ...patch }
-  void router.replace({ query: { ...route.query, q: next.q || undefined, type: next.type || undefined, status: next.status === 'current' ? undefined : next.status, sort: next.sort || undefined } })
+const graph = ref<{ focus: () => void }>()
+// A selection carries over between the two displays where the pane can show it; on a narrow
+// screen going back to Entries drops it, which would otherwise open the entry's own page.
+function setMode(graph: boolean) {
+  void router.replace({ query: { ...route.query, mode: graph ? 'graph' : undefined, entry: graph || props.dock ? route.query.entry : undefined } })
 }
+// The page keeps the display (?mode=graph) and the docked entry (?entry=) while filters change.
+function updateFilters(patch: Partial<KnowledgeFilters>) { emit('update', patch) }
 
 const input = ref<HTMLInputElement>()
 const draft = ref(props.filters.q)
@@ -160,6 +160,7 @@ async function copyCommand() {
 }
 // The row the entry page was on is the cursor when the tab shows again.
 function reveal(id: string, focus = false) {
+  if (graphMode.value) { if (focus) graph.value?.focus(); return }
   if (!props.state.sequence.value.some(item => item.id === id)) return
   cursorId.value = id
   void nextTick(() => { const el = rowEl(id); if (focus) el?.focus({ preventScroll: true }); el?.scrollIntoView({ block: 'nearest' }) })
@@ -173,9 +174,11 @@ const who = (item: KnowledgeItem) => item.imported ? 'imported' : item.updated_b
 <template>
   <!-- Controls in the project toolbar, beside the view switch. -->
   <Teleport to="#knowledge-controls" defer>
+    <!-- Kept apart from the project's views (List, Outline, Journey, Knowledge) by a hairline and its own words. -->
+    <span class="k-mode-sep" aria-hidden="true" />
     <div class="seg k-mode" role="group" aria-label="Knowledge display">
-      <button type="button" :aria-pressed="!graphMode" @click="setMode(false)"><AppIcon name="list" :size="14" />List</button>
-      <button type="button" :aria-pressed="graphMode" @click="setMode(true)"><AppIcon name="link" :size="14" />Graph</button>
+      <button type="button" :aria-pressed="!graphMode" aria-label="Entries" data-tip="Entries · grouped by kind" @click="setMode(false)"><AppIcon name="rows-comfortable" :size="14" /><span class="k-mode-label">Entries</span></button>
+      <button type="button" :aria-pressed="graphMode" aria-label="Graph" data-tip="Graph · how entries link" @click="setMode(true)"><AppIcon name="graph" :size="14" /><span class="k-mode-label">Graph</span></button>
     </div>
     <label class="search-field k-search">
       <AppIcon name="search" :size="14" />
@@ -212,7 +215,7 @@ const who = (item: KnowledgeItem) => item.imported ? 'imported' : item.updated_b
           v-for="meta in TYPES" :key="meta.type" type="button" class="k-kind" :class="{ empty: !state.typeCounts.value[meta.type] }"
           :aria-current="filters.type === meta.type ? 'true' : undefined" :data-tip="meta.hint" @click="setType(filters.type === meta.type ? '' : meta.type)"
         >
-          <span class="k-kind-icon"><AppIcon :name="meta.icon" :size="14" /></span><span class="k-kind-label">{{ meta.plural }}</span>
+          <span class="k-kind-icon" :style="{ '--kind': `var(${kindToken(meta.type)})` }"><AppIcon :name="meta.icon" :size="14" /></span><span class="k-kind-label">{{ meta.plural }}</span>
           <span class="k-kind-count mono">{{ state.typeCounts.value[meta.type] ?? 0 }}</span>
         </button>
       </div>
@@ -223,7 +226,7 @@ const who = (item: KnowledgeItem) => item.imported ? 'imported' : item.updated_b
       </section>
     </nav>
 
-    <KnowledgeGraph v-if="graphMode && !paused" :project="project" :filters="filters" :can-write="canWrite" @create="openCreate()" @reset="resetFilters" @list="setMode(false)" />
+    <KnowledgeGraph v-if="graphMode && !paused" ref="graph" :project="project" :filters="filters" :can-write="canWrite" :docked="!!openEntry" @create="openCreate()" @reset="resetFilters" @list="setMode(false)" />
     <div v-else ref="listEl" class="k-list" :class="{ stale: state.searching.value && !!state.visible.value.length }">
       <p v-if="state.error.value && state.loaded.value" class="k-banner" role="status"><AppIcon name="alert" :size="14" />{{ state.error.value }}</p>
 
@@ -247,7 +250,7 @@ const who = (item: KnowledgeItem) => item.imported ? 'imported' : item.updated_b
         <p>Runbooks, guidelines and memory live here. Agents read them by slug before they work, and people keep them true.</p>
         <div v-if="canWrite" class="k-starters">
           <button v-for="meta in TYPES.slice(0, 3)" :key="meta.type" type="button" class="k-starter" @click="openCreate(meta.type)">
-            <span class="k-kind-icon"><AppIcon :name="meta.icon" :size="15" /></span>
+            <span class="k-kind-icon" :style="{ '--kind': `var(${kindToken(meta.type)})` }"><AppIcon :name="meta.icon" :size="15" /></span>
             <span><strong>Write a {{ meta.label.toLowerCase() }}</strong><span>{{ meta.hint }}</span></span>
           </button>
         </div>
@@ -270,7 +273,7 @@ const who = (item: KnowledgeItem) => item.imported ? 'imported' : item.updated_b
       <template v-else>
         <section v-for="group in state.groups.value" :key="group.type" class="k-group glass-card" :aria-labelledby="`k-group-${group.type}`">
           <header class="k-group-head">
-            <span class="k-type-mark"><AppIcon :name="group.meta.icon" :size="15" /></span>
+            <span class="k-type-mark" :style="{ '--kind': `var(${kindToken(group.type)})` }"><AppIcon :name="group.meta.icon" :size="15" /></span>
             <h2 :id="`k-group-${group.type}`">{{ group.meta.plural }}</h2>
             <span class="k-group-count mono">{{ group.items.length }}</span>
             <p class="k-group-hint">{{ group.meta.hint }}</p>
@@ -331,9 +334,10 @@ const who = (item: KnowledgeItem) => item.imported ? 'imported' : item.updated_b
 </template>
 
 <style scoped>
+.k-mode-sep { flex-shrink: 0; width: 1px; height: 22px; margin: 0 2px; background: var(--line-2); }
 .k-mode { flex-shrink: 0; }
-.k-mode button { display: flex; align-items: center; justify-content: center; gap: 6px; }
-.k-mode button[aria-pressed="true"] { background: var(--seg-on); box-shadow: var(--shadow-btn); color: var(--teal-ink); }
+.k-mode button { display: flex; align-items: center; justify-content: center; gap: 6px; height: 26px; padding: 0 10px; }
+.k-mode button[aria-pressed="true"] { background: var(--seg-on); box-shadow: 0 1px 2px rgba(32, 60, 61, .12), inset 0 0 0 1px var(--glass-edge); color: var(--teal-ink); }
 /* ---------- Toolbar controls (teleported into the project toolbar) ---------- */
 .k-search { width: 260px; flex-shrink: 0; }
 .k-search .field { height: 32px; padding-right: 30px; font-size: 13.5px; }
@@ -374,8 +378,8 @@ const who = (item: KnowledgeItem) => item.imported ? 'imported' : item.updated_b
 .k-kind:focus-visible { box-shadow: var(--focus-ring); }
 .k-kind[aria-current="true"] { background: var(--row-selected); color: var(--teal-ink); font-weight: 600; box-shadow: inset 0 0 0 1px var(--chip-teal-line); }
 .k-kind.empty:not([aria-current]) .k-kind-label { color: var(--ink-3); }
-.k-kind-icon { display: grid; place-items: center; flex-shrink: 0; width: 26px; height: 26px; border-radius: 8px; background: var(--chip-bg); box-shadow: inset 0 0 0 1px var(--chip-line); color: var(--ink-2); }
-.k-kind[aria-current="true"] .k-kind-icon { background: var(--chip-teal-bg); box-shadow: inset 0 0 0 1px var(--chip-teal-line); color: var(--teal-ink); }
+.k-kind-icon { display: grid; place-items: center; flex-shrink: 0; width: 26px; height: 26px; border-radius: 8px; background: var(--chip-bg); box-shadow: inset 0 0 0 1px var(--chip-line); color: var(--kind, var(--ink-2)); }
+.k-kind[aria-current="true"] .k-kind-icon { background: var(--surface-raised); box-shadow: inset 0 0 0 1px var(--chip-teal-line); color: var(--kind, var(--teal-ink)); }
 .k-kind-label { flex: 1; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 .k-kind-count { font-size: 11.5px; font-weight: 500; color: var(--ink-3); font-variant-numeric: tabular-nums; }
 .k-kind[aria-current="true"] .k-kind-count { color: var(--teal-ink); }
@@ -393,7 +397,8 @@ const who = (item: KnowledgeItem) => item.imported ? 'imported' : item.updated_b
 @media (prefers-reduced-motion: no-preference) { .k-group { transition: opacity .12s ease; } }
 .k-group { overflow: clip; }
 .k-group-head { display: flex; align-items: center; gap: 10px; min-height: 52px; padding: 10px 12px 10px 16px; border-bottom: 1px solid var(--line); }
-.k-type-mark { display: grid; place-items: center; flex-shrink: 0; width: 30px; height: 30px; border-radius: 9px; background: var(--chip-teal-bg); box-shadow: inset 0 0 0 1px var(--chip-teal-line); color: var(--teal-ink); }
+/* The kind's hue marks its icon (the graph's bubbles and legend use the same); the tile stays neutral. */
+.k-type-mark { display: grid; place-items: center; flex-shrink: 0; width: 30px; height: 30px; border-radius: 9px; background: var(--surface-raised); box-shadow: inset 0 0 0 1px var(--line-2); color: var(--kind, var(--teal-ink)); }
 .k-group-head h2 { font: 650 15px/1.3 var(--font); letter-spacing: -.005em; color: var(--ink); }
 .k-group-count { font-size: 11.5px; color: var(--ink-3); }
 .k-group-hint { flex: 1; min-width: 0; margin-left: 6px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; font-size: 12.5px; color: var(--ink-3); }
@@ -443,7 +448,7 @@ li + li .k-row::before { content: ''; position: absolute; top: 0; left: 12px; ri
 .k-starter:focus-visible { box-shadow: var(--focus-ring); }
 .k-starter strong { display: block; font-size: 13.5px; }
 .k-starter strong + span { display: block; margin-top: 2px; font-size: 12px; line-height: 1.45; color: var(--ink-2); }
-.k-starter .k-kind-icon { background: var(--chip-teal-bg); box-shadow: inset 0 0 0 1px var(--chip-teal-line); color: var(--teal-ink); }
+.k-starter .k-kind-icon { background: var(--surface-raised); box-shadow: inset 0 0 0 1px var(--line-2); color: var(--kind, var(--teal-ink)); }
 .k-fine { font-size: 12.5px; color: var(--ink-3); }
 .k-hint { display: flex; align-items: center; justify-content: center; flex-wrap: wrap; gap: 5px; padding: 6px 0; font-size: 12px; color: var(--ink-3); }
 .k-hint .keycap + .keycap { margin-left: 2px; }
@@ -456,6 +461,9 @@ li + li .k-row::before { content: ''; position: absolute; top: 0; left: 12px; ri
 
 /* ---------- Narrower pages ---------- */
 @container toolbar (max-width: 1180px) { .k-search { width: 220px; } .k-sort-label { display: none; } .k-sort-btn { padding: 0 9px; } }
+@container toolbar (max-width: 1080px) { .k-mode-label { display: none; } .k-mode button { padding: 0 8px; } }
+/* Beside the preview pane the toolbar is list-wide: the search gives way before anything wraps. */
+@container toolbar (max-width: 720px) { .k-search { width: auto; flex: 1 1 120px; min-width: 120px; } .k-spacer { display: none; } }
 @container toolbar (max-width: 1000px) { .k-count { display: none; } .k-new { width: 32px; padding: 0; } .k-new-label { display: none; } .k-menu-dim { display: none; } }
 /* Docked beside an entry (U25) the list is narrower than the window says: the
    frame and the list fold by their own width (selectors carry .k-frame / .k-list

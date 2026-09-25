@@ -21,8 +21,18 @@ async function setup(page: Page) {
   })
   return { calls, nodes }
 }
-const toggle = (page: Page, name: 'List' | 'Graph') => page.getByRole('group', { name: 'Knowledge display', exact: true }).getByRole('button', { name, exact: true })
+const toggle = (page: Page, name: 'Entries' | 'Graph') => page.getByRole('group', { name: 'Knowledge display', exact: true }).getByRole('button', { name, exact: true })
 const canvas = (page: Page) => page.locator('.kg-canvas')
+// U25: on wide screens (1200px and up) a selected entry opens in the preview pane beside the graph.
+const pane = (page: Page) => page.locator('.entry-page.dock')
+// The graph fits its camera and picks the bubble under the pointer on animation frames.
+const frames = (page: Page, count = 3) => page.evaluate(n => new Promise<void>(done => { const step = (left: number) => left ? requestAnimationFrame(() => step(left - 1)) : done(); step(n) }), count)
+// The canvas box once layout has stopped moving (the pane opening narrows it).
+async function settledBox(page: Page) {
+  let last = ''
+  await expect.poll(async () => { const now = JSON.stringify(await canvas(page).boundingBox()); const same = now === last; last = now; return same }, { intervals: [120] }).toBe(true)
+  return JSON.parse(last) as { x: number; y: number; width: number; height: number }
+}
 async function ready(page: Page) {
   // Cold lazy-module compilation and a software GPU can exceed the default 5s
   // when the coordinator runs the suite with four browser workers.
@@ -48,29 +58,66 @@ test('graph toggle and filters preserve the URL; selection, keyboard open and hi
   await expect(page.locator('.kg-results')).toContainText('1 match')
   await page.locator('.kg-results').getByRole('button', { name: 'Deploy a release to production' }).click()
   await expect(page).toHaveURL(/entry=runbook\/deploy-release/)
-  await expect(page.locator('.kg-selection')).toContainText('Deploy a release to production')
+  await expect(pane(page).getByRole('heading', { level: 1 })).toHaveText('Deploy a release to production')
+  await expect(page.locator('.kg-selection')).toHaveCount(0)
   await canvas(page).press('Escape'); await expect(page).not.toHaveURL(/entry=/)
+  await expect(pane(page)).toHaveCount(0); await expect(page).toHaveURL(/mode=graph/)
   await canvas(page).press('ArrowRight'); await expect(page).toHaveURL(/entry=runbook\/rotate-host-keys/)
+  await expect(pane(page).getByRole('heading', { level: 1 })).toHaveText('Rotate the fleet host keys')
   await canvas(page).press('Enter'); await expect(page).toHaveURL(/knowledge\/runbook\/rotate-host-keys/)
   await page.goBack(); await ready(page)
+  await expect(pane(page)).toBeVisible()
   await page.getByRole('button', { name: 'Show linked tickets' }).click()
   await expect.poll(() => calls.some(q => q.get('include') === 'tickets')).toBe(true)
-  await toggle(page, 'List').click(); await expect(page).not.toHaveURL(/mode=graph/)
+  // Entries keeps the pane (and so the selection) open beside the list.
+  await toggle(page, 'Entries').click(); await expect(page).not.toHaveURL(/mode=graph/)
   await expect(canvas(page)).toHaveCount(0)
+  await expect(page).toHaveURL(/entry=runbook\/rotate-host-keys/)
+  await expect(pane(page).getByRole('heading', { level: 1 })).toHaveText('Rotate the fleet host keys')
+})
+
+test('the pane closes back to the graph, which keeps the display and filters', async ({ page }) => {
+  await setup(page)
+  await page.goto('/p/PHAROS/knowledge?mode=graph&type=runbook&entry=runbook/deploy-release'); await ready(page)
+  await expect(pane(page).getByRole('heading', { level: 1 })).toHaveText('Deploy a release to production')
+  await expect(page.getByRole('group', { name: 'Knowledge display', exact: true })).toBeVisible()
+  await expect(toggle(page, 'Graph')).toHaveAttribute('aria-pressed', 'true')
+  await pane(page).getByRole('button', { name: 'Close the preview' }).click()
+  await expect(page).toHaveURL(/\/knowledge\?(?=.*mode=graph)(?=.*type=runbook)(?!.*entry=)/)
+  await expect(canvas(page)).toBeFocused()
+  // Expanding keeps the way back to the graph.
+  await canvas(page).press('ArrowRight'); await expect(pane(page)).toBeVisible()
+  await pane(page).getByRole('button', { name: 'Open as full page' }).click()
+  await expect(page).toHaveURL(/knowledge\/runbook\/[^?]+\?(?=.*mode=graph)/)
+  await page.keyboard.press('Escape')
+  await expect(page).toHaveURL(/\/knowledge\?(?=.*mode=graph)/); await ready(page)
+})
+
+test('below the docking width the graph keeps its own selection card', async ({ page }) => {
+  await page.setViewportSize({ width: 1100, height: 800 })
+  await setup(page)
+  await page.goto('/p/PHAROS/knowledge?mode=graph&entry=runbook/deploy-release'); await ready(page)
+  await expect(page).toHaveURL(/\/knowledge\?(?=.*mode=graph)(?=.*entry=runbook\/deploy-release)/)
+  await expect(page.locator('.kg-selection')).toContainText('Deploy a release to production')
+  await expect(pane(page)).toHaveCount(0)
+  // Back to Entries drops the selection here, rather than opening the entry's page.
+  await toggle(page, 'Entries').click()
+  await expect(page).toHaveURL(/\/knowledge$/)
+  await expect(page.locator('.k-row')).toHaveCount(8)
 })
 
 test('selection deep links survive reload, retheme, and dimension changes', async ({ page }) => {
   await page.emulateMedia({ reducedMotion: 'no-preference' })
   await setup(page)
   await page.goto('/p/PHAROS/knowledge?mode=graph&entry=runbook/deploy-release'); await ready(page)
-  await expect(page.locator('.kg-selection')).toContainText('Deploy a release to production')
+  await expect(pane(page).getByRole('heading', { level: 1 })).toHaveText('Deploy a release to production')
   await expect(canvas(page)).toHaveAttribute('data-dimension', '3d')
   await page.evaluate(() => { document.documentElement.dataset.theme = 'dark' })
   await page.getByRole('button', { name: '2D', exact: true }).click(); await ready(page)
   await expect(page).toHaveURL(/entry=runbook\/deploy-release/)
   await page.getByRole('button', { name: '3D', exact: true }).click(); await ready(page)
   await page.reload(); await ready(page)
-  await expect(page.locator('.kg-selection')).toContainText('Deploy a release to production')
+  await expect(pane(page).getByRole('heading', { level: 1 })).toHaveText('Deploy a release to production')
 })
 
 test('no WebGL uses the canvas fallback with the same selection controls', async ({ page }) => {
@@ -108,7 +155,7 @@ test('20 mode switches dispose every WebGL context and removed canvas', async ({
     await toggle(page, 'Graph').click(); await ready(page)
     await expect(canvas(page)).toHaveAttribute('data-dimension', '3d')
     await expect(page.locator('.kg-canvas canvas')).toHaveCount(1)
-    await toggle(page, 'List').click(); await expect(page.locator('.kg-canvas canvas')).toHaveCount(0)
+    await toggle(page, 'Entries').click(); await expect(page.locator('.kg-canvas canvas')).toHaveCount(0)
     await expect.poll(() => page.evaluate(() => { const s = (window as unknown as { graphContexts: { created: number; lost: number } }).graphContexts; return s.created - s.lost })).toBe(0)
   }
   expect(await page.evaluate(() => (window as unknown as { graphContexts: { created: number } }).graphContexts.created)).toBeGreaterThanOrEqual(20)
@@ -117,15 +164,20 @@ test('20 mode switches dispose every WebGL context and removed canvas', async ({
 test('a bubble hover, click and double-click work on the canvas itself', async ({ page }) => {
   const { nodes } = await setup(page)
   await page.route('**/api/knowledge/graph?*', route => route.fulfill({ json: { nodes: [nodes[0]], edges: [], truncated: false } }))
-  await page.goto('/p/PHAROS/knowledge?mode=graph'); await ready(page)
+  await page.goto('/p/PHAROS/knowledge?mode=graph'); await ready(page); await frames(page)
   const box = (await canvas(page).boundingBox())!
   const point = { x: box.x + box.width / 2, y: box.y + box.height / 2 }
   await page.mouse.move(point.x, point.y)
   await expect(page.getByRole('tooltip')).toContainText(nodes[0].title)
   await page.mouse.click(point.x, point.y)
   await expect(page).toHaveURL(new RegExp(`entry=${nodes[0].type}/${nodes[0].slug}`))
-  await expect(page.locator('.kg-selection')).toContainText(nodes[0].title)
+  await expect(pane(page).getByRole('heading', { level: 1 })).toHaveText(nodes[0].title)
+  // The stage narrows for the pane and keeps the selection in its centre.
+  const narrowed = await settledBox(page)
+  expect(narrowed.width).toBeLessThan(box.width - 200)
+  const centre = { x: narrowed.x + narrowed.width / 2, y: narrowed.y + narrowed.height / 2 }
+  await frames(page); await page.mouse.move(centre.x, centre.y); await frames(page)
   // Two clicks after selection also open the full entry page.
-  await page.mouse.dblclick(point.x, point.y)
+  await page.mouse.dblclick(centre.x, centre.y)
   await expect(page).toHaveURL(new RegExp(`/knowledge/${nodes[0].type}/${nodes[0].slug}`))
 })

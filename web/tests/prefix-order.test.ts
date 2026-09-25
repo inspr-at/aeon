@@ -18,7 +18,6 @@ const ALLOW: { file: string; why: string }[] = [
   { file: 'components/journey/ReleaseWalker.vue', why: 'Journey view, AEON-139 (builder A)' },
   { file: 'components/journey/WalkerBar.vue', why: 'Journey view, AEON-139 (builder A)' },
   { file: 'styles/journey.css', why: 'Journey view, AEON-139 (builder A)' },
-  { file: 'components/knowledge/KnowledgeEntryPage.vue', why: 'Knowledge, AEON-138' },
 ]
 
 function files(dir: string): string[] {

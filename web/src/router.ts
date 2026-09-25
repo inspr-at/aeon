@@ -26,7 +26,8 @@ export const router = createRouter({
         // A docked entry (?entry=<type>/<slug>) on a screen too narrow to dock it opens the entry's own page.
         { path: 'knowledge', component: RouteMarker, meta: { title: 'Knowledge' }, beforeEnter: to => {
           const entry = parseEntryParam(to.query.entry)
-          if (!entry || window.matchMedia(DOCK_MEDIA).matches) return true
+          // Narrow screens open a docked link as the entry's page; the graph shows its selection itself.
+          if (!entry || to.query.mode === 'graph' || window.matchMedia(DOCK_MEDIA).matches) return true
           const { entry: _entry, ...query } = to.query
           return { path: `/p/${encodeURIComponent(String(to.params.projectKey))}/knowledge/${entry.type}/${encodeURIComponent(entry.slug)}`, query, hash: to.hash, replace: true }
         } },
