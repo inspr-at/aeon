@@ -4,6 +4,7 @@ package httpapi
 
 import (
 	"bytes"
+	"context"
 	"encoding/json"
 	"log/slog"
 	"net/http"
@@ -236,5 +237,94 @@ func TestCapabilityAndPanicDetailsNeverEnterRequestLogs(t *testing.T) {
 	}
 	if strings.Contains(logs.String(), token) || strings.Contains(logs.String(), secretPanic) {
 		t.Fatal("capability path or panic value entered request logs")
+	}
+}
+
+func TestRequestLogRoutes(t *testing.T) {
+	var logs bytes.Buffer
+	previous := slog.Default()
+	slog.SetDefault(slog.New(slog.NewJSONHandler(&logs, nil)))
+	t.Cleanup(func() { slog.SetDefault(previous) })
+
+	s := &Server{
+		Middleware: []func(http.Handler) http.Handler{func(next http.Handler) http.Handler {
+			return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+				// Auth middleware may clone an authenticated request.
+				next.ServeHTTP(w, r.WithContext(context.WithValue(r.Context(), requestIDKey{}, "inner")))
+			})
+		}},
+		Modules: []Module{moduleFunc(func(mux *http.ServeMux) {
+			for _, pattern := range []string{
+				"GET /api/nodes/{id}",
+				"GET /api/public/quotes/{tenant}/{token}",
+				"POST /api/public/quotes/{tenant}/{token}/accept",
+			} {
+				mux.HandleFunc(pattern, func(w http.ResponseWriter, _ *http.Request) {
+					w.WriteHeader(http.StatusNoContent)
+				})
+			}
+		})},
+	}
+	server := s.Handler()
+	bare := requestIDMiddleware(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
+		w.WriteHeader(http.StatusAccepted)
+	}))
+
+	tests := []struct {
+		name, method, path, token, wantRoute string
+		handler                              http.Handler
+		wantStatus                           int
+	}{
+		{"matched node", "GET", "/api/nodes/123?access=query-secret-node", "query-secret-node", "GET /api/nodes/{id}", server, http.StatusNoContent},
+		{"matched public quote", "GET", "/api/public/quotes/tenant/SECRET-QUOTE-TOKEN?access=query-secret-quote", "SECRET-QUOTE-TOKEN", "GET /api/public/quotes/{tenant}/{token}", server, http.StatusNoContent},
+		{"matched public acceptance", "POST", "/api/public/quotes/tenant/SECRET-ACCEPT-TOKEN/accept", "SECRET-ACCEPT-TOKEN", "POST /api/public/quotes/{tenant}/{token}/accept", server, http.StatusNoContent},
+		{"unmatched public quote", "GET", "/api/public/quotes/tenant/SECRET-UNKNOWN-TOKEN/extra", "SECRET-UNKNOWN-TOKEN", "/api/public/{redacted}", server, http.StatusNotFound},
+		{"spa q link", "GET", "/q/SECRET-Q-TOKEN", "SECRET-Q-TOKEN", "/q/{redacted}", server, http.StatusOK},
+		{"spa offer link", "GET", "/offers/tenant/SECRET-OFFER-TOKEN", "SECRET-OFFER-TOKEN", "/offers/{redacted}", server, http.StatusOK},
+		{"invite token", "GET", "/api/invites/SECRET-INVITE-TOKEN/accept", "SECRET-INVITE-TOKEN", "/api/invites/{redacted}", server, http.StatusNotFound},
+		{"link token", "GET", "/api/links/SECRET-LINK-TOKEN", "SECRET-LINK-TOKEN", "/api/links/{redacted}", server, http.StatusNotFound},
+		{"confirmation token", "GET", "/api/quotes/123/confirmation/SECRET-CONFIRM-TOKEN", "SECRET-CONFIRM-TOKEN", "/api/quotes/{redacted}", server, http.StatusNotFound},
+		{"attachment download token", "GET", "/api/attachments/123/content/SECRET-DOWNLOAD-TOKEN", "SECRET-DOWNLOAD-TOKEN", "/api/attachments/{redacted}", server, http.StatusNotFound},
+		{"encoded public token", "GET", "/api/public/quotes/tenant/SECRET%2FENCODED-TOKEN", "SECRET/ENCODED-TOKEN", "GET /api/public/quotes/{tenant}/{token}", server, http.StatusNoContent},
+		{"unmatched unknown token", "GET", "/api/SECRET-UNKNOWN-SECTION/other", "SECRET-UNKNOWN-SECTION", "/api/{redacted}", server, http.StatusNotFound},
+		{"no mux ordinary path", "GET", "/api/nodes/123", "", "/api/nodes/{redacted}", bare, http.StatusAccepted},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			logs.Reset()
+			req := httptest.NewRequest(tt.method, tt.path, nil)
+			rec := httptest.NewRecorder()
+			tt.handler.ServeHTTP(rec, req)
+			if rec.Code != tt.wantStatus {
+				t.Fatalf("status %d, want %d", rec.Code, tt.wantStatus)
+			}
+			log := logs.String()
+			if tt.token != "" && strings.Contains(log, tt.token) {
+				t.Fatal("token entered request log")
+			}
+			if strings.Contains(log, "SECRET%2FENCODED-TOKEN") {
+				t.Fatal("encoded token entered request log")
+			}
+			if strings.Contains(log, "query-secret-") {
+				t.Fatal("query string entered request log")
+			}
+			var entry struct {
+				Method     string `json:"method"`
+				Path       string `json:"path"`
+				Status     int    `json:"status"`
+				RequestID  string `json:"request_id"`
+				DurationMS int64  `json:"duration_ms"`
+			}
+			if err := json.Unmarshal(logs.Bytes(), &entry); err != nil {
+				t.Fatal(err)
+			}
+			if entry.Path != tt.wantRoute || entry.Method != tt.method || entry.Status != tt.wantStatus {
+				t.Fatalf("unexpected request log: path %q, method %q, status %d", entry.Path, entry.Method, entry.Status)
+			}
+			if entry.RequestID == "" || entry.RequestID != rec.Header().Get(requestIDHeader) || entry.DurationMS < 0 {
+				t.Fatal("request id or duration missing from request log")
+			}
+		})
 	}
 }
