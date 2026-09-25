@@ -29,11 +29,15 @@ func importPaimos(args []string, stdout io.Writer) error {
 	dryRun := flags.Bool("dry-run", false, "read and report without writing")
 	concurrency := flags.Int("concurrency", 4, "maximum concurrent source requests")
 	delay := flags.Duration("delay", 0, "minimum delay between source request starts")
+	delta := flags.Bool("delta", false, "import only items that are new or changed since the last import")
 	if err := flags.Parse(args); err != nil {
 		return errors.New("invalid import flags")
 	}
 	if flags.NArg() != 0 || *sourceURL == "" || *keyFile == "" || *tenant == "" {
-		return errors.New("usage: aeon import paimos --source-url URL --api-key-file FILE --tenant SLUG [--project KEY] [--dry-run] [--concurrency N] [--delay DURATION]")
+		return errors.New("usage: aeon import paimos --source-url URL --api-key-file FILE --tenant SLUG [--project KEY] [--dry-run] [--delta] [--concurrency N] [--delay DURATION]")
+	}
+	if *delta && *dryRun {
+		return errors.New("--delta writes; use aeon import reconcile to preview differences")
 	}
 	source, err := importer.NewHTTPSource(*sourceURL, *keyFile, nil)
 	if err != nil {
@@ -56,6 +60,13 @@ func importPaimos(args []string, stdout io.Writer) error {
 		}
 		defer pool.Close()
 		job.Writer = importer.PostgresWriter{Pool: pool}
+	}
+	if *delta {
+		report, err := job.RunDelta(ctx, *tenant, *project)
+		if err != nil {
+			return err
+		}
+		return json.NewEncoder(stdout).Encode(report)
 	}
 	report, err := job.Run(ctx, *tenant, *project, *dryRun)
 	if err != nil {
@@ -146,4 +157,38 @@ func importPaimosAttachments(args []string, stdout io.Writer) error {
 		return fmt.Errorf("after %d attachments: %w", created, err)
 	}
 	return json.NewEncoder(stdout).Encode(map[string]int{"attachments_created": created})
+}
+
+// importReconcile compares the classic source with the Aeon tenant import. It
+// only reads: GET against classic, SELECT against Aeon.
+func importReconcile(args []string, stdout io.Writer) error {
+	flags := flag.NewFlagSet("aeon import reconcile", flag.ContinueOnError)
+	flags.SetOutput(io.Discard)
+	sourceURL := flags.String("source-url", "", "classic Paimos URL")
+	keyFile := flags.String("api-key-file", "", "bearer key file")
+	tenant := flags.String("tenant", "", "Aeon tenant slug")
+	project := flags.String("project", "", "classic project key (all projects when empty)")
+	if err := flags.Parse(args); err != nil || flags.NArg() != 0 || *sourceURL == "" || *keyFile == "" || *tenant == "" {
+		return errors.New("usage: aeon import reconcile --source-url URL --api-key-file FILE --tenant SLUG [--project KEY]")
+	}
+	source, err := importer.NewHTTPSource(*sourceURL, *keyFile, nil)
+	if err != nil {
+		return err
+	}
+	ctx, stop := signal.NotifyContext(context.Background(), syscall.SIGTERM, syscall.SIGINT)
+	defer stop()
+	cfg, err := config.FromEnv()
+	if err != nil {
+		return err
+	}
+	pool, err := db.Open(ctx, cfg.DatabaseURL)
+	if err != nil {
+		return fmt.Errorf("open target database: %w", err)
+	}
+	defer pool.Close()
+	report, err := importer.Reconcile(ctx, source, pool, attachments.Store{FilesDir: cfg.FilesDir}, *tenant, *project)
+	if err != nil {
+		return err
+	}
+	return json.NewEncoder(stdout).Encode(report)
 }

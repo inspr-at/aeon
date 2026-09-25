@@ -37,6 +37,13 @@ func main() {
 		}
 		return
 	}
+	if len(os.Args) > 2 && os.Args[1] == "import" && os.Args[2] == "reconcile" {
+		if err := importReconcile(os.Args[3:], os.Stdout); err != nil {
+			fmt.Fprintln(os.Stderr, "import:", err)
+			os.Exit(1)
+		}
+		return
+	}
 	if len(os.Args) > 2 && os.Args[1] == "import" && os.Args[2] == "paimos-offers" {
 		if err := offersimport.RunCommand(context.Background(), os.Args[3:], os.Stdin, os.Stdout); err != nil {
 			fmt.Fprintln(os.Stderr, "import:", err)
