@@ -277,3 +277,85 @@ func TestList6000Performance(t *testing.T) {
 		}
 	}
 }
+
+// Project summaries name the people most recently active in each project: the
+// actors of recent events on the project or anything below it, newest first,
+// a linked principal as its person, at most five, nothing older than 90 days.
+func TestProjectSummaryRecentPeople(t *testing.T) {
+	p := newPrincipal(t, "recent-people")
+	project := kindBySlug(t, p, "project")
+	ticket := kindBySlug(t, p, "ticket")
+	main := mustNode(t, p, `{"kind_id":"`+project.ID+`","title":"Main"}`)
+	child := mustNode(t, p, `{"kind_id":"`+ticket.ID+`","title":"Child","parent_id":"`+main.ID+`"}`)
+	grandchild := mustNode(t, p, `{"kind_id":"`+ticket.ID+`","title":"Grandchild","parent_id":"`+child.ID+`"}`)
+	ctx := t.Context()
+	var ids = map[string]string{}
+	var quiet string
+	err := db.InTenant(ctx, appPool, p.TenantID, func(tx pgx.Tx) error {
+		// A project nobody touched (inserted without an event).
+		if err := tx.QueryRow(ctx, `INSERT INTO nodes (tenant_id, key, kind_id, title) VALUES ($1, 'QUI-1', $2, 'Quiet') RETURNING id::text`, p.TenantID, project.ID).Scan(&quiet); err != nil {
+			return err
+		}
+		for _, person := range []struct{ name, kind string }{{"Mira", "person"}, {"Robo", "agent"}, {"Old", "person"}, {"Ann", "person"}, {"Ben", "person"}, {"Cy", "person"}, {"Dee", "person"}} {
+			var id string
+			if err := tx.QueryRow(ctx, `INSERT INTO principals (tenant_id, kind, name) VALUES ($1, $2, $3) RETURNING id::text`, p.TenantID, person.kind, person.name).Scan(&id); err != nil {
+				return err
+			}
+			ids[person.name] = id
+		}
+		// A classic import principal linked to Mira counts as Mira.
+		var imported string
+		if err := tx.QueryRow(ctx, `INSERT INTO principals (tenant_id, kind, name, linked_to) VALUES ($1, 'person', 'mira (classic)', $2) RETURNING id::text`, p.TenantID, ids["Mira"]).Scan(&imported); err != nil {
+			return err
+		}
+		ids["imported"] = imported
+		event := func(actor, node string, hoursAgo float64) error {
+			_, err := tx.Exec(ctx, `INSERT INTO events (tenant_id, actor_principal_id, node_id, type, after, at) VALUES ($1, $2, $3, 'node.updated', '{}'::jsonb, now() - make_interval(secs => $4))`, p.TenantID, actor, node, hoursAgo*3600)
+			return err
+		}
+		for _, e := range []struct {
+			actor, node string
+			hours       float64
+		}{
+			{ids["Robo"], grandchild.ID, 1},
+			{ids["imported"], child.ID, 2},
+			{ids["Mira"], main.ID, 30},
+			{ids["Old"], child.ID, 24 * 120},
+			{ids["Ann"], child.ID, 3},
+			{ids["Ben"], child.ID, 4},
+			{ids["Cy"], child.ID, 5},
+			{ids["Dee"], child.ID, 6},
+		} {
+			if err := event(e.actor, e.node, e.hours); err != nil {
+				return err
+			}
+		}
+		return nil
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	status, body := call(t, &p, http.MethodGet, "/api/projects", "")
+	page := decode[projectPage](t, status, body, http.StatusOK)
+	byID := map[string]projectSummary{}
+	for _, item := range page.Items {
+		byID[item.ID] = item
+	}
+	var names []string
+	for _, person := range byID[main.ID].People {
+		names = append(names, person.Name+":"+person.Kind)
+	}
+	// The creator of the nodes acted last (node.created, just now); Dee and Old drop out.
+	if strings.Join(names, ",") != "recent-people:person,Robo:agent,Mira:person,Ann:person,Ben:person" {
+		t.Fatalf("recent people = %v", names)
+	}
+	if byID[main.ID].People[2].ID != ids["Mira"] {
+		t.Fatalf("linked principal shown as itself: %#v", byID[main.ID].People[2])
+	}
+	if got, ok := byID[quiet]; !ok || got.People == nil || len(got.People) != 0 {
+		t.Fatalf("quiet project people = %#v (%s)", got.People, body)
+	}
+	if !strings.Contains(string(body), `"people":[]`) {
+		t.Fatalf("empty people must serialize as []: %s", body)
+	}
+}

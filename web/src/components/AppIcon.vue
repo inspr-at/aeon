@@ -12,6 +12,7 @@ export type IconName =
   | 'command' | 'option' | 'backspace'
   | 'book' | 'runbook' | 'guideline' | 'memory' | 'server' | 'folders' | 'terminal' | 'hash'
   | 'bookmark' | 'star' | 'calendar' | 'coin' | 'not' | 'sort' | 'select' | 'shift'
+  | 'cards' | 'columns' | 'grip'
 </script>
 <script setup lang="ts">
 withDefaults(defineProps<{ name: IconName; size?: number }>(), { size: 16 })
@@ -59,6 +60,9 @@ withDefaults(defineProps<{ name: IconName; size?: number }>(), { size: 16 })
     <template v-else-if="name === 'inbox'"><path d="M2 9.4 4.2 3.6h7.6L14 9.4v3a1 1 0 0 1-1 1H3a1 1 0 0 1-1-1Z" /><path d="M2 9.4h3.3l1 1.5h3.4l1-1.5H14" /></template>
     <path v-else-if="name === 'folder'" d="M2 4.6c0-.6.4-1 1-1h3.2l1.5 1.5H13c.6 0 1 .4 1 1V12c0 .6-.4 1-1 1H3c-.6 0-1-.4-1-1Z" />
     <path v-else-if="name === 'layers'" d="M8 2 14 5 8 8 2 5ZM2 8.2l6 3 6-3M2 11.2l6 3 6-3" />
+    <template v-else-if="name === 'cards'"><rect x="2" y="2" width="5.2" height="5.2" rx="1.4" /><rect x="8.8" y="2" width="5.2" height="5.2" rx="1.4" /><rect x="2" y="8.8" width="5.2" height="5.2" rx="1.4" /><rect x="8.8" y="8.8" width="5.2" height="5.2" rx="1.4" /></template>
+    <template v-else-if="name === 'columns'"><rect x="1.8" y="2.6" width="12.4" height="10.8" rx="1.8" /><path d="M6 2.6v10.8M10 2.6v10.8" /></template>
+    <template v-else-if="name === 'grip'"><circle cx="6" cy="3.8" r="1.1" fill="currentColor" stroke="none" /><circle cx="10" cy="3.8" r="1.1" fill="currentColor" stroke="none" /><circle cx="6" cy="8" r="1.1" fill="currentColor" stroke="none" /><circle cx="10" cy="8" r="1.1" fill="currentColor" stroke="none" /><circle cx="6" cy="12.2" r="1.1" fill="currentColor" stroke="none" /><circle cx="10" cy="12.2" r="1.1" fill="currentColor" stroke="none" /></template>
     <template v-else-if="name === 'archive'"><rect x="1.8" y="2.8" width="12.4" height="3.4" rx="1" /><path d="M3 6.2v6.2c0 .6.4 1 1 1h8c.6 0 1-.4 1-1V6.2M6.4 9h3.2" /></template>
     <path v-else-if="name === 'expand'" d="M9.4 2.6h4v4M13.4 2.6 9.2 6.8M6.6 13.4h-4v-4M2.6 13.4l4.2-4.2" />
     <path v-else-if="name === 'collapse'" d="M13.4 2.6 9.4 6.6M9.4 3v3.6H13M2.6 13.4l4-4M6.6 13V9.4H3" />

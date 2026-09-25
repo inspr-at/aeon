@@ -1000,9 +1000,9 @@ watch([project, panelItem, knowledgeActive, knowledgeEntryOpen], ([current, item
         </div>
         <div v-if="counts" class="head-stats" :aria-label="`${counts.open} open, ${counts.progress} in progress, ${counts.done} done of ${counts.total}`">
           <div class="stat-line">
-            <span class="stat"><StatusIcon state="new" :size="11" /><b>{{ counts.open.toLocaleString('en-GB') }}</b> open</span>
-            <span class="stat"><StatusIcon state="in_progress" :size="11" /><b>{{ counts.progress.toLocaleString('en-GB') }}</b> in progress</span>
-            <span class="stat"><StatusIcon state="done" :size="11" /><b>{{ counts.done.toLocaleString('en-GB') }}</b> done</span>
+            <span class="stat" data-tip="Open · new and backlog"><StatusIcon state="new" :size="11" /><b>{{ counts.open.toLocaleString('en-GB') }}</b> open</span>
+            <span class="stat" data-tip="In progress · in progress and QA"><StatusIcon state="in_progress" :size="11" /><b>{{ counts.progress.toLocaleString('en-GB') }}</b> doing</span>
+            <span class="stat" data-tip="Done · done, delivered and accepted"><StatusIcon state="done" :size="11" /><b>{{ counts.done.toLocaleString('en-GB') }}</b> done</span>
           </div>
           <div class="progress-line" :data-tip="`${counts.done.toLocaleString('en-GB')} of ${(counts.total - counts.cancelled).toLocaleString('en-GB')} done${counts.cancelled ? ` · ${counts.cancelled} cancelled` : ''}`">
             <span class="bar"><i :style="{ width: `${counts.percent}%` }" /></span>

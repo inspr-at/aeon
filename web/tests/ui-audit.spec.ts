@@ -19,9 +19,10 @@ import { journeyWorld, mockJourney } from './journey-fixtures'
 import { domAudit, expectedMockConsole, decorativeVersionContrast, installLayoutShiftAudit, armLayoutShiftAudit, readLayoutShiftAudit, type Kind, type Raw } from './ui-audit-rules'
 import { mockQuoteEditor, QUOTE_ID } from './quote-inspector-fixtures'
 import { knowledgeWorld, mockKnowledge } from './knowledge-fixtures'
+import { groupsWorld, mockProjectGroups } from './project-groups-fixtures'
 
 type Finding = Raw & { id: string; route: string; state: string; viewport: string; theme: string; screenshot: string }
-type Setup = 'default' | 'editor' | 'journey' | 'public' | 'signed-out'
+type Setup = 'default' | 'editor' | 'journey' | 'public' | 'signed-out' | 'groups' | 'cards'
 type Scenario = { state: string; route: string; setup?: Setup; act?: (page: Page) => Promise<void> }
 
 const output = resolve(process.cwd(), 'test-results/qa2b-findings.json')
@@ -94,6 +95,13 @@ const scenarios: Scenario[] = [
   { state: 'knowledge edit', route: '/p/PHAROS/knowledge/external-system/hetzner', act: async page => { await visible('.e-where')(page); await page.getByRole('button', { name: /^Edit/ }).click(); await expect(page.getByRole('form', { name: 'Edit hetzner' })).toBeVisible() } },
   { state: 'knowledge new entry dialog', route: '/p/PHAROS/knowledge', act: async page => { await visible('.k-row')(page); await page.getByRole('button', { name: 'New knowledge entry' }).click(); await expect(page.getByRole('dialog', { name: 'New knowledge entry' })).toBeVisible() } },
   { state: 'knowledge across projects', route: '/knowledge?q=deploy', act: visible('.kp-row') },
+  // AEON-136: project groups, the chip row, cards, menus, the move dialog and selection.
+  { state: 'projects groups', route: '/', setup: 'groups', act: visible('.group-head') },
+  { state: 'projects cards', route: '/', setup: 'cards', act: visible('.card') },
+  { state: 'projects group menu', route: '/', setup: 'groups', act: async page => { await visible('.group-head')(page); await page.getByRole('button', { name: 'Actions for group Focus' }).click(); await expect(page.getByRole('menu')).toBeVisible() } },
+  { state: 'projects display', route: '/', setup: 'groups', act: async page => { await visible('.group-head')(page); await page.getByRole('button', { name: /^Display/ }).click(); await expect(page.getByRole('dialog', { name: 'Display options' })).toBeVisible() } },
+  { state: 'projects move dialog', route: '/', setup: 'cards', act: async page => { await visible('.card')(page); await page.locator('.card-link').first().focus(); await page.keyboard.press('m'); await expect(page.getByRole('dialog', { name: /^Move .* to a group$/ })).toBeVisible() } },
+  { state: 'projects selection', route: '/', setup: 'cards', act: async page => { await visible('.card')(page); await page.locator('.card-link').first().focus(); await page.keyboard.press('x'); await expect(page.getByRole('toolbar', { name: /selected project/ })).toBeVisible() } },
 ]
 
 async function installMocks(page: Page, setup: Setup) {
@@ -103,7 +111,13 @@ async function installMocks(page: Page, setup: Setup) {
       : route.fulfill({ status: 404, json: { error: 'not found' } }))
     return
   }
-  await mockWork(page, fixtures())
+  const data = fixtures()
+  if (setup === 'groups' || setup === 'cards') {
+    data.preferences['project-groups'] = { groups: [{ id: 'g:focus', name: 'Focus' }, { id: 'g:later', name: 'Later' }], place: { 'p-pharos': 'g:focus' }, hidden: ['archived', 'g:later'] }
+    if (setup === 'cards') data.preferences.projects = { view: 'cards' }
+  }
+  await mockWork(page, data)
+  await mockProjectGroups(page, data, groupsWorld({ clients: setup === 'groups' || setup === 'cards' ? ['p-aeon'] : undefined }))
   if (setup === 'public') { await mockPublicQuote(page, { acceptable: true }); return }
   await mockAgents(page, agentData({ me: me.id, projects: { pharos: 'p-pharos', aeon: 'p-aeon', pai: 'p-frozen' }, tickets: { fleet: 'n-1', restore: 'n-2', web: 'n-a1', release: 'n-5', approvals: 'n-6' }, nodes: {
     'p-pharos': { key: 'PRJ-17', title: 'Pharos' }, 'p-aeon': { key: 'PRJ-35', title: 'Aeon' }, 'p-frozen': { key: 'PRJ-26', title: 'Studio infrastructure' },

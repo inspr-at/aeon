@@ -1,37 +1,50 @@
 <!-- SPDX-License-Identifier: AGPL-3.0-only -->
-<script setup lang="ts">
-import { computed, nextTick, ref } from 'vue'
-import { COLUMN_BY_ID, PINNED, moveColumn, type ColumnId } from '../../lib/columns'
+<script setup lang="ts" generic="T extends string = ColumnId">
+import { computed, nextTick, ref, useId } from 'vue'
+import { COLUMN_BY_ID, PINNED, type ColumnId } from '../../lib/columns'
 import AppIcon from '../AppIcon.vue'
 
-// Show, hide and reorder list columns: drag a row, or Alt+Up/Down on it. Key and
-// Title always lead. "Automatic" goes back to columns that follow the width.
-const props = defineProps<{ order: ColumnId[]; visible: ColumnId[]; customised: boolean }>()
-const emit = defineEmits<{ change: [order: ColumnId[], visible: ColumnId[]]; reset: [] }>()
-const free = computed(() => props.order.filter(id => !PINNED.includes(id)))
+// Show, hide and reorder list columns: drag a row, or Alt+Up/Down on it. The
+// pinned columns always lead. Reset goes back to the list's own choice
+// ("Automatic" columns that follow the width, for tickets). Other lists (the
+// Projects list) pass their own labels, pinned columns and wording.
+const props = withDefaults(defineProps<{
+  order: T[]; visible: T[]; customised: boolean
+  labels?: Partial<Record<string, string>>; pinned?: T[]; resetLabel?: string; resetTip?: string; note?: string | null
+}>(), { labels: undefined, pinned: undefined, resetLabel: 'Automatic', resetTip: 'Columns follow the width again', note: 'Drag a header edge to resize a column; double-click it to fit.' })
+const emit = defineEmits<{ change: [order: T[], visible: T[]]; reset: [] }>()
+const pins = computed<T[]>(() => props.pinned ?? (PINNED as unknown as T[]))
+const label = (id: T) => props.labels?.[id] ?? COLUMN_BY_ID.get(id as unknown as ColumnId)?.label ?? id
+const free = computed(() => props.order.filter(id => !pins.value.includes(id)))
 const shown = computed(() => new Set(props.visible))
-const dragging = ref<ColumnId | null>(null)
-const over = ref<ColumnId | null>(null)
+// Plain strings: a generic ref does not unwrap cleanly in the template.
+const dragging = ref<string | null>(null)
+const over = ref<string | null>(null)
+const hint = `move-hint-${useId()}`
 
-function toggle(id: ColumnId) {
+function toggle(id: T) {
   const next = shown.value.has(id) ? props.visible.filter(x => x !== id) : [...props.visible, id]
-  emit('change', props.order, next.filter(x => !PINNED.includes(x)))
+  emit('change', props.order, next.filter(x => !pins.value.includes(x)))
 }
-function step(id: ColumnId, delta: -1 | 1) {
-  emit('change', moveColumn(props.order, id, delta), props.visible.filter(x => !PINNED.includes(x)))
+function step(id: T, delta: -1 | 1) {
+  const list = [...free.value]
+  const index = list.indexOf(id), to = index + delta
+  if (index === -1 || to < 0 || to >= list.length) return
+  ;[list[index], list[to]] = [list[to]!, list[index]!]
+  emit('change', [...pins.value, ...list], props.visible.filter(x => !pins.value.includes(x)))
   // Moving the row in the DOM drops focus; put it back as soon as the list re-renders.
   void nextTick(() => document.querySelector<HTMLElement>(`[data-column-row="${id}"]`)?.focus())
 }
-function keydown(event: KeyboardEvent, id: ColumnId) {
+function keydown(event: KeyboardEvent, id: T) {
   if (event.altKey && (event.key === 'ArrowUp' || event.key === 'ArrowDown')) { event.preventDefault(); step(id, event.key === 'ArrowUp' ? -1 : 1) }
 }
-function drop(target: ColumnId) {
-  const from = dragging.value
+function drop(target: T) {
+  const from = dragging.value as T | null
   dragging.value = null; over.value = null
   if (!from || from === target) return
   const list = free.value.filter(x => x !== from)
   list.splice(list.indexOf(target), 0, from)
-  emit('change', [...PINNED, ...list], props.visible.filter(x => !PINNED.includes(x)))
+  emit('change', [...pins.value, ...list], props.visible.filter(x => !pins.value.includes(x)))
 }
 </script>
 
@@ -39,13 +52,13 @@ function drop(target: ColumnId) {
   <div class="columns">
     <div class="head">
       <p class="eyebrow">Columns</p>
-      <button v-if="customised" type="button" class="reset" data-tip="Columns follow the width again" @click="emit('reset')">Automatic</button>
-      <span v-else class="auto-note">Automatic</span>
+      <button v-if="customised" type="button" class="reset" :data-tip="resetTip" @click="emit('reset')">{{ resetLabel }}</button>
+      <span v-else class="auto-note">{{ resetLabel }}</span>
     </div>
     <ul class="list" aria-label="Columns">
-      <li v-for="id in PINNED" :key="id" class="row pinned">
-        <input type="checkbox" class="check" checked disabled :aria-label="`${COLUMN_BY_ID.get(id)!.label} (always shown)`" />
-        <span class="name">{{ COLUMN_BY_ID.get(id)!.label }}</span>
+      <li v-for="id in pins" :key="id" class="row pinned">
+        <input type="checkbox" class="check" checked disabled :aria-label="`${label(id)} (always shown)`" />
+        <span class="name">{{ label(id) }}</span>
         <span class="pin-note">Always</span>
       </li>
       <li
@@ -54,20 +67,20 @@ function drop(target: ColumnId) {
       >
         <label class="row-label">
           <input
-            type="checkbox" class="check" :checked="shown.has(id)" :data-column-row="id" :aria-describedby="`move-hint`"
+            type="checkbox" class="check" :checked="shown.has(id)" :data-column-row="id" :aria-describedby="hint"
             @change="toggle(id)" @keydown="keydown($event, id)"
           />
-          <span class="name">{{ COLUMN_BY_ID.get(id)!.label }}</span>
+          <span class="name">{{ label(id) }}</span>
         </label>
         <span class="moves">
-          <button type="button" class="icon-btn sm flat" :aria-label="`Move ${COLUMN_BY_ID.get(id)!.label} up`" :disabled="index === 0" tabindex="-1" @click="step(id, -1)"><AppIcon name="chevron-up" :size="13" /></button>
-          <button type="button" class="icon-btn sm flat" :aria-label="`Move ${COLUMN_BY_ID.get(id)!.label} down`" :disabled="index === free.length - 1" tabindex="-1" @click="step(id, 1)"><AppIcon name="chevron" :size="13" /></button>
+          <button type="button" class="icon-btn sm flat" :aria-label="`Move ${label(id)} up`" :disabled="index === 0" tabindex="-1" @click="step(id, -1)"><AppIcon name="chevron-up" :size="13" /></button>
+          <button type="button" class="icon-btn sm flat" :aria-label="`Move ${label(id)} down`" :disabled="index === free.length - 1" tabindex="-1" @click="step(id, 1)"><AppIcon name="chevron" :size="13" /></button>
         </span>
         <span class="grip" aria-hidden="true" />
       </li>
     </ul>
-    <p id="move-hint" class="sr-only">Alt and the arrow keys move the column.</p>
-    <p class="fine">Drag a header edge to resize a column; double-click it to fit.</p>
+    <p :id="hint" class="sr-only">Alt and the arrow keys move the column.</p>
+    <p v-if="note" class="fine">{{ note }}</p>
   </div>
 </template>
 

@@ -37,6 +37,7 @@ import (
 	"github.com/inspr-at/aeon/internal/nodes"
 	"github.com/inspr-at/aeon/internal/plugins"
 	"github.com/inspr-at/aeon/internal/profile"
+	"github.com/inspr-at/aeon/internal/projectgroups"
 	"github.com/inspr-at/aeon/internal/relations"
 	"github.com/inspr-at/aeon/internal/releasehistory"
 	"github.com/inspr-at/aeon/internal/releases"
@@ -205,13 +206,14 @@ func serveListener(ctx context.Context, cfg config.Config, ln net.Listener) erro
 			authMod,
 			nodes.New(pool, nodes.SQLWriter{}),
 			relations.New(pool),
-			events.New(pool, events.WithUndoHandlers(nodes.UndoHandlers()), events.WithUndoHandlers(views.UndoHandlers()), events.WithUndoHandlers(knowledge.UndoHandlers()), events.WithUndoHandlers(attachments.UndoHandlers()), events.WithUndoHandlers(hours.UndoHandlers(pluginRegistry)), events.WithUndoHandlers(profile.UndoHandlers()), events.WithUndoHandlers(crm.UndoHandlers(pluginRegistry)), events.WithUndoHandlers(publicquotes.UndoHandlers()), events.WithUndoHandlers(quotes.UndoHandlers(pluginRegistry))),
+			events.New(pool, events.WithUndoHandlers(nodes.UndoHandlers()), events.WithUndoHandlers(views.UndoHandlers()), events.WithUndoHandlers(knowledge.UndoHandlers()), events.WithUndoHandlers(projectgroups.UndoHandlers()), events.WithUndoHandlers(attachments.UndoHandlers()), events.WithUndoHandlers(hours.UndoHandlers(pluginRegistry)), events.WithUndoHandlers(profile.UndoHandlers()), events.WithUndoHandlers(crm.UndoHandlers(pluginRegistry)), events.WithUndoHandlers(publicquotes.UndoHandlers()), events.WithUndoHandlers(quotes.UndoHandlers(pluginRegistry))),
 			search.New(pool, embedProvider),
 			views.New(pool),
 			activity.New(pool),
 			attachments.New(pool, attachments.Store{FilesDir: cfg.FilesDir}),
 			greetingsMod,
 			knowledge.New(pool),
+			projectgroups.New(pool),
 			historyMod,
 			profile.New(pool, attachments.Store{FilesDir: cfg.FilesDir}),
 			imports.New(pool),

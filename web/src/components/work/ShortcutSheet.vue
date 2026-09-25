@@ -18,6 +18,14 @@ const sections: { title: string; rows: { keys: Key[][]; label: string; joiner?: 
     { keys: [['g'], ['b']], joiner: 'then', label: 'Go to Business' },
     { keys: [['?']], label: 'This sheet' },
   ] },
+  { title: 'Projects', rows: [
+    { keys: [['j'], ['k']], label: 'Next and previous project' },
+    { keys: [[{ icon: 'arrow-left', label: 'Left arrow' }], [{ icon: 'arrow', label: 'Right arrow' }], [{ icon: 'arrow-up', label: 'Up arrow' }], [{ icon: 'arrow-down', label: 'Down arrow' }]], label: 'Among cards: the card beside, above or below' },
+    { keys: [['x']], label: 'Select the project; Shift-click selects a range' },
+    { keys: [['m']], label: 'Move to group, with type-ahead; a new name makes a group' },
+    { keys: [[ALT, { icon: 'arrow-up', label: 'Up arrow' }], [ALT, { icon: 'arrow-down', label: 'Down arrow' }]], label: 'On a group header: move the group up or down' },
+    { keys: [['Esc']], label: 'Clear the selection' },
+  ] },
   { title: 'Search', rows: [
     { keys: [[{ icon: 'arrow-down', label: 'Down arrow' }], [{ icon: 'arrow-up', label: 'Up arrow' }]], label: 'Move through results' },
     { keys: [['Tab']], label: 'Next group of results' },
