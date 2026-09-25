@@ -83,7 +83,7 @@ onMounted(async () => { await nextTick(); focusAt(0) })
 .row-menu-reason { margin-top: 2px; color: var(--ink-2); font-size: 12px; line-height: 1.4; white-space: normal; }
 .row-menu-item:has(.row-menu-reason.shown) { align-items: flex-start; padding-top: 8px; padding-bottom: 8px; }
 .row-menu-item:has(.row-menu-reason.shown) > svg { margin-top: 2px; }
-@media (pointer: coarse) {
+@media (pointer: coarse), (max-width: 600px) {
   .row-menu-item { min-height: 44px; }
   .row-menu-reason:not(.shown) { position: static; width: auto; height: auto; overflow: visible; clip-path: none; white-space: normal; }
   .row-menu-item:has(.row-menu-reason) { align-items: flex-start; padding-top: 8px; padding-bottom: 8px; }

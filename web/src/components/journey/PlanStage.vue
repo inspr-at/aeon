@@ -99,7 +99,7 @@ async function addTicket() {
         <ReleaseList :releases="releases" :current-id="journey.current_release_id" :selected-id="ctx.release.value?.id ?? null" :now="ctx.now.value" :limit="6" @select="r => ctx.selectRelease(r.key)" />
       </section>
     </div>
-    <div class="j-col">
+    <div v-if="!journey.current_release_id || status === 'ready' || status === 'error'" class="j-col">
       <GateCard
         v-if="opening" eyebrow="Decision" title="Open release 1"
         :action="{ label: ctx.next.value.label, disabled: ctx.next.value.disabled, busy: ctx.next.value.busy, tip: ctx.next.value.tip }" @act="ctx.runNext()"
@@ -147,7 +147,7 @@ async function addTicket() {
 </template>
 
 <style scoped>
-.list-skel { height: 180px; border-radius: 10px; }
+.list-skel { height: 560px; border-radius: 10px; }
 .add-row { display: flex; gap: 8px; }
 .add-row .field { height: 36px; }
 .add-row .feature { width: 220px; flex-shrink: 0; }

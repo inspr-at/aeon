@@ -110,6 +110,7 @@ function keys(event: KeyboardEvent) {
 .inspector-title { font: 600 14px/1.3 var(--font); color: var(--ink); }
 .tabs { display: grid; grid-template-columns: repeat(3, minmax(0, 1fr)); gap: 2px; margin: 4px 16px 0; padding: 3px; border-radius: 10px; background: var(--seg-bg); box-shadow: inset 0 1px 2px rgba(32, 60, 61, .08); }
 .tab { height: 30px; padding: 0 8px; border: 0; border-radius: 7px; background: transparent; color: var(--ink-2); font-size: 12.5px; font-weight: 600; }
+@media (max-width: 600px) { .tab { height: 44px; } }
 @media (hover: hover) { .tab:hover { color: var(--ink); background: var(--row-hover); } }
 .tab[aria-selected="true"] { background: var(--seg-on); color: var(--teal-ink); box-shadow: 0 1px 2px rgba(32, 60, 61, .14), inset 0 0 0 1px var(--glass-edge); }
 .tab:focus-visible { box-shadow: var(--focus-ring); }
@@ -122,4 +123,5 @@ function keys(event: KeyboardEvent) {
 .empty-icon { display: grid; place-items: center; width: 36px; height: 36px; margin-bottom: 4px; border-radius: 10px; background: var(--chip-teal-bg); box-shadow: inset 0 0 0 1px var(--chip-teal-line); color: var(--teal-ink); }
 .empty-title { font-size: 14px; font-weight: 650; color: var(--ink); }
 .close { margin-right: -6px; }
+@media (max-width: 600px) { .close { width: 44px; height: 44px; } .close::before { content: none; } }
 </style>

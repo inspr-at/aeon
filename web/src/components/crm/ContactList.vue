@@ -165,7 +165,7 @@ defineExpose({ add: () => start(null) })
 
 <style scoped>
 .empty-line { font-size: 13.5px; color: var(--ink-3); }
-.sk { display: grid; gap: 12px; }
+.sk { display: grid; align-content: start; gap: 12px; min-height: 204px; }
 .sk-row { display: flex; align-items: center; gap: 12px; }
 .sk-row .skeleton { flex: 1; }
 .sk-row .sk-avatar { flex: 0 0 36px; height: 36px; border-radius: 50%; }
@@ -179,6 +179,7 @@ defineExpose({ add: () => start(null) })
 .role { font-size: 12.5px; color: var(--ink-2); }
 .reach { display: flex; flex-wrap: wrap; gap: 2px 14px; margin-top: 2px; }
 .reach-link { display: inline-flex; align-items: center; gap: 6px; min-height: 24px; color: var(--teal-ink); font-size: 13px; text-decoration: none; overflow-wrap: anywhere; }
+@media (max-width: 600px) { .reach-link { min-height: 44px; } .row-actions .icon-btn { width: 44px; height: 44px; } }
 .reach-link svg { flex-shrink: 0; color: var(--ink-3); }
 .reach-link:hover { text-decoration: underline; }
 .reach-link:focus-visible { box-shadow: var(--focus-ring); border-radius: 4px; }

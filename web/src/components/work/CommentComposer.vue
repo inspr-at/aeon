@@ -50,6 +50,7 @@ defineExpose({ focus, isDirty: () => !!draft.value.trim() })
 .composer.open .composer-box { box-shadow: var(--focus-ring); }
 .composer-area { display: block; width: 100%; min-height: 36px; padding: 8px 12px; border: 0; background: transparent; color: var(--ink); resize: none; font: 13.5px/1.5 var(--font); }
 .composer-area:focus { box-shadow: none; }
+@media (max-width: 600px) { .composer-area { min-height: 44px; } }
 .composer-area::placeholder { color: var(--ink-3); }
 .composer-foot { display: flex; align-items: center; justify-content: space-between; gap: 8px; padding: 0 6px 6px 12px; }
 .keys { display: inline-flex; align-items: center; gap: 3px; font-size: 11.5px; color: var(--ink-3); }

@@ -321,6 +321,7 @@ onBeforeUnmount(() => { document.removeEventListener('pointerdown', outside); wi
 .theme-seg { display: grid; grid-template-columns: repeat(3, 1fr); }
 .theme-seg button { height: 30px; gap: 5px; padding: 0 6px; }
 .menu-row { display: flex; align-items: center; gap: 10px; width: 100%; height: 36px; padding: 0 10px; border: 0; border-radius: 8px; background: transparent; color: var(--ink); font-size: 13.5px; text-align: left; }
+@media (max-width: 600px) { .menu-row { height: 44px; } }
 .menu-row svg { color: var(--ink-2); }
 @media (hover: hover) { .menu-row:hover:not(:disabled) { background: var(--row-hover); } }
 .menu-row:active:not(:disabled) { background: var(--row-selected); }
@@ -359,7 +360,7 @@ onBeforeUnmount(() => { document.removeEventListener('pointerdown', outside); wi
   .crumbs.lead { padding-left: 2px; }
   .crumb { height: 44px; margin: 0; padding: 0 4px; }
   /* A long name ends in an ellipsis instead of a hard cut. */
-  .crumbs > .crumb.current { display: block; flex-shrink: 1; min-width: 0; overflow: hidden; text-overflow: ellipsis; line-height: 44px; }
+  .crumbs > .crumb.current { display: block; flex-shrink: 1; min-width: 0; max-width: 100%; overflow: hidden; text-overflow: ellipsis; line-height: 44px; }
   .crumb-name { display: none; }
   .crumb-long { display: none; }
   .crumb-short { display: inline; }

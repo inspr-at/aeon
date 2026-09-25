@@ -230,13 +230,16 @@ defineExpose({ begin, cancel, isOpen: () => !!open.value })
 .expiry { display: inline-flex; align-items: center; gap: 4px; font-size: 12px; color: var(--ink-3); }
 .expiry.soon { color: var(--gold-ink); font-weight: 600; }
 .line2 { display: flex; align-items: center; flex-wrap: wrap; gap: 6px; font-size: 12.5px; color: var(--ink-2); }
+@media (max-width: 600px) { .line2 { row-gap: 28px; } }
+@media (max-width: 600px) { .who { z-index: 1; } }
 .who { display: inline-flex; align-items: center; gap: 6px; height: 24px; padding: 0 8px 0 3px; border: 0; border-radius: 999px; background: var(--chip-bg); box-shadow: inset 0 0 0 1px var(--chip-line); color: var(--ink); font-size: 12.5px; font-weight: 600; }
 .who:hover { box-shadow: inset 0 0 0 1px var(--chip-teal-line); color: var(--teal-ink); }
 .who:focus-visible { box-shadow: var(--focus-ring); }
 .harness { display: inline-flex; align-items: center; height: 16px; padding: 0 6px; border-radius: 999px; background: var(--surface-raised); font: 500 10px/1 var(--mono); letter-spacing: .04em; color: var(--ink-2); font-variant-ligatures: none; }
 .asks { color: var(--ink-3); }
 .scope { padding: 1px 6px; border-radius: 6px; background: var(--code-bg); font-size: 11.5px; color: var(--ink); }
-.res-key { font: 600 11.5px/1 var(--mono); color: var(--teal-ink); text-decoration: none; padding: 3px 7px; border-radius: 6px; background: var(--chip-teal-bg); box-shadow: inset 0 0 0 1px var(--chip-teal-line); font-variant-ligatures: none; }
+.res-key { display: inline-flex; align-items: center; font: 600 11.5px/1 var(--mono); color: var(--teal-ink); text-decoration: none; padding: 3px 7px; border-radius: 6px; background: var(--chip-teal-bg); box-shadow: inset 0 0 0 1px var(--chip-teal-line); font-variant-ligatures: none; }
+@media (max-width: 600px) { .res-key { z-index: 1; } }
 .res-key:hover { text-decoration: underline; }
 .res-title { min-width: 0; max-width: 42ch; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; color: var(--ink-2); }
 .res-label { color: var(--ink); }

@@ -383,6 +383,7 @@ watch(id, value => { if (!value || !route.path.startsWith('/business/customers/'
 .back:hover { color: var(--teal-ink); background: var(--row-hover); }
 .back:focus-visible { box-shadow: var(--focus-ring); }
 .site { display: inline-flex; align-items: center; gap: 4px; color: var(--teal-ink); text-decoration: none; }
+@media (max-width: 600px) { .back, .site { min-height: 44px; } }
 .site:hover { text-decoration: underline; }
 .summary-skeleton { display: inline-block; width: 240px; }
 .unsaved { font-size: 12px; font-weight: 600; color: var(--gold-ink); }
@@ -398,7 +399,7 @@ watch(id, value => { if (!value || !route.path.startsWith('/business/customers/'
 .card-sk { height: 280px; border-radius: var(--radius); }
 .card-sk.short { height: 200px; }
 
-.hero { display: grid; grid-template-columns: minmax(0, 1.7fr) repeat(3, minmax(0, 1fr)); margin-bottom: 16px; padding: 0; overflow: hidden; }
+.hero { display: grid; grid-template-columns: minmax(0, 1.7fr) repeat(3, minmax(0, 1fr)); min-height: 125px; margin-bottom: 16px; padding: 0; overflow: hidden; }
 .hero-cell { display: grid; align-content: start; gap: 6px; min-width: 0; padding: 16px 20px; border-left: 1px solid var(--line); }
 .hero-cell:first-child { border-left: 0; }
 .hero-label { font: 500 10px/1.4 var(--mono); letter-spacing: .14em; text-transform: uppercase; color: var(--ink-3); font-variant-ligatures: none; }

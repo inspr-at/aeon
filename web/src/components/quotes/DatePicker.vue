@@ -106,6 +106,7 @@ function commitTyped() {
 /* In the panel: a field like the others. */
 .as-field { width: 100%; }
 .as-field .date-trigger { justify-content: space-between; width: 100%; height: 30px; padding: 0 8px; border: 1px solid var(--glass-edge); border-radius: 8px; background: var(--field-bg); box-shadow: var(--field-inset), 0 0 0 1px var(--line); color: var(--ink); font: 500 13px/1 var(--mono); font-variant-numeric: tabular-nums; }
+@media (max-width: 600px) { .as-field .date-trigger { height: 44px; } }
 .as-field .date-trigger:focus-visible { box-shadow: var(--focus-ring); }
 .as-field .date-trigger:disabled { color: var(--ink-3); background: var(--surface-2); }
 .as-field .date-trigger.invalid { box-shadow: var(--field-inset), 0 0 0 1px var(--danger-line); }
