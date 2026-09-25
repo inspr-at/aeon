@@ -20,6 +20,16 @@
 //     return one entry with its body, author and linked nodes. resolve follows
 //     slug renames recorded in knowledge.updated and node.updated events and
 //     reports renamed_from, so an old link or agent reference still lands.
+//   - GET /api/knowledge/graph?project_id&types&status&include=tickets derives
+//     a body-free graph (AEON-146): live knowledge, directed relations and
+//     resolved wiki/Markdown/code-slug/key mentions. Same-kind slugs, including
+//     rename history, take precedence over other kinds in the project. Typed
+//     Markdown links stay in their named project/type. Direct ticket satellites
+//     are optional and their bodies are never read. Directed pairs are unique,
+//     relations win over mentions, and degree counts unique returned neighbours.
+//     The response flags truncation at 2,000 nodes or 8,000 edges. This read-only
+//     projection needs no migration, event write or separate plugin manifest;
+//     knowledge.New already mounts it, without additional coordinator wiring.
 //   - POST, PATCH and DELETE /api/knowledge[/{id}] enforce the slug rules of
 //     classic Paimos (^[a-z][a-z0-9_-]*$, at most 64 characters, unique per
 //     project and type among live entries; memory reserves references, stale,

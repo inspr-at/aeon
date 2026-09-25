@@ -8,6 +8,7 @@ import (
 	"encoding/hex"
 	"log/slog"
 	"net/http"
+	"strings"
 	"time"
 )
 
@@ -44,19 +45,68 @@ func requestIDMiddleware(next http.Handler) http.Handler {
 		// before it enters response headers, context or structured logs.
 		id := newRequestID()
 		ctx := context.WithValue(r.Context(), requestIDKey{}, id)
+		r = r.WithContext(ctx)
 		w.Header().Set(requestIDHeader, id)
 		sw := &statusWriter{ResponseWriter: w, status: http.StatusOK}
 		start := time.Now()
 		defer func() {
 			slog.Info("request",
 				"method", r.Method,
+				"path", requestLogRoute(r),
 				"status", sw.status,
 				"request_id", id,
 				"duration_ms", time.Since(start).Milliseconds(),
 			)
 		}()
-		next.ServeHTTP(sw, r.WithContext(ctx))
+		next.ServeHTTP(sw, r)
 	})
+}
+
+// routePatternMiddleware resolves the inner API mux before other middleware
+// can clone the request or reject it. ServeMux normally sets Pattern while
+// serving, but a later WithContext would hide that write from the logger.
+func routePatternMiddleware(mux *http.ServeMux, next http.Handler) http.Handler {
+	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		_, r.Pattern = mux.Handler(r)
+		next.ServeHTTP(w, r)
+	})
+}
+
+func requestLogRoute(r *http.Request) string {
+	// Root and API catchalls identify no specific route. Use a sanitized path
+	// for those, including unmatched public URLs and SPA capability links.
+	if r.Pattern != "" && r.Pattern != "/" && r.Pattern != "/api" && r.Pattern != "/api/" {
+		return r.Pattern
+	}
+	return redactedLogPath(r.URL.Path)
+}
+
+func redactedLogPath(path string) string {
+	parts := strings.Split(strings.Trim(path, "/"), "/")
+	if len(parts) == 1 && parts[0] == "" {
+		return "/"
+	}
+	// On an unmatched route there is no schema to distinguish an ID from a
+	// capability. Keep only known static prefixes and redact every later
+	// segment; this also covers future invite, link, confirmation and download
+	// token shapes without having to recognize their exact spelling.
+	if len(parts) >= 2 && strings.EqualFold(parts[0], "api") {
+		switch strings.ToLower(parts[1]) {
+		case "auth", "nodes", "quotes", "attachments", "public", "invites", "invite", "links", "link", "confirmation", "confirm", "downloads", "download":
+			return "/api/" + strings.ToLower(parts[1]) + "/{redacted}"
+		default:
+			return "/api/{redacted}"
+		}
+	}
+	if len(parts) == 1 && (parts[0] == "favicon.ico" || parts[0] == "robots.txt") {
+		return path
+	}
+	switch strings.ToLower(parts[0]) {
+	case "q", "offers", "invite", "invites", "link", "links", "confirm", "confirmation", "download", "downloads":
+		return "/" + strings.ToLower(parts[0]) + "/{redacted}"
+	default:
+		return "/{redacted}"
+	}
 }
 
 func recoverMiddleware(next http.Handler) http.Handler {

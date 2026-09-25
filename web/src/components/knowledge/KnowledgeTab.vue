@@ -1,7 +1,7 @@
 <!-- SPDX-License-Identifier: AGPL-3.0-only -->
 <script setup lang="ts">
-import { computed, nextTick, onBeforeUnmount, onMounted, ref, watch } from 'vue'
-import { useRouter } from 'vue-router'
+import { computed, defineAsyncComponent, nextTick, onBeforeUnmount, onMounted, ref, watch } from 'vue'
+import { useRoute, useRouter } from 'vue-router'
 import { brand } from '../../lib/brand'
 import { SORTS, TYPES, entryParam, entryPath, highlightWords, statusLabel, type KnowledgeEntry, type KnowledgeItem, type KnowledgeStatus, type KnowledgeType, type SortBy } from '../../lib/knowledge'
 import { STATUS_VIEWS, type KnowledgeFilters, type KnowledgeState, type StatusView } from '../../lib/useKnowledge'
@@ -26,6 +26,17 @@ const props = defineProps<{
 }>()
 const emit = defineEmits<{ update: [patch: Partial<KnowledgeFilters>] }>()
 const router = useRouter()
+const route = useRoute()
+const KnowledgeGraph = defineAsyncComponent(() => import('./KnowledgeGraph.vue'))
+const graphMode = computed(() => route.query.mode === 'graph')
+function setMode(graph: boolean) { void router.replace({ query: { ...route.query, mode: graph ? 'graph' : undefined } }) }
+// ProjectView's current list filter handler rebuilds its query; preserve graph
+// and dock selection here until the coordinator merges the preview-pane wiring.
+function updateFilters(patch: Partial<KnowledgeFilters>) {
+  if (!graphMode.value) { emit('update', patch); return }
+  const next = { ...props.filters, ...patch }
+  void router.replace({ query: { ...route.query, q: next.q || undefined, type: next.type || undefined, status: next.status === 'current' ? undefined : next.status, sort: next.sort || undefined } })
+}
 
 const input = ref<HTMLInputElement>()
 const draft = ref(props.filters.q)
@@ -40,7 +51,7 @@ const onPhone = (event: MediaQueryListEvent) => { phone.value = event.matches }
 phoneQuery.addEventListener('change', onPhone)
 let timer: ReturnType<typeof setTimeout> | undefined
 watch(() => props.filters.q, value => { if (value !== draft.value.trim()) draft.value = value })
-watch(draft, value => { clearTimeout(timer); timer = setTimeout(() => { if (value.trim() !== props.filters.q) emit('update', { q: value.trim() }) }, 160) })
+watch(draft, value => { clearTimeout(timer); timer = setTimeout(() => { if (value.trim() !== props.filters.q) updateFilters({ q: value.trim() }) }, 160) })
 
 const q = computed(() => props.filters.q.trim())
 const statusView = computed(() => STATUS_VIEWS.find(view => view.value === props.filters.status) ?? STATUS_VIEWS[0])
@@ -76,20 +87,21 @@ function filtersQuery() {
   if (props.filters.sort) out.sort = props.filters.sort
   return out
 }
-function setType(type: KnowledgeType | '') { cursorId.value = null; emit('update', { type }) }
+function setType(type: KnowledgeType | '') { cursorId.value = null; updateFilters({ type }) }
 function choose(kind: 'status' | 'sort', value: string) {
   const anchor = menu.value?.anchor
   menu.value = null
   anchor?.focus()
-  emit('update', kind === 'status' ? { status: value as StatusView } : { sort: value as SortBy })
+  updateFilters(kind === 'status' ? { status: value as StatusView } : { sort: value as SortBy })
 }
 function openMenu(kind: 'status' | 'sort', event: MouseEvent) {
   const anchor = event.currentTarget as HTMLElement
   menu.value = menu.value?.kind === kind ? null : { kind, anchor }
 }
 function closeMenu(restore: boolean) { const anchor = menu.value?.anchor; menu.value = null; if (restore) anchor?.focus() }
-function clearSearch() { draft.value = ''; emit('update', { q: '' }); input.value?.focus() }
+function clearSearch() { draft.value = ''; updateFilters({ q: '' }); input.value?.focus() }
 function searchKey(event: KeyboardEvent) {
+  if (graphMode.value && event.key !== 'Escape') return
   if (event.key === 'Escape') { event.preventDefault(); event.stopPropagation(); if (draft.value) clearSearch(); else input.value?.blur() }
   else if (event.key === 'ArrowDown' || (event.key === 'Enter' && props.state.sequence.value.length)) {
     event.preventDefault(); input.value?.blur()
@@ -97,8 +109,8 @@ function searchKey(event: KeyboardEvent) {
     move(cursorId.value ? 0 : 1)
   }
 }
-function resetFilters() { draft.value = ''; emit('update', { q: '', type: '', status: 'current' }) }
-function showAll() { emit('update', { status: 'all' }) }
+function resetFilters() { draft.value = ''; updateFilters({ q: '', type: '', status: 'current' }) }
+function showAll() { updateFilters({ status: 'all' }) }
 
 // ---------- Keyboard: j k move, Enter or o opens, / searches, n writes ----------
 function rowEl(id: string) { return listEl.value?.querySelector<HTMLElement>(`[data-id="${id}"]`) ?? null }
@@ -121,7 +133,7 @@ function typing(target: EventTarget | null) {
   return target instanceof HTMLElement && (target.isContentEditable || ['INPUT', 'TEXTAREA', 'SELECT'].includes(target.tagName))
 }
 function keydown(event: KeyboardEvent) {
-  if (props.paused || event.defaultPrevented || event.metaKey || event.ctrlKey || event.altKey) return
+  if ((graphMode.value && !['/', 'n'].includes(event.key)) || props.paused || event.defaultPrevented || event.metaKey || event.ctrlKey || event.altKey) return
   if (document.querySelector('dialog[open], .floating') || typing(event.target)) return
   switch (event.key) {
     case 'j': case 'ArrowDown': event.preventDefault(); move(1); break
@@ -161,10 +173,14 @@ const who = (item: KnowledgeItem) => item.imported ? 'imported' : item.updated_b
 <template>
   <!-- Controls in the project toolbar, beside the view switch. -->
   <Teleport to="#knowledge-controls" defer>
+    <div class="seg k-mode" role="group" aria-label="Knowledge display">
+      <button type="button" :aria-pressed="!graphMode" @click="setMode(false)"><AppIcon name="list" :size="14" />List</button>
+      <button type="button" :aria-pressed="graphMode" @click="setMode(true)"><AppIcon name="link" :size="14" />Graph</button>
+    </div>
     <label class="search-field k-search">
       <AppIcon name="search" :size="14" />
       <input
-        ref="input" v-model="draft" class="field" type="search" :placeholder="phone ? 'Search' : 'Search knowledge'" :aria-label="`Search knowledge in ${project.title}`"
+        ref="input" v-model="draft" class="field" type="search" :placeholder="graphMode ? 'Find in graph' : phone ? 'Search' : 'Search knowledge'" :aria-label="`Search knowledge in ${project.title}`"
         aria-keyshortcuts="/" autocomplete="off" spellcheck="false" @keydown="searchKey"
       />
       <span v-if="state.searching.value && draft" class="spinner" aria-hidden="true" />
@@ -207,7 +223,8 @@ const who = (item: KnowledgeItem) => item.imported ? 'imported' : item.updated_b
       </section>
     </nav>
 
-    <div ref="listEl" class="k-list" :class="{ stale: state.searching.value && !!state.visible.value.length }">
+    <KnowledgeGraph v-if="graphMode && !paused" :project="project" :filters="filters" :can-write="canWrite" @create="openCreate()" @reset="resetFilters" @list="setMode(false)" />
+    <div v-else ref="listEl" class="k-list" :class="{ stale: state.searching.value && !!state.visible.value.length }">
       <p v-if="state.error.value && state.loaded.value" class="k-banner" role="status"><AppIcon name="alert" :size="14" />{{ state.error.value }}</p>
 
       <div v-if="skeleton" class="k-skeleton" role="status" aria-label="Loading knowledge">
@@ -314,6 +331,9 @@ const who = (item: KnowledgeItem) => item.imported ? 'imported' : item.updated_b
 </template>
 
 <style scoped>
+.k-mode { flex-shrink: 0; }
+.k-mode button { display: flex; align-items: center; justify-content: center; gap: 6px; }
+.k-mode button[aria-pressed="true"] { background: var(--seg-on); box-shadow: var(--shadow-btn); color: var(--teal-ink); }
 /* ---------- Toolbar controls (teleported into the project toolbar) ---------- */
 .k-search { width: 260px; flex-shrink: 0; }
 .k-search .field { height: 32px; padding-right: 30px; font-size: 13.5px; }
