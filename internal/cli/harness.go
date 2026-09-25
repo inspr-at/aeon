@@ -29,29 +29,96 @@ func (rt *runtime) cmdHarnessV2() *Command {
 	}}
 }
 
-func harnessSecret(path, label string) (string, error) {
+func (rt *runtime) harnessSecret(path, label string) (string, error) {
 	if path == "" {
 		return "", usagef("--%s is required", label)
 	}
+	var raw []byte
+	var err error
 	if path == "-" {
-		return "", usagef("--%s must be a protected file", label)
+		raw, err = io.ReadAll(io.LimitReader(rt.stdin, 8193))
+	} else {
+		stat, statErr := os.Lstat(path)
+		if statErr != nil {
+			return "", statErr
+		}
+		if !stat.Mode().IsRegular() || stat.Mode().Perm()&0o077 != 0 || stat.Size() > 8192 {
+			return "", usagef("--%s must be a private regular file", label)
+		}
+		raw, err = os.ReadFile(path)
 	}
-	stat, err := os.Lstat(path)
 	if err != nil {
 		return "", err
 	}
-	if !stat.Mode().IsRegular() || stat.Mode().Perm()&0o077 != 0 {
-		return "", usagef("--%s must be a private regular file", label)
-	}
-	raw, err := os.ReadFile(path)
-	if err != nil {
-		return "", err
+	if len(raw) > 8192 {
+		return "", usagef("--%s is too large", label)
 	}
 	value := strings.TrimSpace(string(raw))
 	if len(value) < 16 || strings.ContainsAny(value, "\r\n") {
 		return "", usagef("--%s must contain one value", label)
 	}
 	return value, nil
+}
+
+func (rt *runtime) harnessRegistration(path string) (string, string, error) {
+	var raw []byte
+	var err error
+	if path == "-" {
+		raw, err = io.ReadAll(io.LimitReader(rt.stdin, 8193))
+	} else {
+		stat, statErr := os.Lstat(path)
+		if statErr != nil {
+			return "", "", statErr
+		}
+		if !stat.Mode().IsRegular() || stat.Mode().Perm()&0o077 != 0 || stat.Size() > 8192 {
+			return "", "", usagef("--registration-file must be a private regular file")
+		}
+		raw, err = os.ReadFile(path)
+	}
+	if err != nil {
+		return "", "", err
+	}
+	if len(raw) > 8192 {
+		return "", "", usagef("--registration-file is too large")
+	}
+	decoder := json.NewDecoder(bytes.NewReader(raw))
+	start, err := decoder.Token()
+	if err != nil || start != json.Delim('{') {
+		return "", "", usagef("--registration-file must contain a JSON object")
+	}
+	seen := map[string]bool{}
+	ref, lease := "", ""
+	for decoder.More() {
+		keyToken, e := decoder.Token()
+		key, ok := keyToken.(string)
+		if e != nil || !ok || seen[key] {
+			return "", "", usagef("--registration-file has duplicate or invalid fields")
+		}
+		seen[key] = true
+		switch key {
+		case "harness_session_ref":
+			err = decoder.Decode(&ref)
+		case "worker_lease":
+			err = decoder.Decode(&lease)
+		default:
+			return "", "", usagef("--registration-file has an unknown field")
+		}
+		if err != nil {
+			return "", "", usagef("--registration-file has invalid JSON")
+		}
+	}
+	end, err := decoder.Token()
+	if err != nil || end != json.Delim('}') {
+		return "", "", usagef("--registration-file has invalid JSON")
+	}
+	if err := decoder.Decode(new(any)); !errors.Is(err, io.EOF) || len(seen) != 2 {
+		return "", "", usagef("--registration-file must contain only harness_session_ref and worker_lease")
+	}
+	ref, lease = strings.TrimSpace(ref), strings.TrimSpace(lease)
+	if len(ref) < 16 || len(lease) < 32 || strings.ContainsAny(ref+lease, "\r\n") {
+		return "", "", usagef("--registration-file contains an invalid registration")
+	}
+	return ref, lease, nil
 }
 
 // harnessDo refuses redirects, so a private registration reference or worker
@@ -170,7 +237,7 @@ func (rt *runtime) harnessTicket(projectID, key string, classicID int) (*string,
 }
 
 func (rt *runtime) harnessRegister() *Command {
-	var project, agent, harness, host, refFile, leaseFile, management, role, parent, ticket, shape, runID, orderID string
+	var project, agent, harness, host, refFile, leaseFile, registrationFile, management, role, parent, ticket, shape, runID, orderID string
 	var ticketIDFlag int
 	var caps []string
 	return &Command{Name: "register", Short: "Register one public harness generation", Use: "harness register --project KEY --agent NAME --harness KIND --host HOST --harness-session-file PATH --worker-lease-file PATH", addFlags: func(fs *flagSet) {
@@ -180,6 +247,7 @@ func (rt *runtime) harnessRegister() *Command {
 		fs.string(&host, "host", 0, "non-secret host label")
 		fs.string(&refFile, "harness-session-file", 0, "private external reference file")
 		fs.string(&leaseFile, "worker-lease-file", 0, "private generation lease file")
+		fs.string(&registrationFile, "registration-file", 0, "private JSON with both registration secrets, or - for stdin")
 		fs.string(&management, "management", 0, "managed or unmanaged")
 		fs.string(&role, "role", 0, "worker or coordinator")
 		fs.string(&parent, "parent-session", 0, "parent public session UUID")
@@ -202,6 +270,32 @@ func (rt *runtime) harnessRegister() *Command {
 		if management != "managed" && management != "unmanaged" || role != "worker" && role != "coordinator" {
 			return usagef("invalid management or role")
 		}
+		var err error
+		var ref, lease string
+		if registrationFile != "" {
+			if refFile != "" || leaseFile != "" {
+				return usagef("--registration-file cannot be combined with --harness-session-file or --worker-lease-file")
+			}
+			ref, lease, err = rt.harnessRegistration(registrationFile)
+			if err != nil {
+				return err
+			}
+		} else {
+			if refFile == "-" && leaseFile == "-" {
+				return usagef("--harness-session-file and --worker-lease-file cannot both read stdin")
+			}
+			ref, err = rt.harnessSecret(refFile, "harness-session-file")
+			if err != nil {
+				return err
+			}
+			lease, err = rt.harnessSecret(leaseFile, "worker-lease-file")
+			if err != nil {
+				return err
+			}
+		}
+		if len(lease) < 32 {
+			return usagef("worker lease must contain at least 32 characters")
+		}
 		projectID, err := rt.harnessProject(project)
 		if err != nil {
 			return err
@@ -212,17 +306,6 @@ func (rt *runtime) harnessRegister() *Command {
 		}
 		if me.Principal.Name != agent {
 			return usagef("--agent must name the authenticated agent")
-		}
-		ref, err := harnessSecret(refFile, "harness-session-file")
-		if err != nil {
-			return err
-		}
-		lease, err := harnessSecret(leaseFile, "worker-lease-file")
-		if err != nil {
-			return err
-		}
-		if len(lease) < 32 {
-			return usagef("worker lease must contain at least 32 characters")
 		}
 		var ticketID, parentID, run, order *string
 		if parent != "" {
@@ -369,7 +452,7 @@ func (rt *runtime) harnessWorker(kind string) *Command {
 		if me.Principal.Name != agent {
 			return usagef("--agent must name the authenticated principal")
 		}
-		lease, err := harnessSecret(leaseFile, "worker-lease-file")
+		lease, err := rt.harnessSecret(leaseFile, "worker-lease-file")
 		if err != nil {
 			return err
 		}
@@ -456,7 +539,7 @@ func (rt *runtime) harnessControl(kind string) *Command {
 			if me.Principal.Name != agent {
 				return usagef("--agent must name the authenticated principal")
 			}
-			lease, err = harnessSecret(leaseFile, "worker-lease-file")
+			lease, err = rt.harnessSecret(leaseFile, "worker-lease-file")
 			if err != nil {
 				return err
 			}

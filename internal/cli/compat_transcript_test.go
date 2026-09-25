@@ -185,6 +185,20 @@ func TestProjectListCompatTranscript(t *testing.T) {
 	}
 }
 
+func TestCompatDefaultConfigPath(t *testing.T) {
+	home, err := os.UserHomeDir()
+	if err != nil {
+		t.Fatal(err)
+	}
+	for _, tc := range []struct{ program, directory string }{{"paimos", ".paimos"}, {"aeon", ".aeon"}} {
+		rt := &runtime{program: tc.program}
+		path, err := rt.configFile()
+		if err != nil || path != filepath.Join(home, tc.directory, "config.yaml") {
+			t.Fatalf("%s config path %q: %v", tc.program, path, err)
+		}
+	}
+}
+
 func TestIssueCommentCompatTranscript(t *testing.T) {
 	isolate(t)
 	var calls []transcriptRequest
@@ -302,6 +316,46 @@ func TestHarnessCompatTranscripts(t *testing.T) {
 				t.Fatal("private harness input appeared in output")
 			}
 		})
+	}
+}
+
+func TestHarnessRegistrationFileTranscript(t *testing.T) {
+	isolate(t)
+	var calls []transcriptRequest
+	srv := transcriptFixture(t, "ticket", "note", &calls)
+	defer srv.Close()
+	t.Setenv("PAIMOS_URL", srv.URL)
+	t.Setenv("PAIMOS_API_KEY", testKey)
+	path := filepath.Join(t.TempDir(), "registration.json")
+	const ref = "local-reference-0000000000000001"
+	const lease = "local-lease-00000000000000000000000001"
+	if err := os.WriteFile(path, []byte(`{"harness_session_ref":"`+ref+`","worker_lease":"`+lease+`"}`), 0600); err != nil {
+		t.Fatal(err)
+	}
+	args := []string{"paimos", "--config", filepath.Join(t.TempDir(), "missing"), "--json", "harness", "register", "--project", "AEON", "--agent", "worker", "--harness", "codex", "--host", "local", "--registration-file", path}
+	code, out, stderr := runCLI(args, "")
+	if code != 0 || strings.TrimSpace(out) != `{"ok":true}` || stderr != "" {
+		t.Fatalf("register exit %d out %q stderr %q", code, out, stderr)
+	}
+	last := calls[len(calls)-1]
+	if last.method != "POST" || last.path != "/api/projects/"+transcriptProjectID+"/harness-sessions" || last.body["harness_session_ref"] != ref || last.body["worker_lease"] != lease {
+		t.Fatalf("request path/body mismatch: %s %s", last.method, last.path)
+	}
+	if strings.Contains(out+stderr, ref) || strings.Contains(out+stderr, lease) {
+		t.Fatal("registration secret appeared in output")
+	}
+	stdinArgs := append(append([]string{}, args[:len(args)-1]...), "-")
+	code, out, stderr = runCLI(stdinArgs, `{"harness_session_ref":"`+ref+`","worker_lease":"`+lease+`"}`)
+	if code != 0 || strings.TrimSpace(out) != `{"ok":true}` || stderr != "" {
+		t.Fatalf("stdin registration exit %d out %q stderr %q", code, out, stderr)
+	}
+	if err := os.WriteFile(path, []byte(`{"worker_lease":"one","worker_lease":"two"}`), 0600); err != nil {
+		t.Fatal(err)
+	}
+	before := len(calls)
+	code, out, stderr = runCLI(args, "")
+	if code != 2 || len(calls) != before || out != "" || !strings.Contains(stderr, "duplicate") {
+		t.Fatalf("malformed register exit %d out %q stderr %q requests %d", code, out, stderr, len(calls))
 	}
 }
 
