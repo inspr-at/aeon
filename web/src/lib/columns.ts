@@ -8,21 +8,23 @@
 // text columns, so the metadata stays near the title. Free of Vue for unit tests.
 import type { SortField } from './work.ts'
 
-export type ColumnId = 'key' | 'title' | 'status' | 'priority' | 'assignee' | 'epic' | 'release' | 'tags' | 'estimate' | 'created' | 'updated'
+export type ColumnId = 'key' | 'title' | 'status' | 'priority' | 'assignee' | 'epic' | 'release' | 'tags' | 'cost' | 'estimate' | 'created' | 'updated'
 export interface ColumnDef { id: ColumnId; label: string; sort: SortField | null; width: number; min: number; max: number; end?: boolean }
-export interface ListPrefs { order?: ColumnId[]; visible?: ColumnId[]; widths?: Partial<Record<ColumnId, number>> }
+// defaultView: the saved view this person opens the project with.
+export interface ListPrefs { order?: ColumnId[]; visible?: ColumnId[]; widths?: Partial<Record<ColumnId, number>>; defaultView?: string | null }
 
 export const COLUMNS: ColumnDef[] = [
   { id: 'key', label: 'Key', sort: 'key', width: 118, min: 84, max: 220 },
   { id: 'title', label: 'Title', sort: 'title', width: 0, min: 240, max: 4000 },
   { id: 'status', label: 'Status', sort: 'state', width: 138, min: 84, max: 260 },
   { id: 'priority', label: 'Priority', sort: 'priority', width: 112, min: 72, max: 200 },
-  { id: 'assignee', label: 'Assignee', sort: null, width: 156, min: 96, max: 320 },
+  { id: 'assignee', label: 'Assignee', sort: 'assignee', width: 156, min: 96, max: 320 },
   { id: 'epic', label: 'Epic', sort: null, width: 220, min: 110, max: 480 },
   { id: 'release', label: 'Release', sort: null, width: 132, min: 84, max: 260 },
   { id: 'tags', label: 'Tags', sort: null, width: 180, min: 96, max: 420 },
+  { id: 'cost', label: 'Cost unit', sort: null, width: 150, min: 96, max: 320 },
   { id: 'estimate', label: 'Estimate', sort: null, width: 96, min: 72, max: 180, end: true },
-  { id: 'created', label: 'Created', sort: null, width: 104, min: 80, max: 200, end: true },
+  { id: 'created', label: 'Created', sort: 'created_at', width: 104, min: 80, max: 200, end: true },
   { id: 'updated', label: 'Updated', sort: 'updated_at', width: 104, min: 80, max: 200, end: true },
 ]
 export const COLUMN_BY_ID = new Map(COLUMNS.map(column => [column.id, column]))
@@ -35,11 +37,11 @@ export const TITLE_TARGET = 960
 const TITLE_ROOM = 420
 const PHONE: ColumnId[] = ['key', 'title', 'status', 'priority', 'updated']
 // The order columns leave in when space runs out: the least essential first.
-const DROP_ORDER: ColumnId[] = ['estimate', 'tags', 'release', 'created', 'epic', 'assignee', 'updated', 'priority', 'status']
+const DROP_ORDER: ColumnId[] = ['estimate', 'cost', 'tags', 'release', 'created', 'epic', 'assignee', 'updated', 'priority', 'status']
 // Columns only wide tables add on their own.
 const WIDE_EXTRAS: ColumnId[] = ['estimate', 'tags', 'release', 'created', 'epic', 'assignee']
 // The text columns that take spare width on wide tables (their text gets room).
-const GROWS: ColumnId[] = ['epic', 'tags', 'assignee', 'release']
+const GROWS: ColumnId[] = ['epic', 'tags', 'assignee', 'release', 'cost']
 // Which optional values any loaded row has.
 export interface Present { assigned?: boolean; estimate?: boolean; release?: boolean; tags?: boolean }
 
@@ -124,6 +126,17 @@ export function releaseLabel(fields: Record<string, unknown> | null | undefined)
   if (typeof value === 'string') return value.trim()
   if (value && typeof value === 'object') { const label = (value as { label?: unknown; name?: unknown }).label ?? (value as { name?: unknown }).name; return typeof label === 'string' ? label.trim() : '' }
   return ''
+}
+// The cost unit a ticket books to: its own, else the one classic PPM gave it.
+export function costUnitLabel(fields: Record<string, unknown> | null | undefined): string {
+  const label = (value: unknown): string => {
+    if (typeof value === 'string') return value.trim()
+    if (value && typeof value === 'object') { const v = (value as { label?: unknown; name?: unknown }).label ?? (value as { name?: unknown }).name; return typeof v === 'string' ? v.trim() : '' }
+    return ''
+  }
+  if (fields && 'cost_unit' in fields) return label(fields.cost_unit)
+  const classic = fields?.classic
+  return classic && typeof classic === 'object' ? label((classic as Record<string, unknown>).cost_unit) : ''
 }
 export interface TagRef { name: string; color: string }
 export function tagList(fields: Record<string, unknown> | null | undefined): TagRef[] {

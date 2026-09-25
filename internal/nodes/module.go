@@ -44,6 +44,7 @@ func (m *Module) Mount(mux *http.ServeMux) {
 	mux.HandleFunc("GET /api/nodes", m.handleListNodes)
 	mux.HandleFunc("GET /api/projects", m.handleListProjects)
 	mux.HandleFunc("POST /api/nodes", m.handleCreateNode)
+	mux.HandleFunc("POST /api/nodes/bulk", m.handleBulk)
 	mux.HandleFunc("GET /api/nodes/lookup", m.handleLookupNodes)
 	mux.HandleFunc("GET /api/nodes/tree", m.handleTree)
 	mux.HandleFunc("GET /api/node-keys/{key}", m.handleGetNodeByKey)

@@ -134,9 +134,11 @@ export function highlight(text: string, query: string): Segment[] {
 }
 
 // Sort keys map one-to-one to the list API ("state,-updated_at").
-export type SortField = 'key' | 'title' | 'state' | 'priority' | 'updated_at' | 'kind'
+export type SortField = 'key' | 'title' | 'state' | 'priority' | 'updated_at' | 'created_at' | 'kind' | 'assignee'
 export interface SortKey { field: SortField; desc: boolean }
-const SORT_FIELDS: SortField[] = ['key', 'title', 'state', 'priority', 'updated_at', 'kind']
+export const SORT_FIELDS: SortField[] = ['key', 'title', 'state', 'priority', 'updated_at', 'created_at', 'kind', 'assignee']
+// What each sort key is called in the Display menu.
+export const SORT_LABELS: Record<SortField, string> = { updated_at: 'Updated', created_at: 'Created', key: 'Key', title: 'Title', state: 'Status', priority: 'Priority', kind: 'Type', assignee: 'Assignee' }
 export function parseSort(raw: string | null | undefined): SortKey[] {
   if (!raw) return []
   const out: SortKey[] = []
