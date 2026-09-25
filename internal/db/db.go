@@ -7,6 +7,7 @@ package db
 import (
 	"context"
 	"fmt"
+	"strings"
 
 	"github.com/jackc/pgx/v5"
 	"github.com/jackc/pgx/v5/pgxpool"
@@ -16,8 +17,21 @@ import (
 const TenantSetting = "aeon.tenant_id"
 
 // Open connects the pool and runs pending migrations.
+//
+// Sessions run with JIT compilation off. Aeon's reads are short OLTP queries,
+// but recursive tree walks carry large row estimates, so Postgres would JIT
+// compile them: on the production copy (AEON-140) that cost about 310 ms of a
+// 350 ms /api/projects query that runs in 26 ms without it. A URL that sets
+// jit itself (options=-c jit=on) keeps its choice.
 func Open(ctx context.Context, url string) (*pgxpool.Pool, error) {
-	pool, err := pgxpool.New(ctx, url)
+	cfg, err := pgxpool.ParseConfig(url)
+	if err != nil {
+		return nil, fmt.Errorf("connect: %w", err)
+	}
+	if _, set := cfg.ConnConfig.RuntimeParams["jit"]; !set && !strings.Contains(cfg.ConnConfig.RuntimeParams["options"], "jit") {
+		cfg.ConnConfig.RuntimeParams["jit"] = "off"
+	}
+	pool, err := pgxpool.NewWithConfig(ctx, cfg)
 	if err != nil {
 		return nil, fmt.Errorf("connect: %w", err)
 	}
