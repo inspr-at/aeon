@@ -62,6 +62,12 @@ func TestAgentScopeSeparatesProjectSubpathsAndUnknownRoutes(t *testing.T) {
 		{"POST", project + "/requirements", ""},
 		{"PUT", "/api/plugins/foo/installation", ""},
 		{"GET", "/api/unlisted", ""},
+		{"GET", "/api/me", selfScope},
+		{"GET", "/api/me/profile", ""},
+		{"GET", "/api/tags", "nodes.read"},
+		{"PATCH", "/api/tags/bug", "nodes.configure"},
+		{"GET", "/api/work-orders/aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa/runs", "run.read"},
+		{"POST", "/api/work-orders/aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa/runs", "run.create"},
 	} {
 		got, _ := coreAgentScope(httptest.NewRequest(tc.method, tc.path, nil))
 		if got != tc.want {
@@ -129,6 +135,10 @@ func TestEmptyAgentKeyDeniedAcrossRegisteredAPIRoutes(t *testing.T) {
 		method, path, _ := strings.Cut(pattern, " ")
 		path = routeValue.ReplaceAllString(path, "aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa")
 		req := httptest.NewRequest(method, path, bytes.NewReader(nil))
+		if scope, _ := coreAgentScope(req); scope == selfScope {
+			// Reading its own identity is the one route every key may call.
+			continue
+		}
 		req.Header.Set("Authorization", "Bearer "+key.Token)
 		res := httptest.NewRecorder()
 		handler.ServeHTTP(res, req)

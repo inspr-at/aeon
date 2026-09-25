@@ -226,6 +226,9 @@ func coreAgentScope(r *http.Request) (string, bool) {
 			return "nodes.read", true
 		}
 	case "tags":
+		if read {
+			return "nodes.read", true
+		}
 		return "nodes.configure", true
 	case "attachments":
 		return scope("nodes")
@@ -273,6 +276,9 @@ func coreAgentScope(r *http.Request) (string, bool) {
 		}
 	case "work-orders":
 		if len(parts) > 2 && parts[2] == "runs" {
+			if read {
+				return "run.read", true
+			}
 			return "run.create", true
 		}
 		return scope("work_orders")
@@ -295,8 +301,9 @@ func coreAgentScope(r *http.Request) (string, bool) {
 	case "stage-handoffs":
 		return "stage.<op>", true
 	case "me":
+		// Any key may read its own identity; the rest of /api/me is for people.
 		if len(parts) == 1 && read {
-			return "account.manage", true
+			return selfScope, true
 		}
 	case "time-entries", "time-periods":
 		return scope("hours")
@@ -322,7 +329,13 @@ func harnessScope(parts []string, read bool) string {
 	return "harness.write"
 }
 
+// selfScope marks routes that only reveal the calling agent to itself.
+const selfScope = "self"
+
 func agentHasScope(have []string, want string) bool {
+	if want == selfScope {
+		return true
+	}
 	if want == "stage.<op>" {
 		for _, op := range []string{"prepare", "deploy", "verify", "apply"} {
 			if hasScope(have, "stage."+op) {
