@@ -80,18 +80,26 @@ func (m *Module) Mount(mux *http.ServeMux) {
 type failure struct {
 	status  int
 	message string
+	fields  map[string]string
 }
 
 func (f failure) Error() string { return f.message }
-func bad(s string) error        { return failure{400, s} }
-func denied() error             { return failure{403, "quote operation is not available"} }
-func missing() error            { return failure{404, "quote not found"} }
-func conflict(s string) error   { return failure{409, s} }
+func bad(s string) error        { return failure{status: 400, message: s} }
+func badField(field, reason string) error {
+	return failure{status: 400, message: "invalid quote document", fields: map[string]string{field: reason}}
+}
+func denied() error           { return failure{status: 403, message: "quote operation is not available"} }
+func missing() error          { return failure{status: 404, message: "quote not found"} }
+func conflict(s string) error { return failure{status: 409, message: s} }
 func respond(w http.ResponseWriter, status int, value any, err error) {
 	if err != nil {
 		var f failure
 		if errors.As(err, &f) {
-			httpapi.WriteError(w, f.status, f.message)
+			if len(f.fields) > 0 {
+				httpapi.WriteJSON(w, f.status, map[string]any{"error": f.message, "errors": f.fields})
+			} else {
+				httpapi.WriteError(w, f.status, f.message)
+			}
 		} else {
 			httpapi.WriteError(w, 500, "quote operation failed")
 		}

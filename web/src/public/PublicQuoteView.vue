@@ -109,13 +109,17 @@ const initialDeskWidth = Math.min(880, window.innerWidth - (window.innerWidth <=
 const scale = ref(Math.min(1, Math.max(0.3, Math.floor(initialDeskWidth) / 794)))
 let sizer: ResizeObserver | undefined
 let frame = 0
+const fit = (width: number) => Math.min(1, Math.max(0.3, Math.floor(width) / 794))
 watch(desk, el => {
   sizer?.disconnect()
   if (!el) return
-  // Measured after layout settles: a changed scale may change the width it was measured at.
-  sizer = new ResizeObserver(([entry]) => { cancelAnimationFrame(frame); const width = entry.contentRect.width; frame = requestAnimationFrame(() => { scale.value = Math.min(1, Math.max(0.3, Math.floor(width) / 794)) }) })
+  // The first fit lands before the page is painted, so the paper never jumps into place.
+  const style = getComputedStyle(el)
+  scale.value = fit(el.clientWidth - parseFloat(style.paddingLeft) - parseFloat(style.paddingRight))
+  // Later fits wait for layout to settle: a changed scale may change the width it was measured at.
+  sizer = new ResizeObserver(([entry]) => { cancelAnimationFrame(frame); const width = entry.contentRect.width; frame = requestAnimationFrame(() => { scale.value = fit(width) }) })
   sizer.observe(el)
-})
+}, { flush: 'post' })
 // Private by construction: no referrer leaves this page and search engines are asked to stay away.
 const metas: HTMLMetaElement[] = []
 // Screen readers read the page in its language.

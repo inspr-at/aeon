@@ -153,7 +153,7 @@ function saveCaption(item: Attachment) { if (editing.value !== item.id) return; 
 .file-name { max-width: 116px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; font-size: 11.5px; color: var(--ink); }
 .file-size { font-size: 10.5px; color: var(--ink-2); }
 .remove {
-  position: absolute; top: 5px; right: 5px; display: grid; place-items: center; width: 22px; height: 22px; padding: 0; border: 0; border-radius: 50%;
+  position: absolute; top: 5px; right: 5px; display: grid; place-items: center; width: 24px; height: 24px; padding: 0; border: 0; border-radius: 50%;
   background: rgba(16, 35, 39, .72); color: #fff; opacity: 0; transition: opacity .12s ease;
 }
 .item:hover .remove, .item:focus-within .remove { opacity: 1; }

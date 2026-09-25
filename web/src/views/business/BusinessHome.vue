@@ -84,7 +84,11 @@ const rateRows = computed(() => business.costUnits
 const ratesInForce = computed(() => rateRows.value.reduce((n, row) => n + row.rates.length, 0))
 const money = (rate: CostRate) => { try { return formatAmount(rate.bill_amount, rate.currency) } catch { return rate.bill_amount } }
 
+const settled = ref({ costs: false, crm: false })
+// The summary appears once every part it counts is in, in one piece rather than
+// growing a clause at a time.
 const summary = computed(() => {
+  if ((business.open.hours && !hoursLoaded.value && !hoursError.value) || (business.open.costs && !settled.value.costs) || (business.open.crm && !settled.value.crm)) return ''
   const parts: string[] = []
   if (business.open.hours && hoursLoaded.value) parts.push(weekTotal.value ? `${formatSpan(weekTotal.value)} logged this week` : 'Nothing logged this week')
   if (business.open.hours && business.admin && hoursLoaded.value) parts.push(waiting.value.length ? `${plural(waiting.value.length, 'period')} to approve` : 'nothing to approve')
@@ -94,9 +98,9 @@ const summary = computed(() => {
 })
 async function load() {
   await business.loadPlugins()
-  if (business.open.costs) void business.loadCostUnits(true)
+  if (business.open.costs) void business.loadCostUnits(true).catch(() => {}).finally(() => { settled.value = { ...settled.value, costs: true } })
   if (business.open.hours) { void loadHours(); void projects.load() }
-  if (business.open.crm) void customers.load()
+  if (business.open.crm) void customers.load().finally(() => { settled.value = { ...settled.value, crm: true } })
   if (business.anyOpen && business.staff) void business.loadPrincipals()
 }
 watch(() => [business.open.costs, business.open.hours, business.open.crm], (value, before) => { if (before && value.join() !== before.join()) void load() })
@@ -111,7 +115,7 @@ const offered = computed(() => business.anyOpen)
     <template #summary>
       <span v-if="summary">{{ summary }}</span>
       <span v-else-if="business.plugins && !offered">{{ business.admin ? 'Not set up yet' : 'Not enabled for this workspace' }}</span>
-      <span v-else class="skeleton summary-skeleton" />
+      <span v-else class="summary-loading"><span class="skeleton summary-skeleton" /><span class="skeleton summary-skeleton line2" /></span>
     </template>
     <template v-if="business.admin && offered" #actions>
       <button type="button" class="btn sm" :aria-pressed="managing" @click="managing = !managing"><AppIcon name="sliders" :size="14" />Manage parts</button>
@@ -219,6 +223,14 @@ const offered = computed(() => business.anyOpen)
 
 <style scoped>
 .summary-skeleton { display: inline-block; width: 240px; }
+/* Phones wrap the summary to two lines; the loading line holds both. */
+.summary-loading { display: inline-block; }
+.summary-skeleton.line2 { display: none; }
+@media (max-width: 600px) {
+  .summary-loading { display: grid; gap: 10px; padding: 5px 0; }
+  .summary-skeleton, .summary-skeleton.line2 { display: block; }
+  .summary-skeleton.line2 { width: 60%; }
+}
 .intro { max-width: 760px; }
 .closed { display: grid; justify-items: center; gap: 8px; padding: 44px 28px; text-align: center; }
 .closed h2 { font-size: 17px; }

@@ -55,7 +55,7 @@ const fullTicket = computed(() => typeof route.params.ticketKey === 'string' && 
 const pageTitle = computed(() => !activePlace.value && !route.path.startsWith('/settings') && route.path !== '/signin' ? String(route.meta.title ?? '') : '')
 // The three places, in order of use; the active one is where this page lives.
 // The breadcrumb continues from it: Projects / PHAROS Pharos / PHAROS-11.
-const places = computed(() => visiblePlaces({ signedIn: !!session.identity, business: business.anyOpen }))
+const places = computed(() => visiblePlaces({ signedIn: !!session.identity, business: business.placeOpen }))
 const activePlace = computed(() => placeOf(route.path))
 const PLACE_ROOT: Record<PlaceId, string> = { projects: '/', agents: '/agents', business: '/business' }
 const atPlaceRoot = computed(() => !!activePlace.value && (route.path === PLACE_ROOT[activePlace.value] || (activePlace.value === 'agents' && route.path.startsWith('/agents/'))))
@@ -199,7 +199,7 @@ onBeforeUnmount(() => { document.removeEventListener('pointerdown', outside); wi
         <template v-if="profilesPage">
           <RouterLink class="crumb" to="/settings/business">{{ settingsSection.label }}</RouterLink>
           <span class="sep" aria-hidden="true">/</span>
-          <span class="crumb current" aria-current="page">Document profiles</span>
+          <span class="crumb current" aria-current="page"><span class="crumb-long">Document profiles</span><span class="crumb-short">Profiles</span></span>
         </template>
         <span v-else class="crumb current" aria-current="page">{{ settingsSection.label }}</span>
       </template>
@@ -287,6 +287,7 @@ onBeforeUnmount(() => { document.removeEventListener('pointerdown', outside); wi
 .crumbs > .crumb.current, .crumbs > .sep { flex-shrink: 0; }
 .crumb.current:hover { background: transparent; }
 .crumb-name { overflow: hidden; text-overflow: ellipsis; color: var(--ink); }
+.crumb-short { display: none; }
 .project-crumb { min-width: 0; }
 .sep { color: var(--ink-3); font-weight: 300; font-size: 16px; }
 .mono-crumb { font: 500 12px/1 var(--mono); letter-spacing: .02em; font-variant-ligatures: none; }
@@ -358,8 +359,11 @@ onBeforeUnmount(() => { document.removeEventListener('pointerdown', outside); wi
   .crumbs > :not(:last-child) { display: none; }
   .crumbs.lead { padding-left: 2px; }
   .crumb { height: 44px; margin: 0; padding: 0 4px; }
-  .crumb.current { min-width: 0; max-width: 100%; flex-shrink: 1; overflow: hidden; text-overflow: ellipsis; }
+  /* A long name ends in an ellipsis instead of a hard cut. */
+  .crumbs > .crumb.current { display: block; flex-shrink: 1; min-width: 0; max-width: 100%; overflow: hidden; text-overflow: ellipsis; line-height: 44px; }
   .crumb-name { display: none; }
+  .crumb-long { display: none; }
+  .crumb-short { display: inline; }
   .search-pill { width: 44px; height: 44px; padding: 0; justify-content: center; }
   .pill-text, .pill-keys { display: none; }
   .header-btn, .avatar-btn { width: 44px; height: 44px; }

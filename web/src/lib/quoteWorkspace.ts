@@ -27,6 +27,8 @@ export interface LiveQuote {
   editor: QuoteEditor | null
   presenceClient: QuotePresence | null
   canSaveNow: (() => boolean) | null
+  // Settles once the draft is open and any unsaved copy from an earlier visit is read.
+  readonly ready: Promise<void>
   refresh(): Promise<void>
 }
 interface Entry { quote: LiveQuote; holders: number; timer: number | undefined; dispose(): void }
@@ -36,10 +38,12 @@ export interface Scope { tenantId: string; principalId: string }
 
 function open(scope: Scope, quoteId: string): Entry {
   const session = new QuoteSession({ quoteId, tenantId: scope.tenantId, principalId: scope.principalId })
+  let markReady: () => void = () => {}
   const quote: LiveQuote = {
     quoteId, session,
     view: shallowRef(null), presence: shallowRef(null), recovery: shallowRef(null), projection: shallowRef(null), frozen: shallowRef(null),
     error: ref(''), draftMissing: ref(false), editor: null, presenceClient: null, canSaveNow: null,
+    ready: new Promise<void>(resolve => { markReady = resolve }),
     refresh,
   }
   let closed = false
@@ -70,6 +74,7 @@ function open(scope: Scope, quoteId: string): Entry {
       ])
       if (closed) return
       quote.recovery.value = recovery
+      markReady()
       // Opening the draft marks it clean; an issued quote stays read-only whichever answered first.
       const known = quote.projection.value
       if (known && known.state !== 'draft') session.onPresence({ sessions: [], draft_revision: session.view.baseRevision, quote_revision: known.revision, state: known.state })
@@ -83,6 +88,7 @@ function open(scope: Scope, quoteId: string): Entry {
       quote.presenceClient = presence
       await presence.start(session.view.baseRevision).catch(() => { presence.stop(); if (quote.presenceClient === presence) quote.presenceClient = null })
     } catch (cause) {
+      markReady()
       if (!closed) quote.error.value = cause instanceof APIError && cause.status === 404 ? 'This quote does not exist, or it is not shared with you.' : cause instanceof Error ? cause.message : 'The quote could not be opened.'
     }
   })()

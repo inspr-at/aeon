@@ -5,15 +5,19 @@ import { APIError } from './api'
 import { getDraft, saveDraft, type QuoteDraft, type MutationReceipt } from './quotes/api'
 import type { QuoteDocumentData } from './quotes/types'
 import { mergeQuote, type ConflictChoices, type MergePreview } from './quoteMerge'
-import { saveRecovery, loadRecovery, clearRecovery, downloadRecovery, type RecoveryDraft } from './quoteRecovery'
+import { saveRecovery, loadRecovery, clearRecovery, downloadRecovery, holdsWork, type RecoveryDraft } from './quoteRecovery'
 import type { QuoteNotice, PresenceSnapshot } from './quotePresence'
 
 export type LocalState = 'loading'|'clean'|'dirty'|'saving'|'offline'|'failed'|'conflict'|'read-only'
 export type RemoteState = 'current'|'checking'|'newer'|'unavailable'
+// Why the last save did not land: 'invalid' (the server refused the document: fix it,
+// a retry cannot succeed), 'forbidden' (no longer allowed to edit) or 'server' (a
+// passing problem: trying again can work). Offline is its own local state.
+export interface SaveFailure { kind:'invalid'|'forbidden'|'server'; status:number; message:string; body:Record<string,unknown> }
 export interface SessionView {
   local:LocalState; remote:RemoteState; working:QuoteDocumentData|null; baseRevision:number
   highestRemoteRevision:number; remoteActorId:string|null; durableRecovery:boolean; review:MergePreview|null
-  pendingMutationId:string|null; error:string|null; quoteState:string
+  pendingMutationId:string|null; error:string|null; quoteState:string; failure?:SaveFailure|null
 }
 type Listener=(view:SessionView)=>void
 const clone=<T>(value:T):T=>structuredClone(value)
@@ -25,7 +29,7 @@ export class QuoteSession {
   private probe:{nonce:string;collided:boolean}|null=null
   private listeners=new Set<Listener>(); private generation=0; private editSequence=0; private disposed=false
   private inFlight:Promise<void>|null=null; private checking:Promise<void>|null=null; private pending:{id:string;revision:number;document:QuoteDocumentData;editSequence:number}|null=null
-  private base:QuoteDocumentData|null=null; private reviewedTheirs:QuoteDraft|null=null
+  private base:QuoteDocumentData|null=null; private reviewedTheirs:QuoteDraft|null=null; private baseVersion:number|undefined
   private ownMutations=new Set<string>(); private checkTimer:number|undefined; private checkDelay=4000
   view:SessionView={local:'loading',remote:'current',working:null,baseRevision:0,highestRemoteRevision:0,remoteActorId:null,durableRecovery:true,review:null,pendingMutationId:null,error:null,quoteState:'draft'}
   constructor(scope:{quoteId:string;tenantId:string;principalId:string;clientSessionId?:string}) {
@@ -52,31 +56,60 @@ export class QuoteSession {
   subscribe(fn:Listener):()=>void {this.listeners.add(fn);fn(this.view);return()=>this.listeners.delete(fn)}
   private emit():void {for(const fn of this.listeners) fn(this.view)}
   private scope() {return {tenantId:this.tenantId,principalId:this.principalId,quoteId:this.quoteId,sessionId:this.clientSessionId}}
-  private recovery():RecoveryDraft|null {return this.base && this.view.working ? {...this.scope(),baseRevision:this.view.baseRevision,base:clone(this.base),mine:clone(this.view.working),pendingMutationId:this.pending?.id,savedAt:Date.now(),schemaVersion:1}:null}
-  private async persist():Promise<void> {const value=this.recovery();if(!value)return;const ok=await saveRecovery(value);if(!this.disposed){this.view.durableRecovery=ok;this.emit()}}
+  private recovery():RecoveryDraft|null {return this.base && this.view.working ? {...this.scope(),baseRevision:this.view.baseRevision,baseVersion:this.baseVersion,base:clone(this.base),mine:clone(this.view.working),pendingMutationId:this.pending?.id,savedAt:Date.now(),schemaVersion:1}:null}
+  // A copy is kept only when it holds work the saved draft does not: a read-only
+  // quote or an unchanged draft leaves none behind to offer later (and never
+  // overwrites a copy that does hold work).
+  private async persist():Promise<void> {
+    const value=this.recovery();if(!value || !holdsWork(value))return
+    const ok=await saveRecovery(value);if(!this.disposed){this.view.durableRecovery=ok;this.emit()}
+  }
   async open():Promise<RecoveryDraft|null> {
     const generation=++this.generation
     await this.ensureUniqueTab()
     if(this.disposed || generation!==this.generation)return null
     const server=await getDraft(this.quoteId)
     if(this.disposed || generation!==this.generation) return null
-    this.base=clone(server.document);this.view.working=clone(server.document);this.view.baseRevision=server.draft_revision
-    this.view.highestRemoteRevision=server.draft_revision;this.view.local='clean';this.view.error=null;this.emit()
-    this.scheduleCheck();window.addEventListener('focus',this.focus);document.addEventListener('visibilitychange',this.visibility)
+    this.base=clone(server.document);this.view.working=clone(server.document);this.view.baseRevision=server.draft_revision;this.baseVersion=typeof server.base_version==='number'?server.base_version:undefined
+    this.view.highestRemoteRevision=server.draft_revision;this.view.local='clean';this.view.error=null;this.view.failure=null;this.emit()
+    this.scheduleCheck();window.addEventListener('focus',this.focus);document.addEventListener('visibilitychange',this.visibility);window.addEventListener('online',this.online)
     const stored=await loadRecovery(this.scope())
+    if(!stored)return null
+    // A copy with nothing in it, or one from another version's draft (it was issued and
+    // revised since), is never offered: it would put the wrong content on this draft.
+    const otherVersion=stored.baseVersion!==undefined && this.baseVersion!==undefined && stored.baseVersion!==this.baseVersion
+    if(!holdsWork(stored) || otherVersion || stored.baseRevision>server.draft_revision){await clearRecovery(this.scope()).catch(()=>{});return null}
     // Restoration always requires a user decision; opening cannot replace the server copy.
     return stored
   }
   restore(stored:RecoveryDraft):void {
+    // An issued quote never takes local work: it goes into a revision instead (adopt).
+    if(this.view.local==='read-only' || this.view.quoteState!=='draft')return
     if(this.disposed || !this.base || !this.view.working || stored.tenantId!==this.tenantId || stored.principalId!==this.principalId || stored.quoteId!==this.quoteId || stored.sessionId!==this.clientSessionId) return
     this.base=clone(stored.base);this.view.baseRevision=stored.baseRevision;this.view.working=clone(stored.mine)
     this.view.local='dirty';this.editSequence++;this.view.remote=stored.baseRevision<this.view.highestRemoteRevision?'newer':'current';this.emit();void this.persist()
   }
+  // Unsaved work from before the quote was issued, carried into its new revision: the
+  // work (its base to mine) is merged onto the fresh draft. Where both changed the
+  // same place, the review decides, as for any newer draft.
+  async adopt(stored:RecoveryDraft):Promise<'applied'|'review'|'refused'> {
+    if(this.disposed || !this.base || !this.view.working || this.view.local==='read-only' || this.view.quoteState!=='draft' || stored.tenantId!==this.tenantId || stored.principalId!==this.principalId || stored.quoteId!==this.quoteId) return 'refused'
+    const preview=mergeQuote(stored.base,stored.mine,this.base)
+    if(preview.document && !preview.conflicts.length){
+      this.view.working=preview.document;this.editSequence++;this.view.local=same(this.base,preview.document)?'clean':'dirty';this.emit();void this.persist();return 'applied'
+    }
+    this.base=clone(stored.base);this.view.working=clone(stored.mine);this.editSequence++;this.view.local='dirty';this.view.remote='newer';this.emit()
+    await this.reviewChanges();return 'review'
+  }
+  // Drops the copy offered on opening without touching the saved draft.
+  async discardRecovery():Promise<void> {await clearRecovery(this.scope()).catch(()=>{})}
   edit(document:QuoteDocumentData):void {
     if(this.disposed || !this.base || this.view.local==='read-only') return
+    if(this.view.local==='failed')this.view.failure=null
     this.view.working=clone(document);this.editSequence++
     if(this.view.local!=='saving' && this.view.local!=='conflict') this.view.local=same(this.base,document)?'clean':'dirty'
-    this.emit();void this.persist()
+    // Edited back to the saved draft: no copy is left to offer.
+    this.emit();if(same(this.base,document) && !this.pending)void clearRecovery(this.scope()).catch(()=>{});else void this.persist()
   }
   onNotice(notice:QuoteNotice):void {
     if(this.disposed)return
@@ -111,7 +144,17 @@ export class QuoteSession {
       } catch(e) {
         if(this.disposed || this.pending!==sent)return
         if(e instanceof APIError && (e.status===412 || e.status===409)) {this.view.local='conflict';this.view.remote='newer';this.pending=null;await this.reviewChanges().catch(()=>{})}
-        else {this.view.local=e instanceof TypeError?'offline':'failed';this.view.remote='unavailable';this.view.error=e instanceof Error?e.message:'Save failed'}
+        else if(e instanceof TypeError) {this.view.local='offline';this.view.remote='unavailable';this.view.failure=null;this.view.error=e.message}
+        else {
+          const status=e instanceof APIError?e.status:0
+          const kind:SaveFailure['kind']=status===400 || status===413 || status===422?'invalid':status===401 || status===403?'forbidden':'server'
+          const message=e instanceof Error?e.message:'Save failed'
+          this.view.local='failed';this.view.error=message;this.view.failure={kind,status,message,body:e instanceof APIError?e.body:{}}
+          // A refused document did not commit: the next save sends what is on the paper
+          // then, under a new mutation. A passing failure keeps its mutation for the retry.
+          if(kind==='server')this.view.remote='unavailable'
+          else {this.pending=null;this.view.pendingMutationId=null}
+        }
         this.emit();void this.persist()
       } finally {this.inFlight=null}
     })()
@@ -136,7 +179,7 @@ export class QuoteSession {
     this.base=clone(canonical);this.view.baseRevision=ack.acknowledged_revision
     this.view.highestRemoteRevision=Math.max(this.view.highestRemoteRevision,ack.current_revision)
     this.view.remote=this.view.highestRemoteRevision>this.view.baseRevision?'newer':'current'
-    this.view.local=same(this.base,this.view.working)?'clean':'dirty';this.view.error=null;this.emit()
+    this.view.local=same(this.base,this.view.working)?'clean':'dirty';this.view.error=null;this.view.failure=null;this.emit()
     if(this.view.local==='clean') await clearRecovery(this.scope()).catch(()=>{})
     else {await this.persist();if(this.view.remote==='current') queueMicrotask(()=>{void this.save()})}
   }
@@ -167,8 +210,8 @@ export class QuoteSession {
     if(this.disposed || generation!==this.generation || edits!==this.editSequence)return 'stale'
     if(server.draft_revision<this.view.highestRemoteRevision){this.view.remote='newer';this.emit();return 'stale'}
     if(this.view.local!=='clean' && !discardLocal){await this.reviewChanges();return 'review'}
-    this.base=clone(server.document);this.view.working=clone(server.document);this.view.baseRevision=server.draft_revision
-    this.view.highestRemoteRevision=server.draft_revision;this.view.remote='current';this.view.local='clean';this.view.review=null;this.view.error=null;this.editSequence++;this.emit()
+    this.base=clone(server.document);this.view.working=clone(server.document);this.view.baseRevision=server.draft_revision;this.baseVersion=typeof server.base_version==='number'?server.base_version:this.baseVersion
+    this.view.highestRemoteRevision=server.draft_revision;this.view.remote='current';this.view.local='clean';this.view.review=null;this.view.error=null;this.view.failure=null;this.editSequence++;this.emit()
     if(discardLocal) await clearRecovery(this.scope()).catch(()=>{})
     return 'loaded'
   }
@@ -186,7 +229,9 @@ export class QuoteSession {
   }
   private scheduleCheck():void {window.clearTimeout(this.checkTimer);if(!this.disposed)this.checkTimer=window.setTimeout(()=>{void this.check()},this.checkDelay)}
   private focus=()=>{void this.check()}
+  // Back online: work kept while offline saves by itself.
+  private online=()=>{if(this.view.local==='offline')void this.save()}
   private visibility=()=>{if(!document.hidden)void this.check()}
   exportRecovery():void {const value=this.recovery();if(value)downloadRecovery(value)}
-  dispose():void {this.disposed=true;this.generation++;this.channel?.close();window.clearTimeout(this.checkTimer);window.removeEventListener('focus',this.focus);document.removeEventListener('visibilitychange',this.visibility);if(this.view.local!=='clean')void this.persist();this.listeners.clear()}
+  dispose():void {this.disposed=true;this.generation++;this.channel?.close();window.clearTimeout(this.checkTimer);window.removeEventListener('focus',this.focus);window.removeEventListener('online',this.online);document.removeEventListener('visibilitychange',this.visibility);if(this.view.local!=='clean')void this.persist();this.listeners.clear()}
 }

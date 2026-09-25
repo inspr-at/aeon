@@ -128,7 +128,7 @@ onMounted(load)
             <p v-if="preview.legal.length" class="lh-small dot-list"><span v-for="part in preview.legal" :key="part">{{ part }}</span></p>
             <p v-if="preview.bank.length" class="lh-small dot-list"><span v-for="part in preview.bank" :key="part">{{ part }}</span></p>
           </div>
-          <p class="lh-note">Email delivery is disabled. Accepted PDF receipts remain available in the quote. Texts and layout arrive with the quote editor.</p>
+          <p class="lh-note">Email delivery is disabled. Accepted PDF receipts remain available in the quote. Type, colours and layout come from the document profiles below.</p>
         </aside>
       </div>
       <p v-if="error" class="f-error" role="alert"><AppIcon name="alert" :size="14" />{{ error }}</p>

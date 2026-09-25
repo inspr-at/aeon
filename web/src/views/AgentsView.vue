@@ -218,10 +218,12 @@ watch(sessionId, id => { if (id) cursor.value = `s:${id}` }, { immediate: true }
       </div>
     </header>
 
-    <div class="layout">
+    <!-- The first load swaps the loading layout for the real one in one step, so the
+         page does not jump as each read lands. -->
+    <div :key="agents.loaded ? 'ready' : 'loading'" class="layout">
       <div class="main-col">
         <ApprovalQueue
-          ref="queue" :loading="!agents.loaded" :pending="agents.pending" :held="agents.held" :history="history" :now="agents.now"
+          ref="queue" :pending="agents.pending" :held="agents.held" :history="history" :now="agents.now" :loaded="agents.loaded"
           :cursor="cursor" :can-decide="writable" :asker="agents.askerName" :resource="resource" :decide="decide" :revoke="agents.revoke" :resolve="resolveHeld"
           @focus-row="id => cursor = id" @open-agent="openAgent"
         />

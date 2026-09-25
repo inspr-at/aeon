@@ -1,6 +1,6 @@
 // SPDX-License-Identifier: AGPL-3.0-only
 import { defineStore } from 'pinia'
-import { computed, ref } from 'vue'
+import { computed, ref, watch } from 'vue'
 import { createNode, getKinds, getRelations, listNodes, type Kind, type ListItem, type Relation } from '../lib/api'
 import { listPrincipals, listQuotes, listRates, type CostRate, type Principal, type Quote, type Unit } from '../lib/business'
 import { availability, configurePlugin, installationWrite, isTenantAdmin, listPlugins, type BusinessPlugin } from '../components/business/catalog'
@@ -61,6 +61,16 @@ export const useBusiness = defineStore('business', () => {
     return out
   })
   const anyOpen = computed(() => Object.values(open.value).some(Boolean))
+  // The header's Business place from the first paint: until the plugins are read,
+  // this browser's last answer for the workspace stands in, so the header does not
+  // shift sideways a moment after every load.
+  const hintKey = computed(() => session.identity ? `aeon.business-place.${session.identity.tenant.id}` : '')
+  const remembered = computed(() => { if (!hintKey.value) return false; try { return localStorage.getItem(hintKey.value) === '1' } catch { return false } })
+  const placeOpen = computed(() => plugins.value || pluginsError.value ? anyOpen.value : remembered.value)
+  watch([plugins, anyOpen], () => {
+    if (!plugins.value || !hintKey.value) return
+    try { localStorage.setItem(hintKey.value, anyOpen.value ? '1' : '0') } catch { /* private window: the place waits for the plugins */ }
+  })
   // The overview's first-run card stays until hours and rates are on; Customers
   // and Quotes are added from Manage parts when a workspace wants them.
   const allOpen = computed(() => open.value.costs && open.value.hours)
@@ -256,7 +266,7 @@ export const useBusiness = defineStore('business', () => {
   }
 
   return {
-    plugins, pluginsError, open, anyOpen, allOpen, admin, staff, loadPlugins, enable, disable,
+    plugins, pluginsError, open, anyOpen, placeOpen, allOpen, admin, staff, loadPlugins, enable, disable,
     kinds, loadKinds, kindBySlug, fieldsOf,
     principals, loadPrincipals, nameOf, people, timeKeepers,
     costUnits, costUnitsLoaded, loadCostUnits, setRates, addCostUnit, costUnit, rateOn, currencies, usable,

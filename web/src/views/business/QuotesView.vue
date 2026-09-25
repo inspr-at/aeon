@@ -57,6 +57,10 @@ const noticeTime = (at: string) => new Intl.DateTimeFormat('en-GB', { dateStyle:
 const UUID = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i
 const openId = computed(() => typeof route.query.quote === 'string' && UUID.test(route.query.quote) ? route.query.quote : null)
 const all = computed(() => store.items ?? [])
+// The first load shows the list together with the accepted-offers notice, so the
+// table does not jump down when the notice lands a moment after the quotes.
+const settled = ref(!!store.items)
+const items = computed(() => settled.value ? store.items : null)
 const live = computed(() => all.value.filter(q => !q.archived))
 const rows = computed(() => sortQuotes(all.value.filter(q => matchesQuote(q, filter.value, today)), sort.value))
 const archivedCount = computed(() => all.value.length - live.value.length)
@@ -277,10 +281,10 @@ const scroller = () => document.getElementById('main')
 onMounted(async () => {
   window.addEventListener('keydown', keys)
   await business.loadPlugins()
-  if (business.open.quotes) { await Promise.all([store.load(true), loadCreatorNotices()]); await nextTick(); const el = scroller(); if (el && store.scroll) el.scrollTop = store.scroll }
+  if (business.open.quotes) { await Promise.all([store.load(true), loadCreatorNotices()]); settled.value = true; await nextTick(); const el = scroller(); if (el && store.scroll) el.scrollTop = store.scroll }
 })
 onBeforeUnmount(() => { window.removeEventListener('keydown', keys); store.scroll = scroller()?.scrollTop ?? 0 })
-watch(() => business.open.quotes, on => { if (on) { void store.load(true); void loadCreatorNotices() } })
+watch(() => business.open.quotes, on => { if (on) void Promise.all([store.load(true), loadCreatorNotices()]).then(() => { settled.value = true }) })
 watch(openId, (id, old) => { if (!id && old) void loadCreatorNotices() })
 watch(openId, id => { if (id) store.cursor = id })
 </script>
@@ -289,14 +293,14 @@ watch(openId, id => { if (id) store.cursor = id })
   <div class="quotes-view" :class="{ docked: !!openId }">
     <BusinessPage title="Quotes" area="quotes" :panel-open="!!openId" class="quotes-list-page">
       <template #summary>
-        <span v-if="store.items && live.length" class="dot-list">
+        <span v-if="items && live.length" class="dot-list">
           <span>{{ plural(live.length, 'quote') }}</span>
           <span v-if="issuedCount">{{ issuedCount }} waiting for the customer</span>
           <span v-for="sum in awaiting" :key="sum"><b>{{ sum }}</b> to accept</span>
         </span>
-        <span v-else-if="store.items">No quotes yet</span>
+        <span v-else-if="items">No quotes yet</span>
         <span v-else-if="store.error">Quotes could not be loaded</span>
-        <span v-else class="skeleton summary-skeleton" />
+        <span v-else class="summary-loading"><span class="skeleton summary-skeleton" /><span class="skeleton summary-skeleton line2" /></span>
       </template>
       <template v-if="business.staff" #actions>
         <RouterLink v-if="business.admin" class="btn ghost" :to="settingsLink('business', 'quotes')" data-tip="Sender, texts and numbering for new quotes"><AppIcon name="gear" :size="14" />Quote settings</RouterLink>
@@ -304,15 +308,6 @@ watch(openId, id => { if (id) store.cursor = id })
       </template>
 
       <template v-if="noticesReady && (store.items || store.error)">
-      <details v-if="creatorNotices.length" class="acceptance-notices">
-        <summary><AppIcon name="chevron-right" :size="12" class="disclosure-chev" />Recently accepted offers you created <span>{{ creatorNotices.length }}</span></summary>
-        <ol>
-          <li v-for="notice in creatorNotices" :key="`${notice.quote_node_id}:${notice.version}`">
-            <RouterLink :to="`/business/quotes/${notice.quote_node_id}`">{{ noticeName(notice.quote_node_id) }} · version {{ notice.version }}</RouterLink>
-            <span>Accepted {{ noticeTime(notice.accepted_at) }}</span>
-          </li>
-        </ol>
-      </details>
       <div class="toolbar" role="search">
         <label class="search-field list-search">
           <AppIcon name="search" :size="14" />
@@ -330,16 +325,25 @@ watch(openId, id => { if (id) store.cursor = id })
           <button v-if="isNarrowed" type="button" class="btn sm ghost" @click="clearFilters">Clear</button>
         </div>
         <span class="spacer" />
-        <p v-if="store.items && (isNarrowed || filter.archived)" class="count" role="status">{{ rows.length }} of {{ filter.archived ? all.length : live.length }}</p>
+        <p v-if="items && (isNarrowed || filter.archived)" class="count" role="status">{{ rows.length }} of {{ filter.archived ? all.length : live.length }}</p>
       </div>
 
-      <div v-if="store.error && !store.items" class="state glass-card" role="alert">
+      <details v-if="items && creatorNotices.length" class="acceptance-notices">
+        <summary><AppIcon name="chevron-right" :size="12" class="disclosure-chev" />Recently accepted offers you created <span>{{ creatorNotices.length }}</span></summary>
+        <ol>
+          <li v-for="notice in creatorNotices" :key="`${notice.quote_node_id}:${notice.version}`">
+            <RouterLink :to="`/business/quotes/${notice.quote_node_id}`">{{ noticeName(notice.quote_node_id) }} · version {{ notice.version }}</RouterLink>
+            <span>Accepted {{ noticeTime(notice.accepted_at) }}</span>
+          </li>
+        </ol>
+      </details>
+      <div v-if="store.error && !items" class="state glass-card" role="alert">
         <span class="state-icon danger"><AppIcon name="alert" :size="18" /></span>
         <h2>{{ store.status === 403 ? 'Quotes are not open to you' : 'Quotes could not be loaded' }}</h2>
         <p>{{ store.status === 403 ? 'Only admins and members of this workspace see its quotes. A workspace admin can change your role.' : store.error }}</p>
         <button v-if="store.status !== 403" type="button" class="btn" @click="store.load(true)"><AppIcon name="refresh" :size="14" />Try again</button>
       </div>
-      <div v-else-if="store.items && !all.length" class="state glass-card">
+      <div v-else-if="items && !all.length" class="state glass-card">
         <span class="state-icon"><BizIcon name="document" :size="18" /></span>
         <h2>No quotes yet</h2>
         <p v-if="business.staff">Write a quote for a customer: it starts from your sender and texts, and gets its number when you create it. You issue it when it is ready and share it with a link.</p>
@@ -350,11 +354,11 @@ watch(openId, id => { if (id) store.cursor = id })
         </div>
       </div>
       <QuoteTable
-        v-else ref="table" :rows="rows" :loading="store.loading && !store.items" :query="filter.q" :sort="sort" :cursor-id="store.cursor" :open-id="openId" :menu-id="menu?.row.quote_node_id ?? null" :can-duplicate="business.staff" :widths="widths" :today="today"
+        v-else ref="table" :key="items ? 'rows' : 'loading'" :rows="items ? rows : []" :loading="!items" :query="filter.q" :sort="sort" :cursor-id="store.cursor" :open-id="openId" :menu-id="menu?.row.quote_node_id ?? null" :can-duplicate="business.staff" :widths="widths" :today="today"
         @sort="setSort" @cursor="id => store.cursor = id" @open="row => open(row)" @widths="setWidths" @grid-focus="() => { if (!store.cursor && rows.length) store.cursor = rows[0]!.quote_node_id }"
         @action="(row, id) => act(row, id)" @menu="(row, anchor) => openMenu(row, anchor)"
       >
-        <div v-if="store.items && all.length && !rows.length" class="state inline">
+        <div v-if="items && all.length && !rows.length" class="state inline">
           <span class="state-icon"><AppIcon name="search" :size="18" /></span>
           <h2>{{ filter.q.trim() ? `No quote matches “${filter.q.trim()}”` : 'No quote matches these filters' }}</h2>
           <p>Search looks at numbers, titles, customers, project references and status.<template v-if="amountActive(filter)"> Quotes without an amount are left out while an amount is set.</template><template v-if="dateActive(filter)"> The date is the one on the quote.</template></p>
@@ -364,7 +368,7 @@ watch(openId, id => { if (id) store.cursor = id })
           </div>
         </div>
       </QuoteTable>
-      <p v-if="store.items && rows.length" class="keys-hint dot-list" aria-hidden="true">
+      <p v-if="items && rows.length" class="keys-hint dot-list" aria-hidden="true">
         <span><kbd class="keycap">j</kbd><kbd class="keycap">k</kbd> move</span><span><kbd class="keycap"><AppIcon name="enter" /></kbd> open</span><span><kbd class="keycap">shift</kbd><kbd class="keycap"><AppIcon name="enter" /></kbd> own page</span><span><kbd class="keycap">shift</kbd><kbd class="keycap">F10</kbd> actions</span><span><kbd class="keycap">/</kbd> search</span><span v-if="business.staff"><kbd class="keycap">n</kbd> new quote</span>
       </p>
       </template>
@@ -389,6 +393,14 @@ watch(openId, id => { if (id) store.cursor = id })
 .quote-list-placeholder .skeleton { width: min(100%, 620px); height: 36px; }
 .quote-list-placeholder .skeleton:first-child { width: min(100%, 300px); height: 44px; }
 .quote-list-placeholder .skeleton:last-child { height: 220px; }
+/* Phones wrap the summary to two lines; the loading line holds both. */
+.summary-loading { display: inline-block; }
+.summary-skeleton.line2 { display: none; }
+@media (max-width: 600px) {
+  .summary-loading { display: grid; gap: 10px; padding: 5px 0; }
+  .summary-skeleton, .summary-skeleton.line2 { display: block; }
+  .summary-skeleton.line2 { width: 60%; }
+}
 .acceptance-notices { min-width: 0; margin: 0 0 12px; padding: 9px 12px; border-radius: 10px; background: var(--surface-raised-2); box-shadow: inset 0 0 0 1px var(--line-2); color: var(--ink); }
 .acceptance-notices summary { width: fit-content; cursor: pointer; font-size: 13px; font-weight: 600; }
 .acceptance-notices summary:focus-visible { border-radius: 4px; box-shadow: var(--focus-ring); }

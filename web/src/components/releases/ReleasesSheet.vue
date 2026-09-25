@@ -264,7 +264,7 @@ const KINDS = [
             </div>
             <p class="result-count" aria-live="polite">
               <template v-if="filtering">{{ visible.length }} of {{ releases.length }}</template>
-              <template v-else-if="releases.length">{{ releases.length - reservedCount }}<template v-if="!phone"> published</template><template v-if="reservedCount"> · {{ reservedCount }} reserved</template></template>
+              <template v-else-if="releases.length">{{ releases.length - reservedCount }} published<template v-if="reservedCount"> · {{ reservedCount }} reserved</template></template>
             </p>
           </div>
 

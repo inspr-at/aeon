@@ -30,7 +30,12 @@ const phoneChange = () => { phone.value = phoneQuery.matches }
 let sizer: ResizeObserver | undefined
 onMounted(() => {
   phoneChange(); phoneQuery.addEventListener('change', phoneChange)
-  if (card.value) { width.value = card.value.getBoundingClientRect().width; sizer = new ResizeObserver(([entry]) => { width.value = entry.contentRect.width }); sizer.observe(card.value) }
+  if (card.value) {
+    // The first fit happens before paint, so the columns never jump into place.
+    const box = getComputedStyle(card.value)
+    width.value = card.value.clientWidth - parseFloat(box.paddingLeft) - parseFloat(box.paddingRight)
+    sizer = new ResizeObserver(([entry]) => { width.value = entry.contentRect.width }); sizer.observe(card.value)
+  }
 })
 onBeforeUnmount(() => { phoneQuery.removeEventListener('change', phoneChange); sizer?.disconnect() })
 
