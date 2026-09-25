@@ -30,6 +30,11 @@ const cursorId = ref<string | null>(null)
 const listEl = ref<HTMLElement>()
 const createDialog = ref<InstanceType<typeof KnowledgeCreateDialog>>()
 const menu = ref<{ kind: 'status' | 'sort'; anchor: HTMLElement } | null>(null)
+// Phones get the short placeholder that fits beside Status, Sort and New.
+const phoneQuery = window.matchMedia('(max-width: 600px)')
+const phone = ref(phoneQuery.matches)
+const onPhone = (event: MediaQueryListEvent) => { phone.value = event.matches }
+phoneQuery.addEventListener('change', onPhone)
 let timer: ReturnType<typeof setTimeout> | undefined
 watch(() => props.filters.q, value => { if (value !== draft.value.trim()) draft.value = value })
 watch(draft, value => { clearTimeout(timer); timer = setTimeout(() => { if (value.trim() !== props.filters.q) emit('update', { q: value.trim() }) }, 160) })
@@ -131,7 +136,7 @@ function reveal(id: string) {
   void nextTick(() => rowEl(id)?.scrollIntoView({ block: 'nearest' }))
 }
 onMounted(() => window.addEventListener('keydown', keydown))
-onBeforeUnmount(() => { window.removeEventListener('keydown', keydown); clearTimeout(timer) })
+onBeforeUnmount(() => { window.removeEventListener('keydown', keydown); clearTimeout(timer); phoneQuery.removeEventListener('change', onPhone) })
 defineExpose({ focusSearch, openCreate, reveal })
 const who = (item: KnowledgeItem) => item.imported ? 'imported' : item.updated_by ? `by ${item.updated_by.name}` : ''
 </script>
@@ -142,7 +147,7 @@ const who = (item: KnowledgeItem) => item.imported ? 'imported' : item.updated_b
     <label class="search-field k-search">
       <AppIcon name="search" :size="14" />
       <input
-        ref="input" v-model="draft" class="field" type="search" placeholder="Search knowledge" :aria-label="`Search knowledge in ${project.title}`"
+        ref="input" v-model="draft" class="field" type="search" :placeholder="phone ? 'Search' : 'Search knowledge'" :aria-label="`Search knowledge in ${project.title}`"
         aria-keyshortcuts="/" autocomplete="off" spellcheck="false" @keydown="searchKey"
       />
       <span v-if="state.searching.value && draft" class="spinner" aria-hidden="true" />

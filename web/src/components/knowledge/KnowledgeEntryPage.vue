@@ -152,11 +152,18 @@ watch([toc, article], async () => {
   const visible = new Map<string, boolean>()
   spy = new IntersectionObserver(entries => {
     for (const item of entries) visible.set(item.target.id.slice(2), item.isIntersecting)
-    const first = toc.value.find(h => visible.get(h.id))
+    const main = document.getElementById('main')
+    const atEnd = !!main && main.scrollTop > 0 && main.scrollTop + main.clientHeight >= main.scrollHeight - 4
+    const first = atEnd ? toc.value[toc.value.length - 1] : toc.value.find(h => visible.get(h.id))
     if (first) activeHeading.value = first.id
   }, { root: document.getElementById('main'), rootMargin: '-64px 0px -55% 0px' })
   for (const h of toc.value) { const el = document.getElementById(`h-${h.id}`); if (el) spy.observe(el) }
 }, { flush: 'post' })
+// At the very end of the page the last sections cannot reach the top: the last one is where the reader is.
+function scrolledToEnd(event: Event) {
+  const el = event.target as HTMLElement
+  if (toc.value.length && el.scrollTop + el.clientHeight >= el.scrollHeight - 4) activeHeading.value = toc.value[toc.value.length - 1].id
+}
 
 // ---------- Links to tickets and other entries ----------
 const linkGroups = computed(() => {
@@ -439,12 +446,14 @@ onMounted(() => {
   window.addEventListener('keydown', keydown)
   window.addEventListener('focus', checkNewer)
   wideQuery.addEventListener('change', onWide)
+  document.getElementById('main')?.addEventListener('scroll', scrolledToEnd, { passive: true })
   poll = setInterval(checkNewer, 60_000)
 })
 onBeforeUnmount(() => {
   window.removeEventListener('keydown', keydown)
   window.removeEventListener('focus', checkNewer)
   wideQuery.removeEventListener('change', onWide)
+  document.getElementById('main')?.removeEventListener('scroll', scrolledToEnd)
   clearInterval(poll); spy?.disconnect()
 })
 defineExpose({ isDirty: () => !skipGuard && dirty.value, startEdit, editing, entryId: () => entry.value?.id ?? null })
@@ -531,7 +540,7 @@ const whoUpdated = computed(() => entry.value?.imported ? 'imported' : entry.val
       <p v-if="touched && titleIssue" class="f-note bad" role="alert"><AppIcon name="alert" :size="12" />{{ titleIssue }}</p>
 
       <div class="e-props">
-        <div class="e-prop">
+        <div class="e-prop e-prop-kind">
           <span class="prop-label">Kind</span>
           <span class="kind-static"><AppIcon :name="meta.icon" :size="14" />{{ meta.label }}</span>
         </div>
@@ -906,6 +915,7 @@ a.link-row:focus-visible { box-shadow: var(--focus-ring); }
   .e-body :deep(pre) { white-space: pre-wrap; overflow-wrap: anywhere; }
   .edit-title { font-size: 22px; }
   .e-props { grid-template-columns: minmax(0, 1fr); }
+  .e-prop-kind { display: none; }
   .e-prop-slug { grid-row: auto; }
   .status-seg { display: grid; grid-auto-flow: column; grid-auto-columns: 1fr; height: auto; }
   .status-seg button { height: 38px; }
