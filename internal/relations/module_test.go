@@ -65,6 +65,7 @@ func setup(t *testing.T) fixture {
 			t.Fatal(err)
 		}
 	}
+	dbtest.BindLegacy(t, d, f.a.TenantID, f.a.ID)
 	f.handler = (&httpapi.Server{Pool: d.App, Modules: []httpapi.Module{New(d.App), events.New(d.App, UndoOption())}}).Handler()
 	return f
 }
@@ -349,6 +350,9 @@ func TestUndoAuthorizationRestorationAndConflicts(t *testing.T) {
 		return tx.QueryRow(t.Context(), `INSERT INTO principals(tenant_id,kind,name) VALUES($1,'person','Decider') RETURNING id::text`, f.a.TenantID).Scan(&other.ID)
 	})
 	if err != nil {
+		t.Fatal(err)
+	}
+	if _, err := f.db.Admin.Exec(t.Context(), `INSERT INTO role_bindings(tenant_id,principal_id,role_id,scope_type) SELECT $1::uuid,$2::uuid,id,'workspace' FROM roles WHERE tenant_id=$1::uuid AND key='admin'`, f.a.TenantID, other.ID); err != nil {
 		t.Fatal(err)
 	}
 	expect(t, request(f.handler, other, "POST", "/api/events/1/undo", ""), 201)

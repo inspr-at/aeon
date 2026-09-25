@@ -22,6 +22,7 @@ import (
 	"time"
 
 	"github.com/jackc/pgx/v5"
+	"github.com/jackc/pgx/v5/pgconn"
 	"github.com/jackc/pgx/v5/pgxpool"
 
 	"github.com/inspr-at/aeon/internal/db"
@@ -60,6 +61,31 @@ func Open(t testing.TB) *DB {
 		}
 	})
 	return opened
+}
+
+// BindLegacy seeds the workspace binding represented by fixture classic roles.
+// Fixtures describe starting state, so this does not append a mutation event.
+func BindLegacy(t testing.TB, d *DB, tenantID, principalID string) {
+	t.Helper()
+	if err := BindLegacyTx(context.Background(), d.Admin, tenantID, principalID); err != nil {
+		t.Fatalf("bind fixture role: %v", err)
+	}
+}
+
+// BindLegacyTx seeds the same fixture binding within an existing transaction.
+func BindLegacyTx(ctx context.Context, tx interface{ Exec(context.Context, string, ...any) (pgconn.CommandTag, error) }, tenantID, principalID string) error {
+	_, err := tx.Exec(ctx, `
+		INSERT INTO role_bindings(tenant_id,principal_id,role_id,scope_type)
+		SELECT p.tenant_id,p.id,r.id,'workspace' FROM principals p
+		JOIN roles r ON r.tenant_id=p.tenant_id AND r.key=CASE
+		  WHEN 'super_admin'=ANY(p.roles) THEN 'owner'
+		  WHEN 'admin'=ANY(p.roles) THEN 'admin'
+		  WHEN 'member'=ANY(p.roles) OR 'reviewer'=ANY(p.roles) THEN 'member'
+		  WHEN 'external'=ANY(p.roles) THEN 'guest'
+		  WHEN 'customer'=ANY(p.roles) THEN 'customer' END
+		WHERE p.tenant_id=$1::uuid AND p.id=$2::uuid AND p.kind='person'
+		ON CONFLICT DO NOTHING`, tenantID, principalID)
+	return err
 }
 
 // New creates a migrated database. On failure the database and role are dropped.

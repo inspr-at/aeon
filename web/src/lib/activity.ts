@@ -89,8 +89,3 @@ export function parseWorkerMarker(body: string): WorkerMarker | null {
   const rest = [tail.trim().replace(/^[.;,:]\s*/, ''), newline === -1 ? '' : text.slice(newline + 1)].filter(part => part.trim()).join('\n\n').trim()
   return { session: session.trim(), sessionId: sessionId.trim(), role: role.trim().toLowerCase(), started, extras, line: first.slice(0, first.length - tail.length).trim(), rest }
 }
-
-// There is no dedicated write role yet; viewers and read-only principals see the panel read-only.
-export function canWrite(roles: string[] | undefined): boolean {
-  return !(roles ?? []).some(role => ['viewer', 'readonly', 'read_only', 'read-only'].includes(role.toLowerCase()))
-}

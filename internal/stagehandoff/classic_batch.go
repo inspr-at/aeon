@@ -12,6 +12,7 @@ import (
 	"strconv"
 	"strings"
 
+	"github.com/inspr-at/aeon/internal/authz"
 	"github.com/inspr-at/aeon/internal/db"
 	"github.com/inspr-at/aeon/internal/events"
 	"github.com/inspr-at/aeon/internal/tenant"
@@ -142,7 +143,7 @@ func handoffOwner(ctx context.Context, tx pgx.Tx, p tenant.Principal, id string)
 	if err := tx.QueryRow(ctx, `SELECT requested_by_principal_id::text FROM stage_handoffs WHERE id=$1::uuid`, id).Scan(&requester); err != nil {
 		return err
 	}
-	if requester == p.ID || slicesContains(p.Roles, "admin") {
+	if requester == p.ID || authz.RequireTx(ctx, tx, p, "stage_handoffs.decide", authz.Scope{}) == nil {
 		return nil
 	}
 	return fail(403, "handoff owner required")

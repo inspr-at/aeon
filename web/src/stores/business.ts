@@ -3,7 +3,8 @@ import { defineStore } from 'pinia'
 import { computed, ref, watch } from 'vue'
 import { createNode, getKinds, getRelations, listNodes, type Kind, type ListItem, type Relation } from '../lib/api'
 import { listPrincipals, listQuotes, listRates, type CostRate, type Principal, type Quote, type Unit } from '../lib/business'
-import { availability, configurePlugin, installationWrite, isTenantAdmin, listPlugins, type BusinessPlugin } from '../components/business/catalog'
+import { availability, configurePlugin, installationWrite, listPlugins, type BusinessPlugin } from '../components/business/catalog'
+import { can } from '../lib/authz'
 import { businessSections } from '../components/business/areas'
 import { api } from '../lib/api'
 import { useProjects } from './projects'
@@ -50,8 +51,8 @@ export const useBusiness = defineStore('business', () => {
   const quotes = ref<Quote[]>([])
   const quotesLoaded = ref(false)
   const quotesError = ref('')
-  const admin = computed(() => isTenantAdmin(session.identity))
-  const staff = computed(() => session.identity?.principal.kind === 'person' && (session.identity.principal.roles ?? []).some(role => role === 'admin' || role === 'member'))
+  const admin = computed(() => can('plugins.manage'))
+  const staff = computed(() => can('crm.write'))
 
   // ---------- Plugins ----------
   const open = computed<Record<AreaId, boolean>>(() => {
@@ -141,8 +142,7 @@ export const useBusiness = defineStore('business', () => {
   }
   const people = computed(() => principals.value.filter(p => p.kind === 'person'))
   // Staff who log time, and agents that are not system accounts.
-  const timeKeepers = computed(() => principals.value.filter(p =>
-    p.kind === 'person' ? p.roles.some(role => ['admin', 'member', 'super_admin'].includes(role)) : !p.roles.some(role => ['system', 'importer', 'operator'].includes(role))))
+  const timeKeepers = computed(() => principals.value.filter(p => p.kind === 'person' ? !p.roles.includes('customer') : p.kind === 'agent' && !p.roles.includes('system')))
 
   // ---------- Cost units and rates ----------
   let costRequest: Promise<void> | null = null

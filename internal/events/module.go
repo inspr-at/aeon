@@ -9,6 +9,7 @@ import (
 	"strconv"
 	"strings"
 
+	"github.com/inspr-at/aeon/internal/authz"
 	"github.com/inspr-at/aeon/internal/db"
 	"github.com/inspr-at/aeon/internal/httpapi"
 	"github.com/inspr-at/aeon/internal/tenant"
@@ -206,8 +207,7 @@ func (m *module) handleUndo(w http.ResponseWriter, r *http.Request) {
 		if err != nil {
 			return err
 		}
-		admin := tenant.IsAdmin(p)
-		if e.ActorPrincipalID != p.ID && !admin {
+		if e.ActorPrincipalID != p.ID && authz.RequireTx(r.Context(), tx, p, "events.undo_other", authz.Scope{}) != nil {
 			return ErrForbidden
 		}
 		fn := m.undo[e.Type]

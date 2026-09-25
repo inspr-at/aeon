@@ -9,6 +9,7 @@ import (
 
 	"github.com/jackc/pgx/v5"
 
+	"github.com/inspr-at/aeon/internal/authz"
 	"github.com/inspr-at/aeon/internal/events"
 	"github.com/inspr-at/aeon/internal/tenant"
 )
@@ -26,7 +27,7 @@ func UndoHandlers() map[string]events.UndoFunc {
 }
 
 func undoStart(ctx context.Context, tx pgx.Tx, p tenant.Principal) error {
-	if !isAdmin(p) {
+	if authz.RequireTx(ctx, tx, p, "project_groups.write", authz.Scope{}) != nil {
 		return events.ErrForbidden
 	}
 	return lockGroups(ctx, tx)

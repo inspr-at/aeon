@@ -11,7 +11,7 @@ import AppIcon from '../AppIcon.vue'
 // sees) and held action requests. Decided and expired requests fold into a history.
 type Held = ProjectMessage & { projectId: string }
 const props = defineProps<{
-  pending: Approval[]; held: Held[]; history: Approval[]; now: number; cursor: string; canDecide: boolean; canDecideApproval: (approval: Approval) => boolean; loaded: boolean
+  pending: Approval[]; held: Held[]; history: Approval[]; now: number; cursor: string; canDecide: boolean; canDecideApproval: (approval: Approval) => boolean; canResolve: boolean; canRevoke: boolean; loaded: boolean
   asker: (principalId: string) => Asker; resource: (approval: Approval) => Resource
   decide: (approval: Approval, decision: 'approved' | 'denied', reason: string) => Promise<void>
   revoke: (approval: Approval) => Promise<void>
@@ -32,6 +32,7 @@ async function begin(id: string, mode: Mode) {
   if (!props.canDecide || busy.value) return
   const approval = props.pending.find(item => item.id === id)
   if (approval && !props.canDecideApproval(approval)) return
+  if (!approval && !props.canResolve) return
   if (open.value?.id !== id) { reason.value = ''; error.value = '' }
   open.value = { id, mode }
   emit('focusRow', `${mode === 'resolve' || mode === 'dismiss' ? 'm' : 'a'}:${id}`)
@@ -44,7 +45,7 @@ function cancel() {
   if (current) void nextTick(() => document.querySelector<HTMLElement>(`[data-row="${current.mode === 'resolve' || current.mode === 'dismiss' ? 'm' : 'a'}:${current.id}"]`)?.focus())
 }
 async function submit(approval: Approval) {
-  if (!open.value || busy.value) return
+  if (!open.value || busy.value || !props.canDecideApproval(approval)) return
   busy.value = true; error.value = ''
   try {
     await props.decide(approval, open.value.mode === 'approve' ? 'approved' : 'denied', reason.value.trim())
@@ -176,7 +177,7 @@ defineExpose({ begin, cancel, isOpen: () => !!open.value })
         </div>
         <div v-if="open?.id !== request.id" class="row-actions">
           <button type="button" class="btn sm ghost answer" @click.stop="emit('openAgent', request.sender_principal_id)"><AppIcon name="send" :size="13" />Answer</button>
-          <template v-if="canDecide">
+          <template v-if="canResolve">
             <button type="button" class="btn sm" aria-keyshortcuts="d" @click.stop="begin(request.id, 'dismiss')"><AppIcon name="close" :size="13" />Dismiss</button>
             <button type="button" class="btn sm" :class="cursor === `m:${request.id}` ? 'primary' : 'approve-soft'" aria-keyshortcuts="a" @click.stop="begin(request.id, 'resolve')"><AppIcon name="check" :size="13" />Resolve</button>
           </template>
@@ -195,7 +196,7 @@ defineExpose({ begin, cancel, isOpen: () => !!open.value })
           <span class="past-who">{{ asker(approval.agent_principal_id).name }}</span>
           <span class="past-outcome">{{ outcome(approval) }}</span>
           <time class="past-time" :datetime="approval.proposed_at">{{ relativeTime(approval.proposed_at, { now }) }}</time>
-          <button v-if="approval.decision === 'approved' && !revoked.has(approval.id) && canDecide" type="button" class="btn sm ghost revoke" @click="revoke(approval)">Revoke</button>
+          <button v-if="approval.decision === 'approved' && !revoked.has(approval.id) && canRevoke" type="button" class="btn sm ghost revoke" @click="revoke(approval)">Revoke</button>
         </li>
       </ul>
     </footer>

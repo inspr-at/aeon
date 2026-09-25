@@ -5,6 +5,7 @@
 import { test, expect, type Page } from '@playwright/test'
 import { fixtures, mockWork, watchErrors } from './work-fixtures'
 import { journeyWorld, mockJourney, type JourneyStart, type WorldOptions } from './journey-fixtures'
+import { mockEffectivePermissions } from './authz-fixtures'
 
 async function open(page: Page, start: JourneyStart = 'plan', path = '/p/PHAROS?view=journey', options: WorldOptions & { failPlan?: boolean; kind?: 'person' | 'agent'; noTicketRoute?: boolean } = {}) {
   await page.setViewportSize({ width: 1440, height: 900 })
@@ -307,6 +308,17 @@ test('Deploy follows launch readiness: ready shows a check, blocked shows its re
   await expect(page.getByRole('region', { name: 'Launch admission is ready' })).toBeVisible()
   await expect(page.getByText('Launch admission · ready')).toBeVisible()
   await expect(page.getByRole('region', { name: /Blocked: Launch admission/ })).toHaveCount(0)
+})
+
+test('a member sees the deploy gate without an approval action', async ({ page }) => {
+  const { calls } = await open(page, 'deploy')
+  await page.route('**/api/me/permissions*', route => route.fulfill({ json: mockEffectivePermissions('member', new URL(route.request().url()).searchParams.get('project_id') ?? undefined) }))
+  await page.reload()
+  const gate = page.getByRole('listitem', { name: /Deployment gate on Release 2, asked by/ })
+  await expect(gate).toBeVisible()
+  await expect(gate.getByRole('button', { name: 'Approve' })).toHaveCount(0)
+  await expect(page.getByRole('button', { name: /Approve and retry deployment/ })).toBeDisabled()
+  expect(writes(calls, '/journey/actions')).toHaveLength(0)
 })
 
 test('Build: marking the candidate approves the build gate and sends mark_candidate', async ({ page }) => {

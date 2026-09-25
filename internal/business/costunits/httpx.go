@@ -56,18 +56,6 @@ func principalFrom(r *http.Request) (tenant.Principal, error) {
 	return p, nil
 }
 
-func requireAdmin(p tenant.Principal) error {
-	if p.Kind != tenant.Person {
-		return forbidden("admin session required")
-	}
-	for _, role := range p.Roles {
-		if role == "admin" {
-			return nil
-		}
-	}
-	return forbidden("admin session required")
-}
-
 func validUUID(s string) bool { return uuidRe.MatchString(s) }
 
 func validUnit(s string) bool {

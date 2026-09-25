@@ -33,7 +33,7 @@ import StatusIcon from '../work/StatusIcon.vue'
 // component, so a draft and the loaded entry carry over).
 const props = withDefaults(defineProps<{
   project: { id: string; routeKey: string; title: string }
-  type: KnowledgeType; slug: string; state: KnowledgeState; canWrite: boolean; now: number
+  type: KnowledgeType; slug: string; state: KnowledgeState; canWrite: boolean; canDelete: boolean; now: number
   // The list's search, kind, status and sort, carried so back returns to it.
   listQuery: Record<string, string>
   mode?: 'page' | 'dock'
@@ -84,7 +84,7 @@ async function load() {
     if (request === generation) loading.value = false
   }
 }
-watch(() => [props.project.id, props.type, props.slug] as const, ([, type, slug]) => {
+watch([() => props.project.id, () => props.type, () => props.slug], ([, type, slug]) => {
   // Our own rename (or its undo) changes the address, not the entry.
   if (entry.value && entry.value.type === type && entry.value.slug === slug) return
   editing.value = false
@@ -313,6 +313,10 @@ async function save() {
 }
 // The server's copy replaces ours everywhere; a new slug moves the address.
 function applySaved(saved: KnowledgeEntry, previousSlug: string) {
+  // A route load started for the previous slug must not replace this newer
+  // server response after a rename or its undo.
+  generation++
+  loading.value = false; missing.value = false; error.value = ''
   entry.value = saved
   props.state.upsert(saved)
   if (saved.slug !== previousSlug || saved.type !== props.type) void router.replace(placeOf(saved.type, saved.slug))
@@ -427,7 +431,7 @@ async function confirmProposed() {
 }
 async function remove() {
   const current = entry.value
-  if (!current || !writable.value) return
+  if (!current || !props.canDelete) return
   const ok = await confirmAction({
     title: `Delete ${current.slug}?`,
     body: `“${current.title}” leaves the project’s knowledge and agents stop finding it. You can undo this right after; the history stays in the audit log.`,
@@ -759,10 +763,10 @@ const whoUpdated = computed(() => entry.value?.imported ? 'imported' : entry.val
         <button type="button" role="menuitem" class="menu-item" data-autofocus @click="pick('link')"><AppIcon name="link" :size="14" />Copy link</button>
         <button type="button" role="menuitem" class="menu-item" @click="pick('slug')"><AppIcon name="copy" :size="14" />Copy slug</button>
         <button type="button" role="menuitem" class="menu-item" @click="pick('command')"><AppIcon name="terminal" :size="14" />Copy the agent command</button>
-        <template v-if="writable">
+        <template v-if="writable || canDelete">
           <div class="menu-sep" role="separator" />
-          <button type="button" role="menuitem" class="menu-item" @click="pick('archive')"><AppIcon name="archive" :size="14" />{{ entry.status === 'archived' ? 'Make active again' : 'Archive' }}</button>
-          <button type="button" role="menuitem" class="menu-item danger" @click="pick('delete')"><AppIcon name="trash" :size="14" />Delete {{ meta.label.toLowerCase() }}…</button>
+          <button v-if="writable" type="button" role="menuitem" class="menu-item" @click="pick('archive')"><AppIcon name="archive" :size="14" />{{ entry.status === 'archived' ? 'Make active again' : 'Archive' }}</button>
+          <button v-if="canDelete" type="button" role="menuitem" class="menu-item danger" @click="pick('delete')"><AppIcon name="trash" :size="14" />Delete {{ meta.label.toLowerCase() }}…</button>
         </template>
       </div>
     </FloatingPanel>

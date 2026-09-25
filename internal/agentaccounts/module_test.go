@@ -100,6 +100,7 @@ func addPrincipal(t *testing.T, tenantID, kind, name string, roles []string) ten
 	if err != nil {
 		t.Fatalf("principal: %v", err)
 	}
+	dbtest.BindLegacy(t, testDB, tenantID, id)
 	k := tenant.Person
 	if kind == "agent" {
 		k = tenant.Agent

@@ -36,7 +36,7 @@ func TestAgentRoleCannotManageKeys(t *testing.T) {
 	req := httptest.NewRequest(http.MethodGet, "/api/agent-keys", nil)
 	req = req.WithContext(tenant.WithPrincipal(req.Context(), tenant.Principal{Kind: tenant.Agent, Roles: []string{"admin"}}))
 	rec := httptest.NewRecorder()
-	_, ok := (&Module{}).requireAdmin(rec, req)
+	_, ok := (&Module{}).requireKeyManagement(rec, req)
 	if ok || rec.Code != http.StatusForbidden {
 		t.Fatalf("agent with admin role managed keys: %d", rec.Code)
 	}

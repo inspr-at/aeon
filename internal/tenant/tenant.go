@@ -6,7 +6,6 @@ package tenant
 
 import (
 	"context"
-	"slices"
 )
 
 // PrincipalKind distinguishes people from agents; both are first-class.
@@ -19,29 +18,20 @@ const (
 
 // Principal is who acts, always inside exactly one tenant.
 type Principal struct {
-	ID       string // principals.id (uuid)
-	TenantID string // tenants.id (uuid)
-	Kind     PrincipalKind
-	Name     string
-	Roles    []string // e.g. "admin", "member"
-	Scopes   []string // authenticated agent key's outer permission ceiling
+	ID           string // principals.id (uuid)
+	TenantID     string // tenants.id (uuid)
+	Kind         PrincipalKind
+	Name         string
+	Roles        []string // e.g. "admin", "member"
+	Scopes       []string // authenticated agent key's outer permission ceiling
+	KeyCreatorID string   // creator's live binding further narrows an agent key
 }
 
 type ctxKey struct{}
 
 // WithPrincipal returns a context carrying p.
 func WithPrincipal(ctx context.Context, p Principal) context.Context {
-	// A global administrator has tenant-admin authority in every handler that
-	// checks the existing admin role. Never confer that authority on an agent.
-	if p.Kind == Person && slices.Contains(p.Roles, "super_admin") && !slices.Contains(p.Roles, "admin") {
-		p.Roles = append(slices.Clone(p.Roles), "admin")
-	}
 	return context.WithValue(ctx, ctxKey{}, p)
-}
-
-// IsAdmin requires a person, including a global administrator.
-func IsAdmin(p Principal) bool {
-	return p.Kind == Person && (slices.Contains(p.Roles, "admin") || slices.Contains(p.Roles, "super_admin"))
 }
 
 // PrincipalFrom returns the principal set by the auth middleware, if any.

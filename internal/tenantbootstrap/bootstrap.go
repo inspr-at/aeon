@@ -94,8 +94,10 @@ func BindOIDC(ctx context.Context, pool *pgxpool.Pool, slug, issuer, subject, na
 		var operatorID string
 		err = tx.QueryRow(ctx, `SELECT p.id::text FROM principals p
 			JOIN identities i ON i.id=p.identity_id
+			JOIN role_bindings b ON b.tenant_id=p.tenant_id AND b.principal_id=p.id AND b.scope_type='workspace'
+			JOIN roles r ON r.tenant_id=b.tenant_id AND r.id=b.role_id
 			WHERE p.tenant_id=$1::uuid AND p.kind='person'
-			  AND 'admin'=ANY(p.roles) AND i.issuer=$2
+			  AND p.status='active' AND r.key IN ('admin','owner') AND i.issuer=$2
 			ORDER BY p.created_at,p.id LIMIT 1`, id, issuer).Scan(&operatorID)
 		if err == nil {
 			actor = operatorID
@@ -118,24 +120,48 @@ func BindOIDC(ctx context.Context, pool *pgxpool.Pool, slug, issuer, subject, na
 			return err
 		}
 		before := any(nil)
+		principalChanged := false
 		if errors.Is(err, pgx.ErrNoRows) {
 			if err := tx.QueryRow(ctx, `INSERT INTO principals(tenant_id,kind,identity_id,name,roles)
 				VALUES($1::uuid,'person',$2::uuid,$3,ARRAY[$4]::text[]) RETURNING id::text`, id, identityID, name, role).Scan(&principalID); err != nil {
 				return err
 			}
+			principalChanged = true
 		} else {
-			if oldName == name && len(oldRoles) == 1 && oldRoles[0] == role {
-				return nil
+			if oldName != name {
+				before = map[string]any{"principal_id": principalID, "name": oldName, "roles": oldRoles}
+				if _, err := tx.Exec(ctx, `UPDATE principals SET name=$3
+					WHERE tenant_id=$1::uuid AND id=$2::uuid`, id, principalID, name); err != nil {
+					return err
+				}
+				principalChanged = true
 			}
-			before = map[string]any{"principal_id": principalID, "name": oldName, "roles": oldRoles}
-			if _, err := tx.Exec(ctx, `UPDATE principals SET name=$3,roles=ARRAY[$4]::text[]
-				WHERE tenant_id=$1::uuid AND id=$2::uuid`, id, principalID, name, role); err != nil {
+		}
+		if principalChanged {
+			_, err = events.Append(ctx, tx, tenant.Principal{ID: actor, TenantID: id}, events.Change{
+				Type: "tenant.principal_bound", Before: before,
+				After: map[string]any{"principal_id": principalID, "issuer": issuer, "subject": subject, "name": name},
+			})
+			if err != nil {
 				return err
 			}
 		}
+		var bindingID string
+		err = tx.QueryRow(ctx, `INSERT INTO role_bindings(tenant_id,principal_id,role_id,scope_type)
+			SELECT $1::uuid,$2::uuid,r.id,'workspace' FROM roles r
+			WHERE r.tenant_id=$1::uuid AND r.key=$3
+			  AND NOT EXISTS (SELECT 1 FROM role_bindings b WHERE b.tenant_id=$1::uuid
+			                  AND b.principal_id=$2::uuid AND b.scope_type='workspace')
+			ON CONFLICT DO NOTHING RETURNING id::text`, id, principalID, role).Scan(&bindingID)
+		if errors.Is(err, pgx.ErrNoRows) {
+			return nil
+		}
+		if err != nil {
+			return err
+		}
 		_, err = events.Append(ctx, tx, tenant.Principal{ID: actor, TenantID: id}, events.Change{
-			Type: "tenant.principal_bound", Before: before,
-			After: map[string]any{"principal_id": principalID, "issuer": issuer, "subject": subject, "name": name, "roles": []string{role}},
+			Type:  "authz.workspace_role_changed",
+			After: map[string]any{"principal_id": principalID, "role_key": role, "binding_id": bindingID},
 		})
 		return err
 	})

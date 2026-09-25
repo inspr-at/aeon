@@ -2,6 +2,7 @@
 <script setup lang="ts">
 import { computed, ref } from 'vue'
 import { acceptDraft, ACTION_LONG, isImported, STAGE_LABEL, type IntakeDraft } from '../../lib/journey'
+import { can } from '../../lib/authz'
 import { useJourneyContext } from '../../lib/journeyContext'
 import { toast } from '../../lib/toast'
 import { absoluteTime, plural, relativeTime } from '../../lib/work'
@@ -93,7 +94,7 @@ async function accept(draft: IntakeDraft) {
           </p>
           <footer class="draft-foot">
             <time :datetime="draft.proposed_at" :data-tip="absoluteTime(draft.proposed_at)">Proposed {{ relativeTime(draft.proposed_at, { now: ctx.now.value }) }}</time>
-            <button v-if="draft.status === 'proposed' && ctx.canAct.value" type="button" class="btn sm primary" :disabled="accepting === draft.id" @click="accept(draft)"><AppIcon name="check" :size="13" />{{ accepting === draft.id ? 'Accepting…' : 'Accept draft' }}</button>
+            <button v-if="draft.status === 'proposed' && ctx.canAct.value && can('intake.decide', ctx.project.value.id)" type="button" class="btn sm primary" :disabled="accepting === draft.id" @click="accept(draft)"><AppIcon name="check" :size="13" />{{ accepting === draft.id ? 'Accepting…' : 'Accept draft' }}</button>
           </footer>
         </article>
       </section>

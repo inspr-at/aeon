@@ -17,11 +17,11 @@ import (
 	"context"
 	"errors"
 	"net/http"
-	"slices"
 
 	"github.com/jackc/pgx/v5"
 	"github.com/jackc/pgx/v5/pgxpool"
 
+	"github.com/inspr-at/aeon/internal/authz"
 	"github.com/inspr-at/aeon/internal/db"
 	"github.com/inspr-at/aeon/internal/httpapi"
 	"github.com/inspr-at/aeon/internal/plugins"
@@ -64,8 +64,8 @@ func (m *module) list(w http.ResponseWriter, r *http.Request) {
 		httpapi.WriteError(w, http.StatusUnauthorized, "authentication required")
 		return
 	}
-	if p.Kind != tenant.Person || (!slices.Contains(p.Roles, "admin") && !slices.Contains(p.Roles, "member")) {
-		httpapi.WriteError(w, http.StatusForbidden, "admin or member person required")
+	if p.Kind != tenant.Person || authz.Require(authz.BindPool(r.Context(), m.pool), "members.read", authz.Scope{}) != nil {
+		httpapi.WriteError(w, http.StatusForbidden, "permission denied")
 		return
 	}
 	out := []Principal{}

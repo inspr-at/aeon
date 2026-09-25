@@ -73,7 +73,7 @@ test('Workspace lists members and agent keys, read-only', async ({ page }) => {
   await setup(page)
   await page.goto('/settings/workspace')
   const members = page.locator('#members')
-  await expect(members.locator('.people').first().getByRole('listitem')).toHaveText([/Markus Barta\s*Admin/, /Mira Holm\s*Member/])
+  await expect(members.locator('.people').first().getByRole('listitem')).toHaveText([/Markus Barta\s*Admin/, /Mira Holm\s*Member/, /Cleo Customer\s*Customer/])
   await expect(members).toContainText('Cleo Customer')
   await expect(members).toContainText('Nova')
   await expect(members).not.toContainText('System')
@@ -88,12 +88,12 @@ test('Workspace lists members and agent keys, read-only', async ({ page }) => {
   await expect(page.locator('#agent-keys').getByRole('button')).toHaveCount(0)
 })
 
-test('without the directory the members note says why in plain words', async ({ page }) => {
+test('without members.read the directory explains the access limit', async ({ page }) => {
   await mockWork(page, fixtures())
   await mockBusiness(page, businessData(), { noDirectory: true })
   await mockSettings(page, settingsData())
   await page.goto('/settings/workspace')
-  await expect(page.locator('#members')).toContainText('Members show here only while a Business part is on, and none is on in this workspace.')
+  await expect(page.locator('#members')).toContainText('You don’t have permission to view workspace members.')
 })
 
 test('card controls share one alignment: centred on the title and its line', async ({ page }) => {

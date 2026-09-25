@@ -6,10 +6,10 @@ import (
 	"context"
 	"net/http"
 	"reflect"
-	"slices"
 	"strings"
 	"time"
 
+	"github.com/inspr-at/aeon/internal/authz"
 	"github.com/inspr-at/aeon/internal/db"
 	"github.com/inspr-at/aeon/internal/events"
 	"github.com/inspr-at/aeon/internal/httpapi"
@@ -61,11 +61,11 @@ func checkPrecondition(r *http.Request, e Entry) error {
 // session role snapshot may predate an admin's demotion.
 func refreshPerson(ctx context.Context, tx pgx.Tx, p tenant.Principal) (tenant.Principal, error) {
 	var kind tenant.PrincipalKind
-	err := tx.QueryRow(ctx, `SELECT kind,roles FROM principals WHERE tenant_id=$1 AND id=$2 FOR SHARE`, p.TenantID, p.ID).Scan(&kind, &p.Roles)
+	err := tx.QueryRow(ctx, `SELECT kind FROM principals WHERE tenant_id=$1 AND id=$2 FOR SHARE`, p.TenantID, p.ID).Scan(&kind)
 	if err != nil {
 		return p, err
 	}
-	if p.Kind != tenant.Person || kind != tenant.Person || (!admin(p) && !slices.Contains(p.Roles, "member")) {
+	if p.Kind != tenant.Person || kind != tenant.Person || authz.RequireTx(ctx, tx, p, "hours.write", authz.Scope{}) != nil {
 		return p, fail(403, "member or admin person required")
 	}
 	return p, nil
@@ -130,7 +130,7 @@ func (m *Module) mutateEntry(w http.ResponseWriter, r *http.Request) {
 		if err != nil {
 			return err
 		}
-		if current.PrincipalID != p.ID && !admin(p) {
+		if current.PrincipalID != p.ID && !admin(r.Context(), tx, p) {
 			return fail(403, "entry author or admin required")
 		}
 		if period.State != "open" {

@@ -120,7 +120,7 @@ test('an entry reads with a table of contents, anchors, how agents read it and w
 })
 
 test('editing saves against the version read, warns before a rename and undoes it', async ({ page }) => {
-  const { calls } = await open(page, entry)
+  const { calls, world } = await open(page, entry)
   await expect(page.locator('.e-body')).toBeVisible()
   await page.keyboard.press('e')
   const form = page.getByRole('form', { name: 'Edit deploy-release' })
@@ -144,6 +144,7 @@ test('editing saves against the version read, warns before a rename and undoes i
   await expect(page.getByRole('navigation', { name: 'On this page' })).toHaveCount(0)
   // Undo from the toast brings the old slug, text and status back.
   await page.getByRole('button', { name: 'Undo' }).click()
+  await expect.poll(() => world.entries.find(item => item.id === 'k-deploy')?.slug).toBe('deploy-release')
   await expect(page).toHaveURL('/p/PHAROS/knowledge/runbook/deploy-release')
   await expect(page.getByRole('heading', { name: 'Canary on csb1' })).toBeVisible()
   await expect(page.locator('.e-note.proposed')).toHaveCount(0)

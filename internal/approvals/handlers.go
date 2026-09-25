@@ -161,6 +161,9 @@ func validateProposal(in *proposal) error {
 	if !scopePattern.MatchString(in.Scope) {
 		return fail(http.StatusBadRequest, "invalid scope")
 	}
+	if approvalPermission(in.Scope) == "" {
+		return fail(http.StatusBadRequest, "unknown permission")
+	}
 	switch in.ResourceKind {
 	case "tenant", "node", "run":
 	default:

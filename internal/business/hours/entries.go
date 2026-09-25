@@ -89,7 +89,7 @@ func (m *Module) createEntry(r *http.Request, tx pgx.Tx, p tenant.Principal) (an
 		if in.AgentRunID != nil || !workorders.UUID(in.PrincipalID) || !workorders.UUID(in.NodeID) || !validInterval(in.StartedAt, in.EndedAt) {
 			return nil, fail(400, "manual principal, node and interval required; run is not allowed")
 		}
-		if in.PrincipalID != p.ID && !admin(p) {
+		if in.PrincipalID != p.ID && !admin(r.Context(), tx, p) {
 			return nil, fail(403, "only an admin person can record another person's time")
 		}
 		var kind string
@@ -113,7 +113,7 @@ func (m *Module) createEntry(r *http.Request, tx pgx.Tx, p tenant.Principal) (an
 		if err := tx.QueryRow(r.Context(), `SELECT agent_principal_id::text,work_order_id::text,started_at,ended_at,status FROM agent_runs WHERE id=$1 FOR SHARE`, runID).Scan(&in.PrincipalID, &in.NodeID, &start, &end, &status); err != nil {
 			return nil, err
 		}
-		if (p.Kind == tenant.Agent && p.ID != in.PrincipalID) || (p.Kind == tenant.Person && !admin(p)) {
+		if (p.Kind == tenant.Agent && p.ID != in.PrincipalID) || (p.Kind == tenant.Person && !admin(r.Context(), tx, p)) {
 			return nil, fail(403, "run owner or admin person required")
 		}
 		if (status != "completed" && status != "failed" && status != "cancelled") || start == nil || end == nil {

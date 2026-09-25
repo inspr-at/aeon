@@ -7,6 +7,7 @@
 // with the current entry), 409 once the period is approved, and events that
 // POST /events/{id}/undo reverses.
 import type { Page, Route } from '@playwright/test'
+import { mockEffectivePermissions } from './authz-fixtures'
 import { me } from './work-fixtures'
 
 export const NOW = new Date('2026-09-24T10:00:00+02:00')
@@ -116,12 +117,21 @@ export async function mockBusiness(page: Page, data: BusinessData, options: Busi
     let body: unknown = null
     try { body = request.postDataJSON() } catch { body = null }
     const isCostNodes = path === '/api/nodes' && ((method === 'GET' && q.get('kind') === 'cost_unit') || (method === 'POST' && (body as { kind_id?: string })?.kind_id === 'k-cost_unit'))
-    const known = path === '/api/me' || path === '/api/plugins' || path.startsWith('/api/plugins/') || path === '/api/kinds' || path === '/api/business/principals'
+    const known = path === '/api/me' || path === '/api/me/permissions' || path === '/api/members' || path === '/api/plugins' || path.startsWith('/api/plugins/') || path === '/api/kinds' || path === '/api/business/principals'
       || path.startsWith('/api/cost-units/') || path.startsWith('/api/time-') || path.endsWith('/time-totals') || isCostNodes
       || (path === '/api/events' && data.events.length > 0) || (/^\/api\/events\/\d+\/undo$/.test(path) && data.events.some(e => path === `/api/events/${e.id}/undo`))
     if (!known) return route.fallback()
     calls.push({ path, method, body, query: q })
     if (path === '/api/me') return route.fulfill({ json: { principal: { id: me.id, name: me.name, kind: 'person', roles: [options.role ?? 'admin'] }, tenant: { id: 't1', name: 'INSPR Studio' } } })
+    if (path === '/api/me/permissions') return route.fulfill({ json: mockEffectivePermissions(options.role ?? 'admin', q.get('project_id') ?? undefined) })
+    if (path === '/api/members') {
+      if (options.noDirectory) return route.fulfill({ status: 403, json: { error: 'members unavailable' } })
+      return route.fulfill({ json: {
+        people: data.principals.filter(p => p.kind === 'person').map(p => ({ principal_id: p.id, name: p.name, workspace_role: { id: `role-${p.roles[0]}`, key: p.roles[0], name: p.roles[0][0].toUpperCase() + p.roles[0].slice(1) } })),
+        agents: data.principals.filter(p => p.kind === 'agent').map(p => ({ principal_id: p.id, name: p.name, workspace_role: null, key_count: 0, last_seen_at: null, service: p.roles.includes('system') })),
+        invites: [], imported: [],
+      } })
+    }
     if (path === '/api/plugins') return route.fulfill({ json: data.plugins })
     const install = /^\/api\/plugins\/([a-z_]+)\/installation$/.exec(path)
     if (install) {

@@ -8,7 +8,7 @@ import {
   renameGroup, reorderGroup, replaceGroup, restoreGroup, setHidden, sharedId, sharedIndex, stepGroup, toggleCollapsed, uuidOf, withPlacements,
   type GroupDef, type GroupPrefs, type MoveItem,
 } from '../lib/projectGroups'
-import { useSession } from './session'
+import { can } from '../lib/authz'
 import { useProjects, type Project } from './projects'
 
 // A change that can be taken back: the toast's Undo runs it.
@@ -20,7 +20,6 @@ export interface MoveOutcome { moved: string[]; undo: Undo }
 // change is optimistic and answers how to undo it. Servers without shared groups
 // (the route missing) simply have none.
 export const useProjectGroups = defineStore('projectGroups', () => {
-  const session = useSession()
   const projects = useProjects()
   const pref = usePreference<GroupPrefs>('project-groups')
   const shared = ref<SharedProjectGroup[]>([])
@@ -35,7 +34,7 @@ export const useProjectGroups = defineStore('projectGroups', () => {
   const index = computed(() => sharedIndex(shared.value))
   const hidden = computed(() => hiddenOf(prefs.value))
   const collapsed = computed(() => new Set(prefs.value.collapsed ?? []))
-  const admin = computed(() => session.identity?.principal.roles?.includes('admin') ?? false)
+  const admin = computed(() => can('project_groups.write'))
   const ready = computed(() => sharedReady.value)
 
   function where(project: Pick<Project, 'id' | 'archived'>): string { return placeOf(project, prefs.value, index.value, known.value) }

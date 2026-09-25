@@ -66,6 +66,13 @@ func setup(t *testing.T) fixture {
 			if e := tx.QueryRow(ctx, `INSERT INTO principals(tenant_id,kind,name,roles) VALUES($1::uuid,'person',$2,ARRAY[$3]::text[]) RETURNING id::text`, f.tenant, person.name, person.role).Scan(person.dest); e != nil {
 				return e
 			}
+			if person.role == "viewer" {
+				if _, e := tx.Exec(ctx, `INSERT INTO role_bindings(tenant_id,principal_id,role_id,scope_type) SELECT $1::uuid,$2::uuid,id,'workspace' FROM roles WHERE tenant_id=$1::uuid AND key='viewer'`, f.tenant, *person.dest); e != nil {
+					return e
+				}
+			} else if e := dbtest.BindLegacyTx(ctx, tx, f.tenant, *person.dest); e != nil {
+				return e
+			}
 		}
 		for _, id := range []string{"business_crm", "business_costs", "business_quotes"} {
 			plug, _ := reg.Lookup(id)
@@ -189,7 +196,7 @@ func TestLeasesAndAuthorization(t *testing.T) {
 		t.Fatalf("viewer view %d", code)
 	}
 	err = db.InTenant(ctx, f.db.App, f.tenant, func(tx pgx.Tx) error {
-		_, e := tx.Exec(ctx, `UPDATE principals SET roles=ARRAY['customer']::text[] WHERE id=$1::uuid`, f.viewer)
+		_, e := tx.Exec(ctx, `UPDATE role_bindings SET role_id=(SELECT id FROM roles WHERE tenant_id=$1::uuid AND key='customer') WHERE principal_id=$2::uuid AND scope_type='workspace'`, f.tenant, f.viewer)
 		return e
 	})
 	if err != nil {
@@ -323,7 +330,7 @@ func TestStreamScopedNoticeAndRevocation(t *testing.T) {
 		t.Fatalf("unsafe or missing scoped notice %s", got)
 	}
 	err = db.InTenant(ctx, f.db.App, f.tenant, func(tx pgx.Tx) error {
-		_, e := tx.Exec(ctx, `UPDATE principals SET roles=ARRAY['customer']::text[] WHERE id=$1::uuid`, f.admin)
+		_, e := tx.Exec(ctx, `UPDATE role_bindings SET role_id=(SELECT id FROM roles WHERE tenant_id=$1::uuid AND key='customer') WHERE principal_id=$2::uuid AND scope_type='workspace'`, f.tenant, f.admin)
 		return e
 	})
 	if err != nil {

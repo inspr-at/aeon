@@ -96,6 +96,7 @@ func addPrincipal(t *testing.T, slug string) tenant.Principal {
 	if err != nil {
 		t.Fatalf("principal: %v", err)
 	}
+	dbtest.BindLegacy(t, testDB, tenantID, id)
 	return tenant.Principal{ID: id, TenantID: tenantID, Kind: tenant.Person, Name: slug, Roles: []string{"admin"}}
 }
 
@@ -139,6 +140,7 @@ func TestSchemaAndTagMutationsRequirePersonAdmin(t *testing.T) {
 		if err != nil {
 			t.Fatal(err)
 		}
+		dbtest.BindLegacy(t, testDB, admin.TenantID, p.ID)
 		return p
 	}
 	member := makePerson("member", "member")

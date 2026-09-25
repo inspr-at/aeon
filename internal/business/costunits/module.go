@@ -10,6 +10,7 @@ import (
 	"github.com/jackc/pgx/v5"
 	"github.com/jackc/pgx/v5/pgxpool"
 
+	"github.com/inspr-at/aeon/internal/authz"
 	"github.com/inspr-at/aeon/internal/db"
 	"github.com/inspr-at/aeon/internal/events"
 	"github.com/inspr-at/aeon/internal/httpapi"
@@ -37,6 +38,13 @@ func New(pool *pgxpool.Pool, reg *plugins.Registry) *Module {
 func (m *Module) Mount(mux *http.ServeMux) {
 	mux.HandleFunc("GET /api/cost-units/{costUnitId}/rates", m.list)
 	mux.HandleFunc("POST /api/cost-units/{costUnitId}/rates", m.create)
+}
+
+func (m *Module) requirePermission(r *http.Request, p tenant.Principal, permission string) error {
+	if p.Kind != tenant.Person || authz.Require(authz.BindPool(r.Context(), m.pool), permission, authz.Scope{}) != nil {
+		return forbidden("permission denied")
+	}
+	return nil
 }
 
 type rateWrite struct {
@@ -84,7 +92,7 @@ func (m *Module) create(w http.ResponseWriter, r *http.Request) {
 		writeErr(w, err)
 		return
 	}
-	if err := requireAdmin(p); err != nil {
+	if err := m.requirePermission(r, p, "cost_units.manage"); err != nil {
 		writeErr(w, err)
 		return
 	}

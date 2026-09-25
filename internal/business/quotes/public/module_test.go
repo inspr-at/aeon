@@ -172,6 +172,9 @@ func newFixture(t *testing.T) *fixture {
 			if err := tx.QueryRow(ctx, `INSERT INTO principals(tenant_id,kind,name,roles) VALUES($1::uuid,'person','Synthetic user',$2) RETURNING id::text`, f.tenantID, p.Roles).Scan(&p.ID); err != nil {
 				return err
 			}
+			if err := dbtest.BindLegacyTx(ctx, tx, f.tenantID, p.ID); err != nil {
+				return err
+			}
 		}
 		var orgKind, contactKind string
 		for _, k := range []struct {
@@ -739,6 +742,7 @@ func TestAcceptanceNoticesFilterToOfferCreator(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
+	dbtest.BindLegacy(t, f.pool, f.tenantID, other.ID)
 	status, body = f.call(&f.admin, "GET", "/api/quotes/acceptances?created_by_me=true", "")
 	if status != 200 || !strings.Contains(body, id) {
 		t.Fatalf("creator notices %d %s", status, body)

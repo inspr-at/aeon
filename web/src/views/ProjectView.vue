@@ -4,7 +4,7 @@ import { setPageTitle } from '../lib/brand'
 import { computed, defineAsyncComponent, nextTick, onBeforeUnmount, onMounted, ref, watch } from 'vue'
 import { onBeforeRouteLeave, onBeforeRouteUpdate, useRoute, useRouter } from 'vue-router'
 import { APIError, createNode, listNodes, type ListItem, type SavedView } from '../lib/api'
-import { canWrite } from '../lib/activity'
+import { can } from '../lib/authz'
 import { confirmAction } from '../lib/confirm'
 import { asListItem, guardedMove, keyPrefix, kinds } from '../lib/useTicket'
 import { useOutline } from '../lib/useOutline'
@@ -167,7 +167,16 @@ const creating = ref(false)
 // Full page: the same ticket workspace in a two-column page instead of the side panel.
 const fullView = fullViewQuery
 const me = computed(() => session.identity ? { id: session.identity.principal.id, name: session.identity.principal.name } : null)
-const writable = computed(() => canWrite(session.identity?.principal.roles))
+const writable = computed(() => can('nodes.write', projectId.value ?? undefined))
+const nodeDeletable = computed(() => can('nodes.delete', projectId.value ?? undefined))
+const nodeMovable = computed(() => can('nodes.move', projectId.value ?? undefined))
+const relationLinkable = computed(() => can('relations.write', projectId.value ?? undefined))
+const relationUnlinkable = computed(() => can('relations.delete', projectId.value ?? undefined))
+const commentable = computed(() => can('comments.write', projectId.value ?? undefined))
+const commentDeletable = computed(() => can('comments.delete', projectId.value ?? undefined))
+const attachable = computed(() => can('attachments.write', projectId.value ?? undefined) && can('attachments.delete', projectId.value ?? undefined))
+const knowledgeWritable = computed(() => can('knowledge.write', projectId.value ?? undefined))
+const knowledgeDeletable = computed(() => can('knowledge.delete', projectId.value ?? undefined))
 
 // ---------- Rows, groups and keyboard order ----------
 const displayRows = computed(() => {
@@ -1086,12 +1095,12 @@ watch([project, panelItem, knowledgeActive, knowledgeEntryOpen, knowledgeDocked]
 
       <JourneyView
         v-if="journeyActive" :project="{ id: project.id, routeKey: project.routeKey, title: project.title }" :stage="journeyStage" :release-key="journeyRelease" :walk-key="journeyWalk"
-        :can-write="writable" :person="session.identity?.principal.kind !== 'agent'" :me="me?.id ?? null"
+        :can-write="writable" :person="session.identity?.principal.kind === 'person'" :me="me?.id ?? null"
         @stage="journeyStageTo" @release="journeyReleaseTo" @walk="journeyWalkTo" @open="openKey"
       />
       <KnowledgeTab
         v-else-if="knowledgeActive" ref="knowledgeTab" :project="{ id: project.id, routeKey: project.routeKey, title: project.title }" :state="knowledge"
-        :filters="knowledgeFilters" :can-write="writable" :now="now" :paused="knowledgeEntryOpen" :dock="knowledgeWide" :open-entry="shownEntry?.mode === 'dock' ? shownEntry : null" @update="updateKnowledge"
+        :filters="knowledgeFilters" :can-write="knowledgeWritable" :now="now" :paused="knowledgeEntryOpen" :dock="knowledgeWide" :open-entry="shownEntry?.mode === 'dock' ? shownEntry : null" @update="updateKnowledge"
       />
       <TicketTable
         v-else ref="table" :expected-rows="expectedRows" :groups="groups" :group="filters.group" :rows-by-id="rowsById" :cursor-id="cursorId" :open-id="panelItem?.id ?? null"
@@ -1124,7 +1133,7 @@ watch([project, panelItem, knowledgeActive, knowledgeEntryOpen, knowledgeDocked]
 
       <KnowledgeEntryPage
         v-if="shownEntry" ref="knowledgeEntry" :project="{ id: project.id, routeKey: project.routeKey, title: project.title }" :mode="shownEntry.mode"
-        :type="shownEntry.type" :slug="shownEntry.slug" :state="knowledge" :can-write="writable" :now="now" :list-query="knowledgeListQuery"
+        :type="shownEntry.type" :slug="shownEntry.slug" :state="knowledge" :can-write="knowledgeWritable" :can-delete="knowledgeDeletable" :now="now" :list-query="knowledgeListQuery"
         @close="shownEntry.mode === 'dock' ? closeKnowledgeDock() : closeKnowledgeEntry()"
       />
       <PanelSplitter v-if="knowledgeDocked" field="knowledgePanel" css-var="--knowledge-panel-user-w" target=".entry-page.dock" :reserve="DOCK_LIST_RESERVE" />
@@ -1132,7 +1141,8 @@ watch([project, panelItem, knowledgeActive, knowledgeEntryOpen, knowledgeDocked]
       <TicketWorkspace
         v-if="ticketKey" ref="panel" :item="panelItem" :ticket-key="ticketKey.toUpperCase()" :resolving="panelLoading" :resolve-error="panelError"
         :position="panelPosition" :now="now" :mode="fullView ? 'full' : 'panel'" :project="{ id: project.id, routeKey: project.routeKey }"
-        :names="list.names" :me="me" :can-write="writable" :people="people"
+        :names="list.names" :me="me" :can-write="writable" :can-delete="nodeDeletable" :can-move="nodeMovable" :can-link="relationLinkable" :can-unlink="relationUnlinkable"
+        :can-comment="commentable" :can-delete-comment="commentDeletable" :can-attach="attachable" :people="people"
         @close="closePanel" @prev="move(-1)" @next="move(1)" @expand="expand" @collapse="collapse" @new-tab="newTab(panelItem?.key ?? ticketKey)"
         @status="anchor => panelItem && openStatus(panelItem, anchor, 'panel')" @open-key="openRelated" :trail="trail" @trail-back="trailBack" @removed="removed" @created="childCreated" @moved="childMoved" @retry="resolvePanel"
       />

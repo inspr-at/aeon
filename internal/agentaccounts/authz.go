@@ -11,6 +11,7 @@ import (
 
 	"github.com/jackc/pgx/v5"
 
+	"github.com/inspr-at/aeon/internal/authz"
 	"github.com/inspr-at/aeon/internal/tenant"
 )
 
@@ -73,7 +74,7 @@ func requireScope(ctx context.Context, tx pgx.Tx, r *http.Request, p tenant.Prin
 // agent, an agent holding a live run.claim grant, or an admin person may
 // settle or release. HTTP routing adds the key-scope ceiling separately.
 func actorMayUseRun(ctx context.Context, tx pgx.Tx, actor tenant.Principal, runAgentID, runID string) error {
-	if actor.Kind == tenant.Person && hasRole(actor, "admin") {
+	if actor.Kind == tenant.Person && authz.RequireTx(ctx, tx, actor, "runs.control", authz.Scope{}) == nil {
 		return nil
 	}
 	if actor.Kind != tenant.Agent {

@@ -5,6 +5,7 @@ import (
 	"context"
 	"encoding/json"
 
+	"github.com/inspr-at/aeon/internal/authz"
 	"github.com/inspr-at/aeon/internal/events"
 	"github.com/inspr-at/aeon/internal/tenant"
 	"github.com/jackc/pgx/v5"
@@ -20,7 +21,7 @@ func undo(ctx context.Context, tx pgx.Tx, p tenant.Principal, e events.Event) (e
 		return events.Change{}, events.ErrConflict
 	}
 	if expected.PrincipalID != p.ID {
-		if !tenant.IsAdmin(p) {
+		if authz.RequireTx(ctx, tx, p, "profile.manage", authz.Scope{}) != nil {
 			return events.Change{}, events.ErrForbidden
 		}
 	}

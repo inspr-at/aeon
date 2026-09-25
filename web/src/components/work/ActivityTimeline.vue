@@ -15,7 +15,7 @@ import StatusIcon from './StatusIcon.vue'
 // system lines that expand to the full marker.
 const props = defineProps<{
   entries: TimelineEntry[]; loading: boolean; loadingOlder: boolean; hasOlder: boolean; error: string
-  me: string | undefined; now: number; canWrite: boolean
+  me: string | undefined; now: number; canWrite: boolean; canDelete: boolean
   edit: (id: string, body: string) => Promise<boolean>; remove: (id: string) => Promise<boolean>
 }>()
 const emit = defineEmits<{ older: []; retry: [] }>()
@@ -72,9 +72,9 @@ defineExpose({ isDirty })
                   <AppIcon name="chevron" :size="11" class="chev" />
                 </button>
                 {{ ' ' }}<span class="sep">·</span>{{ ' ' }}<time :datetime="entry.at" :data-tip="absoluteTime(entry.at)">{{ relativeTime(entry.at, { now }) }}</time>
-                <span v-if="canWrite && commentEditable(entry, me, now)" class="line-actions">
-                  <button type="button" class="icon-btn sm flat" aria-label="Edit comment" data-tip="Edit · within 15 minutes" @click="startEdit(entry)"><AppIcon name="edit" :size="12" /></button>
-                  <button type="button" class="icon-btn sm flat danger-icon" aria-label="Delete comment" data-tip="Delete" @click="removeComment(entry.id)"><AppIcon name="trash" :size="12" /></button>
+                <span v-if="(canWrite || canDelete) && commentEditable(entry, me, now)" class="line-actions">
+                  <button v-if="canWrite" type="button" class="icon-btn sm flat" aria-label="Edit comment" data-tip="Edit · within 15 minutes" @click="startEdit(entry)"><AppIcon name="edit" :size="12" /></button>
+                  <button v-if="canDelete" type="button" class="icon-btn sm flat danger-icon" aria-label="Delete comment" data-tip="Delete" @click="removeComment(entry.id)"><AppIcon name="trash" :size="12" /></button>
                 </span>
               </p>
               <dl v-if="expanded.has(entry.id)" class="marker-detail">
@@ -96,9 +96,9 @@ defineExpose({ isDirty })
               <header class="comment-head">
                 <strong>{{ entry.author.name }}</strong>
                 <time :datetime="entry.at" :data-tip="absoluteTime(entry.at)">{{ relativeTime(entry.at, { now, long: true }) }}</time>
-                <span v-if="canWrite && commentEditable(entry, me, now) && editingId !== entry.id" class="line-actions">
-                  <button type="button" class="icon-btn sm flat" aria-label="Edit comment" data-tip="Edit · within 15 minutes" @click="startEdit(entry)"><AppIcon name="edit" :size="13" /></button>
-                  <button type="button" class="icon-btn sm flat danger-icon" aria-label="Delete comment" data-tip="Delete" @click="removeComment(entry.id)"><AppIcon name="trash" :size="13" /></button>
+                <span v-if="(canWrite || canDelete) && commentEditable(entry, me, now) && editingId !== entry.id" class="line-actions">
+                  <button v-if="canWrite" type="button" class="icon-btn sm flat" aria-label="Edit comment" data-tip="Edit · within 15 minutes" @click="startEdit(entry)"><AppIcon name="edit" :size="13" /></button>
+                  <button v-if="canDelete" type="button" class="icon-btn sm flat danger-icon" aria-label="Delete comment" data-tip="Delete" @click="removeComment(entry.id)"><AppIcon name="trash" :size="13" /></button>
                 </span>
               </header>
               <MarkdownEditor v-if="editingId === entry.id" ref="editor" v-model="draft" label="Comment" compact :min-rows="3" :saving="saving" @save="saveEdit" @cancel="cancelEdit(entry.body)" />

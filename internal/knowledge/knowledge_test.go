@@ -50,6 +50,7 @@ func setup(t *testing.T) fixture {
 		if err != nil {
 			t.Fatal(err)
 		}
+		dbtest.BindLegacy(t, d, tenantID, p.ID)
 		return p
 	}
 	f.a = principal(tenants[0], "Markus Barta", "member")

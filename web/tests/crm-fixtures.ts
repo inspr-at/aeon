@@ -6,6 +6,7 @@
 // first contact becomes the primary one, and undo reverses an event once.
 import type { Page, Route } from '@playwright/test'
 import { me } from './work-fixtures'
+import { mockEffectivePermissions } from './authz-fixtures'
 
 type Address = { street: string; postal_code: string; city: string; country: string; freeform: string }
 export interface MockCustomer {
@@ -139,12 +140,13 @@ export async function mockCRM(page: Page, data: CRMData, options: CRMMockOptions
     let body: Record<string, unknown> = {}
     try { body = request.postDataJSON() ?? {} } catch { body = {} }
     const contactNodes = path === '/api/nodes' && method === 'GET' && q.get('kind') === 'contact'
-    const known = path === '/api/me' || path === '/api/plugins' || path.startsWith('/api/plugins/') || path === '/api/kinds' || path === '/api/business/principals'
+    const known = path === '/api/me' || path === '/api/me/permissions' || path === '/api/plugins' || path.startsWith('/api/plugins/') || path === '/api/kinds' || path === '/api/business/principals'
       || path.startsWith('/api/crm/') || path === '/api/events' || /^\/api\/events\/\d+\/undo$/.test(path) || path === '/api/quotes/settings' || contactNodes
       || (path === '/api/quotes' && method === 'GET')
     if (!known) return route.fallback()
     calls.push({ path, method, body, query: q })
     if (path === '/api/me') return route.fulfill({ json: { principal: { id: me.id, name: me.name, kind: 'person', roles: [options.role ?? 'admin'] }, tenant: { id: 't1', name: 'INSPR Studio' } } })
+    if (path === '/api/me/permissions') return route.fulfill({ json: mockEffectivePermissions(options.role ?? 'admin', q.get('project_id') ?? undefined) })
     if (path === '/api/plugins') return route.fulfill({ json: data.plugins })
     const install = /^\/api\/plugins\/([a-z_]+)\/installation$/.exec(path)
     if (install) {

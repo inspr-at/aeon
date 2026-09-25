@@ -86,6 +86,7 @@ func TestImportedDraftRoundTrip(t *testing.T) {
 	}); err != nil {
 		t.Fatal(err)
 	}
+	dbtest.BindLegacy(t, database, tenantID, adminID)
 	report, err := Import(ctx, database.App, tenantID, adminID, "synthetic", bundle, true)
 	if err != nil {
 		t.Fatal(err)

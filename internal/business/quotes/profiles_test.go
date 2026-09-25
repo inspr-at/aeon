@@ -102,6 +102,9 @@ func TestProfileRevisionsAssetsAndTenantIsolation(t *testing.T) {
 				return e
 			}
 			actors[spec.slug] = tenant.Principal{ID: id, TenantID: spec.tenantID, Kind: tenant.Person, Roles: []string{"admin"}}
+			if e := dbtest.BindLegacyTx(ctx, tx, spec.tenantID, id); e != nil {
+				return e
+			}
 			for _, pluginID := range []string{"business_costs", "business_crm", PluginID} {
 				plug, _ := reg.Lookup(pluginID)
 				if _, e := tx.Exec(ctx, `INSERT INTO plugin_installations(tenant_id,plugin_id,version,manifest_digest_sha256,owner,enabled,permissions,updated_by_principal_id) VALUES($1::uuid,$2,$3,$4,$5,true,$6,$7::uuid)`, spec.tenantID, pluginID, plug.Manifest.Version, plug.Manifest.DigestSHA256, plug.Manifest.Owner, plug.Manifest.Permissions, id); e != nil {

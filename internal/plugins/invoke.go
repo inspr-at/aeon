@@ -9,6 +9,7 @@ import (
 
 	"github.com/jackc/pgx/v5"
 
+	"github.com/inspr-at/aeon/internal/authz"
 	"github.com/inspr-at/aeon/internal/plugins/fence"
 	"github.com/inspr-at/aeon/internal/tenant"
 )
@@ -144,7 +145,7 @@ func (m *Module) InvokeTool(ctx context.Context, p tenant.Principal, pluginID, t
 	if err != nil {
 		return nil, err
 	}
-	return plug.Tools.Invoke(ctx, call, toolID, input)
+	return plug.Tools.Invoke(authz.BindPool(tenant.WithPrincipal(ctx, p), m.pool), call, toolID, input)
 }
 
 // CallIntegration calls one declared integration with a narrowed grant.

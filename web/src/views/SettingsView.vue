@@ -3,7 +3,7 @@
 import { computed, nextTick, watch, type Component } from 'vue'
 import { useRoute } from 'vue-router'
 import '../styles/settings.css'
-import { isTenantAdmin } from '../components/business/catalog'
+import { can } from '../lib/authz'
 import AppIcon from '../components/AppIcon.vue'
 import BizIcon, { type BizIconName } from '../components/business/BizIcon.vue'
 import BusinessSection from '../components/settings/BusinessSection.vue'
@@ -17,7 +17,7 @@ import { useSession } from '../stores/session'
 // /settings/<section>#<card> deep-links to one card, which is ringed on arrival.
 const route = useRoute()
 const session = useSession()
-const admin = computed(() => isTenantAdmin(session.identity))
+const admin = computed(() => can('settings.manage'))
 const sections = computed(() => visibleSections(admin.value))
 const current = computed(() => sectionOf(route.params.section))
 const meta = computed(() => SETTINGS_SECTIONS.find(section => section.id === current.value)!)

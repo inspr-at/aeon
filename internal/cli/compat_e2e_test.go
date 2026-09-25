@@ -126,12 +126,6 @@ func TestCompatEndToEnd(t *testing.T) {
 
 	worker := mintAgent(t, srv.URL, "worker")
 	peer := mintAgent(t, srv.URL, "peer")
-	if err := db.InTenant(ctx, opened.App, worker.TenantID, func(tx pgx.Tx) error {
-		_, err := tx.Exec(ctx, `UPDATE agent_keys SET scopes=array_cat(scopes,$2::text[]) WHERE principal_id=$1`, worker.PrincipalID, []string{"harness.read", "harness.write", "harness.worker", "harness.control"})
-		return err
-	}); err != nil {
-		t.Fatal(err)
-	}
 	seedProject(t, srv.URL, worker.Token)
 	seedKnowledgeKinds(t, srv.URL)
 	t.Setenv("PAIMOS_API_KEY", worker.Token)
@@ -473,7 +467,7 @@ func mintAgent(t *testing.T, base, name string) mintedKey {
 	}
 	// Compat whoami and tell resolve /api/me with account.manage; listen and
 	// ACK need inbox.read, tell uses inbox.send, and model resolve needs models.read.
-	status, raw = doJSON(t, hc, http.MethodPost, base+"/api/agent-keys", `{"name":"`+name+`","scopes":["account.manage","inbox.read","inbox.send","models.read","nodes.read","nodes.write","nodes.configure","relations.read","relations.write","events.read","events.undo","search.read","views.read","views.write"]}`, nil)
+	status, raw = doJSON(t, hc, http.MethodPost, base+"/api/agent-keys", `{"name":"`+name+`","scopes":["account.manage","inbox.read","inbox.send","models.read","kinds.read","nodes.read","nodes.write","nodes.configure","relations.read","relations.write","events.read","events.undo","search.read","views.read","views.write","comments.read","comments.write","knowledge.read","knowledge.write","harness.read","harness.write","harness.worker","harness.control"]}`, nil)
 	if status != http.StatusCreated {
 		t.Fatalf("agent key %s %d %s", name, status, raw)
 	}

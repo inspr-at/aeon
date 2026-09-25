@@ -29,6 +29,9 @@ func TestProfileBundleApplyAndDraftAssignment(t *testing.T) {
 		if err := tx.QueryRow(ctx, `INSERT INTO principals(tenant_id,kind,name,roles) VALUES($1::uuid,'person','Synthetic Admin',ARRAY['admin']) RETURNING id::text`, tenantID).Scan(&adminID); err != nil {
 			return err
 		}
+		if err := dbtest.BindLegacyTx(ctx, tx, tenantID, adminID); err != nil {
+			return err
+		}
 		for slug, prefix := range map[string]string{"organisation": "ORG", "contact": "CON", "quote": "QUO"} {
 			if _, err := tx.Exec(ctx, `INSERT INTO node_kinds(tenant_id,slug,label,short_prefix,icon) VALUES($1::uuid,$2,$2,$3,$2)`, tenantID, slug, prefix); err != nil {
 				return err

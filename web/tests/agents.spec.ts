@@ -2,6 +2,7 @@
 import { test, expect, type Page } from '@playwright/test'
 import { fixtures, me, mockWork, watchErrors } from './work-fixtures'
 import { agentData, mockAgents, type AgentMockOptions, type AgentWorld } from './agents-fixtures'
+import { mockEffectivePermissions } from './authz-fixtures'
 
 const world: AgentWorld = {
   me: me.id,
@@ -104,7 +105,7 @@ test('approvals: j and k move, a opens a reason, Enter records the decision', as
 })
 
 test('members can decide lower risk requests but not high risk requests', async ({ page }) => {
-  await setup(page, { member: true })
+  const { calls } = await setup(page, { member: true })
   await openAgents(page)
   const items = queue(page).locator('.item')
   await expect(items.first()).toContainText('High risk')
@@ -113,6 +114,29 @@ test('members can decide lower risk requests but not high risk requests', async 
   await page.keyboard.press('a')
   await expect(items.first().getByLabel('Reason (optional)')).toHaveCount(0)
   await expect(items.nth(1).getByRole('button', { name: 'Approve' })).toBeVisible()
+  await items.nth(1).getByRole('button', { name: 'Approve' }).click()
+  await items.nth(1).getByRole('button', { name: 'Approve permission' }).click()
+  await expect.poll(() => calls.filter(c => c.path.endsWith('/decision')).length).toBe(1)
+  await expect(items.nth(1)).toContainText('Low risk')
+  await items.nth(1).getByRole('button', { name: 'Approve' }).click()
+  await items.nth(1).getByRole('button', { name: 'Approve permission' }).click()
+  await expect.poll(() => calls.filter(c => c.path.endsWith('/decision')).length).toBe(2)
+})
+
+test('approval controls require the action permission even with an admin legacy role', async ({ page }) => {
+  await setup(page)
+  await page.route('**/api/me/permissions*', route => {
+    const effective = mockEffectivePermissions('admin')
+    effective.workspace.permissions = effective.workspace.permissions.filter(permission => permission !== 'harness.control')
+    return route.fulfill({ json: effective })
+  })
+  await openAgents(page)
+  const high = queue(page).locator('.item').first()
+  await expect(high).toContainText('High risk')
+  await expect(high.getByRole('button', { name: 'Approve' })).toHaveCount(0)
+  await high.focus()
+  await page.keyboard.press('a')
+  await expect(high.getByLabel('Reason (optional)')).toHaveCount(0)
 })
 
 test('a failed decision keeps the reason and says why', async ({ page }) => {

@@ -485,6 +485,7 @@ func insertPrincipal(t *testing.T, database *dbtest.DB, tenantID string, kind te
 	if err := database.Admin.QueryRow(t.Context(), `INSERT INTO principals(tenant_id, kind, name, roles) VALUES($1::uuid, $2, $3, $4) RETURNING id::text`, tenantID, string(kind), name, roles).Scan(&p.ID); err != nil {
 		t.Fatal(err)
 	}
+	dbtest.BindLegacy(t, database, tenantID, p.ID)
 	return p
 }
 

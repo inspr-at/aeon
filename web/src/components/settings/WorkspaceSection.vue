@@ -1,9 +1,10 @@
 <!-- SPDX-License-Identifier: AGPL-3.0-only -->
 <script setup lang="ts">
-import { computed, onMounted, ref } from 'vue'
-import { listPrincipals, type Principal } from '../../lib/business'
+import { computed, onMounted, ref, watch } from 'vue'
+import { api, APIError } from '../../lib/api'
+import { can } from '../../lib/authz'
 import { keyState, listAgentKeys, statusOf, type AgentKey } from '../../lib/settings'
-import { absoluteTime, relativeTime, sentenceCase } from '../../lib/work'
+import { absoluteTime, relativeTime } from '../../lib/work'
 import { useSession } from '../../stores/session'
 import AppIcon from '../AppIcon.vue'
 import Avatar from '../Avatar.vue'
@@ -12,32 +13,35 @@ import SettingsCard from './SettingsCard.vue'
 // The workspace as it is today, read-only: who is in it and which agent keys
 // exist. Managing members and keys arrives later; nothing here pretends to.
 const session = useSession()
-const members = ref<Principal[] | null>(null)
+interface Member { principal_id: string; name: string; workspace_role: { name: string } | null }
+interface AgentMember { principal_id: string; name: string; service: boolean }
+interface Directory { people: Member[]; agents: AgentMember[] }
+const members = ref<Directory | null>(null)
 const membersState = ref<'loading' | 'ready' | 'closed' | 'error'>('loading')
 const keys = ref<AgentKey[] | null>(null)
 const keysError = ref('')
-// People who work here, customer contacts who can sign in, and agents; the
-// workspace's own system principal is not a member.
-const isCustomer = (p: Principal) => p.roles.length > 0 && p.roles.every(role => role === 'customer')
-const people = computed(() => (members.value ?? []).filter(p => p.kind === 'person' && !isCustomer(p)))
-const customers = computed(() => (members.value ?? []).filter(p => p.kind === 'person' && isCustomer(p)))
-const agentsIn = computed(() => (members.value ?? []).filter(p => p.kind === 'agent' && !p.roles.includes('system')))
-const ROLE: Record<string, string> = { admin: 'Admin', member: 'Member', viewer: 'Viewer', customer: 'Customer', super_admin: 'Super admin', reviewer: 'Reviewer', external: 'External' }
-// Roles imported from classic keep their meaning; they read as words, not identifiers.
-const roleText = (roles: string[]) => roles.map(r => ROLE[r] ?? sentenceCase(r)).join(' · ') || 'No role'
+// People and agents from the authorization directory; internal service agents
+// stay out of the member list.
+const people = computed(() => members.value?.people ?? [])
+const agentsIn = computed(() => members.value?.agents.filter(agent => !agent.service) ?? [])
 const STATE: Record<string, string> = { active: 'Active', expired: 'Expired', revoked: 'Revoked' }
 
 async function loadMembers() {
   membersState.value = 'loading'
-  try { members.value = await listPrincipals(); membersState.value = 'ready' }
-  // The directory answers only while a Business part is enabled.
+  try {
+    const response = await api('/members')
+    if (!response.ok) throw new APIError(response.status, 'Members unavailable')
+    members.value = await response.json() as Directory
+    membersState.value = 'ready'
+  }
   catch (e) { membersState.value = statusOf(e) === 403 ? 'closed' : 'error' }
 }
 async function loadKeys() {
   keysError.value = ''
   try { keys.value = await listAgentKeys() } catch { keysError.value = 'The agent keys could not be loaded.' }
 }
-onMounted(() => { void loadMembers(); void loadKeys() })
+onMounted(() => { void loadMembers() })
+watch(() => can('keys.read'), allowed => { if (allowed) void loadKeys() }, { immediate: true })
 </script>
 
 <template>
@@ -46,30 +50,24 @@ onMounted(() => { void loadMembers(); void loadKeys() })
       <template #lead>The workspace you are signed in to.</template>
       <dl class="set-facts">
         <div><dt>Name</dt><dd>{{ session.identity?.tenant.name }}</dd></div>
-        <div><dt>Your role</dt><dd>{{ roleText(session.identity?.principal.roles ?? []) }}</dd></div>
+        <div><dt>Access</dt><dd>{{ can('members.manage') ? 'Manage workspace members' : 'Workspace member' }}</dd></div>
       </dl>
     </SettingsCard>
 
     <SettingsCard class="members-card" title="Members" icon="users" anchor="members">
       <template #lead>People and agents who work in this workspace.</template>
       <div v-if="membersState === 'loading'" class="set-skeleton" role="status" aria-label="Loading members"><span class="skeleton" /><span class="skeleton" /><span class="skeleton" /></div>
-      <p v-else-if="membersState === 'closed'" class="set-note"><AppIcon name="info" :size="14" />Members show here only while a Business part is on, and none is on in this workspace. A member list of its own arrives with workspace administration.</p>
+      <p v-else-if="membersState === 'closed'" class="set-note"><AppIcon name="info" :size="14" />You don’t have permission to view workspace members.</p>
       <p v-else-if="membersState === 'error'" class="set-note error" role="alert"><AppIcon name="alert" :size="14" />The members could not be loaded.<button type="button" class="btn sm" @click="loadMembers">Try again</button></p>
       <template v-else>
         <p class="group-h">People <span class="count">{{ people.length }}</span></p>
         <ul class="people">
-          <li v-for="p in people" :key="p.id"><Avatar :id="p.id" :name="p.name" :size="28" /><span class="person-name">{{ p.name }}</span><span class="role">{{ roleText(p.roles) }}</span></li>
+          <li v-for="p in people" :key="p.principal_id"><Avatar :id="p.principal_id" :name="p.name" :size="28" /><span class="person-name">{{ p.name }}</span><span class="role">{{ p.workspace_role?.name ?? 'No role' }}</span></li>
         </ul>
-        <template v-if="customers.length">
-          <p class="group-h">Customer contacts <span class="count">{{ customers.length }}</span></p>
-          <ul class="people">
-            <li v-for="p in customers" :key="p.id"><Avatar :id="p.id" :name="p.name" :size="28" /><span class="person-name">{{ p.name }}</span><span class="role">Customer</span></li>
-          </ul>
-        </template>
         <template v-if="agentsIn.length">
           <p class="group-h">Agents <span class="count">{{ agentsIn.length }}</span></p>
           <ul class="people">
-            <li v-for="p in agentsIn" :key="p.id"><Avatar :id="p.id" :name="p.name" kind="agent" :size="28" /><span class="person-name mono">{{ p.name }}</span><span class="role">Agent</span></li>
+          <li v-for="p in agentsIn" :key="p.principal_id"><Avatar :id="p.principal_id" :name="p.name" kind="agent" :size="28" /><span class="person-name mono">{{ p.name }}</span><span class="role">Agent</span></li>
           </ul>
         </template>
         <p class="set-note"><AppIcon name="info" :size="14" />Inviting people and changing their roles arrives here next.</p>

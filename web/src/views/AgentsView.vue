@@ -2,15 +2,14 @@
 <script setup lang="ts">
 import { computed, nextTick, onBeforeUnmount, onMounted, ref, watch } from 'vue'
 import { useRoute, useRouter } from 'vue-router'
-import { canWrite } from '../lib/activity'
+import { can } from '../lib/authz'
 import { message, subscribeAgents, type AgentAccount, type Approval, type SessionControl } from '../lib/agents'
-import { controlBlocked, decidedApprovals, riskFor, type Resource } from '../lib/agentState'
+import { canDecideApproval as allowedToDecide, controlBlocked, decidedApprovals, type Resource } from '../lib/agentState'
 import { confirmAction } from '../lib/confirm'
 import { toast } from '../lib/toast'
 import { useAgents, type HeldRequest, type SessionView } from '../stores/agents'
 import { useProjects } from '../stores/projects'
 import { useSession } from '../stores/session'
-import { isTenantAdmin } from '../components/business/catalog'
 import { settingsLink } from '../lib/settings'
 import AppIcon from '../components/AppIcon.vue'
 import AccountsCard from '../components/agents/AccountsCard.vue'
@@ -31,10 +30,11 @@ const queue = ref<InstanceType<typeof ApprovalQueue>>()
 
 const sessionId = computed(() => typeof route.params.sessionId === 'string' ? route.params.sessionId : '')
 const selected = computed(() => agents.views.find(v => v.session.id === sessionId.value))
-const roles = computed(() => session.identity?.principal.roles ?? [])
-const writable = computed(() => canWrite(roles.value))
-const canDecide = computed(() => writable.value && session.identity?.principal.kind === 'person' && roles.value.some(role => ['admin', 'super_admin', 'member'].includes(role)))
-const canDecideApproval = (approval: Approval) => canDecide.value && (riskFor(approval) !== 'high' || roles.value.includes('admin') || roles.value.includes('super_admin'))
+const writable = computed(() => can('harness.control'))
+const canResolve = computed(() => session.identity?.principal.kind === 'person' && can('inbox.manage'))
+const canRevoke = computed(() => session.identity?.principal.kind === 'person' && can('approvals.revoke'))
+const canDecide = computed(() => session.identity?.principal.kind === 'person' && (can('approvals.decide') || canResolve.value))
+const canDecideApproval = (approval: Approval) => session.identity?.principal.kind === 'person' && allowedToDecide(approval, can)
 const history = computed(() => decidedApprovals(agents.approvals, agents.now))
 const counts = computed(() => ({ working: agents.grouped.working.length, idle: agents.grouped.idle.length }))
 const summary = computed(() => {
@@ -213,7 +213,7 @@ watch(sessionId, id => { if (id) cursor.value = `s:${id}` }, { immediate: true }
         <p class="summary"><span v-if="summary">{{ summary }}</span><span v-else class="skeleton summary-skeleton" /></p>
       </div>
       <div class="head-side">
-        <RouterLink v-if="isTenantAdmin(session.identity)" class="context-link" :to="settingsLink('workspace', 'agent-keys')">Agent keys<AppIcon name="arrow" :size="13" /></RouterLink>
+        <RouterLink v-if="can('keys.manage')" class="context-link" :to="settingsLink('workspace', 'agent-keys')">Agent keys<AppIcon name="arrow" :size="13" /></RouterLink>
         <p class="live" :class="{ on: live }" :data-tip="live ? 'Updates arrive as they happen' : 'Refreshing every 20 seconds'">
           <span class="live-mark" aria-hidden="true" />{{ live ? 'Live' : 'Polling' }}
         </p>
@@ -226,7 +226,7 @@ watch(sessionId, id => { if (id) cursor.value = `s:${id}` }, { immediate: true }
       <div class="main-col">
         <ApprovalQueue
           ref="queue" :pending="agents.pending" :held="agents.held" :history="history" :now="agents.now" :loaded="agents.loaded"
-          :cursor="cursor" :can-decide="canDecide" :can-decide-approval="canDecideApproval" :asker="agents.askerName" :resource="resource" :decide="decide" :revoke="agents.revoke" :resolve="resolveHeld"
+          :cursor="cursor" :can-decide="canDecide" :can-decide-approval="canDecideApproval" :can-resolve="canResolve" :can-revoke="canRevoke" :asker="agents.askerName" :resource="resource" :decide="decide" :revoke="agents.revoke" :resolve="resolveHeld"
           @focus-row="id => cursor = id" @open-agent="openAgent"
         />
         <p v-if="agents.approvalsState === 'error'" class="inline-error" role="alert"><AppIcon name="alert" :size="14" />Permission requests could not be loaded: {{ agents.approvalsError }} <button type="button" class="btn sm" @click="agents.refreshApprovals()">Try again</button></p>

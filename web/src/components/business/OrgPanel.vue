@@ -172,7 +172,7 @@ async function unlinkContact(contactId: string) {
   try { await deleteRelation(rel.id); relations.value = relations.value.filter(r => r.id !== rel.id); syncLinks() }
   catch (e) { toast(`Not removed: ${e instanceof Error ? e.message : 'unknown error'}`, { tone: 'error' }) }
 }
-const peopleOptions = computed<PickOption[]>(() => business.people.map(p => ({ value: p.id, label: p.name, hint: p.roles.join(', '), icon: 'user' })))
+const peopleOptions = computed<PickOption[]>(() => business.people.map(p => ({ value: p.id, label: p.name, hint: 'Person', icon: 'user' })))
 async function bind(option: PickOption) {
   const contactId = menu.value?.contactId
   const anchor = menu.value?.anchor

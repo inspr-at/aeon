@@ -10,6 +10,7 @@ import (
 	"time"
 	"unicode/utf8"
 
+	"github.com/inspr-at/aeon/internal/authz"
 	"github.com/inspr-at/aeon/internal/db"
 	"github.com/inspr-at/aeon/internal/events"
 	"github.com/inspr-at/aeon/internal/tenant"
@@ -29,7 +30,7 @@ type HeldResolution struct {
 // Auth middleware establishes the person session; explicit API authorization
 // and agent attribution are rejected even alongside an authenticated person.
 func (m *messaging) resolveMessage(w http.ResponseWriter, r *http.Request) {
-	p, project, ok := messagingPrincipal(w, r, true)
+	p, project, ok := m.messagingPrincipal(w, r, true)
 	if !ok {
 		return
 	}
@@ -63,11 +64,7 @@ func (m *messaging) resolveMessage(w http.ResponseWriter, r *http.Request) {
 		if _, err := tx.Exec(ctx, `SELECT pg_advisory_xact_lock(hashtextextended($1,55))`, p.TenantID); err != nil {
 			return err
 		}
-		var person bool
-		if err := tx.QueryRow(ctx, `SELECT EXISTS(SELECT 1 FROM principals WHERE id=$1::uuid AND kind='person' AND (roles @> ARRAY['admin']::text[] OR roles @> ARRAY['super_admin']::text[]))`, p.ID).Scan(&person); err != nil {
-			return err
-		}
-		if !person {
+		if err := authz.RequireTx(ctx, tx, p, "inbox.manage", authz.Scope{ProjectID: project}); err != nil {
 			return errForbidden
 		}
 		var held bool

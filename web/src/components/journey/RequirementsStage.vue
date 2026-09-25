@@ -3,6 +3,7 @@
 import { computed, ref } from 'vue'
 import { ACTION_LONG, addRequirement, gateApprovals, isDropped, isFinished, isImported, offeredApproval, STAGE_LABEL, type Requirement } from '../../lib/journey'
 import { useJourneyContext } from '../../lib/journeyContext'
+import { can } from '../../lib/authz'
 import { toast } from '../../lib/toast'
 import { plural, statusMeta } from '../../lib/work'
 import type { ListItem } from '../../lib/api'
@@ -105,7 +106,7 @@ async function add() {
           </li>
         </ol>
       </section>
-      <form v-if="ctx.canAct.value" class="j-card add" @submit.prevent="add">
+      <form v-if="ctx.canAct.value && can('requirements.write', ctx.project.value.id)" class="j-card add" @submit.prevent="add">
         <p class="eyebrow">Add a requirement</p>
         <div class="add-row">
           <select v-model="kind" class="field kind" aria-label="Kind of requirement"><option value="functional">Functional</option><option value="nonfunctional">Non-functional</option></select>

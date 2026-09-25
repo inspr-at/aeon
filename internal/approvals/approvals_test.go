@@ -84,6 +84,7 @@ func newFixture(t *testing.T) *fixture {
 	}); err != nil {
 		t.Fatal(err)
 	}
+	dbtest.BindLegacy(t, f.db, f.tenantA, f.personA.ID)
 	f.personB = insertPrincipal(t, f.db.Admin, f.tenantB, tenant.Person, "bea")
 	f.agentA = insertPrincipal(t, f.db.Admin, f.tenantA, tenant.Agent, "agent-a")
 	f.agentB = insertPrincipal(t, f.db.Admin, f.tenantA, tenant.Agent, "agent-b")
