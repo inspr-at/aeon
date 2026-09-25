@@ -108,7 +108,8 @@ export async function createKnowledgeGraphRenderer(host: HTMLElement, dimension:
       if (wantLabel && !label) {
         label = new SpriteText(short(n), 5, palette.ink)
         const text = label as InstanceType<typeof SpriteText>
-        text.material.depthTest = false; text.renderOrder = 10
+        // Above every bubble and link (links render at 10), never tinted by a dimmed bubble in front.
+        text.material.depthTest = false; text.material.depthWrite = false; text.renderOrder = 1000
         group.add(label); labels.set(n.id, label)
       } else if (!wantLabel && label) { group.remove(label); releaseObject(label); labels.delete(n.id); label = undefined }
       if (label) { const text = label as InstanceType<typeof SpriteText>; styleLabel(text, n); text.material.opacity = n.id === emphasis.hovered ? 1 : alpha(n) }
@@ -305,16 +306,49 @@ export async function createKnowledgeGraphRenderer(host: HTMLElement, dimension:
       g2.centerAt((x0 + x1) / 2, (y0 + y1) / 2, duration()); g2.zoom(zoom, duration()); refreshPicking(duration())
     }
   }
+  // A selection sits in the middle with its direct links in view (80% of the stage),
+  // no closer than 1.8 screen pixels per graph unit.
+  const FOCUS_ZOOM = 1.8
   function focus(id: string) {
-      clearTimeout(settleTimer)
-      const node = nodes.find(n => n.id === id); if (!node) return
-      if (g3) {
-        const x = node.x ?? 0, y = node.y ?? 0, z = node.z ?? 0
-        const camera = g3.cameraPosition(), length = Math.hypot(camera.x - x, camera.y - y, camera.z - z) || 1
-        const distance = 150 + graphRadius(node) * 6
-        g3.cameraPosition({ x: x + (camera.x - x) / length * distance, y: y + (camera.y - y) / length * distance, z: z + (camera.z - z) / length * distance }, { x, y, z }, duration())
-      } else { g2!.centerAt(node.x ?? 0, node.y ?? 0, duration()); g2!.zoom(1.8, duration()); refreshPicking(duration()) }
+    clearTimeout(settleTimer)
+    const node = nodes.find(n => n.id === id); if (!node) return
+    const around = links.flatMap(l => endpointID(l.source) === id ? [endpointID(l.target)] : endpointID(l.target) === id ? [endpointID(l.source)] : [])
+      .map(other => nodes.find(n => n.id === other)).filter((n): n is LayoutNode => !!n)
+    const x = node.x ?? 0, y = node.y ?? 0, z = node.z ?? 0
+    if (g3 && three) {
+      const camera = g3.camera() as PerspectiveCamera
+      const back = new three.Vector3(camera.position.x - x, camera.position.y - y, camera.position.z - z)
+      if (back.lengthSq() < 1e-6) back.set(0, 0, 1)
+      back.normalize()
+      const right = new three.Vector3().crossVectors(new three.Vector3(0, 1, 0).applyQuaternion(camera.quaternion), back).normalize()
+      const up = new three.Vector3().crossVectors(back, right).normalize()
+      const tan = Math.tan(camera.fov * Math.PI / 360), aspect = Math.max(1, g3.width()) / Math.max(1, g3.height())
+      let distance = g3.height() / (2 * tan * FOCUS_ZOOM)
+      for (const n of around) {
+        const v = new three.Vector3((n.x ?? 0) - x, (n.y ?? 0) - y, (n.z ?? 0) - z), r = graphRadius(n), depth = v.dot(back)
+        distance = Math.max(distance, depth + (Math.abs(v.dot(up)) + r) / (tan * FILL), depth + (Math.abs(v.dot(right)) + r) / (tan * aspect * FILL))
+      }
+      g3.cameraPosition({ x: x + back.x * distance, y: y + back.y * distance, z: z + back.z * distance }, { x, y, z }, duration())
+    } else if (g2) {
+      let zoom = FOCUS_ZOOM
+      for (const n of around) {
+        const r = graphRadius(n)
+        zoom = Math.min(zoom, g2.width() * FILL / 2 / (Math.abs((n.x ?? 0) - x) + r), g2.height() * FILL / 2 / (Math.abs((n.y ?? 0) - y) + r))
+      }
+      g2.centerAt(x, y, duration()); g2.zoom(Math.max(.2, zoom), duration()); refreshPicking(duration())
     }
+  }
+  // The engines lay out and build their objects a moment after new data. Wait for both
+  // (bounded), so labels attach and the camera frames real positions rather than the origin.
+  function whenLaidOut(run: () => void, frames = 90) {
+    cancelAnimationFrame(paintFrame)
+    paintFrame = requestAnimationFrame(() => {
+      if (disposed) return
+      const ready = nodes.every(n => n.x !== undefined) && (!g3 || nodes.every(n => objects.has(n.id)))
+      if (!ready && frames > 0) whenLaidOut(run, frames - 1)
+      else run()
+    })
+  }
   return {
     dimension: g3 ? '3d' : '2d',
     data(value) {
@@ -322,8 +356,8 @@ export async function createKnowledgeGraphRenderer(host: HTMLElement, dimension:
       objects.forEach(releaseObject); objects.clear(); labels.clear()
       const layout = graphLayout(value); nodes = layout.nodes; links = layout.links
       graph.graphData({ nodes, links }); redraw()
-      cancelAnimationFrame(paintFrame); clearTimeout(settleTimer)
-      paintFrame = requestAnimationFrame(() => { redraw(); if (emphasis.selected) focus(emphasis.selected); else fit() })
+      clearTimeout(settleTimer)
+      whenLaidOut(() => { redraw(); if (emphasis.selected) focus(emphasis.selected); else fit() })
       if (!paused) settleTimer = setTimeout(() => { if (emphasis.selected) focus(emphasis.selected); else fit() }, 1200)
     },
     emphasis(value) {
