@@ -18,6 +18,7 @@ import { mockReleases, releaseHistory } from './releases-fixtures'
 import { journeyWorld, mockJourney } from './journey-fixtures'
 import { domAudit, expectedMockConsole, decorativeVersionContrast, installLayoutShiftAudit, armLayoutShiftAudit, readLayoutShiftAudit, type Kind, type Raw } from './ui-audit-rules'
 import { mockQuoteEditor, QUOTE_ID } from './quote-inspector-fixtures'
+import { knowledgeWorld, mockKnowledge } from './knowledge-fixtures'
 
 type Finding = Raw & { id: string; route: string; state: string; viewport: string; theme: string; screenshot: string }
 type Setup = 'default' | 'editor' | 'journey' | 'public' | 'signed-out'
@@ -87,6 +88,12 @@ const scenarios: Scenario[] = [
   { state: 'quote row menu', route: quote, act: async page => { await listContent('Onlineshop Erweiterung Weihnachten')(page); const row = page.locator(`#quote-${Q.issued}`); await row.hover(); await row.getByRole('button', { name: /^Actions for / }).click(); await expect(page.getByRole('menu')).toBeVisible() } },
   { state: 'account menu', route: '/', act: async page => { await visible('main')(page); await page.getByRole('button', { name: /^Account for/ }).click(); await expect(page.getByRole('dialog', { name: 'Account' })).toBeVisible() } },
   { state: 'command palette', route: '/', act: async page => { await visible('main')(page); await page.keyboard.press('Control+k'); await expect(page.getByRole('dialog', { name: 'Search and commands' })).toBeVisible() } },
+  { state: 'knowledge', route: '/p/PHAROS/knowledge', act: visible('.k-row') },
+  { state: 'knowledge entry', route: '/p/PHAROS/knowledge/runbook/deploy-release', act: visible('.e-body') },
+  { state: 'knowledge kind redirect', route: '/p/PHAROS/knowledge/recipe/old', act: visible('.k-row') },
+  { state: 'knowledge edit', route: '/p/PHAROS/knowledge/external-system/hetzner', act: async page => { await visible('.e-where')(page); await page.getByRole('button', { name: /^Edit/ }).click(); await expect(page.getByRole('form', { name: 'Edit hetzner' })).toBeVisible() } },
+  { state: 'knowledge new entry dialog', route: '/p/PHAROS/knowledge', act: async page => { await visible('.k-row')(page); await page.getByRole('button', { name: 'New knowledge entry' }).click(); await expect(page.getByRole('dialog', { name: 'New knowledge entry' })).toBeVisible() } },
+  { state: 'knowledge across projects', route: '/knowledge?q=deploy', act: visible('.kp-row') },
 ]
 
 async function installMocks(page: Page, setup: Setup) {
@@ -109,6 +116,7 @@ async function installMocks(page: Page, setup: Setup) {
   await mockSettings(page, settingsData({ photo: true }), { photo: true, people: ['22222222-2222-4222-8222-222222222222'] })
   await mockProfiles(page, profileWorld())
   if (setup === 'journey') await mockJourney(page, journeyWorld())
+  await mockKnowledge(page, knowledgeWorld())
   await mockReleases(page, history)
   if (setup === 'editor') await mockQuoteEditor(page)
 }

@@ -66,6 +66,15 @@ const sections: { title: string; rows: { keys: Key[][]; label: string; joiner?: 
     { keys: [['s'], ['a'], ['p'], ['l'], ['m']], joiner: '·', label: 'With a selection: status, assignee, priority, labels, move' },
     { keys: [['Esc']], label: 'Clear the selection' },
   ] },
+  { title: 'Knowledge', rows: [
+    { keys: [['j'], ['k']], label: 'Next and previous entry, in the list and on an entry' },
+    { keys: [[{ icon: 'enter', label: 'Enter' }], ['o']], label: 'Open the entry' },
+    { keys: [['/']], label: 'Search titles, slugs and text' },
+    { keys: [['n']], label: 'New entry' },
+    { keys: [['e']], label: 'Edit the entry' },
+    { keys: [[MOD, { icon: 'enter', label: 'Enter' }]], label: 'Save the entry' },
+    { keys: [['Esc']], label: 'Back to the list, or cancel editing' },
+  ] },
   { title: 'Outline', rows: [
     { keys: [[{ icon: 'arrow', label: 'Right arrow' }]], label: 'Expand, or step into the first child' },
     { keys: [[{ icon: 'arrow-left', label: 'Left arrow' }]], label: 'Collapse, or step out to the parent' },

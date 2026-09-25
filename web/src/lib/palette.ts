@@ -3,14 +3,16 @@
 // matches, project known), the hybrid search API (words, meaning) and local projects
 // and actions. Kept free of Vue for unit tests.
 import type { ListItem, WorkNode } from './api.ts'
+import type { KnowledgeItem, KnowledgeType } from './knowledge.ts'
 import type { Recent } from './recents.ts'
 
 export interface TicketResult { type: 'ticket'; id: string; key: string; title: string; state: string; kind: string; projectKey: string | null }
 export interface ProjectResult { type: 'project'; id: string; key: string; title: string; description: string; archived: boolean }
 // searchOnly: offered when a search matches it, not in the empty palette's short list.
 export interface ActionResult { type: 'action'; id: string; label: string; hint?: string; icon: string; keys?: string[]; searchOnly?: boolean }
-export type Result = TicketResult | ProjectResult | ActionResult
-export interface Group { id: 'recent' | 'tickets' | 'views' | 'projects' | 'actions'; label: string; items: Result[] }
+export interface KnowledgeResult { type: 'knowledge'; id: string; kind: KnowledgeType; slug: string; title: string; excerpt: string; archived: boolean; projectKey: string | null }
+export type Result = TicketResult | ProjectResult | ActionResult | KnowledgeResult
+export interface Group { id: 'recent' | 'tickets' | 'knowledge' | 'views' | 'projects' | 'actions'; label: string; items: Result[] }
 export interface PaletteProject { id: string; routeKey: string; title: string; description: string; archived: boolean }
 
 const KEY = /^([a-z][a-z0-9]{1,9})-(\d*)$/i
@@ -85,8 +87,18 @@ export function recentResults(recents: Recent[], scopeKey: string | null): Resul
       : { type: 'project', id: `recent-${recent.key}`, key: recent.key, title: recent.title, description: '', archived: false })
 }
 
-// Group order: a bare project key puts Projects first; otherwise Tickets lead.
-export function assemble(q: string, parts: { recent: Result[]; tickets: TicketResult[]; projects: ProjectResult[]; actions: ActionResult[]; views?: ActionResult[] }): Group[] {
+// Knowledge: runbooks, guidelines and memory whose title, slug or text match, archived
+// ones last; the project comes from the entry's nearest project.
+export function knowledgeResults(items: KnowledgeItem[], routeKeyOf: (projectId: string) => string | null, scopeKey: string | null, limit = 5): KnowledgeResult[] {
+  return items
+    .map(item => ({ type: 'knowledge' as const, id: `k-${item.id}`, kind: item.type, slug: item.slug, title: item.title, excerpt: item.excerpt, archived: item.status === 'archived', projectKey: item.project ? routeKeyOf(item.project.id) : null }))
+    .filter(result => result.projectKey && (!scopeKey || result.projectKey === scopeKey))
+    .sort((a, b) => Number(a.archived) - Number(b.archived))
+    .slice(0, limit)
+}
+
+// Group order: a bare project key puts Projects first; otherwise Tickets lead, then Knowledge.
+export function assemble(q: string, parts: { recent: Result[]; tickets: TicketResult[]; knowledge?: KnowledgeResult[]; projects: ProjectResult[]; actions: ActionResult[]; views?: ActionResult[] }): Group[] {
   const needle = q.trim()
   const views = parts.views ?? []
   if (!needle) {
@@ -99,10 +111,11 @@ export function assemble(q: string, parts: { recent: Result[]; tickets: TicketRe
   const projectFirst = parts.projects.some(project => project.key.toUpperCase() === needle.toUpperCase())
   const groups: Group[] = [
     { id: 'tickets', label: 'Tickets', items: parts.tickets },
+    { id: 'knowledge', label: 'Knowledge', items: parts.knowledge ?? [] },
     { id: 'views', label: 'Views', items: views },
     { id: 'projects', label: 'Projects', items: parts.projects },
     { id: 'actions', label: 'Actions', items: parts.actions },
   ]
-  if (projectFirst) groups.unshift(groups.splice(2, 1)[0])
+  if (projectFirst) groups.unshift(groups.splice(groups.findIndex(group => group.id === 'projects'), 1)[0])
   return groups.filter(group => group.items.length)
 }

@@ -20,7 +20,7 @@ const props = defineProps<{
   loading: boolean
   density: 'comfortable' | 'compact'
   stuck: boolean
-  view: 'list' | 'outline' | 'journey'
+  view: 'list' | 'outline' | 'journey' | 'knowledge'
   // The table's columns for the Display menu's picker.
   columns?: { order: ColumnId[]; visible: ColumnId[]; customised: boolean } | null
   facetLoading?: boolean
@@ -39,7 +39,7 @@ const emit = defineEmits<{
   openSheet: []
   needOptions: [dimension: Dimension]
   create: []
-  view: [value: 'list' | 'outline' | 'journey']
+  view: [value: 'list' | 'outline' | 'journey' | 'knowledge']
   expandAll: []
   collapseAll: []
   expandGroups: []
@@ -140,13 +140,14 @@ defineExpose({ focusSearch, openFilterMenu, input })
 </script>
 
 <template>
-  <div ref="root" class="toolbar" :class="{ stuck }" role="toolbar" aria-label="Ticket list controls">
+  <div ref="root" class="toolbar" :class="{ stuck, knowledge: view === 'knowledge' }" role="toolbar" :aria-label="view === 'knowledge' ? 'Knowledge controls' : 'Ticket list controls'">
     <div class="seg view-seg" role="radiogroup" aria-label="View">
       <button type="button" role="radio" :aria-checked="view === 'list'" aria-label="List view" data-tip="List view · flat, sortable, groupable" @click="emit('view', 'list')"><AppIcon name="list" :size="14" /><span class="view-label">List</span></button>
       <button type="button" role="radio" :aria-checked="view === 'outline'" aria-label="Outline view" data-tip="Outline view · epics, tickets and tasks as a tree" @click="emit('view', 'outline')"><AppIcon name="outline" :size="14" /><span class="view-label">Outline</span></button>
       <button type="button" role="radio" :aria-checked="view === 'journey'" aria-label="Journey view" data-tip="Journey · from the first conversation to live, with the next step" @click="emit('view', 'journey')"><AppIcon name="journey" :size="14" /><span class="view-label">Journey</span></button>
+      <button type="button" role="radio" :aria-checked="view === 'knowledge'" aria-label="Knowledge" data-tip="Knowledge · runbooks, guidelines and memory agents read" @click="emit('view', 'knowledge')"><AppIcon name="book" :size="14" /><span class="view-label">Knowledge</span></button>
     </div>
-    <template v-if="view !== 'journey'">
+    <template v-if="view === 'list' || view === 'outline'">
     <label class="search-field list-search">
       <AppIcon name="search" :size="14" />
       <input ref="input" v-model="draft" class="field" type="search" :placeholder="narrow ? 'Search' : 'Search this list'" aria-label="Search tickets in this project" aria-keyshortcuts="/" autocomplete="off" spellcheck="false" @keydown="searchKey" />
@@ -207,6 +208,8 @@ defineExpose({ focusSearch, openFilterMenu, input })
     </button>
 
     </template>
+    <!-- The Knowledge tab teleports its own controls here (KnowledgeTab.vue). -->
+    <div v-else-if="view === 'knowledge'" id="knowledge-controls" class="knowledge-controls" />
     <span v-else class="spacer" />
     <slot name="journey" />
 
@@ -218,7 +221,7 @@ defineExpose({ focusSearch, openFilterMenu, input })
     <DateMenu v-if="dateAnchor" :anchor="dateAnchor" :value="filters.date" @change="value => emit('date', value)" @close="closeDate" />
     <FloatingPanel v-if="displayAnchor" :anchor="displayAnchor" :width="320" :tallest="760" align="end" label="Display options" @close="closeDisplay">
       <DisplayPanel
-        :filters="filters" :view="view" :density="density" :columns="columns" :grouped="view === 'list' && filters.group !== 'none'"
+        :filters="filters" :view="view === 'knowledge' ? 'list' : view" :density="density" :columns="columns" :grouped="view === 'list' && filters.group !== 'none'"
         @group="value => emit('group', value)" @sort="keys => emit('sort', keys)" @density="value => emit('density', value)"
         @columns="(order, visible) => emit('columns', order, visible)" @columns-reset="emit('columnsReset')"
         @expand-all="emit('expandAll'); closeDisplay(false)" @collapse-all="emit('collapseAll'); closeDisplay(false)"
@@ -270,11 +273,14 @@ defineExpose({ focusSearch, openFilterMenu, input })
 .filters-btn { display: none; }
 .new-btn { height: 32px; padding: 0 14px 0 11px; gap: 6px; }
 .view-seg { flex-shrink: 0; }
+.knowledge-controls { display: contents; }
 .view-seg button { height: 26px; padding: 0 11px; }
 /* The controls keep to one line; as the list narrows (a docked panel, a smaller
    window) labels step back first, then the rarer quick filters, which stay in
    the Filter menu. */
 @container toolbar (max-width: 1500px) { .more-label { display: none; } .more-btn { padding: 0 9px; } .list-search { width: 208px; } }
+/* Four views: from 1420px down the open view keeps its label and the others show their icon (and tip). */
+@container toolbar (max-width: 1420px) { .view-seg button:not([aria-checked="true"]) .view-label { display: none; } .view-seg button:not([aria-checked="true"]) { padding: 0 8px; } }
 @container toolbar (max-width: 1300px) { .view-label { display: none; } .view-seg button { padding: 0 8px; } }
 @container toolbar (max-width: 1000px) { .list-search { width: 190px; } .count { display: none; } .new-btn { width: 32px; padding: 0; } .new-label { display: none; } .facet-btn[data-dim="type"]:not(.on) { display: none; } .display-label { display: none; } .display-btn { padding: 0 9px; } }
 @container toolbar (max-width: 920px) { .list-search { width: 150px; } .facet-btn { padding: 0 11px; } .facet-btn:not(.on) .facet-end { display: none; } }
@@ -296,5 +302,8 @@ defineExpose({ focusSearch, openFilterMenu, input })
   .new-btn { order: 3; width: 44px; height: 44px; padding: 0; }
   .new-label { display: none; }
   .count { display: none; }
+  /* Knowledge on a phone: the view switch on its own line, search and filters below. */
+  .toolbar.knowledge { flex-wrap: wrap; }
+  .knowledge-controls { display: flex; flex: 1 1 100%; align-items: center; gap: 8px; min-width: 0; }
 }
 </style>

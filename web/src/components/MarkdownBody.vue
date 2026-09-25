@@ -1,10 +1,13 @@
 <!-- SPDX-License-Identifier: AGPL-3.0-only -->
 <script setup lang="ts">
-import { computed } from 'vue'
+import { computed, watch } from 'vue'
 import MarkdownIt from 'markdown-it'
 import { ATTACHMENT_REF, contentUrl } from '../lib/attachments'
-const props = defineProps<{ body: string }>()
-const emit = defineEmits<{ openAttachment: [id: string] }>()
+import { headingSlug, type Heading } from '../lib/knowledge'
+// anchors (knowledge pages): headings get ids and a link to themselves, the
+// outline is emitted for a table of contents, and web links open in a new tab.
+const props = defineProps<{ body: string; anchors?: boolean }>()
+const emit = defineEmits<{ openAttachment: [id: string]; headings: [items: Heading[]]; anchor: [id: string]; jump: [id: string] }>()
 // Raw HTML stays text; markdown-it rejects script/data links. Only this ticket's own
 // attachments render as images (![caption](attachment:<id>)); any other image stays
 // text, so viewing another principal's Markdown never loads third-party resources.
@@ -38,13 +41,65 @@ markdown.core.ruler.after('inline', 'task-lists', state => {
 markdown.renderer.rules.task_checkbox = (tokens, index) =>
   `<input class="task-box" type="checkbox" disabled${tokens[index].meta?.checked ? ' checked' : ''} aria-label="${tokens[index].meta?.checked ? 'Done' : 'Not done'}"> `
 
-const rendered = computed(() => markdown.render(props.body))
+// Heading anchors: the DOM id carries a prefix so a heading can never take an id the
+// page itself uses; the link (and the URL hash) is the bare slug.
+interface AnchorEnv { [key: string]: unknown; anchors?: boolean; used?: Map<string, number>; headings?: Heading[] }
+const LINK_ICON = '<svg width="14" height="14" viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true" focusable="false"><path d="M6.6 9.4 9.4 6.6M7.2 4.4l1.2-1.2a2.6 2.6 0 0 1 3.7 3.7l-1.2 1.2M8.8 11.6l-1.2 1.2a2.6 2.6 0 0 1-3.7-3.7l1.2-1.2"/></svg>'
+const inlineText = (token: { children?: { type: string; content: string }[] | null } | undefined) =>
+  (token?.children ?? []).filter(child => child.type === 'text' || child.type === 'code_inline').map(child => child.content).join('').trim()
+markdown.renderer.rules.heading_open = (tokens, index, options, rawEnv, self) => {
+  const env = rawEnv as AnchorEnv | undefined
+  if (env?.anchors) {
+    const text = inlineText(tokens[index + 1] as never)
+    const id = headingSlug(text, env.used ??= new Map())
+    const level = Number(tokens[index].tag.slice(1))
+    ;(env.headings ??= []).push({ level, text, id })
+    tokens[index].attrSet('id', `h-${id}`)
+    tokens[index].attrJoin('class', 'md-heading')
+    tokens[index].meta = { ...(tokens[index].meta ?? {}), anchor: id, text }
+  }
+  return self.renderToken(tokens, index, options)
+}
+markdown.renderer.rules.heading_close = (tokens, index, options, rawEnv, self) => {
+  const env = rawEnv as AnchorEnv | undefined
+  const open = tokens.slice(0, index).reverse().find(token => token.type === 'heading_open')
+  const anchor = env?.anchors ? open?.meta?.anchor as string | undefined : undefined
+  const link = anchor ? `<a class="md-anchor" href="#${anchor}" data-anchor="${anchor}" aria-label="Copy a link to ${markdown.utils.escapeHtml(String(open?.meta?.text ?? 'this section'))}">${LINK_ICON}</a>` : ''
+  return link + self.renderToken(tokens, index, options)
+}
+markdown.renderer.rules.link_open = (tokens, index, options, rawEnv, self) => {
+  const env = rawEnv as AnchorEnv | undefined
+  const href = String(tokens[index].attrGet('href') ?? '')
+  if (env?.anchors && /^https?:\/\//i.test(href)) { tokens[index].attrSet('target', '_blank'); tokens[index].attrSet('rel', 'noopener noreferrer') }
+  return self.renderToken(tokens, index, options)
+}
+
+// Code blocks and tables scroll sideways when wide; keyboard users can reach and scroll them.
+const renderFence = markdown.renderer.rules.fence!
+markdown.renderer.rules.fence = (tokens, index, options, env, self) => renderFence(tokens, index, options, env, self).replace(/^<pre>/, '<pre tabindex="0">')
+const renderCodeBlock = markdown.renderer.rules.code_block!
+markdown.renderer.rules.code_block = (tokens, index, options, env, self) => renderCodeBlock(tokens, index, options, env, self).replace(/^<pre>/, '<pre tabindex="0">')
+markdown.renderer.rules.table_open = (tokens, index, options, _env, self) => { tokens[index].attrSet('tabindex', '0'); return self.renderToken(tokens, index, options) }
+
+const result = computed(() => {
+  const env: AnchorEnv = { anchors: !!props.anchors }
+  const html = markdown.render(props.body, env as Parameters<typeof markdown.render>[1])
+  return { html, headings: env.headings ?? [] }
+})
+const rendered = computed(() => result.value.html)
+watch(() => result.value.headings, headings => { if (props.anchors) emit('headings', headings) }, { immediate: true })
 function click(event: MouseEvent) {
-  const button = (event.target as HTMLElement).closest<HTMLElement>('.md-attachment')
-  if (button?.dataset.attachment) { event.preventDefault(); emit('openAttachment', button.dataset.attachment) }
+  const target = event.target as HTMLElement
+  const button = target.closest<HTMLElement>('.md-attachment')
+  if (button?.dataset.attachment) { event.preventDefault(); emit('openAttachment', button.dataset.attachment); return }
+  if (!props.anchors) return
+  const anchor = target.closest<HTMLElement>('.md-anchor')
+  if (anchor?.dataset.anchor) { event.preventDefault(); emit('anchor', anchor.dataset.anchor); return }
+  const link = target.closest<HTMLAnchorElement>('a[href^="#"]')
+  if (link) { event.preventDefault(); emit('jump', decodeURIComponent(link.getAttribute('href')!.slice(1))) }
 }
 </script>
-<template><div class="markdown-body" v-html="rendered" @click="click" /></template>
+<template><div class="markdown-body" :class="{ anchored: anchors }" v-html="rendered" @click="click" /></template>
 <style scoped>
 .markdown-body { overflow-wrap: anywhere; font-size: 14px; line-height: 1.65; color: var(--ink); }
 .markdown-body > :deep(:first-child) { margin-top: 0; }
@@ -83,4 +138,14 @@ function click(event: MouseEvent) {
 .markdown-body :deep(.md-attachment) { display: block; max-width: 100%; margin: .4em 0 1em; padding: 0; border: 0; border-radius: 10px; overflow: hidden; background: var(--surface-sunken, var(--code-bg)); box-shadow: inset 0 0 0 1px var(--line), 0 10px 26px -18px rgba(16, 35, 39, .5); cursor: zoom-in; }
 .markdown-body :deep(.md-attachment img) { display: block; max-width: 100%; height: auto; }
 .markdown-body :deep(.md-attachment:focus-visible) { box-shadow: var(--focus-ring); }
+.markdown-body :deep(pre:focus-visible), .markdown-body :deep(table:focus-visible) { box-shadow: var(--focus-ring); }
+/* Anchored headings: the link sits after the words, quiet until the heading is hovered or it has focus. */
+.anchored :deep(.md-heading) { scroll-margin-top: 72px; }
+.anchored :deep(.md-anchor) { display: inline-grid; place-items: center; width: 24px; height: 24px; margin-left: 4px; vertical-align: -5px; border-radius: 6px; color: var(--ink-3); text-decoration: none; opacity: 0; }
+.anchored :deep(.md-heading:hover .md-anchor), .anchored :deep(.md-anchor:focus-visible) { opacity: 1; }
+.anchored :deep(.md-anchor:hover) { color: var(--teal-ink); background: var(--row-hover); }
+.anchored :deep(.md-anchor:focus-visible) { box-shadow: var(--focus-ring); }
+.anchored :deep(.md-heading.flash) { border-radius: 6px; background: var(--row-selected); box-shadow: 0 0 0 4px var(--row-selected); }
+@media (prefers-reduced-motion: no-preference) { .anchored :deep(.md-heading) { transition: background-color .6s ease, box-shadow .6s ease; } }
+@media (hover: none) { .anchored :deep(.md-anchor) { opacity: .7; } }
 </style>

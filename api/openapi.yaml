@@ -979,6 +979,154 @@ paths:
           $ref: '#/components/responses/Error'
         '409':
           $ref: '#/components/responses/Error'
+  /knowledge:
+    get:
+      operationId: listKnowledge
+      description: |
+        Knowledge entries (runbook, guideline, memory, external-system,
+        related-project) across projects, or in one project. q searches title,
+        slug, key and body (German and English full text plus word matches);
+        the excerpt is plain text around the first match. counts cover the
+        project and q scope before the type and status filters.
+      security: *auth
+      parameters:
+        - {name: project_id, in: query, schema: {type: string, format: uuid}}
+        - {name: type, in: query, description: Comma-separated knowledge types, schema: {type: string}}
+        - {name: status, in: query, description: Comma-separated active, proposed, archived, schema: {type: string}}
+        - {name: q, in: query, schema: {type: string, maxLength: 200}}
+        - {name: sort, in: query, schema: {type: string, enum: [relevance, updated, created, title, slug, type]}}
+        - {name: limit, in: query, schema: {type: integer, minimum: 1, maximum: 1000, default: 500}}
+      responses:
+        '200':
+          description: Knowledge entries
+          content:
+            application/json:
+              schema: {$ref: '#/components/schemas/KnowledgePage'}
+        '400':
+          $ref: '#/components/responses/Error'
+    post:
+      operationId: createKnowledge
+      description: |
+        Create an entry under a project. The slug follows ^[a-z][a-z0-9_-]*$
+        (at most 64 characters) and is unique per project and type among live
+        entries; memory reserves references, stale, proposed and needs-review.
+        A missing external_system or related_project kind is created first.
+        Appends knowledge.created (undoable while nobody changed the entry).
+      security: *auth
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: {$ref: '#/components/schemas/KnowledgeCreate'}
+      responses:
+        '201':
+          $ref: '#/components/responses/KnowledgeEntry'
+        '400':
+          $ref: '#/components/responses/Error'
+        '403':
+          $ref: '#/components/responses/Error'
+        '404':
+          $ref: '#/components/responses/Error'
+        '409':
+          description: Slug taken; conflict names the entry that holds it
+          content:
+            application/json:
+              schema: {$ref: '#/components/schemas/KnowledgeProblem'}
+        '422':
+          $ref: '#/components/responses/Error'
+  /knowledge/resolve:
+    get:
+      operationId: resolveKnowledge
+      description: One entry by project, type and slug. When no live entry holds the slug, the entry that renamed away from it answers with renamed_from set.
+      security: *auth
+      parameters:
+        - {name: project_id, in: query, required: true, schema: {type: string, format: uuid}}
+        - {name: type, in: query, required: true, schema: {type: string}}
+        - {name: slug, in: query, required: true, schema: {type: string}}
+      responses:
+        '200':
+          $ref: '#/components/responses/KnowledgeEntry'
+        '400':
+          $ref: '#/components/responses/Error'
+        '404':
+          $ref: '#/components/responses/Error'
+  /knowledge/{knowledgeId}:
+    parameters: [{name: knowledgeId, in: path, required: true, schema: {type: string, format: uuid}}]
+    get:
+      operationId: getKnowledge
+      security: *auth
+      responses:
+        '200':
+          $ref: '#/components/responses/KnowledgeEntry'
+        '404':
+          $ref: '#/components/responses/Error'
+    patch:
+      operationId: updateKnowledge
+      description: |
+        Change title, body, status, slug or metadata (metadata replaces the
+        object; {} removes it). Type, project and key never change here.
+        If-Unmodified-Since is the exact updated_at as read; a stale value
+        returns 412 with the current entry and writes nothing. A write that
+        changes nothing appends no event. Appends knowledge.updated, whose undo
+        restores the prior values while the entry is unchanged since and its
+        old slug is free.
+      parameters:
+        - {name: If-Unmodified-Since, in: header, schema: {type: string}}
+      security: *auth
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: {$ref: '#/components/schemas/KnowledgePatch'}
+      responses:
+        '200':
+          $ref: '#/components/responses/KnowledgeEntry'
+        '400':
+          $ref: '#/components/responses/Error'
+        '403':
+          $ref: '#/components/responses/Error'
+        '404':
+          $ref: '#/components/responses/Error'
+        '409':
+          description: Slug taken
+          content:
+            application/json:
+              schema: {$ref: '#/components/schemas/KnowledgeProblem'}
+        '412':
+          description: Changed since it was read; entry is the current version
+          content:
+            application/json:
+              schema: {$ref: '#/components/schemas/KnowledgeProblem'}
+        '422':
+          $ref: '#/components/responses/Error'
+    delete:
+      operationId: deleteKnowledge
+      description: Soft delete with optional If-Unmodified-Since. Appends knowledge.deleted, whose undo restores the entry while its slug is free.
+      parameters:
+        - {name: If-Unmodified-Since, in: header, schema: {type: string}}
+      security: *auth
+      responses:
+        '200':
+          description: Deleted
+          content:
+            application/json:
+              schema:
+                type: object
+                required: [id, event_id]
+                properties:
+                  id: {type: string, format: uuid}
+                  event_id: {type: integer, format: int64}
+        '403':
+          $ref: '#/components/responses/Error'
+        '404':
+          $ref: '#/components/responses/Error'
+        '409':
+          $ref: '#/components/responses/Error'
+        '412':
+          description: Changed since it was read
+          content:
+            application/json:
+              schema: {$ref: '#/components/schemas/KnowledgeProblem'}
   /search:
     get:
       operationId: searchNodes
@@ -4119,6 +4267,123 @@ components:
             token:
               type: string
               description: Returned once. Format aeon_<prefix>_<secret>.
+    KnowledgeType:
+      type: string
+      enum: [runbook, guideline, memory, external-system, related-project]
+    KnowledgeStatus:
+      type: string
+      description: active is stored as backlog, archived as cancelled; any other stored state reads as active.
+      enum: [active, proposed, archived]
+    KnowledgePerson:
+      type: object
+      required: [id, name]
+      properties:
+        id: {type: string, format: uuid}
+        name: {type: string}
+    KnowledgeItem:
+      type: object
+      required: [id, key, type, kind, slug, title, status, state, project, excerpt, link_count, created_at, updated_at, updated_by, imported]
+      properties:
+        id: {type: string, format: uuid}
+        key: {type: string}
+        type: {$ref: '#/components/schemas/KnowledgeType'}
+        kind: {type: string, description: Node kind slug (external_system)}
+        slug: {type: string}
+        title: {type: string}
+        status: {$ref: '#/components/schemas/KnowledgeStatus'}
+        state: {type: string}
+        project:
+          oneOf:
+            - type: 'null'
+            - type: object
+              required: [id, key, title]
+              properties:
+                id: {type: string, format: uuid}
+                key: {type: string}
+                title: {type: string}
+        excerpt: {type: string}
+        link_count: {type: integer}
+        created_at: {type: string, format: date-time}
+        updated_at: {type: string, format: date-time}
+        updated_by:
+          oneOf: [{type: 'null'}, {$ref: '#/components/schemas/KnowledgePerson'}]
+        imported: {type: boolean, description: The last write came from the classic import}
+    KnowledgeEntry:
+      allOf:
+        - $ref: '#/components/schemas/KnowledgeItem'
+        - type: object
+          required: [body, metadata, author, links]
+          properties:
+            body: {type: string}
+            metadata: {type: object, additionalProperties: true}
+            author:
+              oneOf: [{type: 'null'}, {$ref: '#/components/schemas/KnowledgePerson'}]
+            links:
+              type: array
+              items:
+                type: object
+                required: [relation_id, type, direction, node]
+                properties:
+                  relation_id: {type: string, format: uuid}
+                  type: {type: string}
+                  direction: {type: string, enum: [out, in]}
+                  node:
+                    type: object
+                    required: [id, key, title, state, kind, project_id]
+                    properties:
+                      id: {type: string, format: uuid}
+                      key: {type: string}
+                      title: {type: string}
+                      state: {type: string}
+                      kind: {type: string}
+                      project_id: {type: [string, 'null'], format: uuid}
+                      slug: {type: string}
+                      type: {$ref: '#/components/schemas/KnowledgeType'}
+            renamed_from: {type: string}
+            event_id: {type: integer, format: int64, description: The event a write appended; absent on reads and no-op writes}
+    KnowledgePage:
+      type: object
+      required: [items, total, truncated, counts]
+      properties:
+        items: {type: array, items: {$ref: '#/components/schemas/KnowledgeItem'}}
+        total: {type: integer}
+        truncated: {type: boolean}
+        counts:
+          type: object
+          properties:
+            type: {type: object, additionalProperties: {type: integer}}
+            status: {type: object, additionalProperties: {type: integer}}
+    KnowledgeCreate:
+      type: object
+      required: [project_id, type, slug, title]
+      additionalProperties: false
+      properties:
+        project_id: {type: string, format: uuid}
+        type: {$ref: '#/components/schemas/KnowledgeType'}
+        slug: {type: string, pattern: '^[a-z][a-z0-9_-]*$', maxLength: 64}
+        title: {type: string, minLength: 1, maxLength: 500}
+        body: {type: string}
+        status: {$ref: '#/components/schemas/KnowledgeStatus'}
+        metadata: {type: object, additionalProperties: true}
+        key_prefix: {type: string, pattern: '^[A-Z][A-Z0-9]{1,9}$', description: Key prefix, usually the project's key; default is the kind's prefix}
+    KnowledgePatch:
+      type: object
+      minProperties: 1
+      additionalProperties: false
+      properties:
+        title: {type: string, minLength: 1, maxLength: 500}
+        body: {type: string}
+        status: {$ref: '#/components/schemas/KnowledgeStatus'}
+        slug: {type: string, pattern: '^[a-z][a-z0-9_-]*$', maxLength: 64}
+        metadata: {type: object, additionalProperties: true}
+    KnowledgeProblem:
+      type: object
+      required: [error, code]
+      properties:
+        error: {type: string}
+        code: {type: string, enum: [slug_taken, stale]}
+        conflict: {$ref: '#/components/schemas/KnowledgeItem'}
+        entry: {$ref: '#/components/schemas/KnowledgeEntry'}
     ApiError:
       type: object
       required: [code, message]
@@ -4761,6 +5026,12 @@ components:
           schema:
             $ref: '#/components/schemas/ViewPatch'
   responses:
+    KnowledgeEntry:
+      description: Knowledge entry
+      content:
+        application/json:
+          schema:
+            $ref: '#/components/schemas/KnowledgeEntry'
     Error:
       description: Request error
       content:

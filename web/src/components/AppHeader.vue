@@ -52,6 +52,10 @@ const projectKey = computed(() => typeof route.params.projectKey === 'string' ? 
 const project = computed(() => projectKey.value ? projects.byRouteKey(projectKey.value) : undefined)
 // Full-page tickets get their own crumb; the side panel keeps the list as the page.
 const fullTicket = computed(() => typeof route.params.ticketKey === 'string' && route.query.view === 'full' ? route.params.ticketKey.toUpperCase() : '')
+// Knowledge: Projects / PHAROS Pharos / Knowledge / deploy-flow, and Projects / Knowledge across projects.
+const projectKnowledge = computed(() => !!projectKey.value && route.path.includes('/knowledge'))
+const knowledgeSlug = computed(() => projectKnowledge.value && typeof route.params.slug === 'string' ? route.params.slug : '')
+const allKnowledge = computed(() => route.path === '/knowledge')
 const pageTitle = computed(() => !activePlace.value && !route.path.startsWith('/settings') && route.path !== '/signin' ? String(route.meta.title ?? '') : '')
 // The three places, in order of use; the active one is where this page lives.
 // The breadcrumb continues from it: Projects / PHAROS Pharos / PHAROS-11.
@@ -123,7 +127,7 @@ function typing(target: EventTarget | null) {
   return target instanceof HTMLElement && (target.isContentEditable || ['INPUT', 'TEXTAREA', 'SELECT'].includes(target.tagName))
 }
 // Pages with their own list search keep '/'; everywhere else it opens the palette.
-const pageOwnsSlash = computed(() => route.path === '/' || route.path === '/business/customers' || route.path === '/business/quotes' || (!!projectKey.value && route.query.view !== 'full'))
+const pageOwnsSlash = computed(() => route.path === '/' || route.path === '/business/customers' || route.path === '/business/quotes' || route.path === '/knowledge' || (!!projectKey.value && route.query.view !== 'full' && !knowledgeSlug.value))
 function shortcut(event: KeyboardEvent) {
   if (!globalSearch.value) return
   if ((event.metaKey || event.ctrlKey) && !event.altKey && event.key.toLowerCase() === 'k') { event.preventDefault(); palette.value?.open(); return }
@@ -174,10 +178,10 @@ onBeforeUnmount(() => { document.removeEventListener('pointerdown', outside); wi
         <span v-if="place.id === 'agents' && agents.needsCount" class="needs-badge" aria-hidden="true">{{ agents.needsCount > 99 ? '99+' : agents.needsCount }}</span>
       </RouterLink>
     </nav>
-    <nav v-if="session.identity && !fatal && (projectKey || businessCrumbs.length || settingsSection || pageTitle)" class="crumbs" :class="{ lead: !activePlace }" aria-label="Breadcrumb">
+    <nav v-if="session.identity && !fatal && (projectKey || businessCrumbs.length || settingsSection || pageTitle || allKnowledge)" class="crumbs" :class="{ lead: !activePlace }" aria-label="Breadcrumb">
       <template v-if="projectKey">
         <span class="sep" aria-hidden="true">/</span>
-        <RouterLink class="crumb project-crumb" :to="`/p/${encodeURIComponent(project?.routeKey ?? projectKey)}`" :aria-current="fullTicket ? undefined : 'page'">
+        <RouterLink class="crumb project-crumb" :to="`/p/${encodeURIComponent(project?.routeKey ?? projectKey)}`" :aria-current="fullTicket || projectKnowledge ? undefined : 'page'">
           <span class="key-badge">{{ project?.routeKey ?? projectKey.toUpperCase() }}</span>
           <span class="crumb-name">{{ project?.title ?? '' }}</span>
         </RouterLink>
@@ -185,6 +189,19 @@ onBeforeUnmount(() => { document.removeEventListener('pointerdown', outside); wi
           <span class="sep" aria-hidden="true">/</span>
           <span class="crumb current mono-crumb" aria-current="page">{{ fullTicket }}</span>
         </template>
+        <template v-else-if="projectKnowledge">
+          <span class="sep" aria-hidden="true">/</span>
+          <RouterLink v-if="knowledgeSlug" class="crumb fixed-crumb" :to="`/p/${encodeURIComponent(project?.routeKey ?? projectKey)}/knowledge`">Knowledge</RouterLink>
+          <span v-else class="crumb current" aria-current="page">Knowledge</span>
+          <template v-if="knowledgeSlug">
+            <span class="sep" aria-hidden="true">/</span>
+            <span class="crumb current mono-crumb slug-crumb" aria-current="page" :data-tip="knowledgeSlug.length > 28 ? knowledgeSlug : undefined">{{ knowledgeSlug }}</span>
+          </template>
+        </template>
+      </template>
+      <template v-else-if="allKnowledge">
+        <span class="sep" aria-hidden="true">/</span>
+        <span class="crumb current" aria-current="page">Knowledge</span>
       </template>
       <template v-else-if="businessCrumbs.length">
         <template v-for="crumb in businessCrumbs" :key="crumb.label">
@@ -284,7 +301,9 @@ onBeforeUnmount(() => { document.removeEventListener('pointerdown', outside); wi
    clip, the page you are on stays whole. */
 @media (max-width: 1180px) { .crumbs:has(> .crumb ~ .crumb ~ .crumb) .settings-crumb .crumb-label { position: absolute; width: 1px; height: 1px; overflow: hidden; clip-path: inset(50%); white-space: nowrap; } }
 .crumbs > .crumb:not(.current) { flex-shrink: 1; overflow: hidden; }
-.crumbs > .crumb.current, .crumbs > .sep { flex-shrink: 0; }
+.crumbs > .crumb.current, .crumbs > .sep, .crumbs > .crumb.fixed-crumb { flex-shrink: 0; }
+/* A long knowledge slug gives way first, with an ellipsis and the full slug as a tip. */
+.crumbs > .crumb.slug-crumb { display: block; flex-shrink: 1; min-width: 48px; overflow: hidden; text-overflow: ellipsis; line-height: 30px; }
 .crumb.current:hover { background: transparent; }
 .crumb-name { overflow: hidden; text-overflow: ellipsis; color: var(--ink); }
 .crumb-short { display: none; }
