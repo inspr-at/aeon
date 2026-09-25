@@ -123,7 +123,7 @@ func (m *Module) Middleware(next http.Handler) http.Handler {
 			return
 		}
 		if kind == credAgent {
-			if scope, controlled := coreAgentScope(r); controlled && (scope == "" || !slices.Contains(p.Scopes, scope)) {
+			if scope, controlled := coreAgentScope(r); controlled && (scope == "" || !hasScope(p.Scopes, scope)) {
 				httpapi.WriteError(w, http.StatusForbidden, "agent key scope required")
 				return
 			}
@@ -176,27 +176,27 @@ func coreAgentScope(r *http.Request) (string, bool) {
 	read := r.Method == http.MethodGet || r.Method == http.MethodHead
 	scope := func(resource string) (string, bool) {
 		if read {
-			return resource + ":read", true
+			return resource + ".read", true
 		}
-		return resource + ":write", true
+		return resource + ".write", true
 	}
 	switch {
 	case path == "/api/projects", path == "/api/nodes", strings.HasPrefix(path, "/api/nodes/"), strings.HasPrefix(path, "/api/node-keys/"):
 		return scope("nodes")
 	case path == "/api/kinds", strings.HasPrefix(path, "/api/kinds/"):
 		if !read {
-			return "nodes:configure", true
+			return "nodes.configure", true
 		}
-		return "nodes:read", true
+		return "nodes.read", true
 	case path == "/api/relations", strings.HasPrefix(path, "/api/relations/"):
 		return scope("relations")
 	case path == "/api/events", strings.HasPrefix(path, "/api/events/"):
 		if read {
-			return "events:read", true
+			return "events.read", true
 		}
-		return "events:undo", true
+		return "events.undo", true
 	case path == "/api/search":
-		return "search:read", true
+		return "search.read", true
 	case path == "/api/views", strings.HasPrefix(path, "/api/views/"), strings.HasPrefix(path, "/api/preferences/"),
 		path == "/api/project-groups", strings.HasPrefix(path, "/api/project-groups/"):
 		return scope("views")
@@ -293,4 +293,17 @@ func (m *Module) oidcProvider(ctx context.Context) (*oidc.Provider, oauth2.Confi
 	m.provider = p
 	m.oauth = oc
 	return p, oc, nil
+}
+
+// hasScope matches a required scope against a key's scopes. Scopes are
+// canonical in dot notation (harness.read); SEC1 briefly required colon forms
+// (nodes:read), so both separators are accepted.
+func hasScope(have []string, want string) bool {
+	want = strings.ReplaceAll(want, ":", ".")
+	for _, s := range have {
+		if strings.ReplaceAll(s, ":", ".") == want {
+			return true
+		}
+	}
+	return false
 }
