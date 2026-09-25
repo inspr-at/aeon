@@ -379,7 +379,8 @@ defineExpose({
             :child-label="item.kind_slug === 'epic' ? 'ticket' : 'task'" :progress="ticket.childProgress()" :add="title => ticket.addChild(title, project.routeKey)"
             @open="openLinked"
           />
-          <template v-if="!contextColumn">
+          <!-- Relations, then activity: both wait for the relations, so neither jumps. -->
+          <template v-if="!contextColumn && ticket.relationsReady.value">
             <RelationList class="ws-block" :class="{ 'only-narrow': mode === 'full' }" :related="ticket.related.value" @open="openLinked" />
             <ActivityTimeline
               ref="timeline" class="ws-block" :entries="activity.timeline.value" :loading="activity.loading.value" :loading-older="activity.loadingOlder.value"
@@ -398,6 +399,7 @@ defineExpose({
             @open="openAttachment" @add="files => attachments.add(files)" @remove="attachments.remove" @reorder="attachments.reorder" @caption="attachments.setCaption"
             @retry="attachments.retry" @cancel="attachments.cancel" @reload="attachments.load"
           />
+          <template v-if="ticket.relationsReady.value">
           <RelationList v-if="mode === 'panel' || ticket.related.value.length" class="ctx-block" :related="ticket.related.value" @open="openLinked" />
           <ActivityTimeline
             ref="timeline" class="ctx-block" :entries="activity.timeline.value" :loading="activity.loading.value" :loading-older="activity.loadingOlder.value"
@@ -405,6 +407,7 @@ defineExpose({
             :edit="activity.edit" :remove="activity.remove" @older="activity.loadOlder" @retry="activity.load"
           />
           <CommentComposer v-if="mode === 'full'" ref="composer" class="ctx-block inline-composer" :me="me?.name ?? '?'" :me-id="me?.id ?? null" :post="activity.add" :disabled="!editable" />
+          </template>
         </aside>
 
         <aside v-if="mode === 'full'" class="ws-side" aria-label="Properties">

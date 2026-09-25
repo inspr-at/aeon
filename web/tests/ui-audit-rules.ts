@@ -106,12 +106,30 @@ export function domAudit(): Raw[] {
     const lr = label?.getBoundingClientRect()
     const labelArea = !!lr && lr.width >= 44 && lr.height >= 44
     const cx = (ar.left + ar.right) / 2, cy = (ar.top + ar.bottom) / 2
-    const hits = [receivesPointer(a, cx - 21.5, cy), receivesPointer(a, cx + 21.5, cy),
-      receivesPointer(a, cx, cy - 21.5), receivesPointer(a, cx, cy + 21.5)]
+    // An open menu or popover covers the page below it; a tap there closes it, so it
+    // does not take reach away from the controls it covers.
+    const overlayOf = (el: Element | null) => el?.closest('.floating.pop, #account-panel, [role="menu"]') ?? null
+    const reach = (x: number, y: number) => {
+      if (receivesPointer(a, x, y)) return true
+      if (x < 0 || x >= innerWidth || y < 0 || y >= innerHeight) return false
+      const cover = overlayOf(document.elementFromPoint(x, y))
+      return !!cover && !cover.contains(a)
+    }
+    const hits = [reach(cx - 21.5, cy), reach(cx + 21.5, cy), reach(cx, cy - 21.5), reach(cx, cy + 21.5)]
     // An axis already at least 44px needs no extra reach on that axis.
     const hitArea = (ar.width >= 44 || (hits[0] && hits[1])) && (ar.height >= 44 || (hits[2] && hits[3]))
-    const fullyInViewport = cx - 22 >= 0 && cx + 22 < innerWidth && cy - 22 >= 0 && cy + 22 < innerHeight
-    if (innerWidth <= 390 && fullyInViewport && (ar.width < 44 || ar.height < 44) && !labelArea && !hitArea && !a.closest('[role="checkbox"], [role="radio"], [role="switch"]'))
+    // Assessed only where a finger's reach fits the visible part of its scroll area:
+    // a control half under the app's footer is assessed once it scrolls into view.
+    let clip = { top: 0, bottom: innerHeight }
+    for (let p = a.parentElement; p && p !== document.body; p = p.parentElement) {
+      // Only an area that scrolls up and down: a sideways strip is assessed as it stands.
+      if (/auto|scroll/.test(getComputedStyle(p).overflowY) && p.scrollHeight > p.clientHeight + 1) { const pr = p.getBoundingClientRect(); clip = { top: Math.max(clip.top, pr.top), bottom: Math.min(clip.bottom, pr.bottom) }; break }
+    }
+    const fullyInViewport = cx - 22 >= 0 && cx + 22 < innerWidth && cy - 22 >= clip.top && cy + 22 < clip.bottom
+    // WCAG 2.5.8's inline exception: a date on the quote's paper is a word in the
+    // document's running text, sized by its line, like a link in a sentence.
+    const inline = !!a.closest('.quote-document .as-paper')
+    if (innerWidth <= 390 && fullyInViewport && (ar.width < 44 || ar.height < 44) && !labelArea && !hitArea && !inline && !a.closest('[role="checkbox"], [role="radio"], [role="switch"]'))
       add('small-touch-target', 'moderate', selector(a), `${Math.round(ar.width)}×${Math.round(ar.height)}px touch target at ${Math.round(ar.x)},${Math.round(ar.y)}; blocked ${['left', 'right', 'top', 'bottom'].filter((_, n) => !hits[n]).join(', ')} by ${document.elementFromPoint(cx, cy + 21.5)?.className || '?'} at ${Math.round(document.elementFromPoint(cx, cy + 21.5)?.getBoundingClientRect().x ?? 0)},${Math.round(document.elementFromPoint(cx, cy + 21.5)?.getBoundingClientRect().y ?? 0)}`)
     for (let j = i + 1; j < controls.length; j++) {
       const b = controls[j], br = b.getBoundingClientRect()

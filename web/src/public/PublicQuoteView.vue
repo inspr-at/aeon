@@ -167,7 +167,7 @@ onBeforeUnmount(() => { sizer?.disconnect(); cancelAnimationFrame(frame); window
             <div><dt>{{ t.dated }}</dt><dd class="pq-mono">{{ day(quote.document.offer_date) }}</dd></div>
             <div><dt>{{ t.validUntil }}</dt><dd class="pq-mono">{{ day(quote.document.valid_until) }}</dd></div>
           </dl>
-          <p v-if="accepted" class="pq-status ok" role="status"><svg width="16" height="16" viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><circle cx="8" cy="8" r="6.2" /><path d="m5.3 8.2 1.9 1.9 3.6-3.9" /></svg><span>{{ t.accepted }}{{ quote.accepted_at ? t.acceptedOn(when(quote.accepted_at)) : '' }}</span></p>
+          <p v-if="accepted" class="pq-status ok" role="status"><svg width="16" height="16" viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><circle cx="8" cy="8" r="6.2" /><path d="m5.3 8.2 1.9 1.9 3.6-3.9" /></svg><span>{{ quote.accepted_at ? t.acceptedOn(when(quote.accepted_at)) : t.accepted }}</span></p>
           <p v-else-if="quote.acceptable" class="pq-status">{{ t.invite }}</p>
           <p v-else class="pq-status muted">{{ t.closed }} {{ closedReason }}</p>
           <div class="pq-actions">

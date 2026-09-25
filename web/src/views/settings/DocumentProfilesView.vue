@@ -265,6 +265,13 @@ function jump(section: string) {
   active.value = section
   document.getElementById(`${id}-${section}`)?.scrollIntoView({ block: 'start', behavior: window.matchMedia('(prefers-reduced-motion: reduce)').matches ? 'auto' : 'smooth' })
 }
+// On phones the jump row scrolls sideways: the current section stays in view.
+watch(active, section => {
+  const pill = document.querySelector<HTMLElement>(`.jumps .jump:nth-child(${SECTIONS.findIndex(s => s.id === section) + 1})`)
+  const row = pill?.parentElement
+  if (!pill || !row || row.scrollWidth <= row.clientWidth) return
+  row.scrollTo({ left: row.scrollLeft + pill.getBoundingClientRect().left - row.getBoundingClientRect().left - (row.clientWidth - pill.offsetWidth) / 2, behavior: window.matchMedia('(prefers-reduced-motion: reduce)').matches ? 'auto' : 'smooth' })
+})
 function spy() {
   const root = form.value
   if (!root || Date.now() < heldUntil) return
@@ -556,7 +563,14 @@ watch(() => props.profileId, () => { void nextTick(() => form.value?.scrollTo({ 
 .profile-switch { display: none; height: 34px; }
 .jumps { display: flex; flex-wrap: wrap; gap: 2px; margin: 0 -4px; }
 .jump { height: 26px; padding: 0 8px; border: 0; border-radius: 999px; background: transparent; color: var(--ink-2); font-size: 12.5px; font-weight: 600; }
-@media (max-width: 600px) { .head-left .icon-btn { width: 44px; height: 44px; } .jump { height: 44px; } }
+/* Phones: the sections are one row that scrolls sideways, 40 px pills a finger's
+   reach apart; the current one scrolls into view (see the watch on active). */
+@media (max-width: 600px) {
+  .head-left .icon-btn { width: 44px; height: 44px; }
+  .jumps { flex-wrap: nowrap; gap: 4px; margin: 0 -12px; padding: 2px 12px; overflow-x: auto; scrollbar-width: none; overscroll-behavior-x: contain; }
+  .jumps::-webkit-scrollbar { display: none; }
+  .jump { flex-shrink: 0; height: 40px; padding: 0 12px; }
+}
 @media (hover: hover) { .jump:hover { background: var(--row-hover); color: var(--ink); } }
 .jump[aria-current="true"] { background: var(--chip-teal-bg); color: var(--teal-ink); box-shadow: inset 0 0 0 1px var(--chip-teal-line); }
 .jump:focus-visible { box-shadow: var(--focus-ring); }
@@ -641,8 +655,8 @@ watch(() => props.profileId, () => { void nextTick(() => form.value?.scrollTo({ 
   .profiles-head { padding: 8px 12px; }
   .head-right { width: 100%; justify-content: space-between; }
   .sections { padding: 0 12px 32px; }
-  /* Touch-sized section jumps and pane switch. */
-  .jump, .pane-switch button { height: 36px; }
+  /* Touch-sized pane switch. */
+  .pane-switch button { height: 36px; }
   .form-top { padding: 10px 12px; }
   .variants, .f-pair, .labels, .mm-grid, .margins .mm-grid { grid-template-columns: minmax(0, 1fr); }
   .margins { grid-template-columns: 56px minmax(0, 1fr); }

@@ -64,7 +64,8 @@ const label = computed(() => {
 .version-pill:active .pill-face { background: var(--row-selected); }
 .version-pill:focus-visible .pill-face { box-shadow: var(--focus-ring); }
 .pill-version { color: var(--ink); font-size: 12px; line-height: 1; }
-.pill-skeleton { width: 120px; height: 8px; }
+/* As wide as a calendar version in the pill, so the pill keeps its size when the version lands. */
+.pill-skeleton { width: 131px; height: 8px; }
 .fallback { font-family: var(--font); font-size: 11.5px; }
 .new-badge {
   display: inline-flex; align-items: center; height: 17px; margin-right: -5px; padding: 0 7px; border-radius: 999px;
@@ -77,6 +78,7 @@ const label = computed(() => {
   .footer-name { font-size: 9px; letter-spacing: .18em; }
   .pill-face { height: 30px; }
   .pill-version { font-size: 11.5px; }
+  .pill-skeleton { width: 125px; }
 }
 @media (prefers-reduced-motion: reduce) { .app-footer, .pill-face { transition: none; } }
 </style>

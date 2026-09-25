@@ -70,6 +70,9 @@ export function useTicket(item: Ref<ListItem | null>, context: {
   const children = ref<ListItem[]>([])
   const childrenLoading = ref(false)
   const related = ref<RelatedNode[]>([])
+  // Whether this ticket's relations have been read (or failed): the blocks below them
+  // wait for it, so relations never push activity down after it shows.
+  const relationsReady = ref(false)
   let generation = 0
 
   function merge(target: ListItem, node: WorkNode) {
@@ -115,6 +118,7 @@ export function useTicket(item: Ref<ListItem | null>, context: {
   async function loadRelations() {
     const target = item.value
     related.value = []
+    relationsReady.value = false
     if (!target) return
     try {
       const page = await getRelations(target.id)
@@ -137,6 +141,7 @@ export function useTicket(item: Ref<ListItem | null>, context: {
       })
       if (item.value?.id === target.id) related.value = resolved
     } catch { /* relations are optional context */ }
+    finally { if (item.value?.id === target.id) relationsReady.value = true }
   }
 
   watch(() => item.value?.id, id => {
@@ -241,5 +246,5 @@ export function useTicket(item: Ref<ListItem | null>, context: {
     return { done, total: scope.length, percent: scope.length ? Math.round((done / scope.length) * 100) : 0 }
   }
 
-  return { loading, error, gone, readOnly, children, childrenLoading, related, refresh, patch, setTitle, setBody, setField, setPriority, setAssignee, moveTo, remove, addChild, childProgress }
+  return { loading, error, gone, readOnly, children, childrenLoading, related, relationsReady, refresh, patch, setTitle, setBody, setField, setPriority, setAssignee, moveTo, remove, addChild, childProgress }
 }

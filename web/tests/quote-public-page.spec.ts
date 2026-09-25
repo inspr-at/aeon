@@ -96,7 +96,7 @@ test('the customer sees the sender, the facts and the frozen document in its lan
   await expect(page.getByRole('heading', { name: 'Vielen Dank, Jana Hofer' })).toBeVisible()
   await expect(page.getByRole('heading', { name: 'Vielen Dank, Jana Hofer' }).locator('..')).toBeFocused()
   await expect(page.locator('.pq-done')).toContainText(/Ihre Annahme von Version 1 wurde am \d{2}\.\d{2}\.\d{4}, \d{2}:\d{2} Uhr gespeichert\./)
-  await expect(page.locator('.pq-status')).toContainText('Dieses Angebot wurde angenommen.')
+  await expect(page.locator('.pq-status')).toHaveText(/^Dieses Angebot wurde (am .+ )?angenommen\.$/)
 })
 
 test('an English document gets the English catalog with English formats', async ({ page }) => {
@@ -163,7 +163,7 @@ test('a revoked or unknown link in a German browser says so in German', async ({
 
 test('once accepted, the page says when and offers the receipt', async ({ page }) => {
   await open(page, { acceptable: false, accepted: true, receiptReady: true })
-  await expect(page.locator('.pq-status')).toHaveText(/^Dieses Angebot wurde angenommen\. Angenommen am \d{2}\.\d{2}\.\d{4}, \d{2}:\d{2} Uhr\.$/)
+  await expect(page.locator('.pq-status')).toHaveText(/^Dieses Angebot wurde am \d{2}\.\d{2}\.\d{4}, \d{2}:\d{2} Uhr angenommen\.$/)
   await expect(page.getByRole('link', { name: /^Annahmebestätigung \(PDF\)/ })).toHaveAttribute('href', '/api/public/quotes/sel-demo/tok-example/pdf')
 })
 

@@ -65,8 +65,11 @@ export const useBusiness = defineStore('business', () => {
   // this browser's last answer for the workspace stands in, so the header does not
   // shift sideways a moment after every load.
   const hintKey = computed(() => session.identity ? `aeon.business-place.${session.identity.tenant.id}` : '')
-  const remembered = computed(() => { if (!hintKey.value) return false; try { return localStorage.getItem(hintKey.value) === '1' } catch { return false } })
-  const placeOpen = computed(() => plugins.value || pluginsError.value ? anyOpen.value : remembered.value)
+  const remembered = computed<boolean | null>(() => { if (!hintKey.value) return null; try { const v = localStorage.getItem(hintKey.value); return v === '1' ? true : v === '0' ? false : null } catch { return null } })
+  const placeOpen = computed(() => plugins.value || pluginsError.value ? anyOpen.value : remembered.value === true)
+  // Whether the header can already say if Business is one of the places: read, failed
+  // (it then stays out), or remembered from this browser's last visit.
+  const placeKnown = computed(() => !!plugins.value || !!pluginsError.value || remembered.value !== null)
   watch([plugins, anyOpen], () => {
     if (!plugins.value || !hintKey.value) return
     try { localStorage.setItem(hintKey.value, anyOpen.value ? '1' : '0') } catch { /* private window: the place waits for the plugins */ }
@@ -266,7 +269,7 @@ export const useBusiness = defineStore('business', () => {
   }
 
   return {
-    plugins, pluginsError, open, anyOpen, placeOpen, allOpen, admin, staff, loadPlugins, enable, disable,
+    plugins, pluginsError, open, anyOpen, placeOpen, placeKnown, allOpen, admin, staff, loadPlugins, enable, disable,
     kinds, loadKinds, kindBySlug, fieldsOf,
     principals, loadPrincipals, nameOf, people, timeKeepers,
     costUnits, costUnitsLoaded, loadCostUnits, setRates, addCostUnit, costUnit, rateOn, currencies, usable,

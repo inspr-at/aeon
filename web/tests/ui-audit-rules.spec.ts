@@ -43,6 +43,39 @@ test('overlap rule ignores a card action and modal background but keeps peer col
   expect((await page.evaluate(domAudit)).filter(f => f.kind === 'interactive-overlap')).toEqual([])
 })
 
+test('touch rule lets an open menu cover controls and exempts dates in the paper’s text', async ({ page }) => {
+  await page.setContent(`<style>
+    body { margin: 0; padding: 50px; }
+    button { position: relative; width: 80px; height: 28px; }
+    button::before { content: ''; position: absolute; top: 50%; left: 50%; width: 100%; height: 44px; transform: translate(-50%, -50%); }
+    .floating.pop { position: absolute; top: 80px; left: 40px; width: 200px; height: 80px; background: white; }
+    .quote-document { margin-top: 160px; font-size: 7px; line-height: 9px; }
+    .quote-document button { width: 26px; height: 7px; padding: 0; }
+    .quote-document button::before { content: none; }
+  </style><button id="facet">Status</button><div class="floating pop"><button id="item">Open</button></div>
+  <div class="quote-document"><p>Datum <span class="date-picker as-paper"><button id="paper-date">24.09.</button></span></p><p><button id="paper-other">Other</button></p></div>`)
+  const small = (await page.evaluate(domAudit)).filter(f => f.kind === 'small-touch-target').map(f => f.selector)
+  expect(small).not.toContain('#facet')
+  expect(small).not.toContain('#paper-date')
+  expect(small).toContain('#paper-other')
+})
+
+test('a sideways strip is assessed as it stands; a control under a vertical scroller’s edge waits', async ({ page }) => {
+  await page.setContent(`<style>
+    body { margin: 0; padding: 40px; }
+    .strip { display: flex; width: 300px; overflow-x: auto; }
+    .strip a { flex-shrink: 0; display: block; width: 100px; height: 32px; }
+    .below { height: 40px; background: #eee; }
+    .scroller { margin-top: 20px; height: 120px; overflow-y: auto; }
+    .scroller .fill { height: 100px; }
+    .scroller button { display: block; width: 80px; height: 32px; }
+  </style><div class="strip"><a id="tab" href="#">Tab</a></div><div class="below"></div>
+  <div class="scroller"><div class="fill"></div><button id="edge">Edge</button><div class="fill"></div></div>`)
+  const small = (await page.evaluate(domAudit)).filter(f => f.kind === 'small-touch-target').map(f => f.selector)
+  expect(small).toContain('#tab')
+  expect(small).not.toContain('#edge')
+})
+
 test('partially visible controls wait until they can be assessed after scrolling', async ({ page }) => {
   await page.setContent('<style>body { margin: 0; } button { position: absolute; top: 680px; left: 50px; width: 32px; height: 32px; }</style><button id="edge">Edge</button>')
   expect((await page.evaluate(domAudit)).filter(f => f.kind === 'small-touch-target')).toEqual([])

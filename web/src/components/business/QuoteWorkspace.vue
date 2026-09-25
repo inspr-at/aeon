@@ -302,9 +302,15 @@ const dockZoom = ref<ZoomMode | null>(null)
 const effectiveZoom = computed<ZoomMode>(() => props.layout === 'dock' ? dockZoom.value ?? 'width' : readZoom(pref.value.value?.zoom, phone.value ? 'width' : 100))
 const percent = computed(() => zoomPercent(effectiveZoom.value, deskSize.value))
 function setZoom(next: ZoomMode) { if (props.layout === 'dock') dockZoom.value = next; else pref.save({ ...(pref.value.value ?? {}), zoom: next }) }
-watch(desk, el => { sizer?.disconnect(); if (el) { sizer = new ResizeObserver(([entry]) => { deskSize.value = { width: entry.contentRect.width, height: entry.contentRect.height } }); sizer.observe(el) } })
+// Both are measured once before the first paint (so the bar never lays out for a
+// width it does not have and then jumps), then followed as they change.
+function contentBox(el: HTMLElement) {
+  const box = getComputedStyle(el)
+  return { width: el.clientWidth - parseFloat(box.paddingLeft) - parseFloat(box.paddingRight), height: el.clientHeight - parseFloat(box.paddingTop) - parseFloat(box.paddingBottom) }
+}
+watch(desk, el => { sizer?.disconnect(); if (el) { deskSize.value = contentBox(el); sizer = new ResizeObserver(([entry]) => { deskSize.value = { width: entry.contentRect.width, height: entry.contentRect.height } }); sizer.observe(el) } }, { flush: 'post' })
 let rootSizer: ResizeObserver | undefined
-watch(root, el => { rootSizer?.disconnect(); if (el) { rootSizer = new ResizeObserver(([entry]) => { width.value = entry.contentRect.width }); rootSizer.observe(el) } })
+watch(root, el => { rootSizer?.disconnect(); if (el) { width.value = contentBox(el).width; rootSizer = new ResizeObserver(([entry]) => { width.value = entry.contentRect.width }); rootSizer.observe(el) } }, { flush: 'post' })
 
 // ---------- PDF: save first, then the browser's print (or Save as PDF) ----------
 const printing = ref(false)
