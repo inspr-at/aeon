@@ -12,6 +12,7 @@ import (
 	"github.com/inspr-at/aeon/internal/dbtest"
 	"github.com/inspr-at/aeon/internal/tenant"
 	"github.com/jackc/pgx/v5"
+	"github.com/jackc/pgx/v5/pgxpool"
 )
 
 func TestRolesNoEscalationAndBuiltinImmutability(t *testing.T) {
@@ -45,8 +46,15 @@ func TestRolesNoEscalationAndBuiltinImmutability(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
+	config := d.App.Config().Copy()
+	config.MaxConns = 1 // Role changes must not open a nested tenant transaction.
+	one, err := pgxpool.NewWithConfig(ctx, config)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer one.Close()
 	mux := http.NewServeMux()
-	New(d.App).Mount(mux)
+	New(one).Mount(mux)
 	request := func(method, path, body, id string) int {
 		t.Helper()
 		req := httptest.NewRequest(method, path, strings.NewReader(body))

@@ -25,5 +25,7 @@
 // /api/members and /api/me/permissions. The coordinator mounts it; this
 // package does not edit cmd/aeon, web/src/router.ts or plugins/builtin.go.
 // Every authorizing route must use Handle or Require with a declared registry
-// permission. BindPool attaches the database needed by Require to a request.
+// permission. RoutePermissions names the permission for every current API
+// pattern, including explicit public paths; RequirePattern denies an unknown
+// pattern. BindPool attaches the database needed by Require to a request.
 package authz

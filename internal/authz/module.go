@@ -209,8 +209,8 @@ func validateRoleWrite(body roleWrite, create bool) (string, string, []string, e
 	}
 	return name, desc, perms, nil
 }
-func (m *Module) canGrant(ctx context.Context, p tenant.Principal, perms []string) error {
-	own, err := Load(ctx, m.pool, p, "")
+func canGrantTx(ctx context.Context, tx pgx.Tx, p tenant.Principal, perms []string) error {
+	own, err := loadTx(ctx, tx, p, "")
 	if err != nil {
 		return err
 	}
@@ -229,10 +229,10 @@ func (m *Module) authorizeMutation(ctx context.Context, tx pgx.Tx, p tenant.Prin
 	if err := tx.QueryRow(ctx, `SELECT id::text FROM tenants WHERE id=$1::uuid FOR UPDATE`, p.TenantID).Scan(&id); err != nil {
 		return err
 	}
-	if err := Require(BindPool(tenant.WithPrincipal(ctx, p), m.pool), required, Scope{}); err != nil {
+	if err := requireTx(ctx, tx, p, required, Scope{}); err != nil {
 		return err
 	}
-	return m.canGrant(ctx, p, grants)
+	return canGrantTx(ctx, tx, p, grants)
 }
 func (m *Module) createRole(w http.ResponseWriter, r *http.Request) {
 	p := actor(r)
@@ -382,11 +382,11 @@ func (m *Module) deleteRole(w http.ResponseWriter, r *http.Request) {
 			if err != nil {
 				return err
 			}
-			if err := m.canGrant(r.Context(), p, replacement.Permissions); err != nil {
+			if err := canGrantTx(r.Context(), tx, p, replacement.Permissions); err != nil {
 				return err
 			}
 			if replacement.Key == "owner" {
-				if err := Require(BindPool(r.Context(), m.pool), "ownership.transfer", Scope{}); err != nil {
+				if err := requireTx(r.Context(), tx, p, "ownership.transfer", Scope{}); err != nil {
 					return err
 				}
 			}

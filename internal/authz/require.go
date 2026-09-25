@@ -63,6 +63,21 @@ func Require(ctx context.Context, permission string, scope Scope) error {
 	if err != nil {
 		return err
 	}
+	return permitEffective(p, permission, effective)
+}
+
+func requireTx(ctx context.Context, tx pgx.Tx, p tenant.Principal, permission string, scope Scope) error {
+	if _, ok := Lookup(permission); !ok {
+		return ErrForbidden
+	}
+	effective, err := loadTx(ctx, tx, p, scope.ProjectID)
+	if err != nil {
+		return err
+	}
+	return permitEffective(p, permission, effective)
+}
+
+func permitEffective(p tenant.Principal, permission string, effective Effective) error {
 	allowed := contains(effective.Workspace.Permissions, permission)
 	if effective.Project != nil {
 		allowed = allowed || contains(effective.Project.Permissions, permission)
@@ -96,60 +111,69 @@ func containsScope(items []string, want string) bool {
 // Load evaluates bindings inside one tenant transaction. Project support is
 // read-ready for P2; P1 writes only workspace bindings.
 func Load(ctx context.Context, pool *pgxpool.Pool, p tenant.Principal, projectID string) (Effective, error) {
+	var result Effective
+	err := db.InTenant(ctx, pool, p.TenantID, func(tx pgx.Tx) error {
+		var err error
+		result, err = loadTx(ctx, tx, p, projectID)
+		return err
+	})
+	return result, err
+}
+
+// loadTx lets access mutations recheck grants in the same tenant transaction
+// that writes the binding. It also works when the pool has one connection.
+func loadTx(ctx context.Context, tx pgx.Tx, p tenant.Principal, projectID string) (Effective, error) {
 	result := Effective{Workspace: Grant{Permissions: []string{}}}
 	if projectID != "" {
 		result.Project = &ProjectGrant{ID: projectID, Permissions: []string{}}
 	}
-	err := db.InTenant(ctx, pool, p.TenantID, func(tx pgx.Tx) error {
-		var status string
-		if err := tx.QueryRow(ctx, `SELECT status FROM principals WHERE tenant_id=$1::uuid AND id=$2::uuid`, p.TenantID, p.ID).Scan(&status); err != nil {
-			return err
-		}
-		if status != "active" {
-			return ErrForbidden
-		}
-		rows, err := tx.Query(ctx, `SELECT b.scope_type,coalesce(b.scope_id::text,''),r.id::text,r.key,r.name,r.builtin,rp.permission
+	var status string
+	if err := tx.QueryRow(ctx, `SELECT status FROM principals WHERE tenant_id=$1::uuid AND id=$2::uuid`, p.TenantID, p.ID).Scan(&status); err != nil {
+		return Effective{}, err
+	}
+	if status != "active" {
+		return Effective{}, ErrForbidden
+	}
+	rows, err := tx.Query(ctx, `SELECT b.scope_type,coalesce(b.scope_id::text,''),r.id::text,r.key,r.name,r.builtin,rp.permission
           FROM role_bindings b JOIN roles r ON r.tenant_id=b.tenant_id AND r.id=b.role_id
           LEFT JOIN role_permissions rp ON rp.tenant_id=r.tenant_id AND rp.role_id=r.id
           WHERE b.tenant_id=$1::uuid AND b.principal_id=$2::uuid
             AND (b.scope_type='workspace' OR b.scope_type='project' AND b.scope_id=$3::uuid)
           ORDER BY b.scope_type,rp.permission`, p.TenantID, p.ID, nullUUID(projectID))
-		if err != nil {
-			return err
-		}
-		defer rows.Close()
-		for rows.Next() {
-			var scopeType, scopeID, id, key, name string
-			var builtin bool
-			var perm *string
-			if err := rows.Scan(&scopeType, &scopeID, &id, &key, &name, &builtin, &perm); err != nil {
-				return err
-			}
-			ref := &RoleRef{ID: id, Key: key, Name: name}
-			var target *Grant
-			if scopeType == "workspace" {
-				target = &result.Workspace
-			} else if result.Project != nil && scopeID == projectID {
-				result.Project.Role = ref
-			}
-			if target != nil {
-				target.Role = ref
-			}
-			perms := []string{}
-			if builtin {
-				perms = builtinPermissions(key)
-			} else if perm != nil {
-				perms = []string{*perm}
-			}
-			if target != nil {
-				target.Permissions = append(target.Permissions, perms...)
-			} else if result.Project != nil && scopeID == projectID {
-				result.Project.Permissions = append(result.Project.Permissions, perms...)
-			}
-		}
-		return rows.Err()
-	})
 	if err != nil {
+		return Effective{}, err
+	}
+	defer rows.Close()
+	for rows.Next() {
+		var scopeType, scopeID, id, key, name string
+		var builtin bool
+		var perm *string
+		if err := rows.Scan(&scopeType, &scopeID, &id, &key, &name, &builtin, &perm); err != nil {
+			return Effective{}, err
+		}
+		ref := &RoleRef{ID: id, Key: key, Name: name}
+		var target *Grant
+		if scopeType == "workspace" {
+			target = &result.Workspace
+		} else if result.Project != nil && scopeID == projectID {
+			result.Project.Role = ref
+		}
+		if target != nil {
+			target.Role = ref
+		}
+		perms := []string{}
+		if builtin {
+			perms = builtinPermissions(key)
+		} else if perm != nil {
+			perms = []string{*perm}
+		}
+		if target != nil {
+			target.Permissions = append(target.Permissions, perms...)
+		} else if result.Project != nil && scopeID == projectID {
+			result.Project.Permissions = append(result.Project.Permissions, perms...)
+		}
+	}
+	if err := rows.Err(); err != nil {
 		return Effective{}, err
 	}
 	result.Workspace.Permissions = unique(result.Workspace.Permissions)

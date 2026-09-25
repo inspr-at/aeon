@@ -183,11 +183,11 @@ func (m *Module) putWorkspaceRole(w http.ResponseWriter, r *http.Request) {
 			if err != nil {
 				return err
 			}
-			if err := m.canGrant(r.Context(), p, targetRole.Permissions); err != nil {
+			if err := canGrantTx(r.Context(), tx, p, targetRole.Permissions); err != nil {
 				return err
 			}
 			if targetRole.Key == "owner" {
-				if err := Require(BindPool(r.Context(), m.pool), "ownership.transfer", Scope{}); err != nil {
+				if err := requireTx(r.Context(), tx, p, "ownership.transfer", Scope{}); err != nil {
 					return err
 				}
 			}
@@ -214,7 +214,7 @@ func (m *Module) putWorkspaceRole(w http.ResponseWriter, r *http.Request) {
 			return err
 		}
 		if priorKey != nil && *priorKey == "owner" {
-			if err := Require(BindPool(r.Context(), m.pool), "ownership.transfer", Scope{}); err != nil {
+			if err := requireTx(r.Context(), tx, p, "ownership.transfer", Scope{}); err != nil {
 				return err
 			}
 		}
