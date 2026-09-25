@@ -332,6 +332,14 @@ test('filters and views have no axe violations in light and dark', async ({ page
   data.preferences['list:p-pharos'] = { defaultView: MINE }
   await mockWork(page, data)
   const scan = async () => {
+    // Judge settled states only. A sort or filter change re-queries the list, and
+    // until the answer arrives the previous rows stay on screen dimmed as stale
+    // (tbody.dim, the grid aria-busy); scanning then measured the dimmed avatar
+    // initials, a loading transition rather than the page. Popovers mount off
+    // screen and are placed on the next frame.
+    await expect(grid(page)).toHaveAttribute('aria-busy', 'false')
+    await expect(grid(page).locator('tbody.dim')).toHaveCount(0)
+    for (const pop of await page.locator('.floating').all()) await expect(pop).toBeInViewport()
     const results = await new AxeBuilder({ page }).withTags(['wcag2a', 'wcag2aa', 'wcag21a', 'wcag21aa']).exclude('.version-coordinate').exclude('.calendar-version').analyze()
     const summary = results.violations.map(v => `${v.id}: ${v.help} ${v.nodes.slice(0, 3).map(n => n.target.join(' ')).join(' | ')}`)
     expect(summary, summary.join('\n')).toEqual([])

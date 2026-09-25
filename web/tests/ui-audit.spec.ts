@@ -7,7 +7,7 @@ import AxeBuilder from '@axe-core/playwright'
 import { createHash } from 'node:crypto'
 import { mkdirSync, writeFileSync } from 'node:fs'
 import { resolve, join } from 'node:path'
-import { fixtures, me, mockWork } from './work-fixtures'
+import { fixtures, me, mockView, mockWork } from './work-fixtures'
 import { agentData, mockAgents } from './agents-fixtures'
 import { businessData, mockBusiness } from './business-fixtures'
 import { crmData, HOFER, mockCRM } from './crm-fixtures'
@@ -22,12 +22,13 @@ import { knowledgeWorld, mockKnowledge } from './knowledge-fixtures'
 import { groupsWorld, mockProjectGroups } from './project-groups-fixtures'
 
 type Finding = Raw & { id: string; route: string; state: string; viewport: string; theme: string; screenshot: string }
-type Setup = 'default' | 'editor' | 'journey' | 'public' | 'signed-out' | 'groups' | 'cards'
+type Setup = 'default' | 'editor' | 'journey' | 'public' | 'signed-out' | 'groups' | 'cards' | 'views'
 type Scenario = { state: string; route: string; setup?: Setup; act?: (page: Page) => Promise<void> }
 
 const output = resolve(process.cwd(), 'test-results/qa2b-findings.json')
 const shotDir = resolve(process.cwd(), 'test-results/qa2b-shots')
 const findings = new Map<string, Finding>()
+const AUDIT_VIEW = '11111111-aaaa-4aaa-8aaa-0000000000a1'
 const widths = process.env.AUDIT_WIDTHS ? process.env.AUDIT_WIDTHS.split(',').map(Number) : [390, 1024, 1280, 1440, 1920]
 const themes = process.env.AUDIT_THEMES ? process.env.AUDIT_THEMES.split(',') as ('light' | 'dark')[] : ['light', 'dark'] as const
 const quote = '/business/quotes'
@@ -101,6 +102,8 @@ const scenarios: Scenario[] = [
   { state: 'projects group menu', route: '/', setup: 'groups', act: async page => { await visible('.group-head')(page); await page.getByRole('button', { name: 'Actions for group Focus' }).click(); await expect(page.getByRole('menu')).toBeVisible() } },
   { state: 'projects display', route: '/', setup: 'groups', act: async page => { await visible('.group-head')(page); await page.getByRole('button', { name: /^Display/ }).click(); await expect(page.getByRole('dialog', { name: 'Display options' })).toBeVisible() } },
   { state: 'projects move dialog', route: '/', setup: 'cards', act: async page => { await visible('.card')(page); await page.locator('.card-link').first().focus(); await page.keyboard.press('m'); await expect(page.getByRole('dialog', { name: /^Move .* to a group$/ })).toBeVisible() } },
+  // U22: the view bar with an own view that has changes (Save) and a shared one.
+  { state: 'project saved views', route: `/p/PHAROS?priority=high,medium&v=${AUDIT_VIEW}`, setup: 'views', act: visible('.view-bar .changes .save') },
   { state: 'projects selection', route: '/', setup: 'cards', act: async page => { await visible('.card')(page); await page.locator('.card-link').first().focus(); await page.keyboard.press('x'); await expect(page.getByRole('toolbar', { name: /selected project/ })).toBeVisible() } },
 ]
 
@@ -116,6 +119,10 @@ async function installMocks(page: Page, setup: Setup) {
     data.preferences['project-groups'] = { groups: [{ id: 'g:focus', name: 'Focus' }, { id: 'g:later', name: 'Later' }], place: { 'p-pharos': 'g:focus' }, hidden: ['archived', 'g:later'] }
     if (setup === 'cards') data.preferences.projects = { view: 'cards' }
   }
+  if (setup === 'views') data.views.push(
+    mockView({ id: AUDIT_VIEW, name: 'High priority', filters: { priority: 'high' } }),
+    mockView({ id: '11111111-aaaa-4aaa-8aaa-0000000000a2', name: 'Bugs to fix', owner_principal_id: '22222222-2222-4222-8222-222222222222', shared: true }),
+  )
   await mockWork(page, data)
   await mockProjectGroups(page, data, groupsWorld({ clients: setup === 'groups' || setup === 'cards' ? ['p-aeon'] : undefined }))
   if (setup === 'public') { await mockPublicQuote(page, { acceptable: true }); return }

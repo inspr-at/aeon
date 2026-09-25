@@ -168,12 +168,20 @@ defineExpose({ openMenuFor: (anchor: HTMLElement) => { if (active.value) openMen
 .menu-item:focus-visible { background: var(--row-selected); box-shadow: inset 0 0 0 1px var(--glass-rim); }
 .menu-item.danger, .menu-item.danger svg { color: var(--danger); }
 .divider { height: 1px; margin: 4px 6px; background: var(--line); }
+/* Phones: every control is 40 px with a 44 px reach (a 2 px ring that still
+   hits the control), 6 px apart, and the bar keeps clear of the toolbar below.
+   The strip's own 3 px padding holds the ring, so its scroll box never clips it. */
 @media (max-width: 600px) {
-  .view-bar { gap: 6px; padding-bottom: 2px; }
-  .view-tab { height: 32px; }
-  .tab-menu { width: 30px; height: 30px; }
+  .view-bar { gap: 6px; padding: 0 0 8px; }
+  .strip { gap: 6px; }
+  .view-tab { position: relative; height: 40px; padding: 0 14px; font-size: 14px; }
+  .view-tab::after { content: ''; position: absolute; inset: -2px 0; border-radius: inherit; }
+  .tab.active .view-tab { padding-right: 2px; }
+  .tab-menu { position: relative; width: 40px; height: 40px; margin-right: 0; }
+  .tab-menu::after { content: ''; position: absolute; inset: -2px; border-radius: 50%; }
   .changes .reset { display: none; }
-  .changes .save { width: 34px; height: 34px; padding: 0; justify-content: center; }
+  .changes .save { position: relative; width: 40px; height: 40px; padding: 0; justify-content: center; }
+  .changes .save::after { content: ''; position: absolute; inset: -2px; border-radius: inherit; }
   .save-label { display: none; }
 }
 </style>

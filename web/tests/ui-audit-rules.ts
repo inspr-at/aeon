@@ -11,7 +11,7 @@ export function expectedMockConsole(state: string, message: string): boolean {
   let path: string
   try { path = new URL(match[2]!).pathname } catch { return false }
   if (state === 'sign in') return path === '/api/me' && match[1] === '401' || path === '/api/version' && match[1] === '404'
-  if (['project', 'ticket panel'].includes(state)) return /^\/api\/projects\/[^/]+\/journey$/.test(path) && match[1] === '404'
+  if (['project', 'project saved views', 'ticket panel'].includes(state)) return /^\/api\/projects\/[^/]+\/journey$/.test(path) && match[1] === '404'
   if (['agents', 'agent session', 'runs redirect', 'approvals redirect', 'pacing redirect'].includes(state)) return path === '/api/models' && match[1] === '404'
   if (['link dialog', 'quote row menu'].includes(state)) return /^\/api\/quotes\/[^/]+\/versions\/\d+\/public-link$/.test(path) && match[1] === '404'
   return false
