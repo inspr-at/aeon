@@ -4,30 +4,32 @@ import QuoteText from './QuoteText.vue'
 import DatePicker from '../DatePicker.vue'
 import type { QuoteEditor } from '../../../lib/quotes/editor'
 import type { QuoteDocumentData } from '../../../lib/quotes/types'
+import { profileLabel } from '../../../lib/quotes/profile'
 const props = defineProps<{ document: QuoteDocumentData; editor: QuoteEditor; offerNo?: string; editable?: boolean }>()
 const set = (part: 'sender' | 'recipient' | 'legal', key: string, text: string) => props.editor.editField(part, { key, text })
-const date = (value: string) => value ? new Intl.DateTimeFormat('de-AT', { day: '2-digit', month: '2-digit', year: 'numeric', timeZone: 'UTC' }).format(new Date(`${value}T00:00:00Z`)) : ''
+const date = (value: string) => value ? new Intl.DateTimeFormat(props.document.profile?.definition.locale || 'de-AT', { day: '2-digit', month: '2-digit', year: 'numeric', timeZone: 'UTC' }).format(new Date(`${value}T00:00:00Z`)) : ''
+const label = (key: string, fallback: string) => profileLabel(props.document.profile, key, fallback)
 </script>
 <template>
   <section class="quote-cover" aria-label="Quote cover">
-    <p class="quote-overline">Angebot <span>{{ offerNo }}</span></p>
+    <p class="quote-overline">{{ label('quote', 'Angebot') }} <span>{{ offerNo }}</span></p>
     <QuoteText tag="h1" class="quote-title" :model-value="document.title" label="Angebotstitel" :editable="editable" @update:model-value="editor.editField('title', $event)" />
     <QuoteText tag="p" class="quote-subtitle" :model-value="document.subtitle" label="Untertitel" :editable="editable" @update:model-value="editor.editField('subtitle', $event)" />
     <div class="quote-cover-grid">
       <div>
-        <p class="quote-label">Auftraggeber</p>
+        <p class="quote-label">{{ label('recipient', 'Auftraggeber') }}</p>
         <QuoteText tag="p" class="quote-recipient" :model-value="document.recipient.name ?? ''" label="Firma des Kunden" :editable="editable" @update:model-value="set('recipient', 'name', $event)" />
         <QuoteText tag="p" :model-value="document.recipient.address ?? ''" label="Kundenanschrift" :editable="editable" @update:model-value="set('recipient', 'address', $event)" />
         <QuoteText tag="p" :model-value="document.recipient.contact ?? ''" label="Kundenkontakt" :editable="editable" @update:model-value="set('recipient', 'contact', $event)" />
         <QuoteText tag="p" :model-value="document.recipient.country ?? ''" label="Land des Kunden" :editable="editable" @update:model-value="set('recipient', 'country', $event)" />
       </div>
       <dl class="quote-meta">
-        <dt>Angebotsnummer</dt><dd>{{ offerNo }}</dd>
-        <dt>Angebotsdatum</dt><dd><DatePicker v-if="editable" variant="paper" label="Angebotsdatum" :model-value="document.offer_date" @update:model-value="editor.editField('offer_date', $event)" /><template v-else>{{ date(document.offer_date) }}</template></dd>
-        <dt>Kundennummer</dt><dd>{{ document.recipient.customer_no }}</dd>
-        <dt>Gültig bis</dt><dd><DatePicker v-if="editable" variant="paper" label="Gültig bis" :model-value="document.valid_until" @update:model-value="editor.editField('valid_until', $event)" /><template v-else>{{ date(document.valid_until) }}</template></dd>
-        <dt>Ansprechpartner</dt><dd><QuoteText :model-value="document.sender.contact_person ?? ''" label="Ansprechpartner" :editable="editable" @update:model-value="set('sender', 'contact_person', $event)" /></dd>
-        <dt>Projektreferenz</dt><dd><QuoteText :model-value="document.project_ref" label="Projektreferenz" :editable="editable" @update:model-value="editor.editField('project_ref', $event)" /></dd>
+        <dt>{{ label('number', 'Angebotsnummer') }}</dt><dd>{{ offerNo }}</dd>
+        <dt>{{ label('date', 'Angebotsdatum') }}</dt><dd><DatePicker v-if="editable" variant="paper" :label="label('date', 'Angebotsdatum')" :model-value="document.offer_date" @update:model-value="editor.editField('offer_date', $event)" /><template v-else>{{ date(document.offer_date) }}</template></dd>
+        <dt>{{ label('customer', 'Kundennummer') }}</dt><dd>{{ document.recipient.customer_no }}</dd>
+        <dt>{{ label('valid', 'Gültig bis') }}</dt><dd><DatePicker v-if="editable" variant="paper" :label="label('valid', 'Gültig bis')" :model-value="document.valid_until" @update:model-value="editor.editField('valid_until', $event)" /><template v-else>{{ date(document.valid_until) }}</template></dd>
+        <dt>{{ label('contact', 'Ansprechpartner') }}</dt><dd><QuoteText :model-value="document.sender.contact_person ?? ''" :label="label('contact', 'Ansprechpartner')" :editable="editable" @update:model-value="set('sender', 'contact_person', $event)" /></dd>
+        <dt>{{ label('project', 'Projektreferenz') }}</dt><dd><QuoteText :model-value="document.project_ref" :label="label('project', 'Projektreferenz')" :editable="editable" @update:model-value="editor.editField('project_ref', $event)" /></dd>
       </dl>
     </div>
     <p class="quote-sender"><strong>{{ document.sender.company }}</strong><span>{{ document.sender.street }}, {{ document.sender.postal_code }} {{ document.sender.city }} {{ document.sender.country }}</span><span v-if="document.sender.register_no">{{ document.sender.register_no }} · {{ document.sender.register_court }}</span><span>{{ document.sender.email }}</span></p>
@@ -46,4 +48,14 @@ const date = (value: string) => value ? new Intl.DateTimeFormat('de-AT', { day: 
 .quote-meta dt { color: var(--ink-2); }.quote-meta dd { margin: 0; overflow-wrap: anywhere; }
 .quote-sender { display: flex; flex-wrap: wrap; gap: 1mm 5mm; border-top: 1px solid var(--line-2); padding-top: 4mm; font-size: 8pt; }
 .quote-intro { font-size: 10pt; line-height: 1.5; margin-top: 8mm; }
+:global(.quote-document.classic-v1 .quote-cover) { gap: 0; }
+:global(.quote-document.classic-v1 .quote-overline) { font-family: var(--quote-display-font, var(--quote-body-font, var(--font))); font-size: 34pt; font-weight: 400; letter-spacing: .14em; color: var(--teal); margin: var(--quote-cover-top) 0 0; line-height: 1; }
+:global(.quote-document.classic-v1 .quote-overline span) { display: none; }
+:global(.quote-document.classic-v1 .quote-title) { font-family: var(--quote-display-font, var(--quote-body-font, var(--font))); font-size: var(--quote-title-size); font-weight: 400; margin: var(--quote-title-gap) 0 1.5mm; line-height: 1.25; }
+:global(.quote-document.classic-v1 .quote-subtitle) { font-size: 10.5pt; color: var(--ink-2); }
+:global(.quote-document.classic-v1 .quote-cover-grid) { gap: 0; margin-top: var(--quote-columns-gap); border-top: 1px solid var(--line); padding-top: var(--quote-columns-padding); }
+:global(.quote-document.classic-v1 .quote-cover-grid > div:first-child) { padding-right: 10mm; border-right: 1px solid var(--line); }
+:global(.quote-document.classic-v1 .quote-meta) { padding-left: 10mm; }
+:global(.quote-document.classic-v1 .quote-sender) { margin-top: 5mm; padding-top: 4mm; }
+:global(.quote-document.classic-v1 .quote-intro) { margin-top: 7mm; font-size: 10.5pt; line-height: 1.55; }
 </style>

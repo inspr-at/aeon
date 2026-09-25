@@ -4,6 +4,7 @@ import '../../styles/crm.css'
 import { computed, nextTick, ref, watch } from 'vue'
 import { getRelated, type RelatedProject } from '../../lib/crm'
 import { createQuote, getSettings, lifecycleError, type QuoteProjection } from '../../lib/quotes/lifecycle'
+import { listProfiles, type QuoteProfile } from '../../lib/quotes/profile'
 import { highlight } from '../../lib/work'
 import { useBusiness } from '../../stores/business'
 import { useCustomers } from '../../stores/customers'
@@ -29,6 +30,8 @@ const listOpen = ref(false)
 const active = ref(0)
 const title = ref('')
 const projectId = ref('')
+const profileId = ref('')
+const profiles = ref<QuoteProfile[]>([])
 const projects = ref<RelatedProject[] | null>(null)
 const busy = ref(false)
 const error = ref('')
@@ -59,12 +62,13 @@ function senderReady(s: Awaited<ReturnType<typeof getSettings>>) {
 async function open(options: { customerId?: string; customerName?: string } = {}) {
   opener = document.activeElement as HTMLElement
   customerId.value = options.customerId ?? ''; fixedCustomer.value = !!options.customerId; fixedName.value = options.customerName ?? ''
-  search.value = ''; title.value = ''; projectId.value = ''; projects.value = null
+  search.value = ''; title.value = ''; projectId.value = ''; projects.value = null; profileId.value = ''; profiles.value = []
   error.value = ''; busy.value = false; touched.value = false; listOpen.value = false; active.value = 0
   settings.value = 'loading'
   dialog.value?.showModal()
   void customers.load()
-  void getSettings().then(s => { settings.value = senderReady(s) ? 'ready' : 'missing' }).catch(() => { settings.value = 'error' })
+  void getSettings().then(s => { settings.value = senderReady(s) ? 'ready' : 'missing'; profileId.value = s.default_profile_id || '' }).catch(() => { settings.value = 'error' })
+  void listProfiles().then(items => { profiles.value = items.filter(p => !p.archived) }).catch(() => { profiles.value = [] })
   await nextTick()
   ;(customerId.value ? titleInput.value : customerInput.value)?.focus()
 }
@@ -100,7 +104,7 @@ async function submit() {
   if (busy.value) return
   busy.value = true; error.value = ''
   try {
-    const quote = await createQuote({ title: title.value.trim(), customer_org_node_id: customerId.value, ...(projectId.value ? { project_node_id: projectId.value } : {}) })
+    const quote = await createQuote({ title: title.value.trim(), customer_org_node_id: customerId.value, ...(projectId.value ? { project_node_id: projectId.value } : {}), ...(profileId.value ? { profile_id: profileId.value } : {}) })
     dialog.value?.close()
     emit('created', quote, customerId.value)
   } catch (e) { error.value = lifecycleError(e, 'The quote was not created. Nothing changed.') }
@@ -176,6 +180,13 @@ defineExpose({ open })
           <select id="new-quote-project" v-model="projectId" class="field" :disabled="settings === 'missing'">
             <option value="">No project</option>
             <option v-for="p in projects" :key="p.id" :value="p.id">{{ p.title }}</option>
+          </select>
+        </div>
+        <div v-if="profiles.length" class="f-row wide">
+          <label class="f-label" for="new-quote-profile">Document profile</label>
+          <select id="new-quote-profile" v-model="profileId" class="field" :disabled="settings === 'missing'">
+            <option value="">Standard document</option>
+            <option v-for="profile in profiles" :key="profile.id" :value="profile.id">{{ profile.name }} · r{{ profile.revision }}</option>
           </select>
         </div>
       </div>

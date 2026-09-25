@@ -6,6 +6,7 @@ import SetupCard from '../business/SetupCard.vue'
 import IntegrationCard from '../crm/IntegrationCard.vue'
 import AppIcon from '../AppIcon.vue'
 import QuoteSettingsCard from './QuoteSettingsCard.vue'
+import QuoteProfilesCard from './QuoteProfilesCard.vue'
 import SettingsCard from './SettingsCard.vue'
 
 // Business for admins: which parts are on (the same switches as the overview),
@@ -21,6 +22,7 @@ onMounted(() => { void business.loadPlugins() })
     </div>
 
     <QuoteSettingsCard />
+    <QuoteProfilesCard />
 
     <SettingsCard title="Customers" icon="building" anchor="customers">
       <template #lead>Customers with their contacts and addresses, linked to projects, quotes and hours.</template>

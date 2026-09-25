@@ -1,10 +1,11 @@
 <!-- SPDX-License-Identifier: AGPL-3.0-only -->
 <script setup lang="ts">
 import QuoteText from './QuoteText.vue'
-import { decimalCents, money, positionTotal } from '../../../lib/quotes/layout'
+import { decimalCents, positionTotal } from '../../../lib/quotes/layout'
+import { profileLabel, profileMoney } from '../../../lib/quotes/profile'
 import type { QuoteEditor } from '../../../lib/quotes/editor'
-import type { QuotePosition } from '../../../lib/quotes/types'
-const props = defineProps<{ positions: QuotePosition[]; editor: QuoteEditor; indices?: string[]; editable?: boolean }>()
+import type { QuotePosition, QuoteProfileSnapshot } from '../../../lib/quotes/types'
+const props = defineProps<{ positions: QuotePosition[]; editor: QuoteEditor; indices?: string[]; editable?: boolean; profile?: QuoteProfileSnapshot | null; continuation?: boolean }>()
 const rows = () => props.indices ? props.positions.filter(p => props.indices!.includes(p.id)) : props.positions
 function commitNumber(id: string, kind: 'quantity' | 'unit_price_cents', event: Event) {
   const input = event.target as HTMLInputElement
@@ -21,15 +22,15 @@ function commitNumber(id: string, kind: 'quantity' | 'unit_price_cents', event: 
 }
 </script>
 <template>
-  <section class="quote-positions" aria-label="Positions">
-    <h2>Leistungen</h2>
-    <table><thead><tr><th>Pos.</th><th>Leistung</th><th>Menge</th><th>Einheit</th><th>Einzelpreis</th><th>Betrag</th></tr></thead>
+  <section class="quote-positions" :class="{ 'no-separators': profile?.definition.positions_table.separator === 'none' }" aria-label="Positions">
+    <h2>{{ profileLabel(profile, 'positions', 'Leistungen') }}</h2>
+    <table><thead v-if="!continuation || profile?.definition.positions_table.repeat_header !== false"><tr><th>Pos.</th><th>Leistung</th><th>Menge</th><th>Einheit</th><th>Einzelpreis</th><th>Betrag</th></tr></thead>
       <tbody v-for="row in rows()" :key="row.id" :data-position-id="row.id" @focusin="editor.select({ positionId: row.id })">
         <tr><td>{{ String(positions.indexOf(row) + 1).padStart(2, '0') }}</td><td><QuoteText :model-value="row.short_text" :editable="editable" :label="`Leistung Position ${positions.indexOf(row) + 1}`" @update:model-value="editor.editPosition(row.id, { short_text: $event })" /></td>
           <td><input v-if="editable" inputmode="decimal" :aria-label="`Menge Position ${positions.indexOf(row) + 1}`" :value="row.quantity" @input="commitNumber(row.id, 'quantity', $event)" /><template v-else>{{ row.quantity }}</template></td>
           <td><QuoteText :model-value="row.unit_label" :editable="editable" :label="`Einheit Position ${positions.indexOf(row) + 1}`" @update:model-value="editor.editPosition(row.id, { unit_label: $event })" /></td>
-          <td><input v-if="editable && row.pricing_source === 'manual'" inputmode="decimal" :aria-label="`Einzelpreis Position ${positions.indexOf(row) + 1}`" :value="decimalCents(row.unit_price_cents)" @input="commitNumber(row.id, 'unit_price_cents', $event)" /><template v-else>{{ money(row.unit_price_cents, row.currency) }}</template></td>
-          <td>{{ money(positionTotal(row), row.currency) }}</td></tr>
+          <td><input v-if="editable && row.pricing_source === 'manual'" inputmode="decimal" :aria-label="`Einzelpreis Position ${positions.indexOf(row) + 1}`" :value="decimalCents(row.unit_price_cents)" @input="commitNumber(row.id, 'unit_price_cents', $event)" /><template v-else>{{ profileMoney(row.unit_price_cents, row.currency, profile) }}</template></td>
+          <td>{{ profileMoney(positionTotal(row), row.currency, profile) }}</td></tr>
         <tr class="quote-long"><td></td><td colspan="5"><QuoteText :model-value="row.long_text" :editable="editable" :label="`Beschreibung Position ${positions.indexOf(row) + 1}`" @update:model-value="editor.editPosition(row.id, { long_text: $event })" /></td></tr>
       </tbody></table>
   </section>
@@ -41,4 +42,14 @@ th { text-align: left; font-size: 7pt; text-transform: uppercase; letter-spacing
 th:first-child { width: 10mm; }th:nth-child(2) { width: 55mm; }th:nth-child(3) { width: 18mm; }th:nth-child(4) { width: 18mm; }th:nth-child(5),th:nth-child(6) { width: 27mm; }
 td { vertical-align: top; padding: 3mm 1mm; overflow-wrap: anywhere; }td:nth-child(n+3) { text-align: right; }tbody { break-inside: avoid; border-bottom: 1px solid var(--line); }.quote-long td { padding-top: 0; color: var(--ink-2); }
 input { width: 100%; min-width: 0; font: inherit; text-align: right; background: var(--field-bg); color: var(--ink); border: 1px solid var(--line); }
+:global(.quote-document.classic-v1 .quote-positions h2) { font-family: var(--quote-display-font, var(--quote-body-font, var(--font))); font-size: var(--quote-section-size); font-weight: 400; letter-spacing: .14em; text-transform: var(--quote-heading-transform); color: var(--teal); }
+:global(.quote-document.classic-v1 .quote-positions table) { font-size: var(--quote-table-size); font-variant-numeric: tabular-nums; margin-top: 6mm; }
+:global(.quote-document.classic-v1 .quote-positions th) { box-sizing: border-box; color: var(--teal); font-size: 7.5pt; letter-spacing: .14em; border-color: var(--line); }
+:global(.quote-document.classic-v1 .quote-positions th:first-child) { width: var(--quote-column-1); }
+:global(.quote-document.classic-v1 .quote-positions th:nth-child(2)) { width: var(--quote-column-2); }
+:global(.quote-document.classic-v1 .quote-positions th:nth-child(3)) { width: var(--quote-column-3); }
+:global(.quote-document.classic-v1 .quote-positions th:nth-child(4)) { width: var(--quote-column-4); }
+:global(.quote-document.classic-v1 .quote-positions th:nth-child(5)) { width: var(--quote-column-5); }
+:global(.quote-document.classic-v1 .quote-positions th:nth-child(6)) { width: var(--quote-column-6); }
+:global(.quote-document .quote-positions.no-separators tbody) { border-bottom: 0; }
 </style>

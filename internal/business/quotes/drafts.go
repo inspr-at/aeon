@@ -3,6 +3,7 @@
 package quotes
 
 import (
+	"bytes"
 	"context"
 	"crypto/sha256"
 	"encoding/hex"
@@ -179,6 +180,17 @@ func (m *Module) draftPatch(w http.ResponseWriter, r *http.Request) {
 		}
 		if current.DraftRevision != expected {
 			return failure{412, "draft revision is stale"}
+		}
+		// Profile changes have their own server-side selection endpoint. A full
+		// document save may neither forge a definition nor silently drop it.
+		oldDocument, err := decodeDocument(current.Document)
+		if err != nil {
+			return err
+		}
+		oldProfile, _ := json.Marshal(oldDocument.Profile)
+		newProfile, _ := json.Marshal(doc.Profile)
+		if !bytes.Equal(oldProfile, newProfile) {
+			return conflict("select the quote profile through its endpoint")
 		}
 		minimumWriter := max(current.MinimumWriterVersion, documentMinimumWriterVersion(doc))
 		if in.WriterVersion < minimumWriter {

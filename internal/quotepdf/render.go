@@ -7,6 +7,7 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
+	"io"
 	"io/fs"
 	"net"
 	"net/http"
@@ -15,6 +16,11 @@ import (
 	"path/filepath"
 	"strings"
 	"time"
+
+	"github.com/inspr-at/aeon/internal/attachments"
+	"github.com/inspr-at/aeon/internal/db"
+	"github.com/jackc/pgx/v5"
+	"github.com/jackc/pgx/v5/pgxpool"
 
 	"github.com/chromedp/cdproto/page"
 	cdpruntime "github.com/chromedp/cdproto/runtime"
@@ -31,10 +37,83 @@ type Stamp struct {
 }
 
 type Payload struct {
-	Document  json.RawMessage `json:"document"`
-	OfferNo   string          `json:"offer_no"`
-	PublicURL string          `json:"public_url,omitempty"`
-	Accepted  *Stamp          `json:"accepted,omitempty"`
+	Document      json.RawMessage         `json:"document"`
+	OfferNo       string                  `json:"offer_no"`
+	PublicURL     string                  `json:"public_url,omitempty"`
+	Accepted      *Stamp                  `json:"accepted,omitempty"`
+	ProfileAssets map[string]ProfileAsset `json:"-"`
+}
+
+type ProfileAsset struct {
+	ContentType string
+	Bytes       []byte
+}
+
+// LoadProfileAssets resolves only IDs frozen into the issued document, using
+// tenant RLS. Render serves them on its private loopback origin under font-src
+// and img-src 'self'; no production API credentials enter Chromium.
+func LoadProfileAssets(ctx context.Context, pool *pgxpool.Pool, store attachments.Store, tenantID string, document json.RawMessage) (map[string]ProfileAsset, error) {
+	var wrapped struct {
+		Profile *struct {
+			Definition struct {
+				Fonts []struct {
+					AssetID string `json:"asset_id"`
+				} `json:"fonts"`
+				Footer struct {
+					AssetID string `json:"asset_id"`
+				} `json:"footer"`
+			} `json:"definition"`
+		} `json:"profile"`
+	}
+	if err := json.Unmarshal(document, &wrapped); err != nil {
+		return nil, err
+	}
+	assets := map[string]ProfileAsset{}
+	if wrapped.Profile == nil {
+		return assets, nil
+	}
+	ids := map[string]bool{}
+	for _, f := range wrapped.Profile.Definition.Fonts {
+		ids[f.AssetID] = true
+	}
+	if id := wrapped.Profile.Definition.Footer.AssetID; id != "" {
+		ids[id] = true
+	}
+	if len(ids) > 13 {
+		return nil, errors.New("too many profile assets")
+	}
+	var size int64
+	err := db.InTenant(ctx, pool, tenantID, func(tx pgx.Tx) error {
+		for id := range ids {
+			var hash, kind string
+			var length int64
+			if err := tx.QueryRow(ctx, `SELECT sha256,content_type,size FROM quote_document_profile_assets WHERE id=$1::uuid`, id).Scan(&hash, &kind, &length); err != nil {
+				return err
+			}
+			size += length
+			if size > 20<<20 {
+				return errors.New("profile assets exceed PDF limit")
+			}
+			f, err := store.Open(tenantID, hash, "original")
+			if err != nil {
+				return err
+			}
+			b, readErr := io.ReadAll(io.LimitReader(f, length+1))
+			closeErr := f.Close()
+			if readErr != nil {
+				return readErr
+			}
+			if closeErr != nil {
+				return closeErr
+			}
+			if int64(len(b)) != length {
+				return errors.New("profile asset length mismatch")
+			}
+			assets[id] = ProfileAsset{ContentType: kind, Bytes: b}
+		}
+		return nil
+	})
+	return assets, err
 }
 
 func Available() bool {
@@ -83,6 +162,16 @@ func Render(ctx context.Context, assets fs.FS, in Payload) ([]byte, error) {
 			_, _ = w.Write(payload)
 		case r.URL.Path == "/quote-print.html" || strings.HasPrefix(r.URL.Path, "/assets/"):
 			fileServer.ServeHTTP(w, r)
+		case strings.HasPrefix(r.URL.Path, "/api/quote-profiles/assets/"):
+			id := strings.TrimPrefix(r.URL.Path, "/api/quote-profiles/assets/")
+			asset, ok := in.ProfileAssets[id]
+			if !ok {
+				http.NotFound(w, r)
+				return
+			}
+			w.Header().Set("Content-Type", asset.ContentType)
+			w.Header().Set("X-Content-Type-Options", "nosniff")
+			_, _ = w.Write(asset.Bytes)
 		default:
 			http.NotFound(w, r)
 		}

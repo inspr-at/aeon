@@ -36,15 +36,29 @@ export interface QuoteRecipient {
   name?: string; address?: string; contact?: string; country?: string; customer_no?: string
   email?: string; contact_node_id?: string
 }
-export interface QuoteLegal { intro?: string; accept_text?: string; vat_note?: string }
+export interface QuoteLegal { intro?: string; accept_text?: string; vat_note?: string; discount_note?: string; payment_terms?: string }
 export interface QuoteLayout {
   logo_width_mm?: string; logo_offset_mm?: string; logo_file_id?: string; logo_sha256?: string; page_style?: string
 }
 export interface QuoteDocumentData {
   schema_version: 1; minimum_writer_version: 1 | 2; title: string; subtitle: string; project_ref: string
   offer_date: string; valid_until: string; currency: string; sender: QuoteSender; recipient: QuoteRecipient
-  legal: QuoteLegal; layout: QuoteLayout; sections: QuoteSection[]; positions: QuotePosition[]; net_total_cents: number
+  legal: QuoteLegal; layout: QuoteLayout; profile?: QuoteProfileSnapshot | null; sections: QuoteSection[]; positions: QuotePosition[]; net_total_cents: number
 }
+export interface QuoteProfileDefinition {
+  schema: 'inspr.document-profile.v1'; layout_variant: 'standard' | 'classic-v1'; locale: 'de-AT' | 'en'
+  fonts: { role: 'body' | 'display'; family: string; weight: number; style: 'normal' | 'italic'; asset_id: string }[]
+  colors: Record<string, string>; typography: Record<string, string>
+  page: { width_mm: string; height_mm: string; top_mm: string; right_mm: string; bottom_mm: string; left_mm: string }
+  cover: Record<string, string>; sections: Record<string, string>
+  positions_table: { columns: { key: string; width_mm: string }[]; separator: 'rule' | 'none'; repeat_header: boolean }
+  totals: { vat: 'note' | 'line' | 'hidden'; discount: 'line' | 'hidden'; net_label: string }
+  payment_terms: { position: 'sections' | 'after-totals'; heading: string }
+  acceptance: { signature_columns: 1 | 2; gap_mm: string; lead_mm: string }
+  footer: { asset_id?: string; width_mm: string; offset_mm: string; page_number_format: string }
+  labels: Record<string, string>
+}
+export interface QuoteProfileSnapshot { id: string; revision: number; definition: QuoteProfileDefinition }
 export interface TextPoint { nodeId: string; offset: number }
 export interface TextSelection { sectionId: string; anchor: TextPoint; focus: TextPoint }
 export interface EditorSelection { sectionId?: string; positionId?: string; text?: TextSelection }
