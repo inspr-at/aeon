@@ -15,6 +15,11 @@ import (
 	"time"
 )
 
+// Render has its own 45-second production cap. Under a 0.08-CPU Linux quota,
+// Chromium reached PrintToPDF after the old 40-second test deadline expired.
+// Leave time for the renderer's full budget and post-render PDF checks.
+const renderTestTimeout = renderTimeout + 15*time.Second
+
 func TestBundledDocumentRendersA4(t *testing.T) {
 	if !Available() {
 		t.Skip("Chromium unavailable")
@@ -24,7 +29,7 @@ func TestBundledDocumentRendersA4(t *testing.T) {
 		t.Skip("build web assets first")
 	}
 	document := sampleDocument()
-	ctx, cancel := context.WithTimeout(t.Context(), 40*time.Second)
+	ctx, cancel := context.WithTimeout(t.Context(), renderTestTimeout)
 	defer cancel()
 	pdf, err := Render(ctx, assets, Payload{Document: document, OfferNo: "A260924-1", PublicURL: "https://example.invalid/offers/selector/token"})
 	if err != nil {
@@ -47,7 +52,7 @@ func TestBundledDocumentRefusesWholeBlockOverflow(t *testing.T) {
 		t.Skip("build web assets first")
 	}
 	tooLong := strings.Replace(string(sampleDocument()), `"text":"Work"`, `"text":"`+strings.Repeat("Oversized whole block. ", 1200)+`"`, 1)
-	ctx, cancel := context.WithTimeout(t.Context(), 20*time.Second)
+	ctx, cancel := context.WithTimeout(t.Context(), renderTestTimeout)
 	defer cancel()
 	_, err := Render(ctx, assets, Payload{Document: json.RawMessage(tooLong), OfferNo: "A260924-1"})
 	if err == nil || !strings.Contains(err.Error(), "overflow") {
@@ -81,7 +86,7 @@ func TestSyntheticPDFGoldenTextAndGeometry(t *testing.T) {
 	if err := json.Unmarshal(goldenBytes, &golden); err != nil {
 		t.Fatal(err)
 	}
-	ctx, cancel := context.WithTimeout(t.Context(), 45*time.Second)
+	ctx, cancel := context.WithTimeout(t.Context(), renderTestTimeout)
 	defer cancel()
 	pdf, err := Render(ctx, assets, Payload{Document: document, OfferNo: "A260924-01", PublicURL: "https://example.invalid/offers/synthetic/token"})
 	if err != nil {
@@ -158,7 +163,7 @@ func TestSyntheticClassicV1PDFGolden(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	ctx, cancel := context.WithTimeout(t.Context(), 45*time.Second)
+	ctx, cancel := context.WithTimeout(t.Context(), renderTestTimeout)
 	defer cancel()
 	pdf, err := Render(ctx, os.DirFS("../../web/dist"), Payload{Document: raw, OfferNo: "S-001"})
 	if err != nil {

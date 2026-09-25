@@ -29,6 +29,8 @@ import (
 
 const RendererVersion = "aeon-quote-document-1"
 
+const renderTimeout = 45 * time.Second
+
 type Stamp struct {
 	Name    string `json:"name"`
 	Company string `json:"company,omitempty"`
@@ -149,7 +151,7 @@ func Render(ctx context.Context, assets fs.FS, in Payload) ([]byte, error) {
 	if err != nil {
 		return nil, err
 	}
-	ctx, cancel := context.WithTimeout(ctx, 45*time.Second)
+	ctx, cancel := context.WithTimeout(ctx, renderTimeout)
 	defer cancel()
 	listener, err := net.Listen("tcp", "127.0.0.1:0")
 	if err != nil {
@@ -230,7 +232,10 @@ func Render(ctx context.Context, assets fs.FS, in Payload) ([]byte, error) {
 		result, _, err = page.PrintToPDF().WithPrintBackground(true).WithPreferCSSPageSize(true).WithDisplayHeaderFooter(false).Do(ctx)
 		return err
 	}))
-	if err != nil || len(result) < 100 || len(result) > 20<<20 || !strings.HasPrefix(string(result), "%PDF-") {
+	if err != nil {
+		return nil, fmt.Errorf("quote PDF print failed: %w", err)
+	}
+	if len(result) < 100 || len(result) > 20<<20 || !strings.HasPrefix(string(result), "%PDF-") {
 		return nil, errors.New("quote PDF output invalid")
 	}
 	return result, nil
