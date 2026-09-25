@@ -290,7 +290,7 @@ const transform = computed(() => `translate(${offset.value.x}px, ${offset.value.
 .lightbox[open] { display: grid; }
 .lightbox::backdrop { background: rgba(4, 12, 14, .7); }
 @media (prefers-reduced-motion: no-preference) { .lightbox[open] { animation: lb-in .2s ease; } @keyframes lb-in { from { opacity: 0; } to { opacity: 1; } } }
-.lb-bar { position: relative; z-index: 2; display: flex; align-items: center; gap: 10px; min-height: 72px; padding: 10px 18px 10px 22px; background: var(--lb-glass); border-bottom: 1px solid var(--lb-edge); backdrop-filter: blur(18px); -webkit-backdrop-filter: blur(18px); }
+.lb-bar { position: relative; z-index: 2; display: flex; align-items: center; gap: 10px; min-height: 72px; padding: 10px 18px 10px 22px; background: var(--lb-glass); border-bottom: 1px solid var(--lb-edge); -webkit-backdrop-filter: blur(18px); backdrop-filter: blur(18px); }
 .title-block { display: grid; gap: 2px; min-width: 0; flex: 0 1 auto; }
 .eyebrow { color: #8fb0ad; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 .name { font-size: 17px; font-weight: 600; letter-spacing: -.01em; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; color: var(--lb-ink); }

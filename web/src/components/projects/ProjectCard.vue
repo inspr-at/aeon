@@ -50,7 +50,7 @@ const emit = defineEmits<{ menu: [anchor: HTMLElement] }>()
 .card {
   position: relative; display: flex; min-width: 0; border-radius: var(--radius); border: 1px solid var(--glass-edge);
   background: linear-gradient(165deg, var(--surface-raised-2), var(--glass) 60%); box-shadow: var(--shadow);
-  backdrop-filter: blur(18px) saturate(1.15); -webkit-backdrop-filter: blur(18px) saturate(1.15);
+  -webkit-backdrop-filter: blur(18px) saturate(1.15); backdrop-filter: blur(18px) saturate(1.15);
 }
 @media (hover: hover) { .card:hover { box-shadow: var(--shadow), 0 16px 32px -22px rgba(16, 35, 39, .45); } }
 @media (hover: hover) and (prefers-reduced-motion: no-preference) {

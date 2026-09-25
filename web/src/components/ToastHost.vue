@@ -24,7 +24,7 @@ function act(id: number, run: () => void) { dismiss(id); run() }
 .toast {
   display: flex; align-items: center; gap: 10px; min-height: 40px; padding: 6px 8px 6px 18px; border-radius: 999px; pointer-events: auto;
   background: var(--tip-bg); color: var(--tip-ink); font-size: 13.5px; box-shadow: 0 0 0 1px var(--glass-rim), 0 18px 36px -14px rgba(0, 0, 0, .45);
-  backdrop-filter: blur(12px); -webkit-backdrop-filter: blur(12px);
+  -webkit-backdrop-filter: blur(12px); backdrop-filter: blur(12px);
 }
 .toast.error svg { color: #f3b0a8; }
 .toast span { min-width: 0; }
