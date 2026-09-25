@@ -1048,7 +1048,7 @@ watch([project, panelItem, knowledgeActive, knowledgeEntryOpen], ([current, item
 
       <JourneyView
         v-if="journeyActive" :project="{ id: project.id, routeKey: project.routeKey, title: project.title }" :stage="journeyStage" :release-key="journeyRelease" :walk-key="journeyWalk"
-        :can-write="writable" :person="session.identity?.principal.kind !== 'agent'" :me="me?.id ?? null"
+        :can-write="writable" :person="session.identity?.principal.kind === 'person'" :me="me?.id ?? null"
         @stage="journeyStageTo" @release="journeyReleaseTo" @walk="journeyWalkTo" @open="openKey"
       />
       <KnowledgeTab

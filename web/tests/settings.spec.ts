@@ -73,7 +73,7 @@ test('Workspace lists members and agent keys, read-only', async ({ page }) => {
   await setup(page)
   await page.goto('/settings/workspace')
   const members = page.locator('#members')
-  await expect(members.locator('.people').first().getByRole('listitem')).toHaveText([/Markus Barta\s*Admin/, /Mira Holm\s*Member/])
+  await expect(members.locator('.people').first().getByRole('listitem')).toHaveText([/Markus Barta\s*Admin/, /Mira Holm\s*Member/, /Cleo Customer\s*Customer/])
   await expect(members).toContainText('Cleo Customer')
   await expect(members).toContainText('Nova')
   await expect(members).not.toContainText('System')

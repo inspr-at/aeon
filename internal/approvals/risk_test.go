@@ -17,13 +17,13 @@ func TestApprovalRiskProjection(t *testing.T) {
 	f := newFixture(t)
 	// Expand only this fixture key; requests still pass the real scope ceiling.
 	err := db.InTenant(t.Context(), f.db.App, f.tenantA, func(tx pgx.Tx) error {
-		_, err := tx.Exec(t.Context(), `UPDATE agent_keys SET scopes=ARRAY['nodes','harness','release','run'] WHERE principal_id=$1::uuid AND scopes=ARRAY['run','nodes.read']::text[]`, f.agentA.ID)
+		_, err := tx.Exec(t.Context(), `UPDATE agent_keys SET scopes=ARRAY['nodes','harness','release','run','journey'] WHERE principal_id=$1::uuid AND scopes=ARRAY['run','nodes.read']::text[]`, f.agentA.ID)
 		return err
 	})
 	if err != nil {
 		t.Fatal(err)
 	}
-	for _, tc := range []struct{ scope, kind, risk string }{{"nodes.read", "node", "low"}, {"nodes.read.fields", "node", "low"}, {"nodes.read", "tenant", "high"}, {"harness.control", "node", "high"}, {"release.deploy", "node", "high"}, {"nodes.delete", "node", "high"}, {"nodes.delete.read", "node", "high"}, {"nodes.write", "node", "medium"}, {"run.claim", "run", "medium"}} {
+	for _, tc := range []struct{ scope, kind, risk string }{{"nodes.read", "node", "low"}, {"nodes.read.fields", "node", "low"}, {"nodes.read", "tenant", "high"}, {"harness.control", "node", "high"}, {"release.deploy", "node", "high"}, {"journey.build", "node", "medium"}, {"journey.deploy", "node", "high"}, {"nodes.delete", "node", "high"}, {"nodes.delete.read", "node", "high"}, {"nodes.write", "node", "medium"}, {"run.claim", "run", "medium"}} {
 		t.Run(tc.scope+"-"+tc.kind, func(t *testing.T) {
 			resource := &f.nodeA
 			if tc.kind == "tenant" {
@@ -56,7 +56,7 @@ func TestApprovalRiskProjection(t *testing.T) {
 	if err = json.Unmarshal(response.Body.Bytes(), &items); err != nil {
 		t.Fatal(err)
 	}
-	if len(items) != 9 {
+	if len(items) != 11 {
 		t.Fatal("missing approvals")
 	}
 	for _, item := range items {
@@ -88,6 +88,44 @@ func TestApprovalRiskProjection(t *testing.T) {
 	}
 	if response = f.do(f.agentA, f.empty, "POST", "/api/approvals", proposalJSON("nodes.delete", "node", &f.nodeA, nil)); response.Code != 403 {
 		t.Fatal("risk bypassed scope ceiling")
+	}
+}
+
+func TestDecisionRequiresPermissionBeingGranted(t *testing.T) {
+	f := newFixture(t)
+	decider := insertPrincipal(t, f.db.Admin, f.tenantA, tenant.Person, "custom decider")
+	var roleID string
+	err := db.InTenant(t.Context(), f.db.App, f.tenantA, func(tx pgx.Tx) error {
+		if err := tx.QueryRow(t.Context(), `INSERT INTO roles(tenant_id,key,name) VALUES($1::uuid,'decision_only','Decision only') RETURNING id::text`, f.tenantA).Scan(&roleID); err != nil {
+			return err
+		}
+		_, err := tx.Exec(t.Context(), `INSERT INTO role_permissions(tenant_id,role_id,permission) VALUES($1::uuid,$2::uuid,'approvals.decide')`, f.tenantA, roleID)
+		if err != nil {
+			return err
+		}
+		_, err = tx.Exec(t.Context(), `INSERT INTO role_bindings(tenant_id,principal_id,role_id,scope_type) VALUES($1::uuid,$2::uuid,$3::uuid,'workspace')`, f.tenantA, decider.ID, roleID)
+		return err
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	proposed := f.do(f.agentA, f.narrow, http.MethodPost, "/api/approvals", proposalJSON("nodes.read", "node", &f.nodeA, nil))
+	if proposed.Code != http.StatusCreated {
+		t.Fatal(proposed.Body.String())
+	}
+	id := decodeApproval(t, proposed).ID
+	path := "/api/approvals/" + id + "/decision"
+	if got := f.do(decider, "", http.MethodPost, path, `{"decision":"approved"}`); got.Code != http.StatusForbidden {
+		t.Fatalf("decision without nodes.read: %d %s", got.Code, got.Body.String())
+	}
+	if err := db.InTenant(t.Context(), f.db.App, f.tenantA, func(tx pgx.Tx) error {
+		_, err := tx.Exec(t.Context(), `INSERT INTO role_permissions(tenant_id,role_id,permission) VALUES($1::uuid,$2::uuid,'nodes.read')`, f.tenantA, roleID)
+		return err
+	}); err != nil {
+		t.Fatal(err)
+	}
+	if got := f.do(decider, "", http.MethodPost, path, `{"decision":"approved"}`); got.Code != http.StatusOK {
+		t.Fatalf("decision with nodes.read: %d %s", got.Code, got.Body.String())
 	}
 }
 

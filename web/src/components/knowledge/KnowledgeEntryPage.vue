@@ -74,7 +74,7 @@ async function load() {
     if (request === generation) loading.value = false
   }
 }
-watch(() => [props.project.id, props.type, props.slug] as const, ([, type, slug]) => {
+watch([() => props.project.id, () => props.type, () => props.slug], ([, type, slug]) => {
   // Our own rename (or its undo) changes the address, not the entry.
   if (entry.value && entry.value.type === type && entry.value.slug === slug) return
   editing.value = false
@@ -276,6 +276,10 @@ async function save() {
 }
 // The server's copy replaces ours everywhere; a new slug moves the address.
 function applySaved(saved: KnowledgeEntry, previousSlug: string) {
+  // A route load started for the previous slug must not replace this newer
+  // server response after a rename or its undo.
+  generation++
+  loading.value = false; missing.value = false; error.value = ''
   entry.value = saved
   props.state.upsert(saved)
   if (saved.slug !== previousSlug || saved.type !== props.type) void router.replace({ path: entryPath(props.project.routeKey, saved.type, saved.slug), query: route.query, hash: route.hash })

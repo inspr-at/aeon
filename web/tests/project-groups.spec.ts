@@ -221,7 +221,7 @@ test('cards: arrows walk the cards; x, Shift and Command clicks select; m moves 
   await expect(page.getByText('Moved 2 projects to Paused')).toBeVisible()
   await expect(group(page, 'Paused').locator('.card')).toHaveCount(2)
   await expect(bar).toHaveCount(0)
-  expect(lastPut(calls, 'project-groups')?.value.place).toEqual({ 'p-pharos': 'g:paused', 'p-frozen': 'g:paused' })
+  await expect.poll(() => lastPut(calls, 'project-groups')?.value.place).toEqual({ 'p-pharos': 'g:paused', 'p-frozen': 'g:paused' })
   await page.getByRole('button', { name: 'Undo' }).click()
   await expect(group(page, 'No group').locator('.card')).toHaveCount(3)
   // Shift-click selects a range from the last selected card; Escape clears.

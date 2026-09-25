@@ -14,16 +14,16 @@ func Risk(scope, resourceKind string) string {
 	if resourceKind == "tenant" {
 		return "high"
 	}
-	if permission := approvalPermission(scope); permission != "" {
-		entry, _ := authz.Lookup(permission)
-		return entry.Risk
-	}
 	parts := strings.Split(scope, ".")
 	for _, part := range parts {
 		switch part {
 		case "control", "deploy", "delete":
 			return "high"
 		}
+	}
+	if permission := approvalPermission(scope); permission != "" {
+		entry, _ := authz.Lookup(permission)
+		return entry.Risk
 	}
 	if len(parts) > 1 && parts[1] == "read" {
 		return "low"

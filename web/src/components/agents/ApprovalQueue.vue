@@ -45,7 +45,7 @@ function cancel() {
   if (current) void nextTick(() => document.querySelector<HTMLElement>(`[data-row="${current.mode === 'resolve' || current.mode === 'dismiss' ? 'm' : 'a'}:${current.id}"]`)?.focus())
 }
 async function submit(approval: Approval) {
-  if (!open.value || busy.value) return
+  if (!open.value || busy.value || !props.canDecideApproval(approval)) return
   busy.value = true; error.value = ''
   try {
     await props.decide(approval, open.value.mode === 'approve' ? 'approved' : 'denied', reason.value.trim())

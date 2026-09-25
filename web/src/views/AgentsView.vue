@@ -4,7 +4,7 @@ import { computed, nextTick, onBeforeUnmount, onMounted, ref, watch } from 'vue'
 import { useRoute, useRouter } from 'vue-router'
 import { can } from '../lib/authz'
 import { message, subscribeAgents, type AgentAccount, type Approval, type SessionControl } from '../lib/agents'
-import { controlBlocked, decidedApprovals, riskFor, type Resource } from '../lib/agentState'
+import { canDecideApproval as allowedToDecide, controlBlocked, decidedApprovals, type Resource } from '../lib/agentState'
 import { confirmAction } from '../lib/confirm'
 import { toast } from '../lib/toast'
 import { useAgents, type HeldRequest, type SessionView } from '../stores/agents'
@@ -34,7 +34,7 @@ const writable = computed(() => can('harness.control'))
 const canResolve = computed(() => session.identity?.principal.kind === 'person' && can('inbox.manage'))
 const canRevoke = computed(() => session.identity?.principal.kind === 'person' && can('approvals.revoke'))
 const canDecide = computed(() => session.identity?.principal.kind === 'person' && (can('approvals.decide') || canResolve.value))
-const canDecideApproval = (approval: Approval) => session.identity?.principal.kind === 'person' && can('approvals.decide') && (riskFor(approval) !== 'high' || can('approvals.decide_high'))
+const canDecideApproval = (approval: Approval) => session.identity?.principal.kind === 'person' && allowedToDecide(approval, can)
 const history = computed(() => decidedApprovals(agents.approvals, agents.now))
 const counts = computed(() => ({ working: agents.grouped.working.length, idle: agents.grouped.idle.length }))
 const summary = computed(() => {

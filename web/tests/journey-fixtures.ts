@@ -158,7 +158,7 @@ export async function mockJourney(page: Page, world: JourneyWorld, options: { fa
     try { body = request.postDataJSON() ?? {} } catch { body = {} }
     const record = () => calls.push({ path, method, query, body, headers: request.headers() })
     if (path === '/api/me') return route.fulfill({ json: { principal: { id: me.id, name: me.name, kind: options.kind ?? 'person', roles: ['member'] }, tenant: { id: 't1', name: 'INSPR Studio' } } })
-    if (path === '/api/me/permissions') return route.fulfill({ json: mockEffectivePermissions('member', query.get('project_id') ?? undefined) })
+    if (path === '/api/me/permissions') return route.fulfill({ json: mockEffectivePermissions('admin', query.get('project_id') ?? undefined) })
     if (path === '/api/kinds') return route.fulfill({ json: { items: ['epic', 'ticket', 'task', 'project', 'release'].map(slug => ({ id: `k-${slug}`, slug, label: slug[0].toUpperCase() + slug.slice(1), short_prefix: slug.slice(0, 3).toUpperCase(), icon: slug, allowed_child_kinds: null, field_schema: {} })) } })
     if (path === '/api/plugins') return route.fulfill({ json: PLUGINS })
     // U24: the project node itself (its description stands in for an imported project's brief).

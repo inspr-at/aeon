@@ -259,6 +259,9 @@ func approvalPermission(scope string) string {
 	if scope == "release.deploy" || strings.HasPrefix(scope, "release.deploy.") {
 		return "releases.deploy"
 	}
+	if strings.HasPrefix(scope, "journey.") {
+		return "journey.act"
+	}
 	for scope != "" {
 		if _, ok := authz.Lookup(scope); ok {
 			return scope

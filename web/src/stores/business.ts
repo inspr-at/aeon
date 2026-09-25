@@ -142,7 +142,7 @@ export const useBusiness = defineStore('business', () => {
   }
   const people = computed(() => principals.value.filter(p => p.kind === 'person'))
   // Staff who log time, and agents that are not system accounts.
-  const timeKeepers = computed(() => principals.value.filter(p => p.kind === 'person' || p.kind === 'agent'))
+  const timeKeepers = computed(() => principals.value.filter(p => p.kind === 'person' ? !p.roles.includes('customer') : p.kind === 'agent' && !p.roles.includes('system')))
 
   // ---------- Cost units and rates ----------
   let costRequest: Promise<void> | null = null

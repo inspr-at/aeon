@@ -23,8 +23,8 @@ async function signedIn(page: Page, empty = false) {
   await mockAgents(page, agentData({ ...world, empty }))
   await mockKnowledge(page, knowledgeWorld())
 }
-// Deciding a high-risk request needs an admin (AEON-149), and the first
-// request in the agent fixtures is high risk.
+// The first request needs approvals.decide, approvals.decide_high and the
+// underlying harness.control permission; the admin fixture grants all three.
 async function signedInAdmin(page: Page) {
   await mockWork(page, fixtures(), { admin: true })
   await mockAgents(page, agentData({ ...world }))

@@ -139,6 +139,20 @@ export function riskOf(approval: Pick<Approval, 'scope' | 'resource_kind'>): Ris
 export const riskFor = (approval: Pick<Approval, 'scope' | 'resource_kind' | 'risk'>): Risk => approval.risk ?? riskOf(approval)
 export const RISK_LABEL: Record<Risk, string> = { low: 'Low risk', medium: 'Medium risk', high: 'High risk' }
 
+// Match the server's approvalPermission lookup: a scoped agent request is
+// granted only by someone who can perform the underlying action themselves.
+export function canDecideApproval(approval: Approval, allowed: (permission: string) => boolean): boolean {
+  if (!allowed('approvals.decide') || (riskFor(approval) === 'high' && !allowed('approvals.decide_high'))) return false
+  let scope = approval.scope === 'release.deploy' || approval.scope.startsWith('release.deploy.') ? 'releases.deploy' : approval.scope.startsWith('journey.') ? 'journey.act' : approval.scope
+  while (scope) {
+    if (allowed(scope)) return true
+    const dot = scope.lastIndexOf('.')
+    if (dot < 0) break
+    scope = scope.slice(0, dot)
+  }
+  return false
+}
+
 export function expiresIn(approval: Approval, now: number) {
   const left = Date.parse(approval.expires_at) - now
   return left <= 0 ? 'Expired' : `Expires in ${duration(left)}`

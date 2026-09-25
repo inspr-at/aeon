@@ -8,6 +8,8 @@ import {
   type ActionKey, type PluginInfo, type Stage,
 } from '../../lib/journey'
 import type { Approval } from '../../lib/agents'
+import { canDecideApproval } from '../../lib/agentState'
+import { can } from '../../lib/authz'
 import { JOURNEY, type JourneyContext, type NextState } from '../../lib/journeyContext'
 import { useJourneyData } from '../../lib/useJourneyData'
 import { usePlan } from '../../lib/usePlan'
@@ -114,9 +116,9 @@ watch(() => journey.value?.revision, (revision, before) => {
   if (data.handoffs.status.value === 'ready') void data.loadHandoffs(true)
   if (data.releaseNodes.status.value === 'ready') void data.loadReleases(true)
 })
-const canAct = computed(() => props.canWrite && props.person)
+const canAct = computed(() => props.person && can('journey.act', projectId.value))
 // The plan changes only while the journey is at Plan, on the current release in planning.
-const editable = computed(() => canAct.value && journey.value?.stage === 'plan' && isCurrent.value && data.walker.value.value?.state === 'planning' && data.walker.value.value.release_node_id === journey.value?.current_release_id)
+const editable = computed(() => canAct.value && can('releases.write', projectId.value) && journey.value?.stage === 'plan' && isCurrent.value && data.walker.value.value?.state === 'planning' && data.walker.value.value.release_node_id === journey.value?.current_release_id)
 const plan = usePlan(data, editable, () => { void store.load(projectId.value, true) })
 
 // ---------- The one next action ----------
@@ -129,6 +131,7 @@ const next = computed<NextState>(() => {
   const waitingForGate = !action.available && /gate/i.test(action.reason ?? '') && !!approval.value
   let disabled = !canAct.value || action.key === 'wait_for_build' || (!action.available && !waitingForGate && action.key !== 'continue_intake' && action.key !== 'decide')
   let tip = !canAct.value ? (props.person ? 'You can read this journey; changing it needs write access.' : 'Only a person can move the journey.') : action.available || waitingForGate ? '' : action.reason ?? ''
+  if (approval.value?.decision === null && !canDecideApproval(approval.value, can)) { disabled = true; tip = 'Deciding this gate requires approval and action permissions.' }
   if (gate.value && !approval.value && action.key !== 'decide') { disabled = true; tip = tip || `Waiting for the ${gate.value} gate: an agent asks for it, you approve it here.` }
   // A pending gate is approved by the same click; labels that already say "Approve" stay as they are.
   const label = gate.value && approval.value?.decision === null && action.key !== 'decide' && !/^Approve /.test(action.label) ? `Approve and ${action.label.charAt(0).toLowerCase()}${action.label.slice(1)}` : action.label
@@ -136,6 +139,7 @@ const next = computed<NextState>(() => {
 })
 async function act(action: ActionKey, options: { approval?: Approval | null; reason?: string; done?: string } = {}) {
   try {
+    if (!canAct.value || (options.approval?.decision === null && !canDecideApproval(options.approval, can))) throw new Error('You do not have permission to take this step.')
     const before = journey.value?.stage
     // The person who decides the gate is the one who takes the step (the server checks it).
     if (options.approval && options.approval.decision === null) await agents.decide(options.approval, 'approved', '')
