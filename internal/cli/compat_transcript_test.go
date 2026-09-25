@@ -244,6 +244,18 @@ func TestOnboardCompatTranscript(t *testing.T) {
 	if code != 0 || stderr != "" || !strings.Contains(out, "identical") {
 		t.Fatalf("check %d %q %q", code, out, stderr)
 	}
+	code, out, stderr = runCLI(append(args, "--json"), "")
+	if code != 0 || stderr != "" {
+		t.Fatalf("JSON render %d %q %q", code, out, stderr)
+	}
+	var result struct {
+		Path  string `json:"path"`
+		Rev   string `json:"rev"`
+		Bytes int    `json:"bytes"`
+	}
+	if err := json.Unmarshal([]byte(out), &result); err != nil || result.Path != path || result.Rev == "" || result.Bytes == 0 {
+		t.Fatalf("JSON render %q: %+v, %v", out, result, err)
+	}
 }
 
 func TestHarnessCompatTranscripts(t *testing.T) {

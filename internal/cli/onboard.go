@@ -101,6 +101,9 @@ func (rt *runtime) onboard(project, agent, format, outPath string, check bool, r
 	if err := writeRendered(path, body); err != nil {
 		return err
 	}
+	if rt.jsonOut {
+		return rt.printJSON(map[string]any{"path": path, "rev": rev, "bytes": len(body)})
+	}
 	_, err = fmt.Fprintf(rt.stdout, "wrote %s (%d bytes, rev=%s)\n", path, len(body), rev)
 	return err
 }
@@ -155,17 +158,21 @@ func (b briefing) markdown(program string, readingLimit int, includeLow bool) st
 	b.section(&out, "related_project", "Related projects", 5)
 	b.section(&out, "external_system", "Key external systems", 10)
 	b.section(&out, "guideline", "How we work", 10)
-	if len(b.issues) > 0 {
+	if slices.ContainsFunc(b.issues, func(n apiNode) bool {
+		return n.State == "done" || n.State == "delivered" || n.State == "cancelled"
+	}) {
 		fmt.Fprintln(&out, "## Recent context")
 		fmt.Fprintln(&out)
+		recent := append([]apiNode(nil), b.issues...)
+		slices.SortFunc(recent, func(a, c apiNode) int { return c.UpdatedAt.Compare(a.UpdatedAt) })
 		count := 0
-		for _, n := range b.issues {
-			if n.State == "done" || n.State == "closed" || n.State == "cancelled" {
+		for _, n := range recent {
+			if n.State != "done" && n.State != "delivered" && n.State != "cancelled" {
 				continue
 			}
 			fmt.Fprintf(&out, "- `%s` — %s _(%s, %s)_\n", n.Key, n.Title, n.State, n.UpdatedAt.UTC().Format("2006-01-02"))
 			count++
-			if count == 10 {
+			if count == 5 {
 				break
 			}
 		}
