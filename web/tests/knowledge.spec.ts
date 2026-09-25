@@ -23,6 +23,8 @@ async function axe(page: Page) {
 }
 
 test('the Knowledge tab groups by kind, filters, searches the text and moves with keys', async ({ page }) => {
+  // Below the docking width an entry opens on its own page (wide screens: knowledge-dock.spec.ts).
+  await page.setViewportSize({ width: 1100, height: 800 })
   const errors = watchErrors(page)
   const { calls } = await open(page, '/p/PHAROS')
   await page.getByRole('radio', { name: 'Knowledge' }).click()
@@ -241,7 +243,9 @@ test('the palette finds knowledge by its words and leads to the tab and the sear
   await expect(knowledge).toHaveText([/Deploy a release to production.*runbook\/deploy-release/])
   await expect(palette.getByRole('option', { name: /Search all knowledge for “rollback”/ })).toBeVisible()
   await page.keyboard.press('Enter')
-  await expect(page).toHaveURL(entry)
+  // Wide, the entry opens docked beside its project's list.
+  await expect(page).toHaveURL('/p/PHAROS/knowledge?entry=runbook/deploy-release')
+  await expect(page.getByRole('complementary', { name: 'Runbook: Deploy a release to production' })).toBeVisible()
   await page.keyboard.press('Control+k')
   await page.keyboard.type('new knowledge')
   await palette.getByRole('option', { name: /New knowledge entry in PHAROS/ }).click()

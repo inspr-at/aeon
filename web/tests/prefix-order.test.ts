@@ -13,7 +13,6 @@ import { join, relative } from 'node:path'
 const root = new URL('../src/', import.meta.url).pathname
 // Files other packages own right now; each entry names its owner and must still match.
 const ALLOW: { file: string; why: string }[] = [
-  { file: 'components/knowledge/KnowledgeEntryPage.vue', why: 'Knowledge, AEON-138' },
 ]
 
 function files(dir: string): string[] {
