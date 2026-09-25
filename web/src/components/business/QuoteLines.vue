@@ -7,6 +7,7 @@ import { blankLine, isBlank, moveLine, type Draft, type LineResult } from '../..
 import { formatAmount, ratePercent } from './money'
 import { useBusiness } from '../../stores/business'
 import AppIcon from './BizIcon.vue'
+import KeyCap from '../KeyCap.vue'
 
 // Line items like a small spreadsheet: Tab to the next cell, Enter to the same
 // cell in the next line (a new line at the end), Shift+Enter back up, Alt+arrows
@@ -15,6 +16,7 @@ import AppIcon from './BizIcon.vue'
 // stored rates and amounts, never today's.
 const props = defineProps<{ draft: Draft | null; results: LineResult[]; frozen: QuoteVersion | null; editable: boolean }>()
 const emit = defineEmits<{ save: []; changed: [] }>()
+const mac = /Mac|iPhone|iPad/.test(navigator.platform || navigator.userAgent)
 const business = useBusiness()
 const grid = ref<HTMLElement>()
 const dragFrom = ref<number | null>(null)
@@ -136,7 +138,7 @@ defineExpose({ focusFirst: () => focusCell(0, 'description'), focusLast: () => f
         v-for="(line, index) in draft.lines" :key="line.id" class="line" :class="{ dragging: dragFrom === index, 'drop-before': dropAt?.index === index && !dropAt.after, 'drop-after': dropAt?.index === index && dropAt.after, problem: results[index]?.problem }"
         @dragover="dragOver($event, index)"
       >
-        <span class="c-grip" :draggable="editable" :data-tip="editable ? 'Drag to reorder · Alt+↑ ↓' : undefined" @dragstart="dragStart($event, index)"><AppIcon v-if="editable" name="grip" :size="14" /></span>
+        <span class="c-grip" :draggable="editable" :data-tip="editable ? `Drag to reorder · ${mac ? 'Option' : 'Alt'} Up or Down` : undefined" @dragstart="dragStart($event, index)"><AppIcon v-if="editable" name="grip" :size="14" /></span>
         <span class="c-pos mono">{{ index + 1 }}</span>
         <span class="c-desc">
           <input v-model="line.description" class="cell" :data-row="index" data-col="description" :aria-label="`Line ${index + 1} description`" placeholder="What is offered" maxlength="2000" :readonly="!editable" autocomplete="off" @input="changed" />
@@ -171,13 +173,13 @@ defineExpose({ focusFirst: () => focusCell(0, 'description'), focusLast: () => f
           <span v-else-if="line.costUnitId" class="rate-hint warn">no {{ line.unit }} rate</span>
         </span>
         <span class="c-act">
-          <button v-if="editable" type="button" class="icon-btn sm flat remove" :aria-label="`Remove line ${index + 1}`" data-tip="Remove line · ⌘⌫" @click="remove(index)"><AppIcon name="trash" :size="13" /></button>
+          <button v-if="editable" type="button" class="icon-btn sm flat remove" :aria-label="`Remove line ${index + 1}`" :data-tip="`Remove line · ${mac ? 'Cmd' : 'Ctrl'} Backspace`" @click="remove(index)"><AppIcon name="trash" :size="13" /></button>
         </span>
       </li>
     </ol>
     <div v-if="editable && draft" class="lines-foot">
       <button type="button" class="add-line" @click="addAfter(draft.lines.length - 1); focusCell(draft.lines.length - 1, 'description')"><AppIcon name="plus" :size="12" />Add line</button>
-      <span class="keys-hint" aria-hidden="true"><kbd class="keycap">Tab</kbd> next cell · <kbd class="keycap"><AppIcon name="enter" /></kbd> next line · <kbd class="keycap">⌥</kbd><kbd class="keycap"><AppIcon name="arrow-up" /></kbd> move</span>
+      <span class="keys-hint" aria-hidden="true"><kbd class="keycap">Tab</kbd> next cell · <kbd class="keycap"><AppIcon name="enter" /></kbd> next line · <KeyCap k="alt" /><KeyCap k="up" /> move</span>
     </div>
   </div>
 </template>

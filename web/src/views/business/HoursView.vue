@@ -449,9 +449,9 @@ const waitingCount = computed(() => allPeriods.value.filter(p => p.state === 'op
           <AppIcon :name="isAgent ? 'agent' : 'user'" :size="13" />{{ personName }}<AppIcon name="chevron" :size="12" class="chev" />
         </button>
         <div class="week-nav" role="group" aria-label="Week">
-          <button type="button" class="icon-btn sm" aria-label="Previous week" aria-keyshortcuts="ArrowLeft" data-tip="Previous week · ←" @click="shiftWeek(-1)"><AppIcon name="chevron-left" :size="14" /></button>
+          <button type="button" class="icon-btn sm" aria-label="Previous week" aria-keyshortcuts="ArrowLeft" data-tip="Previous week · Left arrow" @click="shiftWeek(-1)"><AppIcon name="chevron-left" :size="14" /></button>
           <span class="week-label"><b>Week {{ isoWeek(weekStart) }}</b><span>{{ weekLabel(weekStart) }}</span></span>
-          <button type="button" class="icon-btn sm" aria-label="Next week" aria-keyshortcuts="ArrowRight" data-tip="Next week · →" @click="shiftWeek(1)"><AppIcon name="chevron-right" :size="14" /></button>
+          <button type="button" class="icon-btn sm" aria-label="Next week" aria-keyshortcuts="ArrowRight" data-tip="Next week · Right arrow" @click="shiftWeek(1)"><AppIcon name="chevron-right" :size="14" /></button>
           <button v-if="!thisWeek" type="button" class="btn sm ghost" aria-keyshortcuts="t" @click="go({ week: undefined })">This week</button>
         </div>
       </template>

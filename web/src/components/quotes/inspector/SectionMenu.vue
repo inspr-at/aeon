@@ -32,8 +32,8 @@ void props
   <FloatingPanel :anchor="anchor" :width="236" :label="label" @close="restore => emit('close', restore)">
     <div class="section-menu" role="menu" :aria-label="label" @keydown="keys">
       <button type="button" role="menuitem" class="menu-item" data-autofocus @click="pick('add')"><QuoteIcon name="section-add" :size="15" /><span>Add section below</span></button>
-      <button type="button" role="menuitem" class="menu-item" :disabled="index === 0" @click="pick('up')"><QuoteIcon name="arrow-up" :size="15" /><span>Move up</span><kbd class="menu-keys">{{ mac ? '⌥' : 'Alt' }}↑</kbd></button>
-      <button type="button" role="menuitem" class="menu-item" :disabled="index >= count - 1" @click="pick('down')"><QuoteIcon name="arrow-down" :size="15" /><span>Move down</span><kbd class="menu-keys">{{ mac ? '⌥' : 'Alt' }}↓</kbd></button>
+      <button type="button" role="menuitem" class="menu-item" :disabled="index === 0" @click="pick('up')"><QuoteIcon name="arrow-up" :size="15" /><span>Move up</span><kbd class="menu-keys" aria-hidden="true">{{ mac ? 'Option' : 'Alt' }} Up</kbd></button>
+      <button type="button" role="menuitem" class="menu-item" :disabled="index >= count - 1" @click="pick('down')"><QuoteIcon name="arrow-down" :size="15" /><span>Move down</span><kbd class="menu-keys" aria-hidden="true">{{ mac ? 'Option' : 'Alt' }} Down</kbd></button>
       <div class="menu-sep" role="separator" />
       <button type="button" role="menuitem" class="menu-item quiet" @click="pick('remove')"><QuoteIcon name="trash" :size="15" /><span>Delete section</span></button>
     </div>

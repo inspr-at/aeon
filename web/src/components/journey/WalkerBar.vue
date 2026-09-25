@@ -154,8 +154,8 @@ defineExpose({ reveal })
   <header class="walker-bar" :class="{ ovf: overflow, dragging }">
     <div class="rt2"><span class="eyebrow">{{ releaseLabel }}</span><b class="count">{{ inRelease }} of {{ order.length }}</b></div>
     <div class="garrs">
-      <button type="button" class="garr" aria-label="Previous feature" data-tip="Previous feature · Shift ←" @click="emit('feature', -1)"><AppIcon name="chevron-left" :size="14" /></button>
-      <button type="button" class="garr" aria-label="Previous ticket" data-tip="Previous ticket · ←" @click="emit('step', -1)"><AppIcon name="chevron-left" :size="14" /></button>
+      <button type="button" class="garr" aria-label="Previous feature" data-tip="Previous feature · Shift Left arrow" @click="emit('feature', -1)"><AppIcon name="chevron-left" :size="14" /></button>
+      <button type="button" class="garr" aria-label="Previous ticket" data-tip="Previous ticket · Left arrow" @click="emit('step', -1)"><AppIcon name="chevron-left" :size="14" /></button>
     </div>
     <div
       ref="nav" class="nav" :class="{ 'fade-l': fadeLeft, 'fade-r': fadeRight }" role="group" aria-label="Features and tickets"
@@ -201,8 +201,8 @@ defineExpose({ reveal })
     </div>
     <span ref="thumb" class="navthumb" :class="{ drag: dragging }" aria-hidden="true" />
     <div class="garrs">
-      <button type="button" class="garr" aria-label="Next feature" data-tip="Next feature · Shift →" @click="emit('feature', 1)"><AppIcon name="chevron-right" :size="14" /></button>
-      <button type="button" class="garr" aria-label="Next ticket" data-tip="Next ticket · →" @click="emit('step', 1)"><AppIcon name="chevron-right" :size="14" /></button>
+      <button type="button" class="garr" aria-label="Next feature" data-tip="Next feature · Shift Right arrow" @click="emit('feature', 1)"><AppIcon name="chevron-right" :size="14" /></button>
+      <button type="button" class="garr" aria-label="Next ticket" data-tip="Next ticket · Right arrow" @click="emit('step', 1)"><AppIcon name="chevron-right" :size="14" /></button>
     </div>
     <div class="tools">
       <button type="button" class="gic" aria-label="Find a ticket" aria-keyshortcuts="/" data-tip="Find a ticket · /" @click="emit('search')"><AppIcon name="search" :size="15" /></button>

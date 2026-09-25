@@ -7,6 +7,7 @@ import { hours, type WalkerTicket } from '../../lib/journey'
 import type { Plan } from '../../lib/usePlan'
 import { statusMeta } from '../../lib/work'
 import AppIcon from '../AppIcon.vue'
+import KeyCap from '../KeyCap.vue'
 import MarkdownBody from '../MarkdownBody.vue'
 import WalkerBar from './WalkerBar.vue'
 
@@ -210,7 +211,7 @@ const touch = window.matchMedia('(hover: none)').matches
 
         <div v-if="current.length" class="pill" role="group" aria-label="Screens">
           <button v-for="(s, i) in current" :key="s.id" type="button" class="pill-btn" :aria-pressed="i === screen" @click="screen = i; compare = false">{{ s.caption || s.name }}</button>
-          <kbd v-if="current.length > 1" class="keycap" aria-hidden="true">↑↓</kbd>
+          <span v-if="current.length > 1" class="pill-keys" aria-hidden="true"><KeyCap k="up" /><KeyCap k="down" /></span>
           <span class="pill-sep" aria-hidden="true" />
           <button v-if="current.length > 1" type="button" class="pill-btn" :aria-pressed="compare" aria-keyshortcuts="c" @click="compare = !compare; zoom = false">Compare</button>
           <button type="button" class="pill-btn" :aria-pressed="zoom" aria-keyshortcuts="z" @click="zoom = !zoom; compare = false">100 %</button>
@@ -220,8 +221,8 @@ const touch = window.matchMedia('(hover: none)').matches
           <span>Swipe, or use the arrows below, to move between tickets.</span>
         </div>
         <div v-else-if="hint && ticket" class="hint-bubble" role="note" @click="dismissHint">
-          <span><kbd class="keycap">←</kbd><kbd class="keycap">→</kbd> tickets</span>
-          <span><kbd class="keycap">↑</kbd><kbd class="keycap">↓</kbd> screens</span>
+          <span><KeyCap k="left" /><KeyCap k="right" /> tickets</span>
+          <span><KeyCap k="up" /><KeyCap k="down" /> screens</span>
           <span v-if="editable"><kbd class="keycap">Space</kbd> include</span>
           <span><kbd class="keycap">?</kbd> all shortcuts</span>
         </div>
@@ -258,9 +259,9 @@ const touch = window.matchMedia('(hover: none)').matches
       <section class="sheet" role="dialog" aria-label="Walker shortcuts">
         <header><h2>Shortcuts</h2><button type="button" class="xbtn" aria-label="Close shortcuts" @click="sheet = false"><AppIcon name="close" :size="14" /></button></header>
         <dl>
-          <div><dt><kbd class="keycap">←</kbd><kbd class="keycap">→</kbd></dt><dd>Previous / next ticket, wraps around</dd></div>
-          <div><dt><kbd class="keycap">Shift</kbd><kbd class="keycap">←</kbd><kbd class="keycap">→</kbd></dt><dd>Previous / next feature</dd></div>
-          <div><dt><kbd class="keycap">↑</kbd><kbd class="keycap">↓</kbd></dt><dd>Screens of this ticket</dd></div>
+          <div><dt><KeyCap k="left" /><KeyCap k="right" /></dt><dd>Previous / next ticket, wraps around</dd></div>
+          <div><dt><kbd class="keycap">Shift</kbd><KeyCap k="left" /><KeyCap k="right" /></dt><dd>Previous / next feature</dd></div>
+          <div><dt><KeyCap k="up" /><KeyCap k="down" /></dt><dd>Screens of this ticket</dd></div>
           <div v-if="editable"><dt><kbd class="keycap">Space</kbd></dt><dd>Include in the release / defer (or the checkbox on the ticket)</dd></div>
           <div><dt><kbd class="keycap">C</kbd></dt><dd>Compare two screens</dd></div>
           <div><dt><kbd class="keycap">Z</kbd></dt><dd>Zoom to 100 %</dd></div>
@@ -315,6 +316,7 @@ const touch = window.matchMedia('(hover: none)').matches
 .pill-btn:hover { color: var(--ink); background: var(--row-hover); }
 .pill-btn[aria-pressed="true"] { background: var(--chip-teal-bg); color: var(--teal-ink); box-shadow: inset 0 0 0 1px var(--chip-teal-line); }
 .pill-btn:focus-visible { box-shadow: var(--focus-ring); }
+.pill-keys { display: inline-flex; flex-shrink: 0; gap: 2px; }
 .pill-sep { width: 1px; height: 18px; margin: 0 4px; background: var(--line-2); flex-shrink: 0; }
 /* The first-use hint: a dark bubble in both themes. */
 .hint-bubble { position: absolute; top: 18px; left: 18px; z-index: 4; display: grid; grid-template-columns: auto auto; gap: 8px 16px; padding: 12px 14px; border-radius: 12px; background: rgba(16, 35, 39, .94); color: #fffefa; font-size: 12.5px; box-shadow: 0 16px 40px -18px rgba(0, 0, 0, .6); cursor: pointer; }

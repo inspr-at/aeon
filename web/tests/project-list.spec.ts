@@ -239,7 +239,8 @@ test('? opens the shortcut sheet', async ({ page }) => {
   await page.keyboard.press('Shift+?')
   const sheet = page.getByRole('dialog', { name: 'Keyboard shortcuts' })
   await expect(sheet).toBeVisible()
-  await expect(sheet.locator('.keycap').first()).toHaveText(/^(⌘|Ctrl)$/)
+  // Command is drawn (an SVG with its name for screen readers), never the ⌘ text symbol.
+  await expect(sheet.locator('.keycap').first()).toHaveText(/^(Command|Ctrl)$/)
   await expect(sheet).toContainText('Search tickets, projects and actions')
   await expect(sheet).toContainText('Search this list')
   await page.keyboard.press('Escape')

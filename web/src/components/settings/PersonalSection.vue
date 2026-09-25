@@ -7,6 +7,7 @@ import { setTheme, themeChoice, type ThemeChoice } from '../../lib/theme'
 import { toast } from '../../lib/toast'
 import { useProfile } from '../../stores/profile'
 import AppIcon from '../AppIcon.vue'
+import KeyCap from '../KeyCap.vue'
 import ProfileCard from './ProfileCard.vue'
 import SettingsCard from './SettingsCard.vue'
 
@@ -47,9 +48,8 @@ async function setGreeting(on: boolean) {
 }
 onMounted(() => { void store.load() })
 
-const mac = /Mac|iPhone|iPad/.test(navigator.platform || navigator.userAgent)
 const KEYS: { keys: string[][]; label: string }[] = [
-  { keys: [[mac ? '⌘' : 'Ctrl', 'K']], label: 'Search everything' },
+  { keys: [['mod', 'K']], label: 'Search everything' },
   { keys: [['g', 'p'], ['g', 'a'], ['g', 'b']], label: 'Go to Projects, Agents or Business' },
   { keys: [['?']], label: 'All shortcuts on the page you are on' },
 ]
@@ -92,7 +92,7 @@ const KEYS: { keys: string[][]; label: string }[] = [
       <template #aside><button type="button" class="btn sm" aria-keyshortcuts="?" @click="run({ name: 'shortcuts' })">All shortcuts<kbd class="keycap" aria-hidden="true">?</kbd></button></template>
       <dl class="keys">
         <div v-for="row in KEYS" :key="row.label">
-          <dt><template v-for="(combo, i) in row.keys" :key="i"><span v-if="i" class="or" aria-hidden="true">·</span><span class="combo"><kbd v-for="k in combo" :key="k" class="keycap">{{ k }}</kbd></span></template></dt>
+          <dt><template v-for="(combo, i) in row.keys" :key="i"><span v-if="i" class="or" aria-hidden="true">·</span><span class="combo"><KeyCap v-for="k in combo" :key="k" :k="k" /></span></template></dt>
           <dd>{{ row.label }}</dd>
         </div>
       </dl>

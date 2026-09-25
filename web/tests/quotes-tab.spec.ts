@@ -201,7 +201,7 @@ test('quote creation sends an incomplete sender to business settings', async ({ 
   const dialog = page.getByRole('dialog', { name: 'New quote' })
   await expect(dialog.getByRole('alert')).toContainText('Set up the sender first')
   await expect(dialog.getByRole('button', { name: 'Create quote' })).toBeDisabled()
-  await dialog.getByRole('link', { name: 'Open Settings › Business' }).click()
+  await dialog.getByRole('link', { name: 'Open Business settings' }).click()
   await expect(page).toHaveURL(/\/settings\/business/)
   expect(calls.filter(call => call.method === 'POST' && call.path === '/api/quotes')).toHaveLength(0)
 })
@@ -241,7 +241,7 @@ test('without a sender the dialog says what to set up first and creates nothing'
   await page.getByRole('button', { name: 'New quote' }).click()
   const dialog = page.getByRole('dialog', { name: 'New quote' })
   await expect(dialog.getByText('Set up the sender first')).toBeVisible()
-  await expect(dialog.getByRole('link', { name: 'Open Settings › Business' })).toBeVisible()
+  await expect(dialog.getByRole('link', { name: 'Open Business settings' })).toBeVisible()
   await expect(dialog.getByRole('button', { name: 'Create quote' })).toBeDisabled()
 })
 

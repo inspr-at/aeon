@@ -15,7 +15,8 @@ import SegmentedControl, { type Segment } from './SegmentedControl.vue'
 const props = defineProps<{ editor: QuoteEditor; state: TextState; editable: boolean }>()
 const emit = defineEmits<{ run: [command: () => void] }>()
 const mac = /Mac|iPhone|iPad/.test(navigator.platform || navigator.userAgent)
-const mod = mac ? '⌘' : 'Ctrl+'
+// Tooltips spell keys as words, as everywhere else ("Close · Esc").
+const mod = mac ? 'Cmd ' : 'Ctrl '
 type Bullet = Exclude<QuoteMarker, 'decimal'>
 const LISTS: Segment<'none' | 'bullet' | 'numbered'>[] = [
   { value: 'none', label: 'None', icon: 'list-none', tip: 'Plain paragraphs' },
@@ -23,8 +24,8 @@ const LISTS: Segment<'none' | 'bullet' | 'numbered'>[] = [
   { value: 'numbered', label: 'Numbers', icon: 'list-numbered', tip: 'Numbered list' },
 ]
 const BULLETS: Segment<Bullet>[] = [
-  { value: 'disc', label: 'Dot', glyph: '•' }, { value: 'circle', label: 'Circle', glyph: '◦' },
-  { value: 'square', label: 'Square', glyph: '▪' }, { value: 'dash', label: 'Dash', glyph: '–' },
+  { value: 'disc', label: 'Dot', icon: 'bullet-disc', hideLabel: true }, { value: 'circle', label: 'Circle', icon: 'bullet-circle', hideLabel: true },
+  { value: 'square', label: 'Square', icon: 'bullet-square', hideLabel: true }, { value: 'dash', label: 'Dash', icon: 'dash', hideLabel: true },
 ]
 const SEQUENCE: Segment<'follow' | 'continue' | 'start'>[] = [
   { value: 'follow', label: 'Automatic', icon: 'list-follow', tip: 'Counts on within the list; text in between starts it again at 1' },
@@ -97,7 +98,7 @@ const isItem = computed(() => s.value.list === 'bullet' || s.value.list === 'num
       <div class="level-row">
         <span class="level-text">{{ level ? `Level ${level}` : s.depth === 'mixed' ? 'Mixed levels' : 'Not in a list' }}<span v-if="level" class="level-of"> of 6</span></span>
         <div class="level-tools">
-          <button type="button" class="tool" :disabled="disabled || !s.canOutdent" :data-tip="s.canOutdent ? 'Outdent · ⇧Tab' : 'Already at the outermost level'" aria-label="Outdent" @mousedown.prevent @click="run(() => editor.outdent())"><QuoteIcon name="outdent" :size="15" /></button>
+          <button type="button" class="tool" :disabled="disabled || !s.canOutdent" :data-tip="s.canOutdent ? 'Outdent · Shift Tab' : 'Already at the outermost level'" aria-label="Outdent" @mousedown.prevent @click="run(() => editor.outdent())"><QuoteIcon name="outdent" :size="15" /></button>
           <button type="button" class="tool" :disabled="disabled || !s.canIndent" :data-tip="s.canIndent ? 'Indent · Tab' : 'Already at the deepest level'" aria-label="Indent" @mousedown.prevent @click="run(() => editor.indent())"><QuoteIcon name="indent" :size="15" /></button>
         </div>
       </div>

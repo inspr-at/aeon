@@ -9,6 +9,7 @@ import { useTicket } from '../../lib/useTicket'
 import { absoluteTime, kindLabel, priorityLabel, relativeTime, statusMeta, statusOptions } from '../../lib/work'
 import { useAttachments } from '../../lib/useAttachments'
 import AppIcon from '../AppIcon.vue'
+import KeyCap from '../KeyCap.vue'
 import ActivityTimeline from './ActivityTimeline.vue'
 import AttachmentLightbox from './AttachmentLightbox.vue'
 import AttachmentStrip from './AttachmentStrip.vue'
@@ -194,7 +195,6 @@ async function attachmentId(file: File) { return (await attachments.upload(file)
 function openAttachment(id: string) { lightbox.value?.open(id) }
 
 const root = ref<HTMLElement>()
-const mac = /Mac|iPhone|iPad/.test(navigator.platform || navigator.userAgent)
 const scroller = ref<HTMLElement>()
 const title = ref<InstanceType<typeof InlineTitle>>()
 const descSection = ref<InstanceType<typeof MarkdownSection>>()
@@ -340,7 +340,7 @@ defineExpose({
         <section class="edit-section" aria-labelledby="edit-notes"><h3 id="edit-notes" class="eyebrow">Notes</h3>
           <MarkdownEditor v-model="draft.notes" label="Notes" bare :split="mode === 'full'" :min-rows="3" :attachment-id="attachmentId" @save="saveEdit" @cancel="cancelEdit" />
         </section>
-        <p class="edit-hint"><kbd class="keycap">{{ mac ? '⌘' : 'Ctrl' }}</kbd><kbd class="keycap"><AppIcon name="enter" /></kbd> save · <kbd class="keycap">esc</kbd> cancel · paste or drop images to attach them</p>
+        <p class="edit-hint"><KeyCap k="mod" /><KeyCap k="enter" /> save · <kbd class="keycap">esc</kbd> cancel · paste or drop images to attach them</p>
       </form>
 
       <div v-else class="ws-grid">

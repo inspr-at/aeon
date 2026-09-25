@@ -8,10 +8,11 @@ import { highlight } from '../../lib/work'
 import { useBusiness } from '../../stores/business'
 import { useCustomers } from '../../stores/customers'
 import AppIcon from '../AppIcon.vue'
+import KeyCap from '../KeyCap.vue'
 import BizIcon from './BizIcon.vue'
 
 // A new quote: who it is for and what it is called. The document starts from the
-// workspace's sender and texts (Settings › Business), the customer's address and
+// workspace's sender and texts (the Business settings), the customer's address and
 // today's date; its number and the customer's number are assigned on creation.
 // Opened from a customer's page, the customer is already chosen.
 const emit = defineEmits<{ created: [quote: QuoteProjection, customer: string] }>()
@@ -34,7 +35,6 @@ const error = ref('')
 const touched = ref(false)
 const settings = ref<'loading' | 'ready' | 'missing' | 'error'>('loading')
 let opener: HTMLElement | null = null
-const mod = /Mac|iPhone|iPad/.test(navigator.platform || navigator.userAgent) ? '⌘' : 'Ctrl'
 
 // Archived customers are left out of the choice; one fixed by its page still shows.
 const all = computed(() => (customers.items ?? []).filter(c => !c.archived))
@@ -128,9 +128,9 @@ defineExpose({ open })
         <span class="gate-icon"><BizIcon name="seal" :size="16" /></span>
         <div>
           <p class="gate-title">Set up the sender first</p>
-          <p v-if="business.admin">A quote carries your company’s name, address and bank details. Add them once in Settings › Business; every new quote starts from them.</p>
-          <p v-else>A quote carries the company’s name, address and bank details. A workspace admin adds them in Settings › Business.</p>
-          <RouterLink v-if="business.admin" class="btn sm" to="/settings/business" @click="close">Open Settings › Business</RouterLink>
+          <p v-if="business.admin">A quote carries your company’s name, address and bank details. Add them once in the Business settings; every new quote starts from them.</p>
+          <p v-else>A quote carries the company’s name, address and bank details. A workspace admin adds them in the Business settings.</p>
+          <RouterLink v-if="business.admin" class="btn sm" to="/settings/business" @click="close">Open Business settings</RouterLink>
         </div>
       </div>
       <p v-else-if="settings === 'error'" class="f-error" role="alert"><AppIcon name="alert" :size="14" />The quote settings could not be read, so nothing can be created right now.</p>
@@ -181,7 +181,7 @@ defineExpose({ open })
       </div>
       <p v-if="error" class="f-error" role="alert"><AppIcon name="alert" :size="14" />{{ error }}</p>
       <footer class="create-foot">
-        <p class="f-hint"><kbd class="keycap">{{ mod }}</kbd><kbd class="keycap"><AppIcon name="enter" /></kbd> creates · <kbd class="keycap">esc</kbd> closes</p>
+        <p class="f-hint"><KeyCap k="mod" /><KeyCap k="enter" /> creates · <kbd class="keycap">esc</kbd> closes</p>
         <button type="button" class="btn" @click="close">Cancel</button>
         <button type="submit" class="btn primary" :disabled="busy || settings !== 'ready'"><AppIcon name="plus" :size="14" />{{ busy ? 'Creating…' : 'Create quote' }}</button>
       </footer>
