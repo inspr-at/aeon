@@ -6,7 +6,7 @@ import { minorMoney } from '../../lib/crm'
 import { usePreference } from '../../lib/preferences'
 import { settingsLink } from '../../lib/settings'
 import { DEFAULT_SORT, STATUSES, STATUS_META, amountActive, blankFilter, dateActive, firstDir, matchesQuote, narrowed, sortQuotes, statusOf, todayIso, type ColumnId, type QuoteRow, type Sort } from '../../lib/quotes/list'
-import { acceptanceNotices, branchQuote, createLink, deleteQuote, duplicateQuote, finalizeQuote, getLink, getVersion, issueConfirm, issueError, lifecycleError, linkState, linkUrl, reviseConfirm, setArchived, undoQuote, type AcceptanceNotice, type QuoteProjection } from '../../lib/quotes/lifecycle'
+import { acceptanceNotices, branchQuote, deleteQuote, duplicateQuote, finalizeQuote, getLink, getVersion, issueConfirm, issueError, lifecycleError, linkState, linkUrl, reviseConfirm, setArchived, undoQuote, type AcceptanceNotice, type QuoteProjection } from '../../lib/quotes/lifecycle'
 import { getDraft } from '../../lib/quotes/api'
 import { quoteActions, type LinkState, type QuoteActionId } from '../../lib/quotes/actions'
 import { confirmAction } from '../../lib/confirm'
@@ -158,15 +158,11 @@ async function act(row: QuoteRow, id: QuoteActionId) {
     case 'pdf': void router.push({ path: `/business/quotes/${encodeURIComponent(row.quote_node_id)}`, query: { print: '1' } }); return
     case 'link': {
       if (state?.link === 'copy' && state.url) { menu.value = null; await copyText(state.url, `Copied the customer link of ${nameOf(row)}.`); return }
-      busy.value = 'link'
-      try {
-        const link = await createLink(row.quote_node_id, row.current_version, new Date(Date.now() + 30 * 86_400_000).toISOString())
-        menu.value = null
-        const until = new Intl.DateTimeFormat('en-GB', { day: 'numeric', month: 'short', year: 'numeric' }).format(new Date(link.expires_at))
-        try { await navigator.clipboard.writeText(linkUrl(link)) } catch { /* the toast still says where it is */ }
-        toast(`Created a customer link for ${nameOf(row)}, open until ${until}, and copied it.`, { action: { label: 'Undo', run: undoing(row.quote_node_id, ['quote.public_link_created'], () => toast('The link is revoked again.')) }, timeout: 8000 })
-      } catch (e) { menu.value = null; failed(e, 'The link was not created. Nothing changed.') }
-      finally { busy.value = null }
+      // Details keeps a one-time link visible when the server has no host key.
+      // Creating it from this transient menu could lose the only copy.
+      menu.value = null
+      open(row, true)
+      toast(`Create the customer link for ${nameOf(row)} in Details so you can save it.`)
       return
     }
     case 'duplicate': {
@@ -191,7 +187,7 @@ async function act(row: QuoteRow, id: QuoteActionId) {
         const draft = await getDraft(row.quote_node_id)
         await finalizeQuote(row.quote_node_id, { expected_quote_revision: row.revision, expected_draft_revision: draft.draft_revision, expected_document_sha256: draft.document_sha256 })
         await store.load(true)
-        toast(`Issued ${nameOf(row)} as version ${row.current_version + 1}. Its customer link is in Details.`, { action: { label: 'Open', run: () => open(row, true) } })
+        toast(`Issued ${nameOf(row)} as version ${row.current_version + 1}. See its customer link in Details.`, { action: { label: 'Open', run: () => open(row, true) } })
       } catch (e) { toast(issueError(e), { tone: 'error' }); void store.load(true) }
       return
     }

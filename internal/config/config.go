@@ -25,6 +25,10 @@ type Config struct {
 	// AEON_MESSAGING_KEY_FILE contents; in dev without a file it is random and
 	// lives only in memory; in prod without a file it is nil and messaging is off.
 	MessagingKey []byte
+	// LinkKey encrypts retained public quote capabilities. It is derived from
+	// AEON_LINK_KEY_FILE or the existing host messaging-key file. Without a
+	// persistent host key, links can only be shown once.
+	LinkKey []byte
 	// FilesDir is the attachment store root (AEON_FILES_DIR, default data/files).
 	FilesDir string
 }
@@ -64,6 +68,11 @@ func FromEnv() (Config, error) {
 			return Config{}, fmt.Errorf("dev messaging key: %w", err)
 		}
 	}
+	var err error
+	cfg.LinkKey, err = LinkKeyFromEnv()
+	if err != nil {
+		return Config{}, err
+	}
 	if f := os.Getenv("AEON_DATABASE_PASSWORD_FILE"); f != "" {
 		u, err := withPasswordFile(cfg.DatabaseURL, f)
 		if err != nil {
@@ -72,6 +81,31 @@ func FromEnv() (Config, error) {
 		cfg.DatabaseURL = u
 	}
 	return cfg, nil
+}
+
+// LinkKeyFromEnv uses an explicit link file or the existing host messaging
+// key file, with domain separation from messaging encryption. An absent host
+// file has no ephemeral fallback: links must survive a server restart.
+func LinkKeyFromEnv() ([]byte, error) {
+	file := os.Getenv("AEON_LINK_KEY_FILE")
+	name := "AEON_LINK_KEY_FILE"
+	if file == "" {
+		file = os.Getenv("AEON_MESSAGING_KEY_FILE")
+		name = "AEON_MESSAGING_KEY_FILE"
+		if file == "" {
+			return nil, nil
+		}
+	}
+	b, err := os.ReadFile(file)
+	if err != nil {
+		return nil, fmt.Errorf("%s: %w", name, err)
+	}
+	secret := strings.TrimSpace(string(b))
+	if len(secret) < 32 {
+		return nil, fmt.Errorf("%s must hold at least 32 characters", name)
+	}
+	sum := sha256.Sum256([]byte("aeon/link-vault/v1\x00" + secret))
+	return sum[:], nil
 }
 
 // messagingKey reads a host-generated secret file (at least 32 characters)

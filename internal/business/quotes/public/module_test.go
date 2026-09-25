@@ -8,6 +8,7 @@ import (
 	"net/http"
 	"net/http/httptest"
 	"os"
+	"path/filepath"
 	"strings"
 	"sync"
 	"testing"
@@ -131,6 +132,11 @@ type fixture struct {
 
 func newFixture(t *testing.T) *fixture {
 	t.Helper()
+	keyFile := filepath.Join(t.TempDir(), "link-key")
+	if err := os.WriteFile(keyFile, []byte("synthetic-link-key-for-tests-0123456789abcdef\n"), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	t.Setenv("AEON_LINK_KEY_FILE", keyFile)
 	database := dbtest.Open(t)
 	f := &fixture{t: t, pool: database, mux: http.NewServeMux(), tenantID: "aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa", store: attachments.Store{FilesDir: t.TempDir()}}
 	reg := plugins.NewRegistry()
@@ -344,18 +350,131 @@ func TestPublicLinkReadDoesNotRotateCapability(t *testing.T) {
 		t.Fatalf("original capability stopped working: %d", status)
 	}
 	var retained, leaked int
+	var ciphertext []byte
 	token := path[strings.LastIndex(path, "/")+1:]
 	err := db.InTenant(t.Context(), f.pool.App, f.tenantID, func(tx pgx.Tx) error {
-		return tx.QueryRow(t.Context(), `SELECT (SELECT count(*) FROM quote_public_link_tokens t JOIN quote_public_links l ON l.tenant_id=t.tenant_id AND l.id=t.link_id WHERE l.quote_node_id=$1::uuid AND t.token=$2),(SELECT count(*) FROM events WHERE node_id=$1::uuid AND after::text LIKE '%' || $2 || '%')`, id, token).Scan(&retained, &leaked)
+		return tx.QueryRow(t.Context(), `SELECT t.ciphertext,(SELECT count(*) FROM events WHERE node_id=$1::uuid AND after::text LIKE '%' || $2 || '%') FROM quote_public_link_tokens t JOIN quote_public_links l ON l.tenant_id=t.tenant_id AND l.id=t.link_id WHERE l.quote_node_id=$1::uuid`, id, token).Scan(&ciphertext, &leaked)
 	})
-	if err != nil || retained != 1 || leaked != 0 {
-		t.Fatalf("capability storage or event privacy: retained=%d leaked=%d err=%v", retained, leaked, err)
+	if err != nil || len(ciphertext) == 0 || strings.Contains(string(ciphertext), token) || leaked != 0 {
+		t.Fatalf("capability ciphertext or event privacy: bytes=%d leaked=%d err=%v", len(ciphertext), leaked, err)
+	}
+	var plaintextColumns int
+	err = db.InTenant(t.Context(), f.pool.App, f.tenantID, func(tx pgx.Tx) error {
+		return tx.QueryRow(t.Context(), `SELECT count(*) FROM information_schema.columns WHERE table_name='quote_public_link_tokens' AND column_name='token'`).Scan(&plaintextColumns)
+	})
+	if err != nil || plaintextColumns != 0 {
+		t.Fatalf("plaintext token column survives: %d %v", plaintextColumns, err)
 	}
 	err = db.InTenant(t.Context(), f.pool.App, zeroTenant, func(tx pgx.Tx) error {
 		return tx.QueryRow(t.Context(), `SELECT count(*) FROM quote_public_link_tokens`).Scan(&retained)
 	})
 	if err != nil || retained != 0 {
 		t.Fatalf("capability crossed tenant boundary: count=%d err=%v", retained, err)
+	}
+}
+
+func TestPublicLinkWithoutKeyIsShownOnceAndRevocationDeletes(t *testing.T) {
+	f := newFixture(t)
+	id, _, _ := f.issued()
+	url := "/api/quotes/" + id + "/versions/1/public-link"
+	if status, _ := f.call(&f.admin, "POST", url+"/revoke", ""); status != 200 {
+		t.Fatalf("revoke first link: %d", status)
+	}
+	t.Setenv("AEON_LINK_KEY_FILE", "")
+	t.Setenv("AEON_MESSAGING_KEY_FILE", "")
+	module, err := NewWithStore(f.pool.App, f.reg, nil, f.store, "https://example.invalid")
+	if err != nil {
+		t.Fatal(err)
+	}
+	mux := http.NewServeMux()
+	module.Mount(mux)
+	call := func(method, body string) (int, map[string]any) {
+		req := httptest.NewRequest(method, url, strings.NewReader(body))
+		if body != "" {
+			req.Header.Set("Content-Type", "application/json")
+		}
+		req = req.WithContext(tenant.WithPrincipal(req.Context(), f.admin))
+		rec := httptest.NewRecorder()
+		mux.ServeHTTP(rec, req)
+		return rec.Code, object(t, rec.Body.String())
+	}
+	status, created := call("POST", "")
+	if status != 201 || created["path"] == nil || created["copy_unavailable_reason"] != "key_not_configured" {
+		t.Fatalf("one-time creation: %d %v", status, created)
+	}
+	path := created["path"].(string)
+	status, info := call("GET", "")
+	if status != 200 || info["path"] != nil || info["copy_unavailable_reason"] != "key_not_configured" {
+		t.Fatalf("re-copy was not refused: %d %v", status, info)
+	}
+	if status, _ := f.call(nil, "GET", "/api/public/quotes/"+strings.TrimPrefix(path, "/offers/"), ""); status != 200 {
+		t.Fatalf("one-time capability no longer verifies: %d", status)
+	}
+	status, _ = call("POST", "")
+	if status != 409 {
+		t.Fatalf("active capability rotated: %d", status)
+	}
+	status, body := func() (int, map[string]any) {
+		req := httptest.NewRequest("POST", url+"/revoke", nil).WithContext(tenant.WithPrincipal(t.Context(), f.admin))
+		rec := httptest.NewRecorder()
+		mux.ServeHTTP(rec, req)
+		return rec.Code, object(t, rec.Body.String())
+	}()
+	if status != 200 || body["revoked_at"] == nil {
+		t.Fatalf("revoke one-time link: %d %v", status, body)
+	}
+	var retained int
+	err = db.InTenant(t.Context(), f.pool.App, f.tenantID, func(tx pgx.Tx) error {
+		return tx.QueryRow(t.Context(), `SELECT count(*) FROM quote_public_link_tokens`).Scan(&retained)
+	})
+	if err != nil || retained != 0 {
+		t.Fatalf("revoked vault row remains: %d %v", retained, err)
+	}
+}
+
+func TestPlaintextVaultMigrationEncryptsExistingLink(t *testing.T) {
+	f := newFixture(t)
+	id, _, path := f.issued()
+	token := path[strings.LastIndex(path, "/")+1:]
+	// Recreate the pre-0770 vault schema in this isolated test database.
+	_, err := f.pool.Admin.Exec(t.Context(), `ALTER TABLE quote_public_link_tokens DROP CONSTRAINT quote_public_link_tokens_ciphertext_required`)
+	if err != nil {
+		t.Fatal(err)
+	}
+	_, err = f.pool.Admin.Exec(t.Context(), `ALTER TABLE quote_public_link_tokens ADD COLUMN token text`)
+	if err != nil {
+		t.Fatal(err)
+	}
+	err = db.InTenant(t.Context(), f.pool.App, f.tenantID, func(tx pgx.Tx) error {
+		_, err := tx.Exec(t.Context(), `UPDATE quote_public_link_tokens SET token=$1`, token)
+		return err
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	_, err = f.pool.Admin.Exec(t.Context(), `ALTER TABLE quote_public_link_tokens DROP COLUMN ciphertext`)
+	if err != nil {
+		t.Fatal(err)
+	}
+	_, err = f.pool.Admin.Exec(t.Context(), `DELETE FROM schema_migrations WHERE version IN ('0770_quote_link_ciphertext.sql','0771_quote_link_drop_plaintext.sql')`)
+	if err != nil {
+		t.Fatal(err)
+	}
+	upgraded, err := db.Open(t.Context(), f.pool.URL)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer upgraded.Close()
+	status, body := f.call(&f.admin, "GET", "/api/quotes/"+id+"/versions/1/public-link", "")
+	if status != 200 || object(t, body)["path"] != path {
+		t.Fatalf("migrated link cannot be re-copied: %d %s", status, body)
+	}
+	var plaintextColumns int
+	err = db.InTenant(t.Context(), f.pool.App, f.tenantID, func(tx pgx.Tx) error {
+		return tx.QueryRow(t.Context(), `SELECT count(*) FROM information_schema.columns WHERE table_name='quote_public_link_tokens' AND column_name='token'`).Scan(&plaintextColumns)
+	})
+	if err != nil || plaintextColumns != 0 {
+		t.Fatalf("plaintext column survives migration: %d %v", plaintextColumns, err)
 	}
 }
 func acceptanceBody(digest, mutation string) string {

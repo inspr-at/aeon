@@ -2277,7 +2277,7 @@ paths:
     post:
       operationId: createQuotePublicLink
       summary: Create a scoped capability for the current issued document
-      description: Admin person only. Finalization creates the first link. Explicit creation is for a historical issued version without one, or reissue after revocation. The projection stores only a SHA-256 verifier; the capability is kept separately for repeat copying by admins. Revoke before reissue; expired links stay readable but cannot accept.
+      description: Admin person only. Finalization creates the first link when a persistent link or messaging host key is configured; otherwise explicit creation returns a one-time link. The projection stores only a SHA-256 verifier. Retained capabilities are AES-256-GCM encrypted for admin re-copy. Without a host key re-copy is unavailable. Revoke before reissue; expired links stay readable but cannot accept.
       security: [{session: []}]
       parameters: [{name: quoteId, in: path, required: true, schema: {type: string, format: uuid}}, {name: version, in: path, required: true, schema: {type: integer, minimum: 1}}]
       requestBody: {required: false, content: {application/json: {schema: {type: object, additionalProperties: false, properties: {expires_at: {type: string, format: date-time}}}}}}
@@ -2286,7 +2286,7 @@ paths:
         '409': {$ref: '#/components/responses/Error'}
     get:
       operationId: getQuotePublicLink
-      summary: Read link metadata and the stable path as an admin
+      summary: Read link metadata and, when a host key is available, decrypt the stable path as an admin
       security: [{session: []}]
       parameters: [{name: quoteId, in: path, required: true, schema: {type: string, format: uuid}}, {name: version, in: path, required: true, schema: {type: integer, minimum: 1}}]
       responses:
@@ -3414,8 +3414,9 @@ components:
         target_content_sha256: {type: string, pattern: '^[0-9a-f]{64}$'}
         expires_at: {type: string, format: date-time}
         revoked_at: {type: string, format: date-time}
-        path: {type: string, description: Returned to admins for an active link when its capability is retained; historical links without a retained capability omit it}
+        path: {type: string, description: Returned on creation or to admins for an active link whose retained capability can be decrypted; omitted after one-time delivery without a host key}
         token: {type: string, description: Returned only on creation}
+        copy_unavailable_reason: {type: string, enum: [key_not_configured], description: Active links cannot be re-copied when the server has no persistent link key}
     QuotePublicDocument:
       type: object
       required: [document, offer_no, version, content_sha256, state, expires_at, acceptable, receipt_ready]
