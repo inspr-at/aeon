@@ -61,6 +61,7 @@ func (m *module) Mount(mux *http.ServeMux) {
 	mux.HandleFunc("GET /api/crm/organisations/{organisationId}", m.getCustomer)
 	mux.HandleFunc("PATCH /api/crm/organisations/{organisationId}", m.updateCustomer)
 	mux.HandleFunc("DELETE /api/crm/organisations/{organisationId}", m.deleteCustomer)
+	mux.HandleFunc("PATCH /api/crm/organisations/{organisationId}/visibility", m.customerVisibility)
 	mux.HandleFunc("GET /api/crm/organisations/{organisationId}/contacts", m.listContacts)
 	mux.HandleFunc("POST /api/crm/organisations/{organisationId}/contacts", m.createContact)
 	mux.HandleFunc("GET /api/crm/contacts/{contactId}", m.getContact)

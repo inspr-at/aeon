@@ -6,16 +6,20 @@ import { highlight } from '../../../lib/work'
 import AppIcon from '../../AppIcon.vue'
 import BizIcon from '../../business/BizIcon.vue'
 import QuoteStatusIcon from '../QuoteStatusIcon.vue'
+import type { RowMenuAnchor } from '../../../lib/rowActions'
 
 // The quote list: the ticket list's table (sortable headers, edges to drag or
 // fit, a keyboard cursor) with one row per quote. The quote's title takes the
 // width the other columns leave; every other column keeps the width you give it.
 // Phones get one card per quote instead of columns.
 const props = defineProps<{
-  rows: QuoteRow[]; loading: boolean; query: string; sort: Sort; cursorId: string | null; openId: string | null
+  rows: QuoteRow[]; loading: boolean; query: string; sort: Sort; cursorId: string | null; openId: string | null; menuId?: string | null; canDuplicate?: boolean
   widths: Partial<Record<ColumnId, number>>; today: string
 }>()
-const emit = defineEmits<{ sort: [key: ColumnId]; cursor: [id: string]; open: [row: QuoteRow]; widths: [widths: Partial<Record<ColumnId, number>>]; gridFocus: [] }>()
+const emit = defineEmits<{
+  sort: [key: ColumnId]; cursor: [id: string]; open: [row: QuoteRow]; widths: [widths: Partial<Record<ColumnId, number>>]; gridFocus: []
+  action: [row: QuoteRow, id: 'duplicate' | 'pdf']; menu: [row: QuoteRow, anchor: RowMenuAnchor]
+}>()
 
 const card = ref<HTMLElement>()
 const grid = ref<HTMLTableElement>()
@@ -121,7 +125,24 @@ function soon(row: QuoteRow) {
   const days = (Date.parse(`${row.valid_until}T00:00:00Z`) - Date.parse(`${props.today}T00:00:00Z`)) / 86_400_000
   return days >= 0 && days <= 7
 }
-defineExpose({ focus: () => (phone.value ? card.value?.querySelector<HTMLElement>('.card-link') : grid.value)?.focus() })
+// A right-click opens the row's own menu where the pointer is.
+function contextMenu(event: MouseEvent, row: QuoteRow) {
+  event.preventDefault()
+  emit('cursor', row.quote_node_id)
+  emit('menu', row, { x: event.clientX, y: event.clientY })
+}
+// An inline action moves the cursor to its row, so focus has a place to come back to.
+function inline(row: QuoteRow, id: 'duplicate' | 'pdf') {
+  emit('cursor', row.quote_node_id)
+  emit('action', row, id)
+}
+function more(event: MouseEvent, row: QuoteRow) {
+  emit('cursor', row.quote_node_id)
+  emit('menu', row, event.currentTarget as HTMLElement)
+}
+// The … button of a row, for a menu opened from the keyboard.
+const moreButton = (id: string) => document.querySelector<HTMLElement>(`#quote-${CSS.escape(id)} .row-more`)
+defineExpose({ focus: () => (phone.value ? card.value?.querySelector<HTMLElement>('.card-link') : grid.value)?.focus(), moreButton })
 </script>
 
 <template>
@@ -130,7 +151,7 @@ defineExpose({ focus: () => (phone.value ? card.value?.querySelector<HTMLElement
       <template v-if="loading && !rows.length">
         <li v-for="i in 5" :key="i" class="card-row ghost" aria-hidden="true"><span class="skeleton sk-name" /><span class="skeleton sk-line" /></li>
       </template>
-      <li v-for="row in rows" :id="`quote-${row.quote_node_id}`" :key="row.quote_node_id" class="card-row" :class="{ cursor: cursorId === row.quote_node_id }">
+      <li v-for="row in rows" :id="`quote-${row.quote_node_id}`" :key="row.quote_node_id" class="card-row" :class="{ cursor: cursorId === row.quote_node_id }" @contextmenu="contextMenu($event, row)">
         <RouterLink class="card-link" :to="pageUrl(row)" @click="emit('cursor', row.quote_node_id)">
           <span class="card-top">
             <span class="card-name"><template v-for="(part, i) in highlight(titleOf(row), query)" :key="i"><mark v-if="part.match">{{ part.text }}</mark><template v-else>{{ part.text }}</template></template></span>
@@ -139,19 +160,20 @@ defineExpose({ focus: () => (phone.value ? card.value?.querySelector<HTMLElement
           <span class="card-meta">
             <span class="number mono">{{ numberOf(row) }}</span>
             <QuoteStatusIcon :status="statusOf(row)" :size="13" />
-            <span v-if="row.archived" class="archived">Archived</span>
+            <span v-if="row.archived" class="archived-chip">Archived</span>
           </span>
           <span class="card-sub">
             <span v-if="row.customer_name" class="meta-item"><BizIcon name="building" :size="12" />{{ row.customer_name }}</span>
             <span v-if="row.offer_date" class="meta-item"><BizIcon name="calendar" :size="12" />{{ dayText(row.offer_date) }}</span>
           </span>
         </RouterLink>
+        <button type="button" class="icon-btn sm flat row-more card-more" :aria-label="`Actions for ${numberOf(row)}`" aria-haspopup="menu" :aria-expanded="menuId === row.quote_node_id" @click="more($event, row)"><AppIcon name="more" :size="16" /></button>
       </li>
     </ul>
 
     <table
       v-else ref="grid" class="quotes" role="grid" aria-label="Quotes" :aria-busy="loading" tabindex="0"
-      :aria-activedescendant="cursorId && rows.some(r => r.quote_node_id === cursorId) ? `quote-${cursorId}` : undefined" @focus="emit('gridFocus')"
+      :aria-activedescendant="cursorId && rows.some(r => r.quote_node_id === cursorId) ? `quote-${cursorId}` : undefined" @focus="emit('gridFocus')" @contextmenu.self.prevent
     >
       <colgroup>
         <col v-for="column in columns" :key="column.id" :style="colWidth(column.id) ? { width: `${colWidth(column.id)}px` } : undefined" />
@@ -181,7 +203,7 @@ defineExpose({ focus: () => (phone.value ? card.value?.querySelector<HTMLElement
         <tr
           v-for="row in rows" :id="`quote-${row.quote_node_id}`" :key="row.quote_node_id" class="row"
           :class="{ cursor: cursorId === row.quote_node_id, open: openId === row.quote_node_id, archived: row.archived }"
-          :aria-selected="cursorId === row.quote_node_id" @click="rowClick($event, row)"
+          :aria-selected="cursorId === row.quote_node_id" @click="rowClick($event, row)" @contextmenu="contextMenu($event, row)"
         >
           <template v-for="column in columns" :key="column.id">
             <td v-if="column.id === 'number'" class="c-number">
@@ -194,9 +216,14 @@ defineExpose({ focus: () => (phone.value ? card.value?.querySelector<HTMLElement
                 <a class="title-link" :href="pageUrl(row)" tabindex="-1" @click="linkClick($event)">
                   <template v-for="(part, i) in highlight(titleOf(row), query)" :key="i"><mark v-if="part.match">{{ part.text }}</mark><template v-else>{{ part.text }}</template></template>
                 </a>
-                <span v-if="row.archived" class="archived">Archived</span>
+                <span v-if="row.archived" class="archived-chip">Archived</span>
                 <span v-if="row.project_ref" class="ref">{{ row.project_ref }}</span>
               </div>
+              <span class="row-actions">
+                <button v-if="canDuplicate" type="button" class="icon-btn sm flat" :aria-label="`Duplicate ${numberOf(row)}`" data-tip="Duplicate as a new draft" @click.stop="inline(row, 'duplicate')"><AppIcon name="copy" :size="14" /></button>
+                <button type="button" class="icon-btn sm flat" :aria-label="`Print ${numberOf(row)} or save it as PDF`" data-tip="Print or save as PDF" @click.stop="inline(row, 'pdf')"><BizIcon name="print" :size="14" /></button>
+                <button type="button" class="icon-btn sm flat row-more" :aria-label="`Actions for ${numberOf(row)}`" aria-haspopup="menu" :aria-expanded="menuId === row.quote_node_id" data-tip="All actions · Shift F10" @click.stop="more($event, row)"><AppIcon name="more" :size="15" /></button>
+              </span>
             </td>
             <td v-else-if="column.id === 'customer'" class="c-customer">
               <div class="cell" :data-full="fullOf(row, 'customer')" @pointerover="tipIfCut">
@@ -257,9 +284,20 @@ tbody .row:last-child td { border-bottom: 0; }
 tbody.dim { opacity: .55; }
 .row.archived .title-link { color: var(--ink-2); }
 .number { padding: 2px 7px; border-radius: 6px; background: var(--chip-bg); box-shadow: inset 0 0 0 1px var(--chip-line); color: var(--ink); font: 500 12px/16px var(--mono); font-variant-ligatures: none; overflow: hidden; text-overflow: ellipsis; }
+/* Row actions float over the end of the title cell (as on the ticket list), shown
+   on hover, on the cursor row and while one of them has focus; the title fades
+   out beneath them. */
+td.c-title { position: relative; }
+.row-actions { position: absolute; top: 50%; right: 8px; display: inline-flex; gap: 2px; transform: translateY(-50%); visibility: hidden; }
+.row-actions .icon-btn { width: 26px; height: 26px; color: var(--ink-3); }
+@media (hover: hover) { .row-actions .icon-btn:hover { color: var(--teal-ink); } }
+.row.cursor .row-actions, .row-actions:focus-within { visibility: visible; }
+@media (hover: hover) { .row:hover .row-actions { visibility: visible; } }
+.row.cursor td.c-title .cell, td.c-title:focus-within .cell { -webkit-mask-image: linear-gradient(to left, transparent 88px, #000 116px); mask-image: linear-gradient(to left, transparent 88px, #000 116px); }
+@media (hover: hover) { .row:hover td.c-title .cell { -webkit-mask-image: linear-gradient(to left, transparent 88px, #000 116px); mask-image: linear-gradient(to left, transparent 88px, #000 116px); } }
 .title-link { flex: 0 1 auto; min-width: 0; overflow: hidden; text-overflow: ellipsis; color: var(--ink); font-weight: 600; text-decoration: none; }
 .ref { flex: 0 0 auto; color: var(--ink-3); font-size: 12.5px; }
-.archived { flex: 0 0 auto; height: 18px; padding: 0 7px; border-radius: 999px; background: var(--surface-2); box-shadow: inset 0 0 0 1px var(--line-2); color: var(--ink-2); font: 600 10px/18px var(--mono); letter-spacing: .06em; text-transform: uppercase; font-variant-ligatures: none; }
+.archived-chip { flex: 0 0 auto; height: 18px; padding: 0 7px; border-radius: 999px; background: var(--surface-2); box-shadow: inset 0 0 0 1px var(--line-2); color: var(--ink-2); font: 600 10px/18px var(--mono); letter-spacing: .06em; text-transform: uppercase; font-variant-ligatures: none; }
 .text { overflow: hidden; text-overflow: ellipsis; color: var(--ink-2); }
 .day { color: var(--ink-2); font-variant-numeric: tabular-nums; }
 .day.soon { color: var(--gold-ink); font-weight: 600; }
@@ -270,7 +308,9 @@ tbody.dim { opacity: .55; }
 
 /* Phones */
 .cards { margin: 0; padding: 0; list-style: none; }
-.card-row { border-bottom: 1px solid var(--line); }
+.card-row { position: relative; border-bottom: 1px solid var(--line); }
+.card-more { position: absolute; top: 8px; right: 8px; z-index: 1; width: 36px; height: 36px; color: var(--ink-2); }
+.card-row .card-link { padding-right: 52px; }
 .card-row:last-child { border-bottom: 0; }
 .card-row.ghost { display: grid; gap: 10px; padding: 16px; }
 .sk-name { width: 55%; height: 12px; } .sk-line { width: 80%; }

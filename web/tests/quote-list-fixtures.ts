@@ -3,8 +3,10 @@
 // the customer link (U18): the list with its summary fields, drafts with CAS
 // saves, issue (finalize), revise (branch), duplicate, archive, frozen versions,
 // public links (token shown once), acceptance notices and receipts, presence
-// and its stream. Layered over mockWork and mockCRM; every name, number and
-// amount is invented. No fixed clock: Vue's event timing needs real time.
+// and its stream; deleting a never-issued draft, and an event log whose undo
+// reverses a delete, an archive, a duplicate or a new link (QL1). Layered over
+// mockWork and mockCRM; every name, number and amount is invented. No fixed
+// clock: Vue's event timing needs real time.
 import type { Page, Route } from '@playwright/test'
 import { quoteDocument, type QuoteDoc } from './quote-inspector-fixtures'
 import { HOFER, LUMEN, NORDSTERN } from './crm-fixtures'
@@ -69,9 +71,11 @@ export function quoteWorld(options: { empty?: boolean } = {}) {
   links.set(`${Q.accepted}:1`, { id: 'link-acc', public_tenant: 'sel-demo', quote_node_id: Q.accepted, version: 1, target_content_sha256: DIGEST(3), expires_at: stamp(4), revoked_at: undefined })
   const jobs = new Map<string, Job>([[`${Q.accepted}:1`, { quote_node_id: Q.accepted, version: 1, state: 'ready', attempts: 1, next_attempt_at: stamp(-26), receipt_sha256: 'fe'.repeat(32), renderer_version: 'quote-print chromium-128', updated_at: stamp(-26, 10) }]])
   const notices = [{ quote_node_id: Q.accepted, version: 1, channel: 'public', accepted_at: stamp(-26), confirmation_state: 'ready' }]
-  return { rows, drafts, versions, links, jobs, notices, presence: [] as { session_id: string; principal_id: string; name: string; mode: string; observed_revision: number; expires_at: string; anchor?: unknown }[], counter: { next: 20 } }
+  const events: QuoteEvent[] = []
+  return { rows, drafts, versions, links, jobs, notices, events, deleted: new Map<string, Row>(), presence: [] as { session_id: string; principal_id: string; name: string; mode: string; observed_revision: number; expires_at: string; anchor?: unknown }[], counter: { next: 20 } }
 }
 export type QuoteWorld = ReturnType<typeof quoteWorld>
+export interface QuoteEvent { id: number; node_id: string; type: string; before: unknown; after: unknown; undo_of: number | null }
 export interface QuoteCall { path: string; method: string; body: unknown; query: URLSearchParams; headers: Record<string, string> }
 export interface QuoteMockOptions {
   listStatus?: number
@@ -91,6 +95,8 @@ export async function mockQuotes(page: Page, world: QuoteWorld, options: QuoteMo
     try { body = request.postDataJSON() ?? {} } catch { body = {} }
     calls.push({ path, method, body, query: q, headers: request.headers() })
     const rowOf = (qid: string) => world.rows.find(r => r.quote_node_id === qid)
+    const log = (node: string, type: string, before: unknown, after: unknown) => world.events.push({ id: 5000 + world.events.length + 1, node_id: node, type, before: structuredClone(before), after: structuredClone(after), undo_of: null })
+    const admin = (options.role ?? 'admin') === 'admin'
     const projection = (r: Row) => ({ quote_node_id: r.quote_node_id, project_node_id: r.project_node_id, customer_org_node_id: r.customer_org_node_id, current_version: r.current_version, state: r.state, revision: r.revision, offer_no: r.offer_no, archived: r.archived, project_ref: r.project_ref, classic_status: r.classic_status })
     if (path === '/api/quotes' && method === 'GET') {
       if (options.listStatus) return route.fulfill({ status: options.listStatus, json: { error: 'quote operation is not available' } })
@@ -115,6 +121,14 @@ export async function mockQuotes(page: Page, world: QuoteWorld, options: QuoteMo
     const draft = world.drafts.get(qid)!
     const list = world.versions.get(qid) ?? []
     if (!rest && method === 'GET') return route.fulfill({ json: projection(r) })
+    if (!rest && method === 'DELETE') {
+      if (!admin) return route.fulfill({ status: 403, json: { error: 'quote operation is not available' } })
+      if (Number(q.get('expected_revision')) !== r.revision) return route.fulfill({ status: 409, json: { error: 'quote revision is stale' } })
+      if (r.state !== 'draft' || r.current_version > 0) return route.fulfill({ status: 409, json: { error: 'only a draft that was never issued can be deleted; archive it instead' } })
+      world.rows.splice(world.rows.indexOf(r), 1); r.revision++; world.deleted.set(qid, r)
+      log(qid, 'quote.deleted', projection(r), { deleted: true, revision: r.revision })
+      return route.fulfill({ status: 204, body: '' })
+    }
     if (rest === 'draft') {
       if (method === 'PATCH') {
         const write = body as unknown as { document: QuoteDoc; mutation_id: string }
@@ -150,11 +164,14 @@ export async function mockQuotes(page: Page, world: QuoteWorld, options: QuoteMo
       const n = ++world.counter.next
       const copy = row(id(100 + n), n, r.title, r.customer_org_node_id, r.customer_name, 'draft', r.net_total_cents, isoToday(), isoPlus(30), { revision: 1 })
       world.rows.push(copy); world.drafts.set(copy.quote_node_id, { document: structuredClone(draft.document), revision: 1 })
+      log(copy.quote_node_id, 'quote.duplicated', null, { source_quote_node_id: qid, quote: projection(copy) })
       return route.fulfill({ status: 201, json: projection(copy) })
     }
     if (rest === 'visibility' && method === 'PATCH') {
       if (body.expected_revision !== r.revision) return route.fulfill({ status: 409, json: { error: 'quote revision is stale' } })
+      const was = r.archived
       r.archived = body.archived === true; r.revision++
+      log(qid, 'quote.visibility_changed', { archived: was }, { archived: r.archived })
       return route.fulfill({ json: projection(r) })
     }
     if (rest === 'versions') return route.fulfill({ json: list })
@@ -171,6 +188,7 @@ export async function mockQuotes(page: Page, world: QuoteWorld, options: QuoteMo
           const linkId = `link-${world.counter.next++}`
           const link: Link = { id: linkId, public_tenant: 'sel-demo', quote_node_id: qid, version: n, target_content_sha256: version.content_sha256, expires_at: String(body.expires_at), path: `/offers/sel-demo/tok-${linkId}` }
           world.links.set(key, link)
+          log(qid, 'quote.public_link_created', null, { link_id: linkId, version: n })
           return route.fulfill({ status: 201, json: { ...link, token: `tok-${link.id}` } })
         }
         const link = world.links.get(key)
@@ -193,6 +211,52 @@ export async function mockQuotes(page: Page, world: QuoteWorld, options: QuoteMo
     return route.fulfill({ status: 404, json: { error: 'Unmocked quote route' } })
   }
   await page.route('**/api/quotes**', handler)
+  // The quote events and their undo; every other event falls through to mockCRM.
+  await page.route('**/api/events**', async route => {
+    const url = new URL(route.request().url()), path = url.pathname
+    const undo = /^\/api\/events\/(\d+)\/undo$/.exec(path)
+    if (path === '/api/events') {
+      const node = url.searchParams.get('node_id')
+      const mine = world.events.filter(e => e.node_id === node)
+      if (!mine.length) return route.fallback()
+      return route.fulfill({ json: { items: mine.map(e => ({ ...e, actor_principal_id: me.id, at: new Date().toISOString() })), next_after: null } })
+    }
+    const original = undo && world.events.find(e => e.id === Number(undo[1]))
+    if (!original) return route.fallback()
+    calls.push({ path, method: 'POST', body: {}, query: url.searchParams, headers: route.request().headers() })
+    const conflict = () => route.fulfill({ status: 409, json: { error: 'conflict' } })
+    if (original.undo_of !== null || world.events.some(e => e.undo_of === original.id)) return conflict()
+    if ((options.role ?? 'admin') !== 'admin') return route.fulfill({ status: 403, json: { error: 'forbidden' } })
+    const qid = original.node_id
+    const r = world.rows.find(x => x.quote_node_id === qid)
+    switch (original.type) {
+      case 'quote.deleted': {
+        const gone = world.deleted.get(qid)
+        if (!gone || gone.revision !== (original.after as { revision: number }).revision) return conflict()
+        world.deleted.delete(qid); gone.revision++; world.rows.push(gone)
+        break
+      }
+      case 'quote.visibility_changed':
+        if (!r || r.archived !== (original.after as { archived: boolean }).archived) return conflict()
+        r.archived = (original.before as { archived: boolean }).archived; r.revision++
+        break
+      case 'quote.duplicated':
+        if (!r || r.revision !== 1) return conflict()
+        world.rows.splice(world.rows.indexOf(r), 1); r.revision++; world.deleted.set(qid, r)
+        break
+      case 'quote.public_link_created': {
+        const after = original.after as { version: number }
+        const link = world.links.get(`${qid}:${after.version}`)
+        if (!link || link.revoked_at) return conflict()
+        link.revoked_at = new Date().toISOString(); link.path = undefined
+        break
+      }
+      default: return conflict()
+    }
+    const undone: QuoteEvent = { id: 5000 + world.events.length + 1, node_id: qid, type: original.type, before: original.after, after: original.before, undo_of: original.id }
+    world.events.push(undone)
+    return route.fulfill({ status: 201, json: undone })
+  })
   return calls
 }
 function isoToday() { return iso(0) }

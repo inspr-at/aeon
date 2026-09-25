@@ -1600,7 +1600,7 @@ paths:
       operationId: listCRMOrganisations
       summary: Search tenant customers, including their number and primary contact
       security: *auth
-      parameters: [{name: q, in: query, schema: {type: string, maxLength: 200}}, {name: limit, in: query, schema: {type: integer, minimum: 1, maximum: 100}}, {name: offset, in: query, schema: {type: integer, minimum: 0}}]
+      parameters: [{name: q, in: query, schema: {type: string, maxLength: 200}}, {name: limit, in: query, schema: {type: integer, minimum: 1, maximum: 100}}, {name: offset, in: query, schema: {type: integer, minimum: 0}}, {name: archived, in: query, description: Archived customers leave the default list, schema: {type: string, enum: ['false', 'true', all], default: 'false'}}]
       responses:
         '200': {description: Customer page, content: {application/json: {schema: {type: object, properties: {items: {type: array, items: {$ref: '#/components/schemas/CRMOrganisation'}}, next_offset: {type: integer}}}}}}
     post:
@@ -1635,6 +1635,17 @@ paths:
       parameters: [{name: organisationId, in: path, required: true, schema: {type: string, format: uuid}}]
       responses:
         '204': {description: Deleted}
+        '409': {$ref: '#/components/responses/Error'}
+  /crm/organisations/{organisationId}/visibility:
+    patch:
+      operationId: setCRMOrganisationVisibility
+      summary: Archive or restore a customer
+      description: Admin person only. An archived customer leaves the default list and keeps its contacts, number, projects and quotes. Records crm.customer_visibility_changed, reversible through POST /events/{eventId}/undo while the customer is unchanged.
+      security: [{session: []}]
+      parameters: [{name: organisationId, in: path, required: true, schema: {type: string, format: uuid}}]
+      requestBody: {required: true, content: {application/json: {schema: {type: object, additionalProperties: false, required: [expected_revision, archived], properties: {expected_revision: {type: integer, minimum: 1}, archived: {type: boolean}}}}}}
+      responses:
+        '200': {description: Customer, content: {application/json: {schema: {$ref: '#/components/schemas/CRMOrganisation'}}}}
         '409': {$ref: '#/components/responses/Error'}
   /crm/organisations/{organisationId}/related:
     get:
@@ -1853,6 +1864,17 @@ paths:
       responses:
         '200': {description: Quote, content: {application/json: {schema: {$ref: '#/components/schemas/BusinessQuote'}}}}
         '404': {$ref: '#/components/responses/Error'}
+    delete:
+      operationId: deleteQuoteDraft
+      summary: Delete a draft that was never issued
+      description: Admin person only. Only a draft with no frozen version can be deleted; anything once issued is evidence and is archived instead (409). The quote is hidden, not erased, and its number stays allocated. Records quote.deleted, reversible through POST /events/{eventId}/undo while the quote is unchanged.
+      security: [{session: []}]
+      parameters: [{name: quoteId, in: path, required: true, schema: {type: string, format: uuid}}, {name: expected_revision, in: query, required: true, schema: {type: integer, minimum: 1}}]
+      responses:
+        '204': {description: Deleted}
+        '400': {$ref: '#/components/responses/Error'}
+        '403': {$ref: '#/components/responses/Error'}
+        '409': {$ref: '#/components/responses/Error'}
   /quotes/settings:
     get:
       operationId: getQuoteSettings
@@ -1967,6 +1989,7 @@ paths:
     post:
       operationId: duplicateQuote
       summary: Duplicate into a new numbered draft for the same customer
+      description: Undoing quote.duplicated (POST /events/{eventId}/undo, admin) deletes the copy while it is still untouched.
       security: [{session: []}]
       parameters: [{name: quoteId, in: path, required: true, schema: {type: string, format: uuid}}]
       requestBody: {required: true, content: {application/json: {schema: {type: object, additionalProperties: false, required: [expected_revision], properties: {expected_revision: {type: integer, minimum: 1}}}}}}
@@ -1977,6 +2000,7 @@ paths:
     patch:
       operationId: setQuoteVisibility
       summary: Archive or restore without deleting history
+      description: Admin person only. quote.visibility_changed is reversible through POST /events/{eventId}/undo while the archived state is unchanged.
       security: [{session: []}]
       parameters: [{name: quoteId, in: path, required: true, schema: {type: string, format: uuid}}]
       requestBody: {required: true, content: {application/json: {schema: {type: object, additionalProperties: false, required: [expected_revision, archived], properties: {expected_revision: {type: integer, minimum: 1}, archived: {type: boolean}}}}}}
@@ -2781,7 +2805,7 @@ components:
     CRMOrganisation:
       allOf:
         - {$ref: '#/components/schemas/CRMOrganisationWrite'}
-        - {type: object, required: [id, key, revision], properties: {id: {type: string, format: uuid}, key: {type: string}, revision: {type: integer}, customer_no: {type: [string, 'null']}, primary_contact_node_id: {type: [string, 'null'], format: uuid}}}
+        - {type: object, required: [id, key, revision], properties: {id: {type: string, format: uuid}, key: {type: string}, revision: {type: integer}, customer_no: {type: [string, 'null']}, primary_contact_node_id: {type: [string, 'null'], format: uuid}, archived: {type: boolean, description: Archived customers leave the default list}}}
     CRMContactWrite:
       type: object
       additionalProperties: false

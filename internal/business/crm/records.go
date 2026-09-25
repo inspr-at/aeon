@@ -62,6 +62,7 @@ type Customer struct {
 	Revision             int64   `json:"revision"`
 	CustomerNo           *string `json:"customer_no"`
 	PrimaryContactNodeID *string `json:"primary_contact_node_id"`
+	Archived             bool    `json:"archived"`
 	CustomerFields
 }
 type ContactFields struct {
@@ -204,11 +205,11 @@ func customer(ctx context.Context, tx pgx.Tx, id string, lock bool) (Customer, e
 	var c Customer
 	var raw []byte
 	var no, primary *string
-	q := `SELECT n.id::text,n.key,n.title,n.fields,o.revision,x.customer_no,o.primary_contact_node_id::text FROM nodes n JOIN node_kinds k ON k.tenant_id=n.tenant_id AND k.id=n.kind_id JOIN crm_organisation_profiles o ON o.tenant_id=n.tenant_id AND o.organisation_node_id=n.id LEFT JOIN crm_customer_numbers x ON x.tenant_id=n.tenant_id AND x.organisation_node_id=n.id WHERE n.id=$1::uuid AND k.slug='organisation' AND n.deleted_at IS NULL`
+	q := `SELECT n.id::text,n.key,n.title,n.fields,o.revision,x.customer_no,o.primary_contact_node_id::text,o.archived_at IS NOT NULL FROM nodes n JOIN node_kinds k ON k.tenant_id=n.tenant_id AND k.id=n.kind_id JOIN crm_organisation_profiles o ON o.tenant_id=n.tenant_id AND o.organisation_node_id=n.id LEFT JOIN crm_customer_numbers x ON x.tenant_id=n.tenant_id AND x.organisation_node_id=n.id WHERE n.id=$1::uuid AND k.slug='organisation' AND n.deleted_at IS NULL`
 	if lock {
 		q += ` FOR UPDATE OF n,o`
 	}
-	err := tx.QueryRow(ctx, q, id).Scan(&c.ID, &c.Key, &c.Name, &raw, &c.Revision, &no, &primary)
+	err := tx.QueryRow(ctx, q, id).Scan(&c.ID, &c.Key, &c.Name, &raw, &c.Revision, &no, &primary, &c.Archived)
 	if errors.Is(err, pgx.ErrNoRows) {
 		return c, errNotFound
 	}
@@ -259,12 +260,21 @@ func (m *module) listCustomers(w http.ResponseWriter, r *http.Request) {
 		writeErr(w, errInvalid("invalid page"))
 		return
 	}
+	// Archived customers leave the default list; archived=all or true asks for them.
+	archived := r.URL.Query().Get("archived")
+	if archived == "" {
+		archived = "false"
+	}
+	if archived != "false" && archived != "true" && archived != "all" {
+		writeErr(w, errInvalid("invalid archived filter"))
+		return
+	}
 	out := struct {
 		Items      []Customer `json:"items"`
 		NextOffset *int       `json:"next_offset"`
 	}{Items: []Customer{}}
 	err := m.run(r, p, fence.PermViewsProvide, func(tx pgx.Tx) error {
-		rows, e := tx.Query(r.Context(), `SELECT n.id::text FROM nodes n JOIN node_kinds k ON k.tenant_id=n.tenant_id AND k.id=n.kind_id WHERE k.slug='organisation' AND n.deleted_at IS NULL AND ($1='' OR n.title ILIKE '%'||$1||'%' OR n.fields->>'legal_name' ILIKE '%'||$1||'%' OR EXISTS(SELECT 1 FROM crm_customer_numbers x WHERE x.tenant_id=n.tenant_id AND x.organisation_node_id=n.id AND x.customer_no ILIKE '%'||$1||'%')) ORDER BY n.title,n.id LIMIT $2 OFFSET $3`, q, limit+1, offset)
+		rows, e := tx.Query(r.Context(), `SELECT n.id::text FROM nodes n JOIN node_kinds k ON k.tenant_id=n.tenant_id AND k.id=n.kind_id LEFT JOIN crm_organisation_profiles o ON o.tenant_id=n.tenant_id AND o.organisation_node_id=n.id WHERE k.slug='organisation' AND n.deleted_at IS NULL AND ($4='all' OR (o.archived_at IS NOT NULL)=($4='true')) AND ($1='' OR n.title ILIKE '%'||$1||'%' OR n.fields->>'legal_name' ILIKE '%'||$1||'%' OR EXISTS(SELECT 1 FROM crm_customer_numbers x WHERE x.tenant_id=n.tenant_id AND x.organisation_node_id=n.id AND x.customer_no ILIKE '%'||$1||'%')) ORDER BY n.title,n.id LIMIT $2 OFFSET $3`, q, limit+1, offset, archived)
 		if e != nil {
 			return e
 		}
@@ -792,4 +802,70 @@ func (m *module) deleteContact(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	w.WriteHeader(204)
+}
+
+// customerVisibility archives or restores a customer (QL1/AEON-109). An archived
+// customer leaves the default list and keeps everything attached to it; the
+// change is one event, undone through the event log.
+func (m *module) customerVisibility(w http.ResponseWriter, r *http.Request) {
+	p, ok := actor(w, r, true)
+	if !ok {
+		return
+	}
+	id, e := pathUUID(r, "organisationId")
+	if e != nil {
+		writeErr(w, e)
+		return
+	}
+	var in struct {
+		ExpectedRevision int64 `json:"expected_revision"`
+		Archived         *bool `json:"archived"`
+	}
+	if e = decodeCRM(r, &in); e != nil {
+		writeErr(w, e)
+		return
+	}
+	if in.ExpectedRevision < 1 || in.Archived == nil {
+		writeErr(w, errInvalid("expected_revision and archived required"))
+		return
+	}
+	var out Customer
+	e = m.run(r, p, fence.PermNodesContribute, func(tx pgx.Tx) error {
+		before, e := customer(r.Context(), tx, id, true)
+		if e != nil {
+			return e
+		}
+		if before.Revision != in.ExpectedRevision {
+			return errConflict
+		}
+		if before.Archived == *in.Archived {
+			out = before
+			return nil
+		}
+		if e = setCustomerArchived(r.Context(), tx, p, id, *in.Archived); e != nil {
+			return e
+		}
+		if out, e = customer(r.Context(), tx, id, false); e != nil {
+			return e
+		}
+		return appendCRM(r.Context(), tx, p, id, EventCustomerVisibility, before, out)
+	})
+	if e != nil {
+		writeErr(w, e)
+		return
+	}
+	httpapi.WriteJSON(w, http.StatusOK, out)
+}
+
+// EventCustomerVisibility records archiving or restoring a customer.
+const EventCustomerVisibility = "crm.customer_visibility_changed"
+
+func setCustomerArchived(ctx context.Context, tx pgx.Tx, p tenant.Principal, id string, archived bool) error {
+	var e error
+	if archived {
+		_, e = tx.Exec(ctx, `UPDATE crm_organisation_profiles SET archived_at=clock_timestamp(),archived_by_principal_id=$2::uuid,revision=revision+1 WHERE organisation_node_id=$1::uuid`, id, p.ID)
+	} else {
+		_, e = tx.Exec(ctx, `UPDATE crm_organisation_profiles SET archived_at=NULL,archived_by_principal_id=NULL,revision=revision+1 WHERE organisation_node_id=$1::uuid`, id)
+	}
+	return e
 }

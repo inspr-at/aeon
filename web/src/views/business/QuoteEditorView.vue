@@ -1,6 +1,7 @@
 <!-- SPDX-License-Identifier: AGPL-3.0-only -->
 <script setup lang="ts">
-import { useRouter } from 'vue-router'
+import { computed } from 'vue'
+import { useRoute, useRouter } from 'vue-router'
 import QuoteWorkspace from '../../components/business/QuoteWorkspace.vue'
 
 // A quote on its own page. The workspace is the same one the Quotes list docks
@@ -8,10 +9,14 @@ import QuoteWorkspace from '../../components/business/QuoteWorkspace.vue'
 // unsaved work and undo history.
 const props = defineProps<{ quoteId: string }>()
 const router = useRouter()
+const route = useRoute()
+// ?print=1 (the list's PDF action) prints once, then leaves the address clean.
+const autoPrint = computed(() => route.query.print === '1')
+function printed() { const { print: _print, ...rest } = route.query; void router.replace({ path: route.path, query: rest }) }
 function collapse() { void router.push({ path: '/business/quotes', query: { quote: props.quoteId } }) }
 function open(id: string) { void router.push(`/business/quotes/${encodeURIComponent(id)}`) }
 </script>
 
 <template>
-  <QuoteWorkspace :quote-id="quoteId" layout="full" class="quote-editor-page" @collapse="collapse" @open="open" />
+  <QuoteWorkspace :quote-id="quoteId" layout="full" class="quote-editor-page" :auto-print="autoPrint" @collapse="collapse" @open="open" @printed="printed" />
 </template>

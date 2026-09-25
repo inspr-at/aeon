@@ -4,7 +4,7 @@ import '../../styles/crm.css'
 import { computed, nextTick, onBeforeUnmount, onMounted, reactive, ref, watch } from 'vue'
 import { onBeforeRouteLeave, useRoute, useRouter } from 'vue-router'
 import {
-  addressLines, blankCustomer, deleteCustomer, draftOf, draftProblems, errorText, getCustomer, getRelated, listContacts, minorMoney, placeOf, sameDraft, statusOf, telHref, undoLatest,
+  addressLines, blankCustomer, deleteCustomer, draftOf, draftProblems, errorText, getCustomer, getRelated, listContacts, minorMoney, placeOf, sameDraft, setCustomerArchived, statusOf, telHref, undoLatest,
   updateCustomer, websiteHost, writeOf, type Contact, type Customer, type CustomerDraft, type Related,
 } from '../../lib/crm'
 import { setPageTitle } from '../../lib/brand'
@@ -163,6 +163,22 @@ async function copyLink() {
   moreAnchor.value = null
   try { await navigator.clipboard.writeText(window.location.href); toast('Link copied.') } catch { toast('The link could not be copied.', { tone: 'error' }) }
 }
+// Archiving keeps everything that depends on the customer and hides it from
+// lists and pickers; the toast undoes it.
+async function archive(archived: boolean) {
+  const c = customer.value
+  moreAnchor.value = null
+  if (!c) return
+  try {
+    const next = await setCustomerArchived(c.id, c.revision, archived)
+    customer.value = next
+    store.upsert(next)
+    toast(archived ? `Archived ${c.name}. Its quotes, projects and hours stay; new quotes no longer offer it.` : `${c.name} is back in the list.`, {
+      timeout: 8000,
+      action: { label: 'Undo', run: () => { void undoLatest([{ node: c.id, types: ['crm.customer_visibility_changed'] }]).then(() => { void loadCustomer(); void store.load(true) }).catch(e => toast(errorText(e), { tone: 'error' })) } },
+    })
+  } catch (e) { toast(errorText(e, 'That did not work.'), { tone: 'error' }) }
+}
 async function remove() {
   const c = customer.value
   moreAnchor.value = null
@@ -213,6 +229,7 @@ watch(id, value => { if (!value || !route.path.startsWith('/business/customers/'
     <template #eyebrow><RouterLink class="back" to="/business/customers"><AppIcon name="arrow-left" :size="12" />Customers</RouterLink></template>
     <template #summary>
       <span v-if="customer" class="summary-line dot-list">
+        <span v-if="customer.archived" class="archived-chip">Archived</span>
         <span v-if="customer.legal_name && customer.legal_name !== customer.name">{{ customer.legal_name }}</span>
         <span v-if="customer.industry">{{ customer.industry }}</span>
         <a v-if="customer.website" :href="customer.website" target="_blank" rel="noopener" class="site">{{ websiteHost(customer.website) }}<AppIcon name="external" :size="11" /></a>
@@ -237,6 +254,8 @@ watch(id, value => { if (!value || !route.path.startsWith('/business/customers/'
         <button type="button" role="menuitem" class="menu-item" data-autofocus @click="copyLink"><AppIcon name="link" :size="14" />Copy link</button>
         <template v-if="admin">
           <div class="menu-sep" role="separator" />
+          <button v-if="customer.archived" type="button" role="menuitem" class="menu-item" @click="archive(false)"><AppIcon name="rollback" :size="14" />Restore from the archive</button>
+          <button v-else type="button" role="menuitem" class="menu-item" @click="archive(true)"><AppIcon name="archive" :size="14" />Archive</button>
           <button type="button" role="menuitem" class="menu-item danger" :disabled="blocked" :data-tip="blocked ? 'Customers with projects or quotes stay' : undefined" @click="remove"><AppIcon name="trash" :size="14" />Delete customer…</button>
         </template>
       </div>
@@ -358,6 +377,7 @@ watch(id, value => { if (!value || !route.path.startsWith('/business/customers/'
 </template>
 
 <style scoped>
+.archived-chip { height: 18px; padding: 0 7px; border-radius: 999px; background: var(--surface-2); box-shadow: inset 0 0 0 1px var(--line-2); color: var(--ink-2); font: 600 10px/18px var(--mono); letter-spacing: .06em; text-transform: uppercase; font-variant-ligatures: none; }
 .back { display: inline-flex; align-items: center; gap: 6px; min-height: 24px; margin: -4px -6px; padding: 0 6px; border-radius: 6px; color: var(--ink-2); text-decoration: none; }
 .back:hover { color: var(--teal-ink); background: var(--row-hover); }
 .back:focus-visible { box-shadow: var(--focus-ring); }

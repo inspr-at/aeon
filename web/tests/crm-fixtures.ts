@@ -13,7 +13,7 @@ export interface MockCustomer {
   legal_name: string; industry: string; website: string; domain: string; phone: string; description: string; customer_notes: string
   vat_id: string; tax_id: string; register_no: string; employee_count: number | null; annual_revenue_minor: number | null; currency: string
   billing_address: Address | null; visiting_address: Address | null; hourly_rate_minor: number | null; lp_rate_minor: number | null
-  external_provider: string; external_id: string; external_url: string; deleted?: boolean
+  external_provider: string; external_id: string; external_url: string; deleted?: boolean; archived?: boolean
 }
 export interface MockContact {
   id: string; key: string; organisation_node_id: string; name: string; revision: number; primary?: boolean
@@ -114,7 +114,7 @@ export function crmData(options: CRMMockOptions = {}) {
 export type CRMData = ReturnType<typeof crmData>
 export interface CRMCall { path: string; method: string; body: unknown; query: URLSearchParams }
 
-const view = (c: MockCustomer) => { const { deleted: _d, ...rest } = c; void _d; return { ...rest } }
+const view = (c: MockCustomer) => { const { deleted: _d, ...rest } = c; void _d; return { ...rest, archived: !!c.archived } }
 const contactView = (data: CRMData, c: MockContact) => {
   const { deleted: _d, primary: _p, ...rest } = c; void _d; void _p
   return { ...rest, primary: data.customers.find(o => o.id === c.organisation_node_id)?.primary_contact_node_id === c.id }
@@ -191,6 +191,9 @@ export async function mockCRM(page: Page, data: CRMData, options: CRMMockOptions
         case 'crm.customer_updated': Object.assign(org!, pickFields(original.before as MockCustomer), { name: (original.before as MockCustomer).name, revision: org!.revision + 1 }); break
         case 'crm.note_rewrite_applied': Object.assign(org!, { customer_notes: (original.before as MockCustomer).customer_notes, revision: org!.revision + 1 }); break
         case 'crm.customer_deleted': org!.deleted = false; break
+        case 'crm.customer_visibility_changed':
+          if (!!org!.archived !== (original.after as { archived: boolean }).archived) return route.fulfill({ status: 409, json: { error: 'conflict' } })
+          Object.assign(org!, { archived: (original.before as { archived: boolean }).archived, revision: org!.revision + 1 }); break
         case 'crm.primary_contact_changed': Object.assign(org!, { primary_contact_node_id: (original.before as MockCustomer).primary_contact_node_id, revision: org!.revision + 1 }); break
         case 'crm.contact_created':
           if (data.customers.find(c => c.id === person!.organisation_node_id)?.primary_contact_node_id === person!.id) return route.fulfill({ status: 409, json: { error: 'conflict' } })
@@ -219,7 +222,8 @@ export async function mockCRM(page: Page, data: CRMData, options: CRMMockOptions
         return route.fulfill({ status: 201, json: view(created) })
       }
       const limit = Number(q.get('limit') ?? 50), offset = Number(q.get('offset') ?? 0)
-      const list = data.customers.filter(c => !c.deleted).sort((a, b) => a.name.localeCompare(b.name))
+      const archived = q.get('archived') ?? 'false'
+      const list = data.customers.filter(c => !c.deleted && (archived === 'all' || !!c.archived === (archived === 'true'))).sort((a, b) => a.name.localeCompare(b.name))
       const items = list.slice(offset, offset + limit).map(view)
       return route.fulfill({ json: { items, next_offset: offset + limit < list.length ? offset + limit : null } })
     }
@@ -266,6 +270,13 @@ export async function mockCRM(page: Page, data: CRMData, options: CRMMockOptions
         const before = view(org)
         org.primary_contact_node_id = String(body.contact_node_id); org.revision += 1
         event(id, 'crm.primary_contact_changed', before, view(org))
+        return route.fulfill({ json: view(org) })
+      }
+      if (rest === 'visibility' && method === 'PATCH') {
+        if (body.expected_revision !== org.revision) return bad(route, 409, 'conflict', 'customer revision is stale')
+        const before = view(org)
+        org.archived = body.archived === true; org.revision += 1
+        event(id, 'crm.customer_visibility_changed', before, view(org))
         return route.fulfill({ json: view(org) })
       }
       if (rest === 'related') return route.fulfill({ json: data.related[id] ?? { projects: [], quotes: [], hours: [], documents: [] } })

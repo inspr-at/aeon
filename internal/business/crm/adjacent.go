@@ -114,7 +114,7 @@ func (m *module) related(w http.ResponseWriter, r *http.Request) {
 		if e != nil {
 			return e
 		}
-		rows, e = tx.Query(ctx, `SELECT q.quote_node_id::text,q.offer_no,q.state,q.archived_at IS NOT NULL FROM business_quotes q WHERE q.customer_org_node_id=$1::uuid ORDER BY q.created_at DESC,q.quote_node_id`, id)
+		rows, e = tx.Query(ctx, `SELECT q.quote_node_id::text,q.offer_no,q.state,q.archived_at IS NOT NULL FROM business_quotes q WHERE q.customer_org_node_id=$1::uuid AND q.deleted_at IS NULL ORDER BY q.created_at DESC,q.quote_node_id`, id)
 		if e != nil {
 			return e
 		}

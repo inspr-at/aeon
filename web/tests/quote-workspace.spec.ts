@@ -113,7 +113,7 @@ test('invalid quantities block automatic save, explicit save, print and navigati
 })
 
 test('the paper edits its cover, dates, recipient, sender contact, positions and acceptance text', async ({ page }) => {
-  const { calls } = await setup(page)
+  const { calls, world } = await setup(page)
   await full(page, Q.draft)
   const fields: [string, string][] = [
     ['Angebotstitel', 'Neues Angebot'], ['Untertitel', 'Eine Beschreibung'],
@@ -143,7 +143,8 @@ test('the paper edits its cover, dates, recipient, sender contact, positions and
   })
   expect((saved.document.positions as Record<string, unknown>[])[0]).toMatchObject({ short_text: 'Neue Leistung', unit_label: 'Tag', long_text: 'Langer Text', quantity: '1.5', unit_price_cents: 9999 })
   await expect(page.locator('.quote-document')).toContainText('1 / 3')
-  await expect(page.locator('.quote-document')).toContainText('A260922-12')
+  // The number is dated two days back from today (quoteWorld), so it is read, not written here.
+  await expect(page.locator('.quote-document')).toContainText(world.rows.find(r => r.quote_node_id === Q.draft)!.offer_no!)
 })
 
 test('issuing freezes the saved draft with its fingerprint and offers the customer link', async ({ page }) => {
@@ -310,10 +311,11 @@ test('archive and duplicate live in the quote’s menu', async ({ page }) => {
   const { calls } = await setup(page)
   await full(page, Q.second)
   await page.getByRole('button', { name: 'More actions' }).click()
+  // Archiving asks nothing: the toast undoes it (QL1).
   await page.getByRole('menuitem', { name: 'Archive' }).click()
-  await page.getByRole('dialog', { name: /^Archive A/ }).getByRole('button', { name: 'Archive' }).click()
   await expect.poll(() => calls.find(c => c.method === 'PATCH' && c.path.endsWith('/visibility'))?.body).toEqual({ expected_revision: 2, archived: true })
   await expect(page.locator('.state-chip', { hasText: 'Archived' })).toBeVisible()
+  await expect(page.locator('.toast').last().getByRole('button', { name: 'Undo' })).toBeVisible()
   await page.getByRole('button', { name: 'More actions' }).click()
   await page.getByRole('menuitem', { name: 'Duplicate as a new quote' }).click()
   await expect.poll(() => calls.find(c => c.path.endsWith('/duplicate'))?.body).toEqual({ expected_revision: 3 })
