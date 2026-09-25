@@ -1,14 +1,18 @@
 <!-- SPDX-License-Identifier: AGPL-3.0-only -->
 <script lang="ts">
-import { reactive } from 'vue'
+import { reactive, ref } from 'vue'
+import { onPictures } from '../lib/avatar'
 // People whose picture is known to be missing this session: their initials show
 // without asking again.
 const missing = reactive(new Set<string>())
 export function forgetMissing(id: string) { missing.delete(id) }
+// Bumped when a people payload teaches who has a picture (lib/avatar).
+const learned = ref(0)
+onPictures(() => { learned.value++ })
 </script>
 <script setup lang="ts">
-import { computed, ref, watch } from 'vue'
-import { avatarColor, avatarSources } from '../lib/avatar'
+import { computed, watch } from 'vue'
+import { avatarColor, avatarSources, pictureKnown, shouldRequestAvatar } from '../lib/avatar'
 import { initials as nameInitials } from '../lib/work'
 import { useProfile } from '../stores/profile'
 import AppIcon from './AppIcon.vue'
@@ -18,16 +22,19 @@ import AppIcon from './AppIcon.vue'
 // Agents keep the robot glyph. Decorative unless given a label, since a name
 // sits beside it almost everywhere.
 const props = withDefaults(defineProps<{
-  id?: string | null; name: string; size?: number; kind?: 'person' | 'agent'; label?: string; picture?: boolean
-}>(), { id: null, size: 24, kind: 'person', label: undefined, picture: true })
+  id?: string | null; name: string; size?: number; kind?: 'person' | 'agent'; label?: string
+}>(), { id: null, size: 24, kind: 'person', label: undefined })
 const me = useProfile()
 const mine = computed(() => !!props.id && props.id === me.id)
 const hashes = computed(() => mine.value ? me.profile?.avatar_hashes ?? {} : {})
 const letters = computed(() => mine.value && me.profile?.initials ? me.profile.initials : nameInitials(props.name))
 const color = computed(() => mine.value ? me.color : avatarColor(props.id ?? props.name))
-// My own picture is asked for only when my profile says there is one.
-// picture false: the caller knows there is none (the members list says so).
-const wanted = computed(() => props.kind === 'person' && props.picture && !!props.id && !missing.has(props.id) && (!mine.value || me.hasPicture))
+// A picture is asked for only when there is one: my profile says so for me, a
+// people payload for anyone else.
+const wanted = computed(() => {
+  void learned.value
+  return shouldRequestAvatar({ kind: props.kind, id: props.id, mine: mine.value, myPicture: me.hasPicture, known: props.id ? pictureKnown(props.id) : undefined, missing: !!props.id && missing.has(props.id) })
+})
 const sources = computed(() => props.id ? avatarSources(props.id, props.size, hashes.value) : null)
 const loaded = ref(false)
 watch(() => sources.value?.src, () => { loaded.value = false })

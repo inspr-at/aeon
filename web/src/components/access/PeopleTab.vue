@@ -141,7 +141,7 @@ async function link(personId: string) {
         <tr v-for="p in shown" :key="p.principal_id" class="person" :class="{ off: p.status === 'deactivated' }" :data-person="p.principal_id" @click="rowClick($event, p)" @contextmenu="contextMenu($event, p)">
           <td class="c-person">
             <span class="who">
-              <Avatar :id="p.principal_id" :name="p.name" :size="30" :picture="!!p.avatar_url" />
+              <Avatar :id="p.principal_id" :name="p.name" :size="30" />
               <span class="names">
                 <RouterLink class="name" :to="`/settings/access/people/${p.principal_id}`">{{ p.name }}<span v-if="p.principal_id === me" class="you">you</span></RouterLink>
                 <span v-if="p.aliases.length" class="aka">also known as {{ p.aliases.map(a => a.name).join(', ') }}</span>
@@ -179,7 +179,7 @@ async function link(personId: string) {
       <p v-if="importedOpen" class="imported-lead">Identities that came over from classic Paimos and never signed in here. Link one to the person it belongs to, and its history shows under that person.</p>
       <ul v-if="importedOpen" id="imported-rows" class="imported-rows">
         <li v-for="i in access.imported" :key="i.principal_id">
-          <Avatar :id="i.principal_id" :name="i.name" :size="26" :picture="false" />
+          <Avatar :id="i.principal_id" :name="i.name" :size="26" />
           <span class="i-name mono">{{ i.name }}</span>
           <span class="i-role">{{ i.classic_role ? `classic ${i.classic_role.replace('_', ' ')}` : '' }}</span>
           <button v-if="manage" type="button" class="btn sm" :aria-label="`Link ${i.name} to a person`" @click="linking = { id: i.principal_id, name: i.name, anchor: $event.currentTarget as HTMLElement }"><AppIcon name="link" :size="13" />Link to person</button>

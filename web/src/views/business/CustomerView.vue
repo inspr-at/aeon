@@ -428,7 +428,7 @@ address { display: grid; font-style: normal; font-size: 13.5px; line-height: 1.5
 .edit-card { display: grid; gap: 18px; max-width: 1100px; padding: 22px 24px 0; }
 .edit-foot {
   position: sticky; bottom: 0; z-index: 2; display: flex; align-items: center; justify-content: flex-end; gap: 10px; margin: 0 -24px; padding: 12px 24px;
-  border-top: 1px solid var(--line); border-radius: 0 0 var(--radius) var(--radius); background: var(--surface-raised-2); backdrop-filter: blur(14px); -webkit-backdrop-filter: blur(14px);
+  border-top: 1px solid var(--line); border-radius: 0 0 var(--radius) var(--radius); background: var(--surface-raised-2); -webkit-backdrop-filter: blur(14px); backdrop-filter: blur(14px);
 }
 .edit-foot .f-hint { flex: 1; }
 

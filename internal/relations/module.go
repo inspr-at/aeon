@@ -64,6 +64,8 @@ func failure(w http.ResponseWriter, err error) {
 	switch {
 	case errors.Is(err, pgx.ErrNoRows), errors.Is(err, events.ErrNotFound):
 		writeError(w, 404, "not_found", "relation or node not found")
+	case errors.As(err, new(refusal)):
+		writeError(w, 409, "conflict", err.Error())
 	case errors.Is(err, errGraph):
 		writeError(w, 409, "conflict", "relation kind or direction is not allowed")
 	case errors.Is(err, events.ErrConflict):
@@ -140,8 +142,12 @@ func (m *module) create(w http.ResponseWriter, r *http.Request) {
 	}
 	source, sourceOK := uuid(input.Source)
 	target, targetOK := uuid(input.Target)
-	if !sourceOK || !targetOK || source == target || !validType(input.Type) {
+	if !sourceOK || !targetOK || !validType(input.Type) {
 		writeError(w, 400, "invalid_request", "invalid relation endpoints or type")
+		return
+	}
+	if source == target {
+		writeError(w, 400, "invalid_request", "an item cannot be linked to itself")
 		return
 	}
 	if input.Type == "relates" && source > target {
@@ -153,6 +159,9 @@ func (m *module) create(w http.ResponseWriter, r *http.Request) {
 			return err
 		}
 		if err := enforceGraph(r.Context(), tx, p.TenantID, source, target, input.Type); err != nil {
+			return err
+		}
+		if err := refuse(r.Context(), tx, p.TenantID, source, target, input.Type); err != nil {
 			return err
 		}
 		var err error

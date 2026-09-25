@@ -1,6 +1,7 @@
 // SPDX-License-Identifier: AGPL-3.0-only
 import { computed, ref, shallowRef, watch, type Ref } from 'vue'
-import { APIError, type ListItem, type WorkNode } from './api'
+import { APIError, getNode, type ListItem, type WorkNode } from './api'
+import { listKnowledge, type KnowledgeItem } from './knowledge'
 import {
   addPlanTicket, getHandoff, getIntake, getRequirements, getWalker, listReleases, listWork, putPlan, releaseRefs,
   type Handoff, type Intake, type Journey, type ReleaseRef, type Requirement, type Walker,
@@ -21,6 +22,8 @@ export function useJourneyData(projectId: Ref<string | null>, journey: Ref<Journ
   const work = slot<ListItem[]>([])
   const walker = slot<Walker | null>(null)
   const handoffs = slot<Handoff[]>([])
+  // What an imported project brought: its own node (the description) and its knowledge.
+  const origin = slot<{ node: WorkNode | null; knowledge: KnowledgeItem[] }>({ node: null, knowledge: [] })
   let generation = 0
 
   async function fill<T>(target: Slot<T>, read: () => Promise<T>, fallback: string, force = false) {
@@ -37,10 +40,18 @@ export function useJourneyData(projectId: Ref<string | null>, journey: Ref<Journ
     }
   }
   const id = () => projectId.value!
-  const loadIntake = (force = false) => projectId.value ? fill(intake, () => getIntake(id()), 'The sources could not be loaded.', force) : Promise.resolve()
-  const loadRequirements = (force = false) => projectId.value ? fill(requirements, () => getRequirements(id()), 'The requirements could not be loaded.', force) : Promise.resolve()
+  // Before the journey records anything (a project that never took a journey step),
+  // intake and requirements answer 404: that is "nothing yet", not a failure.
+  const orEmpty = <T>(read: Promise<T>, empty: T) => read.catch(e => { if (e instanceof APIError && e.status === 404) return empty; throw e })
+  const loadIntake = (force = false) => projectId.value ? fill(intake, () => orEmpty(getIntake(id()), { sources: [], turns: [], drafts: [] }), 'The sources could not be loaded.', force) : Promise.resolve()
+  const loadRequirements = (force = false) => projectId.value ? fill(requirements, () => orEmpty(getRequirements(id()), []), 'The requirements could not be loaded.', force) : Promise.resolve()
   const loadReleases = (force = false) => projectId.value ? fill(releaseNodes, () => listReleases(id()), 'The releases could not be loaded.', force) : Promise.resolve()
   const loadWork = (force = false) => projectId.value ? fill(work, () => listWork(id()), 'The tickets could not be loaded.', force) : Promise.resolve()
+  const loadOrigin = (force = false) => projectId.value ? fill(origin, async () => {
+    // Each part is optional: a missing description or knowledge list leaves the rest standing.
+    const [node, knowledge] = await Promise.all([getNode(id()).catch(() => null), listKnowledge({ project_id: id(), limit: 50 }).then(page => page.items).catch(() => [] as KnowledgeItem[])])
+    return { node, knowledge }
+  }, 'What came with the project could not be loaded.', force) : Promise.resolve()
   const loadHandoffs = (force = false) => {
     const ids = [...new Set((journey.value?.stages ?? []).map(s => s.handoff_id).filter((x): x is string => !!x))]
     return fill(handoffs, async () => (await Promise.allSettled(ids.map(getHandoff))).flatMap(r => r.status === 'fulfilled' ? [r.value] : []), 'The handoffs could not be loaded.', force)
@@ -86,8 +97,8 @@ export function useJourneyData(projectId: Ref<string | null>, journey: Ref<Journ
 
   watch(projectId, () => {
     generation++
-    for (const s of [intake, requirements, releaseNodes, work, handoffs, walker] as Slot<unknown>[]) { s.status.value = 'idle'; s.error.value = '' }
-    intake.value.value = { sources: [], turns: [], drafts: [] }; requirements.value.value = []; releaseNodes.value.value = []
+    for (const s of [intake, requirements, releaseNodes, work, handoffs, walker, origin] as Slot<unknown>[]) { s.status.value = 'idle'; s.error.value = '' }
+    intake.value.value = { sources: [], turns: [], drafts: [] }; requirements.value.value = []; releaseNodes.value.value = []; origin.value.value = { node: null, knowledge: [] }
     work.value.value = []; handoffs.value.value = []; walker.value.value = null; walkerRelease.value = null
   })
 
@@ -100,8 +111,8 @@ export function useJourneyData(projectId: Ref<string | null>, journey: Ref<Journ
     return item.parent?.kind_slug === 'epic' ? { id: item.parent.id, key: item.parent.key, title: item.parent.title } : null
   }
   return {
-    intake, requirements, releaseNodes, releases, work, workById, epicOf, walker, walkerRelease, handoffs,
-    loadIntake, loadRequirements, loadReleases, loadWork, loadWalker, loadHandoffs, savePlan, patchWalker, addTicket,
+    intake, requirements, releaseNodes, releases, work, workById, epicOf, walker, walkerRelease, handoffs, origin,
+    loadIntake, loadRequirements, loadReleases, loadWork, loadWalker, loadHandoffs, loadOrigin, savePlan, patchWalker, addTicket,
   }
 }
 export type JourneyData = ReturnType<typeof useJourneyData>

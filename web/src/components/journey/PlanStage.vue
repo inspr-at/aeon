@@ -9,7 +9,9 @@ import { plural, statusMeta } from '../../lib/work'
 import { useJourney } from '../../stores/journey'
 import AppIcon from '../AppIcon.vue'
 import GateApprovals from './GateApprovals.vue'
+import BacklogCard from './BacklogCard.vue'
 import GateCard from './GateCard.vue'
+import LaterCard from './LaterCard.vue'
 // Phones get the short prompt: the example would be cut at the field's edge.
 const narrowQuery = window.matchMedia('(max-width: 600px)')
 const narrow = ref(narrowQuery.matches)
@@ -63,16 +65,8 @@ async function addTicket() {
 <template>
   <div class="j-grid">
     <div class="j-col">
-      <!-- No release shown: the journey has none open yet. -->
-      <section v-if="!ctx.release.value" class="j-card" aria-labelledby="plan-none">
-        <header class="j-card-head"><p id="plan-none" class="eyebrow">Tickets · the release</p></header>
-        <div class="j-empty">
-          <span class="j-empty-icon"><AppIcon name="layers" :size="16" /></span>
-          <strong>No release is open</strong>
-          <span>{{ opening ? 'Open release 1 to choose its tickets; the rest stay in the backlog.' : journey.next_action.key === 'start_build' && journey.next_action.reason ? journey.next_action.reason : 'Once release 1 is open, its tickets are chosen here.' }}</span>
-          <span v-if="releases.length">Earlier releases of this project are listed below; open one to walk through its tickets.</span>
-        </div>
-      </section>
+      <!-- No release shown: the journey has none open yet. What it will be chosen from is the backlog. -->
+      <BacklogCard v-if="!ctx.release.value" />
       <section v-else class="j-card" aria-labelledby="plan-tickets">
         <header class="j-card-head">
           <p id="plan-tickets" class="eyebrow">{{ ctx.editable.value ? 'Tickets · ticked ones form the release' : `Tickets · ${ctx.releaseLabel.value}` }}</p>
@@ -140,7 +134,7 @@ async function addTicket() {
         <p v-if="!ctx.current.value" class="j-note">An earlier release: its tickets are shown as they were planned.</p>
         <p v-if="journey.stage !== 'plan'"><button type="button" class="linkish" @click="ctx.view(journey.stage)">Where the journey is now <AppIcon name="arrow" :size="12" /></button></p>
       </GateCard>
-      <GateCard v-if="!planning && !opening && !ctx.release.value" eyebrow="Later" title="Not yet" tone="record"><p>Choosing the tickets of the release. Agreeing the requirements opens release 1.</p></GateCard>
+      <LaterCard v-if="!planning && !opening && !ctx.release.value" stage="plan" />
       <p v-if="store.busy || ctx.plan.saving.value" class="saving" role="status">Saving the plan…</p>
     </div>
   </div>

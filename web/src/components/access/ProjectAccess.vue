@@ -115,7 +115,7 @@ watch(() => props.project.id, load)
     <p v-else-if="error" class="set-note error" role="alert"><AppIcon name="alert" :size="14" />{{ error }}<button type="button" class="btn sm" @click="load">Try again</button></p>
     <ul v-else class="members" :aria-label="`People on ${project.title}`">
       <li v-for="entry in shown" :key="entry.principal_id" class="member">
-        <Avatar :id="entry.principal_id" :name="entry.name" :kind="entry.kind" :size="30" :picture="!!entry.avatar_url" />
+        <Avatar :id="entry.principal_id" :name="entry.name" :kind="entry.kind" :size="30" />
         <span class="m-text">
           <RouterLink v-if="entry.kind === 'person'" class="m-name" :to="`/settings/access/people/${entry.principal_id}`">{{ entry.name }}</RouterLink>
           <span v-else class="m-name mono">{{ entry.name }}</span>

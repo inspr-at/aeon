@@ -34,7 +34,7 @@ const emit = defineEmits<{ act: [] }>()
   position: relative; display: grid; gap: 12px; padding: 16px 18px 16px; border-radius: var(--radius); isolation: isolate;
   background: radial-gradient(120% 90% at 100% 0%, color-mix(in oklab, var(--aqua-2) 70%, transparent), transparent 55%), var(--glass);
   box-shadow: var(--shadow), 0 0 70px -24px rgba(164, 229, 223, .9);
-  backdrop-filter: blur(18px); -webkit-backdrop-filter: blur(18px);
+  -webkit-backdrop-filter: blur(18px); backdrop-filter: blur(18px);
 }
 /* A gold hairline just inside the edge. */
 .gate-card::after { content: ''; position: absolute; inset: 6px; z-index: -1; border-radius: calc(var(--radius) - 5px); box-shadow: inset 0 0 0 1px rgba(214, 155, 49, .35); pointer-events: none; }

@@ -4,8 +4,9 @@ import { nextTick, onBeforeUnmount, onMounted, ref } from 'vue'
 // A popover anchored to a trigger. It is teleported to <body> so table cells
 // and sticky toolbars never clip it; it flips above the trigger near the
 // bottom edge, closes on Escape, outside clicks and page scroll, and hands
-// focus back to the trigger when it closes by keyboard.
-const props = withDefaults(defineProps<{ anchor: HTMLElement | null; align?: 'start' | 'end'; width?: number; label: string; tallest?: number }>(), { align: 'start', width: 240, tallest: 420 })
+// focus back to the trigger when it closes by keyboard. A menu closes on Tab;
+// a small form (`cycle`) keeps Tab among its own controls instead.
+const props = withDefaults(defineProps<{ anchor: HTMLElement | null; align?: 'start' | 'end'; width?: number; label: string; tallest?: number; cycle?: boolean }>(), { align: 'start', width: 240, tallest: 420, cycle: false })
 const emit = defineEmits<{ close: [restoreFocus: boolean] }>()
 const panel = ref<HTMLElement>()
 const x = ref(-9999)
@@ -14,13 +15,15 @@ const y = ref(-9999)
 const maxHeight = ref(props.tallest)
 const above = ref(false)
 
-function place() {
+// keepSide: when the content grows or shrinks (results arriving), stay on the
+// side chosen at opening; above the trigger, the bottom edge stays by it.
+function place(keepSide = false) {
   if (!props.anchor || !panel.value) return
   const rect = props.anchor.getBoundingClientRect()
   const height = panel.value.scrollHeight
   const room = innerHeight - rect.bottom - 12
   // Open above when the menu would not fit below and there is more room above.
-  above.value = room < Math.min(height, props.tallest) && rect.top > room
+  if (!keepSide) above.value = room < Math.min(height, props.tallest) && rect.top > room
   maxHeight.value = Math.max(160, Math.min(props.tallest, above.value ? rect.top - 12 : room))
   const width = Math.min(props.width, innerWidth - 16)
   const left = props.align === 'end' ? rect.right - width : rect.left
@@ -43,9 +46,20 @@ function escape(event: KeyboardEvent) {
   emit('close', true)
 }
 let scrollFrame = 0
+let resized: ResizeObserver | null = null
 function keydown(event: KeyboardEvent) {
-  if (event.key === 'Tab') emit('close', false)
+  if (event.key !== 'Tab') return
+  if (!props.cycle) { emit('close', false); return }
+  const stops = [...(panel.value?.querySelectorAll<HTMLElement>('input, button, textarea, select, [tabindex]') ?? [])]
+    .filter(el => el.tabIndex >= 0 && !(el as HTMLButtonElement).disabled && el.getClientRects().length)
+  if (!stops.length) return
+  const edge = event.shiftKey ? stops[0] : stops[stops.length - 1]
+  if (document.activeElement === edge || !panel.value?.contains(document.activeElement)) {
+    event.preventDefault()
+    ;(event.shiftKey ? stops[stops.length - 1] : stops[0]).focus()
+  }
 }
+const onResize = () => place()
 onMounted(async () => {
   await nextTick()
   place()
@@ -53,7 +67,9 @@ onMounted(async () => {
   // A scroll already under way when the popover opens (the page settling after the
   // click) is delivered before the next frame's callbacks: listen from then on.
   scrollFrame = requestAnimationFrame(() => { scrollFrame = 0; document.addEventListener('scroll', scrolled, true) })
-  window.addEventListener('resize', place)
+  window.addEventListener('resize', onResize)
+  resized = new ResizeObserver(() => place(true))
+  for (const child of panel.value?.children ?? []) resized.observe(child)
   window.addEventListener('keydown', escape, true)
   const first = panel.value?.querySelector<HTMLElement>('[data-autofocus]') ?? panel.value?.querySelector<HTMLElement>('input, button, [tabindex="0"]')
   first?.focus({ preventScroll: true })
@@ -62,7 +78,8 @@ onBeforeUnmount(() => {
   cancelAnimationFrame(scrollFrame)
   document.removeEventListener('pointerdown', outside, true)
   document.removeEventListener('scroll', scrolled, true)
-  window.removeEventListener('resize', place)
+  window.removeEventListener('resize', onResize)
+  resized?.disconnect()
   window.removeEventListener('keydown', escape, true)
 })
 defineExpose({ place })

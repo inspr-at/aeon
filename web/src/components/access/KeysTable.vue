@@ -1,5 +1,6 @@
 <!-- SPDX-License-Identifier: AGPL-3.0-only -->
 <script setup lang="ts">
+import { scopeLabel } from '../../lib/access'
 import { keyState, type AgentKey } from '../../lib/settings'
 import { absoluteTime, relativeTime } from '../../lib/work'
 import AppIcon from '../AppIcon.vue'
@@ -20,7 +21,7 @@ const STATE: Record<string, string> = { active: 'Active', expired: 'Expired', re
         <tr v-for="key in keys" :key="key.id" :class="keyState(key)">
           <th v-if="showName" scope="row">{{ key.name }}<span class="sub">Created {{ relativeTime(key.created_at, { long: true }) }}</span></th>
           <td class="mono">aeon_{{ key.prefix }}_…<span v-if="!showName" class="sub">Created {{ relativeTime(key.created_at, { long: true }) }}</span></td>
-          <td data-label="Scopes"><span v-if="!key.scopes.length" class="muted" data-tip="Everything the agent’s role allows">All of its role</span><span v-for="scope in key.scopes" :key="scope" class="scope mono">{{ scope }}</span></td>
+          <td data-label="Scopes"><span v-if="!key.scopes.length" class="muted" data-tip="A key without scopes can do nothing">None</span><span v-for="scope in key.scopes.slice(0, 4)" :key="scope" class="scope mono" :data-tip="scopeLabel(scope)">{{ scope }}</span><span v-if="key.scopes.length > 4" class="more" :data-tip="key.scopes.slice(4).join('\n')">and {{ key.scopes.length - 4 }} more</span></td>
           <td data-label="Last used"><time v-if="key.last_used_at" :datetime="key.last_used_at" :data-tip="absoluteTime(key.last_used_at)">{{ relativeTime(key.last_used_at, { long: true }) }}</time><span v-else class="muted">Never</span></td>
           <td data-label="Status"><span class="state" :class="keyState(key)">{{ STATE[keyState(key)] }}</span><span v-if="key.expires_at && keyState(key) === 'active'" class="sub">until {{ absoluteTime(key.expires_at) }}</span></td>
           <td v-if="revocable" class="act">
@@ -41,6 +42,7 @@ const STATE: Record<string, string> = { active: 'Active', expired: 'Expired', re
 .sub { display: block; margin-top: 2px; font: 400 11.5px/1.4 var(--font); color: var(--ink-3); }
 .scope { display: inline-flex; align-items: center; height: 20px; margin: 0 4px 4px 0; padding: 0 7px; border-radius: 6px; background: var(--surface-2); color: var(--ink-2); font-size: 11px; }
 .muted { color: var(--ink-3); }
+.more { font-size: 11.5px; color: var(--ink-3); white-space: nowrap; }
 .state { display: inline-flex; align-items: center; height: 20px; padding: 0 8px; border-radius: 999px; background: var(--surface-2); color: var(--ink-2); font-size: 11.5px; font-weight: 600; }
 .state.active { background: rgba(47, 122, 90, .12); color: color-mix(in oklab, var(--ok), var(--ink) 35%); }
 tr.revoked, tr.expired { color: var(--ink-2); }

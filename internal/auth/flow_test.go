@@ -335,7 +335,7 @@ func TestDevLoginAndAgentKeys(t *testing.T) {
 	if err := json.Unmarshal(body, &me); err != nil {
 		t.Fatal(err)
 	}
-	if me.Principal.Kind != string(tenant.Person) || !isAdmin(tenant.Principal{Roles: me.Principal.Roles}) {
+	if me.Principal.Kind != string(tenant.Person) || !isAdmin(tenant.Principal{Kind: tenant.Person, Roles: me.Principal.Roles}) {
 		t.Fatalf("dev me %+v", me.Principal)
 	}
 
@@ -344,7 +344,7 @@ func TestDevLoginAndAgentKeys(t *testing.T) {
 		t.Fatalf("anon create %d", status)
 	}
 
-	status, body, _ = do(t, c, http.MethodPost, app.URL+"/api/agent-keys", `{"name":"ci","scopes":["events:read"]}`, nil)
+	status, body, _ = do(t, c, http.MethodPost, app.URL+"/api/agent-keys", `{"name":"ci","scopes":["events:read","account.manage"]}`, nil)
 	if status != http.StatusCreated {
 		t.Fatalf("create %d %s", status, body)
 	}
@@ -398,7 +398,7 @@ func TestDevLoginAndAgentKeys(t *testing.T) {
 	if err := json.Unmarshal(body, &list); err != nil {
 		t.Fatal(err)
 	}
-	if len(list.Keys) != 1 || list.Keys[0].LastUsedAt == nil || len(list.Keys[0].Scopes) != 1 || list.Keys[0].Scopes[0] != "events:read" {
+	if len(list.Keys) != 1 || list.Keys[0].LastUsedAt == nil || len(list.Keys[0].Scopes) != 2 || list.Keys[0].Scopes[0] != "events:read" || list.Keys[0].Scopes[1] != "account.manage" {
 		t.Fatalf("list %+v", list.Keys)
 	}
 
@@ -498,7 +498,7 @@ func TestAgentKeyRLS(t *testing.T) {
 	if status != http.StatusOK {
 		t.Fatalf("dev %d %s", status, body)
 	}
-	status, body, _ = do(t, c, http.MethodPost, app.URL+"/api/agent-keys", `{"name":"ci","scopes":["read"]}`, nil)
+	status, body, _ = do(t, c, http.MethodPost, app.URL+"/api/agent-keys", `{"name":"ci","scopes":["account.manage"]}`, nil)
 	if status != http.StatusCreated {
 		t.Fatalf("create %d %s", status, body)
 	}

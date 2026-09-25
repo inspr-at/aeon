@@ -411,7 +411,7 @@ const KINDS = [
 .detail-loading .skeleton { height: 22px; }
 .detail-loading .skeleton:nth-child(2) { width: 65%; }
 .detail-loading .skeleton:nth-child(3) { height: 180px; }
-.filters, .day-h { background: color-mix(in srgb, var(--canvas) 94%, transparent); backdrop-filter: blur(12px); -webkit-backdrop-filter: blur(12px); }
+.filters, .day-h { background: color-mix(in srgb, var(--canvas) 94%, transparent); -webkit-backdrop-filter: blur(12px); backdrop-filter: blur(12px); }
 .filters { position: sticky; top: 0; z-index: 2; display: flex; align-items: center; justify-content: space-between; gap: 10px; padding: 2px 0 8px; }
 .toggles { display: flex; gap: 6px; }
 .toggle { display: inline-flex; align-items: center; gap: 6px; height: 28px; padding: 0 11px; border: 1px solid var(--glass-edge); border-radius: 999px; background: var(--btn-bg); box-shadow: var(--shadow-btn); color: var(--ink-2); font-size: 12.5px; font-weight: 600; }

@@ -77,6 +77,13 @@ func newFixture(t *testing.T) *fixture {
 	f.tenantA = insertTenant(t, f.db.Admin, "approvals-a")
 	f.tenantB = insertTenant(t, f.db.Admin, "approvals-b")
 	f.personA = insertPrincipal(t, f.db.Admin, f.tenantA, tenant.Person, "ada")
+	f.personA.Roles = []string{"admin"}
+	if err := db.InTenant(ctx, f.db.App, f.tenantA, func(tx pgx.Tx) error {
+		_, err := tx.Exec(ctx, `UPDATE principals SET roles=$2 WHERE id=$1::uuid`, f.personA.ID, f.personA.Roles)
+		return err
+	}); err != nil {
+		t.Fatal(err)
+	}
 	f.personB = insertPrincipal(t, f.db.Admin, f.tenantB, tenant.Person, "bea")
 	f.agentA = insertPrincipal(t, f.db.Admin, f.tenantA, tenant.Agent, "agent-a")
 	f.agentB = insertPrincipal(t, f.db.Admin, f.tenantA, tenant.Agent, "agent-b")

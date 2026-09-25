@@ -353,7 +353,7 @@ export async function mockAccess(page: Page, world: AccessWorld) {
       const agentRow = world.agents.find(a => a.name === body.name)
       if (agentRow?.service) return fail(route, 403, 'service', 'Service principals never get keys.', 'name')
       const prefix = `n${String(nextId++).slice(-3)}`
-      const key = { id: `k-${prefix}`, principal_id: agentRow?.principal_id ?? `agent-${prefix}`, name: String(body.name), prefix, scopes: [], created_at: new Date(now).toISOString(), expires_at: (body.expires_at as string | undefined) ?? null, last_used_at: null, revoked_at: null }
+      const key = { id: `k-${prefix}`, principal_id: agentRow?.principal_id ?? `agent-${prefix}`, name: String(body.name), prefix, scopes: Array.isArray(body.scopes) ? (body.scopes as string[]) : [], created_at: new Date(now).toISOString(), expires_at: (body.expires_at as string | undefined) ?? null, last_used_at: null, revoked_at: null }
       world.keys.unshift(key)
       event('agent_key.created', null, { id: key.id, principal_id: key.principal_id, name: key.name, prefix })
       return route.fulfill({ status: 201, json: { id: key.id, token: `aeon_${prefix}_T0k3nS3cr3tValue`, prefix, name: key.name, expires_at: key.expires_at } })

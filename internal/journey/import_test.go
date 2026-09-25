@@ -75,6 +75,9 @@ func TestImportedJourneyStagesAndReleaseBackfill(t *testing.T) {
 		if v.Stage != tc.stage || v.NextAction.Key != tc.action || v.StageSource != "derived" {
 			t.Fatalf("%s: stage %s action %s", tc.project, v.Stage, v.NextAction.Key)
 		}
+		if !v.Imported {
+			t.Fatalf("%s: an imported project must say so", tc.project)
+		}
 		if !strings.HasPrefix(v.RequirementsScope, "journey.requirements.r1.d") || len(v.RequirementsDigest) != 64 {
 			t.Fatalf("missing agreement scope: %+v", v)
 		}
@@ -96,6 +99,10 @@ func TestImportedJourneyStagesAndReleaseBackfill(t *testing.T) {
 	planView = f.journey(t, f.person, http.MethodPost, "/api/projects/"+plan+"/journey/actions", actionJSON("open_first_release", planView.Revision, "first-release", "", "", ""))
 	if planView.StageSource != "journey" || planView.Stage != "plan" || planView.CurrentReleaseID == nil {
 		t.Fatalf("first release %+v", planView)
+	}
+	// Recorded history from here on; the project still came with its own.
+	if !planView.Imported {
+		t.Fatal("imported flag lost after the first journey action")
 	}
 	if f.events(t, "journey.derived") != 1 || f.events(t, "journey.release_opened") != 1 {
 		t.Fatal("first action did not record derivation and release")

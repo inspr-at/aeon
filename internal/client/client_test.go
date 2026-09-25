@@ -86,3 +86,39 @@ func TestDoPostsJSON(t *testing.T) {
 		t.Fatalf("id %q", out.ID)
 	}
 }
+
+// A list page of imported tickets passes 1 MiB; it decodes whole, and a body past
+// the cap says so instead of failing as truncated JSON (AEON-140).
+func TestDoReadsLargeResponsesAndNamesTheCap(t *testing.T) {
+	big := strings.Repeat("x", 3<<20)
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		w.Header().Set("Content-Type", "application/json")
+		if r.URL.Path == "/api/huge" {
+			_, _ = w.Write([]byte(`"` + strings.Repeat("y", MaxResponseBytes) + `"`))
+			return
+		}
+		_ = json.NewEncoder(w).Encode(map[string]string{"body": big})
+	}))
+	defer srv.Close()
+	var out map[string]string
+	if err := New(srv.URL, "t").Do(context.Background(), http.MethodGet, "/api/nodes", nil, &out); err != nil || len(out["body"]) != len(big) {
+		t.Fatalf("3 MiB response: err=%v len=%d", err, len(out["body"]))
+	}
+	var s string
+	err := New(srv.URL, "t").Do(context.Background(), http.MethodGet, "/api/huge", nil, &s)
+	if err == nil || !strings.Contains(err.Error(), "larger than 64 MiB") {
+		t.Fatalf("oversized response: %v", err)
+	}
+}
+
+func TestErrorMessagesReadBothErrorShapes(t *testing.T) {
+	for payload, want := range map[string]string{
+		`{"error":"node not found"}`:                        "node not found",
+		`{"code":"forbidden","message":"not your session"}`: "not your session",
+		`plain text`: "plain text",
+	} {
+		if got := errorMessage([]byte(payload)); got != want {
+			t.Fatalf("%s: got %q, want %q", payload, got, want)
+		}
+	}
+}

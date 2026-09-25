@@ -37,6 +37,8 @@ type Principal struct {
 	Kind  string   `json:"kind"`
 	Name  string   `json:"name"`
 	Roles []string `json:"roles"`
+	// HasAvatar says a picture exists; clients request it only then.
+	HasAvatar bool `json:"has_avatar"`
 }
 
 type module struct {
@@ -71,15 +73,16 @@ func (m *module) list(w http.ResponseWriter, r *http.Request) {
 		if err := m.open(r.Context(), tx, p.TenantID); err != nil {
 			return err
 		}
-		rows, err := tx.Query(r.Context(), `SELECT id::text, kind, name, roles FROM principals
-			WHERE tenant_id = $1::uuid ORDER BY kind DESC, lower(name), id`, p.TenantID)
+		rows, err := tx.Query(r.Context(), `SELECT p.id::text, p.kind, p.name, p.roles,
+			EXISTS (SELECT 1 FROM personal_profiles avatar WHERE avatar.tenant_id = p.tenant_id AND avatar.principal_id = p.id AND avatar.avatar_hashes <> '{}'::jsonb)
+			FROM principals p WHERE p.tenant_id = $1::uuid ORDER BY p.kind DESC, lower(p.name), p.id`, p.TenantID)
 		if err != nil {
 			return err
 		}
 		defer rows.Close()
 		for rows.Next() {
 			var item Principal
-			if err := rows.Scan(&item.ID, &item.Kind, &item.Name, &item.Roles); err != nil {
+			if err := rows.Scan(&item.ID, &item.Kind, &item.Name, &item.Roles, &item.HasAvatar); err != nil {
 				return err
 			}
 			if item.Roles == nil {

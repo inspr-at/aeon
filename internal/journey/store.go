@@ -262,6 +262,7 @@ func loadImported(ctx context.Context, tx pgx.Tx, f *facts, releaseID **string) 
 	if !imported {
 		return nil
 	}
+	f.Imported = true
 	if *releaseID != nil {
 		f.ImportedStage = stagePlan
 		return nil

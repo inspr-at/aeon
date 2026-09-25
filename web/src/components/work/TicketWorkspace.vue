@@ -5,7 +5,7 @@ import type { ListItem } from '../../lib/api'
 import { confirmAction } from '../../lib/confirm'
 import { toast } from '../../lib/toast'
 import { useActivity } from '../../lib/useActivity'
-import { useTicket } from '../../lib/useTicket'
+import { useTicket, type RelatedNode } from '../../lib/useTicket'
 import { absoluteTime, kindLabel, priorityLabel, relativeTime, statusMeta, statusOptions } from '../../lib/work'
 import { useAttachments } from '../../lib/useAttachments'
 import AppIcon from '../AppIcon.vue'
@@ -25,6 +25,7 @@ import PriorityIcon from './PriorityIcon.vue'
 import StatusIcon from './StatusIcon.vue'
 import StatusMenu from './StatusMenu.vue'
 import RelationList from './RelationList.vue'
+import RelationPicker from './RelationPicker.vue'
 import TicketHeaderBar from './TicketHeaderBar.vue'
 import TicketProperties from './TicketProperties.vue'
 
@@ -222,7 +223,7 @@ const assigneeOptions = computed<MenuOption[]>(() => {
   ]
 })
 watch(() => props.item?.id, () => {
-  showAcceptance.value = false; showNotes.value = false; menu.value = null
+  showAcceptance.value = false; showNotes.value = false; menu.value = null; linkAnchor.value = null
   scroller.value?.scrollTo({ top: 0 })
 })
 
@@ -230,7 +231,10 @@ function link() { return `${location.origin}/p/${encodeURIComponent(props.projec
 function copy(text: string, label: string) {
   navigator.clipboard.writeText(text).then(() => toast(`Copied ${label}`), () => toast(`${label} could not be copied`, { tone: 'error' }))
 }
-function anchorFor(shortcut: string) { return root.value?.querySelector<HTMLElement>(`[aria-keyshortcuts="${shortcut}"]`) ?? null }
+// The visible control for a key: narrow and wide layouts both render some of them.
+function anchorFor(shortcut: string) {
+  return [...(root.value?.querySelectorAll<HTMLElement>(`[aria-keyshortcuts="${shortcut}"]`) ?? [])].find(el => el.getClientRects().length) ?? null
+}
 function openMenu(kind: 'priority' | 'assignee' | 'epic', anchor: HTMLElement | null) { if (anchor && editable.value) menu.value = { kind, anchor } }
 function closeMenu(restore: boolean) { const anchor = menu.value?.anchor; menu.value = null; if (restore) anchor?.focus() }
 async function choosePriority(value: string) { const anchor = menu.value?.anchor; menu.value = null; anchor?.focus(); await ticket.setPriority(value || null) }
@@ -242,6 +246,32 @@ async function chooseAssignee(value: string) {
 async function chooseEpic(epic: { id: string; key: string; title: string } | null) {
   menu.value = null
   if (epic) await ticket.moveTo(epic)
+}
+// ---------- Links to other tickets ----------
+const linkAnchor = ref<HTMLElement | null>(null)
+// On a phone the picker opens under Link with the screen's height to itself:
+// Link scrolls to the top first, so the keyboard does not cover the results.
+async function openLink(anchor: HTMLElement | null) {
+  if (!anchor || !editable.value || !props.item) return
+  menu.value = null
+  if (matchMedia('(max-width: 600px)').matches) {
+    anchor.scrollIntoView({ block: 'start', behavior: 'instant' })
+    await new Promise(requestAnimationFrame)
+  }
+  linkAnchor.value = anchor
+}
+function closeLink(restore: boolean) { const anchor = linkAnchor.value; linkAnchor.value = null; if (restore) anchor?.focus() }
+// Removing a link asks first, then offers Undo, like the other destructive actions.
+async function unlinkEntry(entry: RelatedNode): Promise<boolean> {
+  const target = props.item
+  if (!target || !editable.value) return false
+  const other = entry.node?.key ?? 'an unavailable ticket'
+  const ok = await confirmAction({
+    title: `Remove the link to ${other}?`,
+    body: `“${entry.label} ${other}” goes from ${target.key} and from ${other}. You can undo it right after.`,
+    confirmLabel: 'Remove link', danger: true,
+  })
+  return ok ? ticket.unlink(entry) : false
 }
 async function remove() {
   const target = props.item
@@ -270,6 +300,7 @@ defineExpose({
   openStatus: () => { const anchor = anchorFor('s'); if (anchor && editable.value) emit('status', anchor) },
   openPriority: () => openMenu('priority', anchorFor('p')),
   openAssignee: () => openMenu('assignee', anchorFor('a')),
+  openLink: () => openLink(anchorFor('r')),
   focusComposer: () => composer.value?.focus(),
 })
 </script>
@@ -381,7 +412,7 @@ defineExpose({
           />
           <!-- Relations, then activity: both wait for the relations, so neither jumps. -->
           <template v-if="!contextColumn && ticket.relationsReady.value">
-            <RelationList class="ws-block" :class="{ 'only-narrow': mode === 'full' }" :related="ticket.related.value" @open="openLinked" />
+            <RelationList class="ws-block" :class="{ 'only-narrow': mode === 'full' }" :related="ticket.related.value" :editable="editable" :unlink="unlinkEntry" @open="openLinked" @link="openLink" />
             <ActivityTimeline
               ref="timeline" class="ws-block" :entries="activity.timeline.value" :loading="activity.loading.value" :loading-older="activity.loadingOlder.value"
               :has-older="!!activity.cursor.value" :error="activity.error.value" :me="me?.id" :now="now" :can-write="editable"
@@ -400,7 +431,7 @@ defineExpose({
             @retry="attachments.retry" @cancel="attachments.cancel" @reload="attachments.load"
           />
           <template v-if="ticket.relationsReady.value">
-          <RelationList v-if="mode === 'panel' || ticket.related.value.length" class="ctx-block" :related="ticket.related.value" @open="openLinked" />
+          <RelationList v-if="mode === 'panel' || ticket.related.value.length || editable" class="ctx-block" :related="ticket.related.value" :editable="editable" :unlink="unlinkEntry" @open="openLinked" @link="openLink" />
           <ActivityTimeline
             ref="timeline" class="ctx-block" :entries="activity.timeline.value" :loading="activity.loading.value" :loading-older="activity.loadingOlder.value"
             :has-older="!!activity.cursor.value" :error="activity.error.value" :me="me?.id" :now="now" :can-write="editable"
@@ -418,7 +449,7 @@ defineExpose({
               @epic="anchor => openMenu('epic', anchor)" @open-parent="openLinked"
             />
           </div>
-          <div v-if="ticket.related.value.length && !contextColumn" class="side-card"><RelationList :related="ticket.related.value" @open="openLinked" /></div>
+          <div v-if="(ticket.related.value.length || editable) && !contextColumn && ticket.relationsReady.value" class="side-card"><RelationList :related="ticket.related.value" :editable="editable" :unlink="unlinkEntry" @open="openLinked" @link="openLink" /></div>
         </aside>
       </div>
     </div>
@@ -437,6 +468,10 @@ defineExpose({
     <StatusMenu v-if="editMenu?.kind === 'status' && item" :anchor="editMenu.anchor" :current="draft.state" :known-states="editStatusOptions.map(option => option.value)" :ticket-key="item.key" @choose="value => chooseEdit('status', value)" @close="closeEditMenu" />
     <OptionMenu v-if="editMenu?.kind === 'priority' && item" :anchor="editMenu.anchor" title="Priority" :subject="item.key" kind="priority" :options="priorityOptions" :current="draft.priority" @choose="value => chooseEdit('priority', value)" @close="closeEditMenu" />
     <OptionMenu v-if="editMenu?.kind === 'assignee' && item" :anchor="editMenu.anchor" title="Assignee" :subject="item.key" kind="assignee" :options="assigneeOptions" :current="draft.assignee" searchable @choose="value => chooseEdit('assignee', value)" @close="closeEditMenu" />
+    <RelationPicker
+      v-if="linkAnchor && item" :anchor="linkAnchor" :subject="item.key" :self-id="item.id" :project-key="project.routeKey"
+      :related="ticket.related.value" :link="ticket.link" @close="closeLink"
+    />
     <EpicPicker v-if="menu?.kind === 'epic' && item" :anchor="menu.anchor" :project-id="project.id" :current="item.parent?.kind_slug === 'epic' ? item.parent.id : null" :subject="item.key" @choose="chooseEpic" @close="closeMenu" />
   </component>
 </template>
@@ -447,7 +482,7 @@ defineExpose({
   position: fixed; z-index: 15; top: calc(var(--header-h) + 10px); right: 10px; bottom: calc(var(--footer-h) + 10px); width: min(560px, calc(100vw - 20px));
   border-radius: var(--radius); border: 1px solid var(--glass-edge);
   background: linear-gradient(165deg, var(--surface-raised), var(--surface-raised-2)); box-shadow: var(--shadow-pop), var(--shadow);
-  backdrop-filter: blur(20px) saturate(1.15); -webkit-backdrop-filter: blur(20px) saturate(1.15);
+  -webkit-backdrop-filter: blur(20px) saturate(1.15); backdrop-filter: blur(20px) saturate(1.15);
 }
 .ticket-ws.panel:focus-visible { box-shadow: var(--shadow-pop), var(--focus-ring); }
 .ws-scroll { flex: 1; min-height: 0; overflow: auto; overscroll-behavior: contain; }
@@ -511,7 +546,7 @@ defineExpose({
 .ticket-ws.full.editing { max-width: 1480px; }
 .full .edit-form { padding: 26px 0 40px; }
 /* Dropping files anywhere on the ticket. */
-.drop-overlay { position: absolute; inset: 0; z-index: 30; display: grid; place-items: center; padding: 24px; border-radius: inherit; background: rgba(14, 111, 108, .12); box-shadow: inset 0 0 0 2px var(--teal); backdrop-filter: blur(3px); -webkit-backdrop-filter: blur(3px); pointer-events: none; }
+.drop-overlay { position: absolute; inset: 0; z-index: 30; display: grid; place-items: center; padding: 24px; border-radius: inherit; background: rgba(14, 111, 108, .12); box-shadow: inset 0 0 0 2px var(--teal); -webkit-backdrop-filter: blur(3px); backdrop-filter: blur(3px); pointer-events: none; }
 .full .drop-overlay { position: fixed; inset: calc(var(--header-h) + 8px) 8px calc(var(--footer-h) + 8px); border-radius: var(--radius); }
 .drop-card { display: grid; justify-items: center; gap: 6px; padding: 22px 28px; border-radius: 16px; background: var(--surface-raised); box-shadow: var(--shadow-pop); color: var(--ink); text-align: center; }
 .drop-card svg { color: var(--teal); }

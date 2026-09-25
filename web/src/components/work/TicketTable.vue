@@ -519,9 +519,7 @@ defineExpose({
                   <span v-else class="twisty-spacer" />
                 </span>
                 <AppIcon :name="entry.row.kind_slug === 'epic' ? 'epic' : entry.row.kind_slug === 'task' ? 'task' : 'ticket'" :size="14" class="kind-glyph" :class="entry.row.kind_slug" :data-tip="kindLabel(entry.row.kind_slug)" />
-                <a class="title-link" :href="href(entry.row)" tabindex="-1" @click="linkClick">
-                  <template v-for="(part, i) in highlight(entry.row.title, query)" :key="i"><mark v-if="part.match">{{ part.text }}</mark><template v-else>{{ part.text }}</template></template>
-                </a>
+                <a class="title-link" :href="href(entry.row)" tabindex="-1" @click="linkClick"><span class="title-text"><template v-for="(part, i) in highlight(entry.row.title, query)" :key="i"><mark v-if="part.match">{{ part.text }}</mark><template v-else>{{ part.text }}</template></template></span></a>
                 <span v-if="childCount(entry)" class="child-count mono" :data-tip="plural(childCount(entry), 'child item')">{{ childCount(entry) }}</span>
                 <span v-if="!entry.tree && epicChip(entry.row)" class="parent-chip" :class="{ epic: epicChip(entry.row)!.kind_slug === 'epic' }" :data-tip="`${kindLabel(epicChip(entry.row)!.kind_slug)} ${epicChip(entry.row)!.key}\n${epicChip(entry.row)!.title}`">
                   <AppIcon v-if="epicChip(entry.row)!.kind_slug === 'epic'" name="epic" :size="10" />
@@ -644,7 +642,7 @@ defineExpose({
 thead th {
   position: sticky; top: var(--toolbar-h, 0px); z-index: 2; height: 34px; padding: 0 12px; text-align: left; font-weight: 500;
   background: var(--surface-raised-2); border-bottom: 1px solid var(--line-2);
-  backdrop-filter: blur(14px) saturate(1.15); -webkit-backdrop-filter: blur(14px) saturate(1.15);
+  -webkit-backdrop-filter: blur(14px) saturate(1.15); backdrop-filter: blur(14px) saturate(1.15);
 }
 thead th:first-child { padding-left: 18px; }
 .th-sort, .th-label { display: inline-flex; align-items: center; gap: 6px; height: 26px; margin: 0 -6px; padding: 0 6px; border: 0; border-radius: 6px; background: transparent; font: 500 10.5px/1 var(--mono); letter-spacing: .14em; text-transform: uppercase; color: var(--ink-3); font-variant-ligatures: none; }
@@ -786,7 +784,7 @@ td.c-title { position: relative; overflow: hidden; }
 .tag-more { flex-shrink: 0; color: var(--ink-3); font-size: 11px; }
 .c-prio.narrow .prio-label { display: none; }
 
-.group-row th { position: sticky; top: calc(var(--toolbar-h, 0px) + 35px); z-index: 1; height: 36px; padding: 0 12px 0 8px; text-align: left; font-weight: 400; background: var(--surface-raised-2); border-bottom: 1px solid var(--line); backdrop-filter: blur(12px); -webkit-backdrop-filter: blur(12px); }
+.group-row th { position: sticky; top: calc(var(--toolbar-h, 0px) + 35px); z-index: 1; height: 36px; padding: 0 12px 0 8px; text-align: left; font-weight: 400; background: var(--surface-raised-2); border-bottom: 1px solid var(--line); -webkit-backdrop-filter: blur(12px); backdrop-filter: blur(12px); }
 .group-head { display: flex; align-items: center; gap: 8px; min-width: 0; }
 .group-toggle { display: grid; place-items: center; width: 24px; height: 24px; padding: 0; border: 0; border-radius: 6px; background: transparent; color: var(--ink-3); }
 .group-toggle:hover { background: var(--row-hover); color: var(--ink); }
@@ -853,7 +851,10 @@ td.c-title { position: relative; overflow: hidden; }
   .ticket-row .c-assignee { display: none !important; }
   .title-cell { align-items: flex-start; flex-wrap: wrap; gap: 4px 8px; white-space: normal; }
   .title-cell .kind-glyph { margin-top: 2px; }
-  .title-link { flex: 1 1 calc(100% - 30px); min-height: 44px; padding-bottom: 12px; white-space: normal; font-size: 14.5px; line-height: 1.35; display: -webkit-box; -webkit-line-clamp: 2; -webkit-box-orient: vertical; }
+  /* The link keeps its 44 px reach; the two-line clamp sits on the text inside it,
+     so a third line never shows through the reach below (AEON-140). */
+  .title-link { flex: 1 1 calc(100% - 30px); min-height: 44px; padding-bottom: 12px; white-space: normal; font-size: 14.5px; line-height: 1.35; }
+  .title-text { display: -webkit-box; -webkit-line-clamp: 2; -webkit-box-orient: vertical; overflow: hidden; }
   .parent-chip { max-width: calc(100% - 22px); margin-left: 22px; }
   .child-count { display: none; }
   .row-actions { display: none; }

@@ -110,7 +110,7 @@ onMounted(async () => {
   <AccessSheet :title="person.name" :label="`${person.name}, access`" @close="emit('close')">
     <template #head>
       <div class="head">
-        <Avatar :id="person.principal_id" :name="person.name" :size="44" :picture="!!person.avatar_url" />
+        <Avatar :id="person.principal_id" :name="person.name" :size="44" />
         <div class="head-text">
           <h2 class="title">{{ person.name }}</h2>
           <p class="sub">{{ identityLine(person) }}<template v-if="person.identity === 'inspr_id' && person.email"> · INSPR ID</template></p>

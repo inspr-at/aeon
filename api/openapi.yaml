@@ -445,11 +445,12 @@ paths:
                           description: The people and agents most recently active in the project (actors of the tenant's latest events, at most 90 days old, on the project or anything below it), newest first. A linked principal is shown as the person it links to.
                           items:
                             type: object
-                            required: [id, name, kind]
+                            required: [id, name, kind, has_avatar]
                             properties:
                               id: {type: string, format: uuid}
                               name: {type: string}
                               kind: {type: string, enum: [person, agent]}
+                              has_avatar: {type: boolean, description: 'The person has a profile picture at /api/people/{id}/avatar/{size}; clients request it only then and show initials otherwise.'}
         '400':
           $ref: '#/components/responses/Error'
   /project-groups:
@@ -1017,7 +1018,11 @@ paths:
           $ref: '#/components/responses/Error'
     post:
       operationId: createRelation
-      description: Relations are directed except relates, which is symmetric and stored with the smaller UUID as source.
+      description: >-
+        Relations are directed except relates, which is symmetric and stored with the smaller UUID as source.
+        A 409 message reads as words and names items by key, so clients can show it as it stands: an identical
+        link that already exists, or a blocks, implements or duplicates link that would close a loop through
+        live items (the message spells out the chain). A link from an item to itself is a 400.
       security: *auth
       requestBody:
         $ref: '#/components/requestBodies/RelationCreate'
@@ -3011,6 +3016,7 @@ components:
         revision: {type: integer, minimum: 1}
         stage: {type: string, enum: [inspire, shape, requirements, plan, build, deploy, access, live]}
         stage_source: {type: string, enum: [journey, derived], description: Whether stage selection uses recorded journey history or the imported-project data derivation}
+        imported: {type: boolean, description: 'True for a project imported from classic Paimos with its history; its stages before Plan were never recorded here'}
         stages: {type: array, items: {$ref: '#/components/schemas/JourneyStage'}}
         next_action: {$ref: '#/components/schemas/JourneyNextAction'}
         requirements_revision: {type: integer, minimum: 0}
@@ -3446,12 +3452,13 @@ components:
         - {type: object, required: [contact_node_id, bound_by_principal_id, bound_at], properties: {contact_node_id: {type: string, format: uuid}, bound_by_principal_id: {type: string, format: uuid}, bound_at: {type: string, format: date-time}}}
     BusinessPrincipal:
       type: object
-      required: [id, kind, name, roles]
+      required: [id, kind, name, roles, has_avatar]
       properties:
         id: {type: string, format: uuid}
         kind: {type: string, enum: [person, agent]}
         name: {type: string}
         roles: {type: array, items: {type: string}}
+        has_avatar: {type: boolean, description: 'The person has a profile picture at /api/people/{id}/avatar/{size}; clients request it only then and show initials otherwise.'}
     QuoteCreate:
       type: object
       additionalProperties: false
@@ -3682,11 +3689,12 @@ components:
           maxItems: 50
           items:
             type: object
-            required: [session_id, principal_id, name, mode, observed_revision, expires_at]
+            required: [session_id, principal_id, name, has_avatar, mode, observed_revision, expires_at]
             properties:
               session_id: {type: string, format: uuid}
               principal_id: {type: string, format: uuid}
               name: {type: string}
+              has_avatar: {type: boolean, description: 'The person has a profile picture at /api/people/{id}/avatar/{size}; clients request it only then and show initials otherwise.'}
               mode: {type: string, enum: [viewing, editing, idle]}
               anchor: {$ref: '#/components/schemas/QuotePresenceAnchor'}
               observed_revision: {type: integer, minimum: 1}
@@ -4669,10 +4677,11 @@ components:
         type: {type: string, enum: [comment, change, created]}
         author:
           type: object
-          required: [id, name]
+          required: [id, name, has_avatar]
           properties:
             id: {type: [string, 'null'], format: uuid, description: Null if no imported principal mapping exists}
             name: {type: string}
+            has_avatar: {type: boolean, description: 'The person has a profile picture at /api/people/{id}/avatar/{size}; clients request it only then and show initials otherwise.'}
         body_markdown: {type: string, description: Present for comments only}
         changes:
           type: array
@@ -4832,6 +4841,7 @@ components:
               properties:
                 id: {type: string, format: uuid}
                 name: {type: string}
+                has_avatar: {type: boolean, description: 'The person has a profile picture at /api/people/{id}/avatar/{size}; clients request it only then and show initials otherwise.'}
             parent:
               type: [object, 'null']
               properties:

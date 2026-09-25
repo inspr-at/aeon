@@ -92,7 +92,7 @@ onMounted(() => { void load(); void projects.load() })
         <ol class="events">
           <li v-for="row in day.items" :key="row.event.id" class="event">
             <span class="e-icon" aria-hidden="true"><AppIcon :name="row.category ? ICON[row.category] : 'history'" :size="13" /></span>
-            <Avatar :id="row.event.actor_principal_id" :name="row.actor" :size="22" :picture="!!access.person(row.event.actor_principal_id)?.avatar_url" />
+            <Avatar :id="row.event.actor_principal_id" :name="row.actor" :size="22" />
             <p class="e-text"><b>{{ row.actor }}</b> {{ row.text }}</p>
             <time class="e-time" :datetime="row.event.at" :data-tip="absoluteTime(row.event.at)">{{ relativeTime(row.event.at) }}</time>
           </li>

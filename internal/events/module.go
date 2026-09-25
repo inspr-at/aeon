@@ -206,12 +206,7 @@ func (m *module) handleUndo(w http.ResponseWriter, r *http.Request) {
 		if err != nil {
 			return err
 		}
-		admin := false
-		for _, role := range p.Roles {
-			if role == "admin" {
-				admin = true
-			}
-		}
+		admin := tenant.IsAdmin(p)
 		if e.ActorPrincipalID != p.ID && !admin {
 			return ErrForbidden
 		}

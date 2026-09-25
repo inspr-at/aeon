@@ -559,7 +559,7 @@ watch(() => props.profileId, () => { void nextTick(() => form.value?.scrollTo({ 
 .pane-switch { display: none; }
 .profiles-body { flex: 1; min-height: 0; display: grid; grid-template-columns: 256px minmax(380px, 456px) minmax(0, 1fr); }
 .profile-form { min-height: 0; overflow: auto; overscroll-behavior: contain; border-right: 1px solid var(--line-2); background: var(--bg, transparent); container-type: inline-size; }
-.form-top { position: sticky; top: 0; z-index: 2; display: grid; gap: 8px; padding: 10px 16px; background: var(--surface-raised-2); border-bottom: 1px solid var(--line); backdrop-filter: blur(12px); -webkit-backdrop-filter: blur(12px); }
+.form-top { position: sticky; top: 0; z-index: 2; display: grid; gap: 8px; padding: 10px 16px; background: var(--surface-raised-2); border-bottom: 1px solid var(--line); -webkit-backdrop-filter: blur(12px); backdrop-filter: blur(12px); }
 .profile-switch { display: none; height: 34px; }
 .jumps { display: flex; flex-wrap: wrap; gap: 2px; margin: 0 -4px; }
 .jump { height: 26px; padding: 0 8px; border: 0; border-radius: 999px; background: transparent; color: var(--ink-2); font-size: 12.5px; font-weight: 600; }

@@ -91,12 +91,12 @@ func addPrincipal(t *testing.T, slug string) tenant.Principal {
 		return tx.QueryRow(t.Context(), `
 			INSERT INTO principals (tenant_id, kind, name, roles)
 			VALUES ($1, 'person', $2, $3)
-			RETURNING id::text`, tenantID, slug, []string{"member"}).Scan(&id)
+			RETURNING id::text`, tenantID, slug, []string{"admin"}).Scan(&id)
 	})
 	if err != nil {
 		t.Fatalf("principal: %v", err)
 	}
-	return tenant.Principal{ID: id, TenantID: tenantID, Kind: tenant.Person, Name: slug, Roles: []string{"member"}}
+	return tenant.Principal{ID: id, TenantID: tenantID, Kind: tenant.Person, Name: slug, Roles: []string{"admin"}}
 }
 
 type countingWriter struct{ n int }
@@ -127,6 +127,46 @@ func callAs(t *testing.T, mod httpapi.Module, p *tenant.Principal, method, path,
 func call(t *testing.T, p *tenant.Principal, method, path, body string) (int, []byte) {
 	t.Helper()
 	return callAs(t, New(appPool, nil), p, method, path, body)
+}
+
+func TestSchemaAndTagMutationsRequirePersonAdmin(t *testing.T) {
+	admin := newPrincipal(t, "schema-role-test")
+	makePerson := func(name, role string) tenant.Principal {
+		p := tenant.Principal{TenantID: admin.TenantID, Kind: tenant.Person, Name: name, Roles: []string{role}}
+		err := db.InTenant(t.Context(), appPool, admin.TenantID, func(tx pgx.Tx) error {
+			return tx.QueryRow(t.Context(), `INSERT INTO principals(tenant_id,kind,name,roles) VALUES($1::uuid,'person',$2,$3) RETURNING id::text`, admin.TenantID, name, p.Roles).Scan(&p.ID)
+		})
+		if err != nil {
+			t.Fatal(err)
+		}
+		return p
+	}
+	member := makePerson("member", "member")
+	super := makePerson("super", "super_admin")
+	definition := `{"slug":"custom","label":"Custom","short_prefix":"CUS","icon":"circle","field_schema":{}}`
+	if status, _ := call(t, &member, http.MethodPost, "/api/kinds", definition); status != http.StatusForbidden {
+		t.Fatalf("member kind create: %d", status)
+	}
+	status, body := call(t, &super, http.MethodPost, "/api/kinds", definition)
+	kind := decode[kindJSON](t, status, body, http.StatusCreated)
+	if status, _ := call(t, &member, http.MethodPatch, "/api/kinds/"+kind.ID, `{"label":"Changed"}`); status != http.StatusForbidden {
+		t.Fatalf("member kind update: %d", status)
+	}
+	if status, _ := call(t, &member, http.MethodDelete, "/api/kinds/"+kind.ID, ""); status != http.StatusForbidden {
+		t.Fatalf("member kind delete: %d", status)
+	}
+	status, body = call(t, &member, http.MethodPost, "/api/nodes", fmt.Sprintf(`{"kind_id":%q,"title":"Member node"}`, kind.ID))
+	decode[nodeJSON](t, status, body, http.StatusCreated)
+	tag := createTestTag(t, admin, "Editable tag")
+	if status, _ := call(t, &member, http.MethodPatch, "/api/tags/"+tag.ID, `{"name":"Changed"}`); status != http.StatusForbidden {
+		t.Fatalf("member tag rename: %d", status)
+	}
+	if status, body := call(t, &member, http.MethodPatch, "/api/tags/"+tag.ID, `{"color":"green"}`); status != http.StatusOK {
+		t.Fatalf("member tag color: %d %s", status, body)
+	}
+	if status, _ := call(t, &member, http.MethodDelete, "/api/tags/"+tag.ID, ""); status != http.StatusForbidden {
+		t.Fatalf("member tag delete: %d", status)
+	}
 }
 
 func decode[T any](t *testing.T, status int, body []byte, want int) T {

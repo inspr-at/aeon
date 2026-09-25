@@ -20,6 +20,9 @@ import (
 type listPerson struct {
 	ID   string `json:"id"`
 	Name string `json:"name"`
+	// HasAvatar says a picture exists, so clients request
+	// /api/people/{id}/avatar/{size} only then and show initials otherwise.
+	HasAvatar bool `json:"has_avatar"`
 }
 type listParent struct {
 	ID       string `json:"id"`
@@ -420,7 +423,8 @@ func (m *Module) listNodes(ctx context.Context, tenantID string, q listQuery) (n
 			var item listItem
 			var fields, position string
 			var assigneeID, assigneeName, parentID, parentKey, parentTitle, parentKind, projectID, projectKey, projectTitle, epicID, epicKey, epicTitle *string
-			err = rows.Scan(&item.ID, &item.Key, &item.KindID, &item.Title, &item.Body, &fields, &item.State, &item.ParentID, &position, &item.CreatedAt, &item.UpdatedAt, &item.DeletedAt, &item.KindSlug, &item.KindLabel, &item.Priority, &assigneeID, &assigneeName, &parentID, &parentKey, &parentTitle, &parentKind, &item.ChildrenCount, &projectID, &projectKey, &projectTitle, &epicID, &epicKey, &epicTitle)
+			var assigneeAvatar bool
+			err = rows.Scan(&item.ID, &item.Key, &item.KindID, &item.Title, &item.Body, &fields, &item.State, &item.ParentID, &position, &item.CreatedAt, &item.UpdatedAt, &item.DeletedAt, &item.KindSlug, &item.KindLabel, &item.Priority, &assigneeID, &assigneeName, &assigneeAvatar, &parentID, &parentKey, &parentTitle, &parentKind, &item.ChildrenCount, &projectID, &projectKey, &projectTitle, &epicID, &epicKey, &epicTitle)
 			if err != nil {
 				rows.Close()
 				return err
@@ -428,7 +432,7 @@ func (m *Module) listNodes(ctx context.Context, tenantID string, q listQuery) (n
 			item.Fields = json.RawMessage(fields)
 			item.Position = trimDecimal(position)
 			if assigneeID != nil {
-				item.Assignee = &listPerson{*assigneeID, *assigneeName}
+				item.Assignee = &listPerson{*assigneeID, *assigneeName, assigneeAvatar}
 			}
 			if parentID != nil {
 				item.Parent = &listParent{*parentID, *parentKey, *parentTitle, *parentKind}
@@ -487,17 +491,31 @@ func (m *Module) listNodes(ctx context.Context, tenantID string, q listQuery) (n
 
 // Native fields win, including an explicit null (unassignment). Classic IDs
 // are resolved only through this tenant's source-qualified identity mapping.
+// The references are read from n.fields once per node (the OFFSET 0 keeps that
+// subquery from being inlined): imported fields are large and stored out of
+// line, and comparing them against every principal re-read them each time,
+// about 0.4 ms per row on production data (AEON-140).
+// hasAvatar is true when the principal has a profile picture; only people
+// have one. It reads the page's few assignees after paging, never the filter.
+func hasAvatar(principal string) string {
+	return `EXISTS (SELECT 1 FROM personal_profiles avatar WHERE avatar.tenant_id=current_setting('aeon.tenant_id')::uuid AND avatar.principal_id=` + principal + ` AND avatar.avatar_hashes <> '{}'::jsonb)`
+}
+
 const assigneeJoin = ` LEFT JOIN LATERAL (
+    SELECT CASE
+            WHEN n.fields ? 'assignee' THEN coalesce(n.fields->'assignee'->>'id',n.fields->>'assignee')
+            WHEN n.fields ? 'assignee_id' THEN n.fields->>'assignee_id' END AS native,
+        NOT (n.fields ? 'assignee' OR n.fields ? 'assignee_id') AS classic_only,
+        (n.fields->'classic'->>'source_id')||':'||(n.fields->'classic'->>'assignee_id') AS classic_subject
+    OFFSET 0
+) aref ON true
+LEFT JOIN LATERAL (
     SELECT coalesce(target.id,person.id) AS id,coalesce(target.name,person.name) AS name FROM principals person
     LEFT JOIN principals target ON target.tenant_id=person.tenant_id AND target.id=person.linked_to
     LEFT JOIN identities identity ON identity.id=person.identity_id
     WHERE person.tenant_id=n.tenant_id AND (
-        person.id::text = CASE
-            WHEN n.fields ? 'assignee' THEN coalesce(n.fields->'assignee'->>'id',n.fields->>'assignee')
-            WHEN n.fields ? 'assignee_id' THEN n.fields->>'assignee_id' END
-        OR (NOT (n.fields ? 'assignee' OR n.fields ? 'assignee_id')
-            AND identity.issuer='paimos-classic'
-            AND identity.subject=(n.fields->'classic'->>'source_id')||':'||(n.fields->'classic'->>'assignee_id'))
+        person.id::text = aref.native
+        OR (aref.classic_only AND identity.issuer='paimos-classic' AND identity.subject=aref.classic_subject)
     ) LIMIT 1
 ) assignee ON true `
 
@@ -688,6 +706,7 @@ func listSQL(q listQuery, anchor any) (string, []any) {
 	sql := prefix + `, ordered AS (SELECT n.id,row_number() OVER (ORDER BY ` + listOrder(q) + `) AS rn FROM filtered f JOIN nodes n ON n.id=f.id JOIN node_kinds k ON k.id=n.kind_id` + people + `),
     selected AS (SELECT id,rn FROM ordered WHERE rn>coalesce((SELECT rn FROM ordered WHERE id=` + anchorArg + `::uuid),0) ORDER BY rn LIMIT ` + limitArg + `)
     SELECT ` + nodeCols + `,k.slug,k.label,nullif(n.fields->>'priority',''),assignee.id::text,assignee.name,
+           ` + hasAvatar("assignee.id") + `,
            par.id::text,par.key,par.title,pk.slug,
            (SELECT count(*)::int FROM nodes c WHERE c.parent_id=n.id AND c.deleted_at IS NULL),
            project.id::text,project.key,project.title,
@@ -932,9 +951,10 @@ type projectSummary struct {
 	People []projectPerson `json:"people"`
 }
 type projectPerson struct {
-	ID   string `json:"id"`
-	Name string `json:"name"`
-	Kind string `json:"kind"`
+	ID        string `json:"id"`
+	Name      string `json:"name"`
+	Kind      string `json:"kind"`
+	HasAvatar bool   `json:"has_avatar"`
 }
 
 // recentPeoplePerProject bounds the avatars a project summary carries.
@@ -993,7 +1013,7 @@ func (m *Module) handleListProjects(w http.ResponseWriter, r *http.Request) {
             ), ranked AS (
                 SELECT project_id,person,at,row_number() OVER (PARTITION BY project_id ORDER BY at DESC,person) AS n FROM actors
             ), people AS (
-                SELECT r.project_id,json_agg(json_build_object('id',who.id::text,'name',who.name,'kind',who.kind) ORDER BY r.at DESC,r.person) AS people
+                SELECT r.project_id,json_agg(json_build_object('id',who.id::text,'name',who.name,'kind',who.kind,'has_avatar',`+hasAvatar("who.id")+`) ORDER BY r.at DESC,r.person) AS people
                 FROM ranked r JOIN principals who ON who.tenant_id=current_setting('aeon.tenant_id')::uuid AND who.id=r.person
                 WHERE r.n <= $2
                 GROUP BY r.project_id

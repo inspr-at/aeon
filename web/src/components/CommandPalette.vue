@@ -2,7 +2,8 @@
 <script setup lang="ts">
 import { computed, nextTick, onBeforeUnmount, ref, watch } from 'vue'
 import { useRoute, useRouter } from 'vue-router'
-import { listNodes, searchNodes, type ListItem, type WorkNode } from '../lib/api'
+import { listNodes, type ListItem, type WorkNode } from '../lib/api'
+import { searchWork, workKindMap } from '../lib/ticketSearch'
 import { entryPath, listKnowledge, typeMeta, type KnowledgeItem } from '../lib/knowledge'
 import { visibleSections } from '../lib/settings'
 import { can } from '../lib/authz'
@@ -15,7 +16,6 @@ import { useSession } from '../stores/session'
 import { recents } from '../lib/recents'
 import { dark, toggleTheme } from '../lib/theme'
 import { toast } from '../lib/toast'
-import { kinds } from '../lib/useTicket'
 import { highlight, statusMeta } from '../lib/work'
 import { useProjects } from '../stores/projects'
 import AppIcon, { type IconName } from './AppIcon.vue'
@@ -131,17 +131,17 @@ async function search() {
   const within = scopeProject.value?.id
   const key = keyQuery(q)
   try {
-    if (!workKinds.value.size) workKinds.value = new Map((await kinds()).filter(k => ['ticket', 'task', 'epic'].includes(k.slug)).map(k => [k.id, k.slug]))
-    // A key prefix ("PHAROS-29") is a key lookup; words also go to the hybrid search.
-    const [page, found, knowledge] = await Promise.all([
-      listNodes({ q, kind: ['ticket', 'task', 'epic'], within, sort: key ? 'key' : '-updated_at', limit: 8 }, { signal }),
-      key ? Promise.resolve({ items: [] }) : searchNodes(q, { limit: 12 }, { signal }).catch(() => ({ items: [] })),
+    if (!workKinds.value.size) workKinds.value = await workKindMap()
+    // A key prefix ("PHAROS-29") is a key lookup; words also go to the hybrid search
+    // (lib/ticketSearch, shared with the relation picker).
+    const [work, knowledge] = await Promise.all([
+      searchWork(q, { within, signal }),
       // Knowledge reads titles, slugs and text; it never holds up the rest.
       key ? Promise.resolve({ items: [] as KnowledgeItem[] }) : listKnowledge({ q, project_id: within, limit: 8 }, signal).catch(() => ({ items: [] as KnowledgeItem[] })),
     ])
     if (signal.aborted) return
-    listed.value = page.items
-    hits.value = found.items.map(hit => hit.node)
+    listed.value = work.listed
+    hits.value = work.hits
     knowledgeHits.value = knowledge.items
     searched = q
     active.value = 0
@@ -347,12 +347,12 @@ const iconOf = (result: Result): BizIconName => result.type === 'action' ? resul
 
 <style scoped>
 .palette { width: min(680px, calc(100vw - 24px)); max-width: none; margin: 11dvh auto auto; padding: 0; border: 0; background: transparent; color: var(--ink); overflow: visible; }
-.palette::backdrop { background: var(--palette-scrim); backdrop-filter: blur(3px) saturate(1.05); -webkit-backdrop-filter: blur(3px) saturate(1.05); }
+.palette::backdrop { background: var(--palette-scrim); -webkit-backdrop-filter: blur(3px) saturate(1.05); backdrop-filter: blur(3px) saturate(1.05); }
 .sheet {
   display: flex; flex-direction: column; border-radius: 18px; border: 1px solid var(--glass-edge); overflow: hidden;
   /* Near-opaque: the list behind must never read through the results. */
   background: linear-gradient(165deg, var(--surface-raised), var(--surface-raised-2) 70%) var(--surface-raised); box-shadow: var(--shadow-pop), var(--shadow);
-  backdrop-filter: blur(22px) saturate(1.2); -webkit-backdrop-filter: blur(22px) saturate(1.2);
+  -webkit-backdrop-filter: blur(22px) saturate(1.2); backdrop-filter: blur(22px) saturate(1.2);
 }
 @media (prefers-reduced-motion: no-preference) {
   .palette[open] .sheet { animation: palette-in .18s cubic-bezier(.2, .7, .2, 1); }

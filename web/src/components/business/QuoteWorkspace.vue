@@ -268,7 +268,7 @@ const compact = computed(() => phone.value || width.value < 780)
 // The side panel docks only on a full page wide enough for it; docked beside the list it floats.
 const sideMode = computed<'dock' | 'overlay' | 'sheet'>(() => mode.value === 'sheet' ? 'sheet' : mode.value === 'dock' && props.layout === 'full' ? 'dock' : 'overlay')
 type Pane = 'format' | 'details'
-const pref = usePreference<{ zoom?: ZoomMode; inspector?: boolean; pane?: Pane | 'none'; headerFolded?: boolean }>('quote-editor')
+const pref = usePreference<{ zoom?: ZoomMode; phoneZoom?: ZoomMode; inspector?: boolean; pane?: Pane | 'none'; headerFolded?: boolean }>('quote-editor')
 const floating = ref<Pane | null>(null)
 const savedPane = computed<Pane | null>(() => {
   const stored = pref.value.value
@@ -299,9 +299,10 @@ const deskSize = ref({ width: 1200, height: 800 })
 // Docked beside the list the paper fits the panel's width unless you zoom it there;
 // the full page keeps your zoom.
 const dockZoom = ref<ZoomMode | null>(null)
-const effectiveZoom = computed<ZoomMode>(() => props.layout === 'dock' ? dockZoom.value ?? 'width' : readZoom(pref.value.value?.zoom, phone.value ? 'width' : 100))
+// A phone keeps its own zoom: a desk's 100 % would put most of the page off screen (AEON-140).
+const effectiveZoom = computed<ZoomMode>(() => props.layout === 'dock' ? dockZoom.value ?? 'width' : phone.value ? readZoom(pref.value.value?.phoneZoom, 'width') : readZoom(pref.value.value?.zoom, 100))
 const percent = computed(() => zoomPercent(effectiveZoom.value, deskSize.value))
-function setZoom(next: ZoomMode) { if (props.layout === 'dock') dockZoom.value = next; else pref.save({ ...(pref.value.value ?? {}), zoom: next }) }
+function setZoom(next: ZoomMode) { if (props.layout === 'dock') dockZoom.value = next; else pref.save({ ...(pref.value.value ?? {}), [phone.value ? 'phoneZoom' : 'zoom']: next }) }
 // Both are measured once before the first paint (so the bar never lays out for a
 // width it does not have and then jumps), then followed as they change.
 function contentBox(el: HTMLElement) {

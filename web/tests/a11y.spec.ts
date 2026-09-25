@@ -23,6 +23,13 @@ async function signedIn(page: Page, empty = false) {
   await mockAgents(page, agentData({ ...world, empty }))
   await mockKnowledge(page, knowledgeWorld())
 }
+// Deciding a high-risk request needs an admin (AEON-149), and the first
+// request in the agent fixtures is high risk.
+async function signedInAdmin(page: Page) {
+  await mockWork(page, fixtures(), { admin: true })
+  await mockAgents(page, agentData({ ...world }))
+  await mockKnowledge(page, knowledgeWorld())
+}
 function business(options: BusinessMockOptions = {}) {
   return async (page: Page) => {
     await mockWork(page, fixtures())
@@ -114,7 +121,7 @@ const screens: [string, (page: Page) => Promise<void>, string, (page: Page) => P
   ['knowledge tab', signedIn, '/p/PHAROS/knowledge', async page => { await expect(page.locator('.k-row').first()).toBeVisible() }],
   ['knowledge entry', signedIn, '/p/PHAROS/knowledge/runbook/deploy-release', async page => { await expect(page.locator('.e-body')).toBeVisible() }],
   ['knowledge across projects', signedIn, '/knowledge?q=deploy', async page => { await expect(page.locator('.kp-row').first()).toBeVisible() }],
-  ['agents approve', signedIn, '/agents', async page => {
+  ['agents approve', signedInAdmin, '/agents', async page => {
     await expect(page.locator('.agents-page .row').first()).toBeVisible()
     await page.keyboard.press('j'); await page.keyboard.press('a')
     await expect(page.getByLabel('Reason (optional)')).toBeFocused()
@@ -196,7 +203,9 @@ const journeyScreens: [string, JourneyStart, string, (page: Page) => Promise<voi
   ['journey history fold', 'build', '/p/PHAROS?view=journey&stage=inspire', async page => {
     await page.locator('section.history').getByRole('button', { name: 'Show the sources' }).click()
     await expect(page.getByText('Sources · stored with the project')).toBeVisible()
-  }, { derived: true }],
+  }],
+  ['journey imported origin', 'build', '/p/PHAROS?view=journey&stage=inspire', async page => { await expect(page.getByRole('list', { name: 'What the project brought' })).toBeVisible() }, { derived: true }],
+  ['journey imported plan backlog', 'open', '/p/PHAROS?view=journey', async page => { await expect(page.getByRole('region', { name: 'Backlog · what release 1 is chosen from' })).toBeVisible() }, { derived: true }],
   ['journey deploy ready', 'deploy', '/p/PHAROS?view=journey', async page => { await expect(page.getByRole('region', { name: 'Launch admission is ready' })).toBeVisible() }, { readiness: { can_admit: true, reason: '' } }],
   ['journey mark candidate', 'mark', '/p/PHAROS?view=journey', async page => { await expect(page.getByRole('listitem', { name: /Build gate/ })).toBeVisible() }],
   ['journey open release 1', 'open', '/p/PHAROS?view=journey', async page => { await expect(page.getByRole('region', { name: 'Decision: Open release 1' })).toBeVisible() }],

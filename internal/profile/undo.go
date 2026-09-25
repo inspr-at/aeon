@@ -20,13 +20,7 @@ func undo(ctx context.Context, tx pgx.Tx, p tenant.Principal, e events.Event) (e
 		return events.Change{}, events.ErrConflict
 	}
 	if expected.PrincipalID != p.ID {
-		admin := false
-		for _, r := range p.Roles {
-			if r == "admin" {
-				admin = true
-			}
-		}
-		if !admin {
+		if !tenant.IsAdmin(p) {
 			return events.Change{}, events.ErrForbidden
 		}
 	}

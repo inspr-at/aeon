@@ -140,7 +140,7 @@ func principal(w http.ResponseWriter, r *http.Request) (tenant.Principal, bool) 
 	return p, true
 }
 
-func isAdmin(p tenant.Principal) bool { return slices.Contains(p.Roles, "admin") }
+func isAdmin(p tenant.Principal) bool { return tenant.IsAdmin(p) }
 
 func admin(w http.ResponseWriter, r *http.Request) (tenant.Principal, bool) {
 	p, ok := principal(w, r)

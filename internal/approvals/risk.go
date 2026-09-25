@@ -4,7 +4,7 @@ package approvals
 
 import "strings"
 
-// Risk is a presentation hint, never an authority or an alternative to a grant.
+// Risk classifies requests for the person decision gate; it grants no authority.
 // Tenant-wide requests and dangerous scope segments take priority over read.
 func Risk(scope, resourceKind string) string {
 	if resourceKind == "tenant" {

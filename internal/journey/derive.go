@@ -100,6 +100,7 @@ type facts struct {
 	DraftCount                 int
 	Release                    *releaseFacts
 	ImportedStage              string
+	Imported                   bool
 	CurrentReleaseRecorded     bool
 	RequirementsDigest         string
 	OpenReleaseTickets         int
@@ -154,6 +155,7 @@ func derive(f facts) Journey {
 		Revision:             f.Revision,
 		Stage:                stage,
 		StageSource:          stageSource,
+		Imported:             f.Imported,
 		Stages:               stageRail(f, stage, blocked),
 		NextAction:           nextAction(f, stage, nextKey, available, reason, approvalID),
 		RequirementsRevision: f.RequirementsRevision,

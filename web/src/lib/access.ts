@@ -3,6 +3,7 @@
 // (ADR-003, the authz contract). Wire types mirror the contract exactly; the
 // helpers below are free of Vue so they can be unit-tested.
 import { api } from './api.ts'
+import { learnPictures } from './avatar.ts'
 import type { RoleRef } from './authz.ts'
 
 export type { RoleRef }
@@ -14,7 +15,8 @@ export interface ProjectRole { project_id: string; project_key: string; project_
 export interface Alias { principal_id: string; name: string; source: 'classic' }
 export type Status = 'active' | 'deactivated'
 export interface Person {
-  principal_id: string; name: string; avatar_url: string | null; email: string | null; status: Status; identity: 'inspr_id' | null
+  // has_avatar (U27) is additive; the contract's avatar_url says the same when it is absent.
+  principal_id: string; name: string; avatar_url: string | null; has_avatar?: boolean; email: string | null; status: Status; identity: 'inspr_id' | null
   workspace_role: RoleRef | null; project_roles: ProjectRole[]; aliases: Alias[]; classic_role: string | null; last_active_at: string | null
 }
 export interface Agent { principal_id: string; name: string; workspace_role: RoleRef | null; key_count: number; last_seen_at: string | null; service: boolean }
@@ -25,7 +27,7 @@ export interface Invite {
 }
 export interface Imported { principal_id: string; name: string; classic_role: string | null }
 export interface Members { people: Person[]; agents: Agent[]; invites: Invite[]; imported: Imported[] }
-export interface ProjectMember { principal_id: string; name: string; avatar_url: string | null; kind: 'person' | 'agent'; via: 'workspace' | 'project'; role: RoleRef }
+export interface ProjectMember { principal_id: string; name: string; avatar_url: string | null; has_avatar?: boolean; kind: 'person' | 'agent'; via: 'workspace' | 'project'; role: RoleRef }
 export interface AuditEvent { id: number; actor_principal_id: string; node_id?: string | null; type: string; before: unknown; after: unknown; at: string }
 
 // ---------- Errors: {error, code, field?, reason} ----------
@@ -52,9 +54,12 @@ export const getRoles = () => call<Role[]>('/roles')
 export const createRole = (body: { name: string; description: string; permissions: string[]; based_on?: string | null }) => call<Role>('/roles', 'POST', body)
 export const updateRole = (roleId: string, body: { name?: string; description?: string; permissions?: string[] }) => call<Role>(`/roles/${id(roleId)}`, 'PATCH', body)
 export const deleteRole = (roleId: string, reassignTo?: string) => call<void>(`/roles/${id(roleId)}${reassignTo ? `?reassign_to=${id(reassignTo)}` : ''}`, 'DELETE')
-export const getMembers = () => call<Members>('/members')
+// Avatars ask for a picture only for people a payload says have one (lib/avatar).
+const pictureHints = (people: { principal_id: string; avatar_url: string | null; has_avatar?: boolean; kind?: string }[]) =>
+  learnPictures(people.filter(p => p.kind !== 'agent').map(p => ({ id: p.principal_id, has_avatar: p.has_avatar ?? !!p.avatar_url })))
+export const getMembers = () => call<Members>('/members').then(members => { pictureHints(members.people); return members })
 export const setWorkspaceRole = (principalId: string, roleId: string | null) => call<Person | Agent>(`/members/${id(principalId)}/workspace-role`, 'PUT', { role_id: roleId })
-export const getProjectMembers = (projectId: string) => call<ProjectMember[]>(`/projects/${id(projectId)}/members`)
+export const getProjectMembers = (projectId: string) => call<ProjectMember[]>(`/projects/${id(projectId)}/members`).then(members => { pictureHints(members); return members })
 export const setProjectRole = (projectId: string, principalId: string, roleId: string) => call<unknown>(`/projects/${id(projectId)}/members/${id(principalId)}`, 'PUT', { role_id: roleId })
 export const removeProjectMember = (projectId: string, principalId: string) => call<void>(`/projects/${id(projectId)}/members/${id(principalId)}`, 'DELETE')
 export const createInvite = (body: { email: string; workspace_role_id?: string; project_roles?: { project_id: string; role_id: string }[]; expires_in_days?: number }) =>
@@ -70,8 +75,35 @@ export async function getAudit(after?: number): Promise<{ items: AuditEvent[]; n
 }
 // Agent keys (existing endpoints): a new key's secret is shown only once.
 export interface AgentKeyCreated { id: string; token: string; prefix: string; name: string; expires_at: string | null }
-export const createAgentKey = (name: string, expiresAt: string | null) => call<AgentKeyCreated>('/agent-keys', 'POST', { name, ...(expiresAt ? { expires_at: expiresAt } : {}) })
+export const createAgentKey = (name: string, expiresAt: string | null, scopes: string[]) => call<AgentKeyCreated>('/agent-keys', 'POST', { name, scopes, ...(expiresAt ? { expires_at: expiresAt } : {}) })
 export const revokeAgentKey = (keyId: string) => call<void>(`/agent-keys/${id(keyId)}`, 'DELETE')
+
+// ---------- Agent key scopes ----------
+// What a key may call. Since SEC4 the server's key ceiling denies by default and
+// an empty list grants nothing (internal/auth/doc.go); a key also never does more
+// than its agent's role allows. The server has no list of scopes to read yet, so
+// this mirrors its route table (stage.<op> scopes are left to the CLI).
+export interface KeyScope { key: string; label: string }
+export const KEY_SCOPE_GROUPS: { label: string; scopes: KeyScope[] }[] = [
+  { label: 'Work', scopes: [{ key: 'nodes.read', label: 'Read projects and tickets' }, { key: 'nodes.write', label: 'Create and change tickets' }, { key: 'nodes.configure', label: 'Set up ticket types and tags' }] },
+  { label: 'Links and history', scopes: [{ key: 'relations.read', label: 'Read links between tickets' }, { key: 'relations.write', label: 'Link tickets' }, { key: 'events.read', label: 'Read history' }, { key: 'events.undo', label: 'Undo changes' }] },
+  { label: 'Search and views', scopes: [{ key: 'search.read', label: 'Search' }, { key: 'views.read', label: 'Read saved views' }, { key: 'views.write', label: 'Save views' }] },
+  { label: 'Knowledge', scopes: [{ key: 'knowledge.read', label: 'Read knowledge' }, { key: 'knowledge.write', label: 'Write knowledge' }, { key: 'journey.read', label: 'Read project journeys' }] },
+  { label: 'Messages and approvals', scopes: [{ key: 'inbox.read', label: 'Read its messages' }, { key: 'inbox.send', label: 'Send messages' }, { key: 'approvals.read', label: 'Read approvals' }, { key: 'approvals.request', label: 'Ask for approval' }] },
+  { label: 'Work orders and runs', scopes: [{ key: 'work_orders.read', label: 'Read work orders' }, { key: 'work_orders.write', label: 'Write work orders' }, { key: 'run.create', label: 'Start runs' }, { key: 'run.read', label: 'Read runs' }, { key: 'run.claim', label: 'Take on runs' }, { key: 'run.telemetry', label: 'Report run progress' }] },
+  { label: 'Harness sessions', scopes: [{ key: 'harness.read', label: 'Read sessions' }, { key: 'harness.write', label: 'Register and update sessions' }, { key: 'harness.worker', label: 'Work as a session' }, { key: 'harness.control', label: 'Control sessions' }] },
+  { label: 'Intake and hours', scopes: [{ key: 'intake.read', label: 'Read intake' }, { key: 'intake.write', label: 'Add to intake' }, { key: 'hours.read', label: 'Read hours' }, { key: 'hours.write', label: 'Book hours' }] },
+  { label: 'Itself', scopes: [{ key: 'account.manage', label: 'Read its own identity and accounts' }, { key: 'models.read', label: 'Read models' }, { key: 'plugins.read', label: 'Read plugins' }] },
+]
+const ALL_SCOPES = KEY_SCOPE_GROUPS.flatMap(g => g.scopes)
+export const KEY_SCOPE_COUNT = ALL_SCOPES.length
+export const MAX_KEY_SCOPES = 32
+export const KEY_PRESETS: { id: string; label: string; scopes: string[] }[] = [
+  { id: 'read', label: 'Read only', scopes: [...ALL_SCOPES.filter(s => s.key.endsWith('.read')).map(s => s.key), 'account.manage'] },
+  // What the coordinating agent uses end to end (internal/cli compat test).
+  { id: 'coordinator', label: 'Coordinator', scopes: ['account.manage', 'inbox.read', 'inbox.send', 'models.read', 'nodes.read', 'nodes.write', 'nodes.configure', 'relations.read', 'relations.write', 'events.read', 'events.undo', 'search.read', 'views.read', 'views.write'] },
+]
+export const scopeLabel = (key: string) => ALL_SCOPES.find(s => s.key === key)?.label ?? key
 
 // ---------- Permissions in words ----------
 const RESOURCE: Record<string, string> = {

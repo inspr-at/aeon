@@ -42,7 +42,8 @@ const risky = (keys: string[]) => keys.filter(key => byKey.value.get(key)?.risk 
 function keys(event: KeyboardEvent) {
   const ids = options.value.map(option => option.id)
   const at = ids.indexOf(picked.value)
-  if (event.key === 'ArrowDown' || event.key === 'ArrowUp') {
+  // Arrows choose a role in the list; elsewhere (the preview) they scroll.
+  if ((event.key === 'ArrowDown' || event.key === 'ArrowUp') && list.value?.contains(event.target as Node)) {
     event.preventDefault()
     picked.value = ids[(at + (event.key === 'ArrowDown' ? 1 : -1) + ids.length) % ids.length]!
     document.getElementById(`${id}-${picked.value}`)?.focus({ preventScroll: true })
@@ -86,7 +87,7 @@ watch(picked, () => void nextTick(reveal))
         </button>
       </div>
       <!-- Always in place, so the menu opens where the full preview will fit. -->
-      <div v-if="!locked" class="preview" :class="{ idle: !changed }" aria-live="polite">
+      <div v-if="!locked" class="preview" :class="{ idle: !changed }" role="region" aria-label="What changes" tabindex="0" aria-live="polite">
         <p class="eyebrow">What changes</p>
         <p v-if="!changed" class="effect idle-text">Pick another role to see what it adds or takes away.</p>
         <p v-else class="effect">{{ pickedRole ? effectLine(pickedRole.permissions, registry) : scope === 'workspace' ? 'Only the projects they are given, nothing in the workspace.' : 'No access on this project beyond their workspace role.' }}</p>
@@ -142,6 +143,7 @@ watch(picked, () => void nextTick(reveal))
 .preview { display: grid; gap: 6px; margin: 2px 2px 0; padding: 10px 12px; border-radius: 12px; background: var(--surface-sunken); box-shadow: inset 0 0 0 1px var(--line); }
 .effect { font-size: 13px; line-height: 1.45; color: var(--ink); }
 .idle-text { color: var(--ink-3); }
+.preview:focus-visible { outline: none; box-shadow: var(--focus-ring); }
 .delta { display: flex; flex-wrap: wrap; align-items: center; gap: 4px 6px; }
 .delta-h { display: inline-flex; align-items: center; gap: 4px; margin-right: 2px; font: 600 11px/1 var(--mono); letter-spacing: .04em; font-variant-ligatures: none; }
 .delta-h.gain { color: var(--ok); }
