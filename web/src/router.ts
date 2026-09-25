@@ -52,6 +52,7 @@ export const router = createRouter({
     { path: '/releases/:version?', component: ProjectsView, meta: { title: 'Releases' } },
     // Settings: Personal for everyone; Workspace, Business and Projects for admins.
     { path: '/settings', redirect: '/settings/personal' },
+    { path: '/settings/business/profiles/:profileId?', component: () => import('./views/settings/DocumentProfilesView.vue'), props: true, meta: { title: 'Document profiles', fill: true } },
     { path: '/settings/:section(personal|workspace|business|projects)', component: () => import('./views/SettingsView.vue'), meta: { title: 'Settings' } },
     { path: '/signin', component: SignInView, meta: { title: 'Sign in', bare: true } },
     { path: '/offers/:publicTenant/:token', component: () => import('./public/PublicQuoteView.vue'), props: true, meta: { title: 'Customer quote', bare: true, public: true } },

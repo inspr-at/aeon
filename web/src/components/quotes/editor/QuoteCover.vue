@@ -4,10 +4,10 @@ import QuoteText from './QuoteText.vue'
 import DatePicker from '../DatePicker.vue'
 import type { QuoteEditor } from '../../../lib/quotes/editor'
 import type { QuoteDocumentData } from '../../../lib/quotes/types'
-import { profileLabel } from '../../../lib/quotes/profile'
+import { profileDate, profileLabel } from '../../../lib/quotes/profile'
 const props = defineProps<{ document: QuoteDocumentData; editor: QuoteEditor; offerNo?: string; editable?: boolean }>()
 const set = (part: 'sender' | 'recipient' | 'legal', key: string, text: string) => props.editor.editField(part, { key, text })
-const date = (value: string) => value ? new Intl.DateTimeFormat(props.document.profile?.definition.locale || 'de-AT', { day: '2-digit', month: '2-digit', year: 'numeric', timeZone: 'UTC' }).format(new Date(`${value}T00:00:00Z`)) : ''
+const date = (value: string) => profileDate(props.document.profile, value)
 const label = (key: string, fallback: string) => profileLabel(props.document.profile, key, fallback)
 </script>
 <template>

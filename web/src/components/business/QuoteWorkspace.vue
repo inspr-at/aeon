@@ -13,6 +13,7 @@ import { getDraft } from '../../lib/quotes/api'
 import { QuoteEditor } from '../../lib/quotes/editor'
 import { branchQuote, duplicateQuote, finalizeQuote, getLink, getVersion, issueConfirm, issueError, lifecycleError, linkUrl, reviseConfirm, setArchived, undoQuote, type QuoteVersion } from '../../lib/quotes/lifecycle'
 import { statusOf } from '../../lib/quotes/list'
+import { getProfile, listProfiles, selectQuoteProfile, type QuoteProfile } from '../../lib/quotes/profile'
 import { readZoom, zoomPercent, type ZoomMode } from '../../lib/quotes/zoom'
 import type { QuoteDocumentData } from '../../lib/quotes/types'
 import { toast } from '../../lib/toast'
@@ -26,6 +27,7 @@ import QuoteDocument from '../quotes/editor/QuoteDocument.vue'
 import QuoteIcon from '../quotes/inspector/QuoteIcon.vue'
 import QuoteInspector from '../quotes/inspector/QuoteInspector.vue'
 import QuoteTitleBar from '../quotes/QuoteTitleBar.vue'
+import QuoteProfilePicker from '../quotes/QuoteProfilePicker.vue'
 import AppIcon from '../AppIcon.vue'
 
 // One quote at work: the title bar, the paper on a desk you can zoom, and the side
@@ -102,6 +104,48 @@ const editor = computed(() => {
   quote.editor ??= new QuoteEditor(working)
   return quote.editor
 })
+// ---------- The document profile (U19): picked on a draft, frozen on a version ----------
+const profiles = ref<QuoteProfile[] | null>(null)
+const profileBusy = ref(false)
+const currentProfile = computed(() => document.value?.profile ?? null)
+// Names as they were at the revision the quote holds (a profile may be renamed later).
+const profileNames = ref(new Map<string, string>())
+const profileName = computed(() => {
+  const p = currentProfile.value
+  if (!p) return ''
+  return profileNames.value.get(`${p.id}:${p.revision}`) ?? profiles.value?.find(item => item.id === p.id)?.name ?? ''
+})
+watch(currentProfile, async p => {
+  if (!p || profileNames.value.has(`${p.id}:${p.revision}`)) return
+  try { const at = await getProfile(p.id, p.revision); profileNames.value = new Map(profileNames.value).set(`${p.id}:${p.revision}`, at.name) } catch { /* the list's name stands in */ }
+}, { immediate: true })
+async function loadProfiles() {
+  if (!staff.value) return
+  try { profiles.value = await listProfiles() } catch { profiles.value = [] }
+}
+watch(() => [props.quoteId, isDraft.value], () => { if (isDraft.value) void loadProfiles() }, { immediate: true })
+// Choosing saves pending edits first, then takes the profile's current revision.
+async function chooseProfile(profileId: string, undoing = false) {
+  const quote = live.value
+  if (!quote || !editable.value || profileBusy.value) return
+  const before = currentProfile.value
+  if ((before?.id ?? '') === profileId && !undoing && (profiles.value?.find(p => p.id === profileId)?.revision ?? 0) <= (before?.revision ?? 0)) return
+  profileBusy.value = true
+  try {
+    if (canSave.value) {
+      await quote.session.save()
+      if (view.value?.local !== 'clean') { toast('Save the draft before choosing another profile.', { tone: 'error' }); return }
+    }
+    await selectQuoteProfile(props.quoteId, view.value?.baseRevision ?? 0, profileId)
+    await quote.session.reload(true)
+    const name = profileId ? profiles.value?.find(p => p.id === profileId)?.name ?? 'the profile' : 'the standard document'
+    if (!undoing) toast(`This draft now uses ${name}.`, { action: { label: 'Undo', run: () => void chooseProfile(before?.id ?? '', true) }, timeout: 8000 })
+    else toast(`Back to ${before ? profileName.value || 'the earlier profile' : 'the standard document'}.`)
+  } catch (e) {
+    toast(lifecycleError(e, 'The profile was not changed.'), { tone: 'error' })
+  } finally { profileBusy.value = false }
+}
+
 // On its own page the tab and the breadcrumb name the quote.
 watch(offerNo, number => { if (props.layout === 'full' && number) setPageTitle(number) }, { immediate: true })
 // The customer's current name from the list (loaded quietly if this page opened first),
@@ -383,7 +427,14 @@ defineExpose({ focus: () => root.value?.focus({ preventScroll: true }), issue, r
       :admin="admin" :staff="staff"
       @save="save" @undo="undo" @redo="redo" @zoom="setZoom" @print="print" @toggle-header="toggleHeader" @pane="setPane"
       @close="emit('close')" @expand="emit('expand')" @collapse="emit('collapse')" @duplicate="duplicate" @archive="archive" @copy-number="copyNumber" @issue="issue"
-    />
+    >
+      <template v-if="document && (isDraft ? staff : true)" #profile>
+        <QuoteProfilePicker
+          :current="currentProfile" :name="profileName" :profiles="profiles" :editable="editable" :busy="profileBusy" :compact="compact" :admin="admin"
+          @open="loadProfiles" @choose="id => chooseProfile(id)"
+        />
+      </template>
+    </QuoteTitleBar>
     <div v-if="error || recovery || viewing !== null || view?.remote === 'newer' || view?.review || view?.local === 'failed' || view?.local === 'offline'" class="quote-notices">
       <p v-if="error" class="notice bad" role="alert"><QuoteIcon name="alert" :size="15" /><span>{{ error }}</span><RouterLink v-if="layout === 'full'" class="btn sm" to="/business/quotes">Back to Quotes</RouterLink></p>
       <p v-if="viewing !== null" class="notice" role="status"><QuoteIcon name="history" :size="15" /><span>You are reading version {{ viewing }} as it was issued. It cannot change.</span><button type="button" class="btn sm" @click="viewing = null">{{ isDraft ? 'Back to the draft' : 'Back to the current version' }}</button></p>

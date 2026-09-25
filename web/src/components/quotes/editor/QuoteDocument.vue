@@ -31,7 +31,7 @@ import { fitWholeBlocks, type PaginationResult, type PagePlan } from '../../../l
 import { MARK_DEFAULT_MM } from '../../../lib/quotes/inspector'
 import { contentUrl } from '../../../lib/attachments'
 import { quoteQr } from '../../../lib/quotes/qr'
-import { loadProfileFonts, pageNumber, profileAssetUrl, profileStyle } from '../../../lib/quotes/profile'
+import { loadProfileFonts, pageNumber, profileAssetUrl, profileDate, profileStyle } from '../../../lib/quotes/profile'
 import type { QuoteDocumentData, DocumentSettings, ListMode, MarkName, NumberingOptions, OffsetPatch, QuoteMarker, QuoteSection, SectionNumberingStyle, SectionSettingsPatch, TextSelection } from '../../../lib/quotes/types'
 const props = withDefaults(defineProps<{ document: QuoteDocumentData; offerNo?: string; editable?: boolean; accepted?: { name: string; company?: string; at: string; digest: string } | null; editor?: QuoteEditor | null; publicLink?: string; draftPreview?: boolean }>(), { editable: false, offerNo: '', editor: null, publicLink: '', draftPreview: false })
 const emit = defineEmits<{ 'update:document': [document: QuoteDocumentData]; change: [document: QuoteDocumentData]; 'render-state': [state: PaginationResult]; overflow: [message: string | null]; mark: [page: number] }>()
@@ -70,6 +70,8 @@ const sections = computed(() => state.value.sections)
 const profile = computed(() => state.value.profile)
 const paperStyle = computed(() => profileStyle(profile.value))
 const footerNumber = (page: number) => pageNumber(profile.value, page, pages.value.length)
+// The running header's date prints like the cover's, in the profile's locale.
+const headerDate = computed(() => profileDate(profile.value, state.value.offer_date))
 let fontsReady: Promise<void> = Promise.resolve()
 watch(profile, value => { fontsReady = loadProfileFonts(value); schedule() }, { immediate: true })
 const publicQr = computed(() => props.publicLink ? quoteQr(props.publicLink) : null)
@@ -223,7 +225,7 @@ defineExpose({
   <div class="quote-document" :class="profile?.definition.layout_variant" :style="paperStyle" :data-quote-ready="renderState.ready" :data-quote-overflow="renderState.overflow ?? undefined" :data-page-count="pages.length">
     <div v-if="renderState.overflow" class="quote-overflow" role="alert">{{ renderState.overflow }}</div>
     <article v-for="(page, pageIndex) in pages" :key="pageIndex" class="quote-page" :data-page="pageIndex + 1">
-      <header v-if="profile?.definition.layout_variant === 'classic-v1'" class="quote-page-header"><span>{{ profile.definition.labels.quote || 'ANGEBOT' }} {{ offerNo }}</span><span>{{ state.offer_date }}</span></header>
+      <header v-if="profile?.definition.layout_variant === 'classic-v1'" class="quote-page-header"><span>{{ profile.definition.labels.quote || 'ANGEBOT' }} {{ offerNo }}</span><span>{{ headerDate }}</span></header>
       <div class="quote-page-content">
         <QuoteCover v-if="page.kind === 'cover'" :document="state" :editor="editor" :offer-no="offerNo" :editable="editable" />
         <div
