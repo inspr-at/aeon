@@ -22,6 +22,7 @@ import (
 	"github.com/inspr-at/aeon/internal/events"
 	"github.com/inspr-at/aeon/internal/plugins"
 	"github.com/inspr-at/aeon/internal/plugins/fence"
+	"github.com/inspr-at/aeon/internal/quotepdf"
 	"github.com/inspr-at/aeon/internal/tenant"
 	"github.com/jackc/pgx/v5"
 )
@@ -559,7 +560,7 @@ func TestPublicCapabilityReplayPrivacyAndDecisionRace(t *testing.T) {
 	if err != nil || decisions != 1 || jobs != 1 || receipts != 1 || !recipientFrozen {
 		t.Fatalf("decision projection %d/%d/%d, recipient frozen %t: %v", decisions, jobs, receipts, recipientFrozen, err)
 	}
-	if _, err := os.Stat("../../../../web/dist/quote-print.html"); err == nil {
+	if _, err := os.Stat("../../../../web/dist/quote-print.html"); err == nil && quotepdf.Available() {
 		confirmationModule, err := confirmation.New(f.pool.App, f.reg, os.DirFS("../../../../web/dist"), f.store)
 		if err != nil {
 			t.Fatal(err)
@@ -578,7 +579,11 @@ func TestPublicCapabilityReplayPrivacyAndDecisionRace(t *testing.T) {
 			return tx.QueryRow(t.Context(), `SELECT r.file_sha256,j.state FROM quote_confirmation_receipts r JOIN quote_confirmation_jobs j ON j.tenant_id=r.tenant_id AND j.quote_node_id=r.quote_node_id AND j.version=r.version WHERE r.quote_node_id=$1::uuid AND r.version=1`, id).Scan(&receiptHash, &jobState)
 		})
 		if err != nil || jobState != "ready" || len(receiptHash) != 64 {
-			t.Fatalf("receipt binding %q %q: %v", receiptHash, jobState, err)
+			var state, safeError string
+			_ = db.InTenant(t.Context(), f.pool.App, f.tenantID, func(tx pgx.Tx) error {
+				return tx.QueryRow(t.Context(), `SELECT state,last_safe_error FROM quote_confirmation_jobs WHERE quote_node_id=$1::uuid AND version=1`, id).Scan(&state, &safeError)
+			})
+			t.Fatalf("receipt binding %q %q: %v (job %q: %q)", receiptHash, jobState, err, state, safeError)
 		}
 		file, err := f.store.Open(f.tenantID, receiptHash, "original")
 		if err != nil {
@@ -650,6 +655,14 @@ func TestPublicCapabilityReplayPrivacyAndDecisionRace(t *testing.T) {
 		unavailable, err := confirmation.New(f.pool.App, f.reg, nil, f.store)
 		if err != nil {
 			t.Fatal(err)
+		}
+		if !quotepdf.Available() {
+			// The first accepted quote still has a pending receipt when the
+			// renderer is unavailable; fail that job before testing id2.
+			unavailable.Mount(f.mux)
+			if processed, err := unavailable.ProcessNext(t.Context(), f.tenantID); err != nil || !processed {
+				t.Fatalf("first unavailable render transition %v: %v", processed, err)
+			}
 		}
 		processed, err := unavailable.ProcessNext(t.Context(), f.tenantID)
 		if err != nil || !processed {
