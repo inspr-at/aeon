@@ -336,6 +336,8 @@ onBeforeUnmount(() => { document.removeEventListener('pointerdown', outside); wi
   .place-text { position: absolute; width: 1px; height: 1px; overflow: hidden; clip: rect(0 0 0 0); white-space: nowrap; }
   .place .needs-badge { position: absolute; top: -4px; right: -6px; margin: 0; }
 }
+/* The search pill gives up width before a breadcrumb has to clip. */
+@media (max-width: 1100px) { .search-pill { width: 200px; } }
 @media (max-width: 900px) { .search-pill { width: 180px; } }
 @media (max-width: 600px) {
   .app-header { gap: 6px; padding: 0 12px; }
