@@ -45,7 +45,7 @@ export function useOutline(projectId: Ref<string | null>, filters: Ref<ListFilte
     if (id && !expandedByProject.has(id)) expandedByProject.set(id, expanded.value)
     stats.clear(); ancestors.clear()
   }, { immediate: true })
-  watch(() => JSON.stringify([filters.value.q, filters.value.status, filters.value.priority, filters.value.assignee, filters.value.type]), () => { autoCollapsed.value = new Set() })
+  watch(() => JSON.stringify({ ...filters.value, sort: null, group: null, cols: null, view: null }), () => { autoCollapsed.value = new Set() })
   function persist() { if (projectId.value) expandedByProject.set(projectId.value, expanded.value) }
 
   // ---------- Match mode ----------

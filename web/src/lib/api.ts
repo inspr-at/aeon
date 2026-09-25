@@ -116,6 +116,8 @@ export type Facets = Record<string, Record<string, number>>
 export interface ListPage extends Page<ListItem> { facets?: Facets }
 export interface ListQuery {
   within?: string; kind?: string[]; state?: string[]; priority?: string[]; assignee?: string[]
+  tag?: string[]; epic?: string[]; cost_unit?: string[]; release?: string[]
+  date_field?: string; date_from?: string; date_to?: string
   q?: string; hide_closed?: boolean; facets?: string[]; sort?: string; cursor?: string; limit?: number; parent_id?: string
 }
 // Work (ticket, task, epic) counts: open = new and backlog, in_progress = in progress and QA,
@@ -133,6 +135,26 @@ function listQuery(params: ListQuery): string {
   return query(values)
 }
 export const listNodes = (params: ListQuery, options: { signal?: AbortSignal } = {}) => json<ListPage>(`/nodes${listQuery(params)}`, 'GET', undefined, {}, options.signal)
+// U22 saved views: a project's list state with a name, own or shared (api/openapi.yaml SavedView).
+export interface SavedView {
+  id: string; owner_principal_id: string; project_id: string | null; name: string
+  filters: Record<string, unknown>; sort_keys: string[]; group_by: string; columns: string[]; shared: boolean
+  created_at: string; updated_at: string; deleted_at: string | null
+}
+export interface ViewWrite { name: string; project_id?: string | null; filters: Record<string, string>; sort_keys: string[]; group_by: string; columns: string[]; shared: boolean }
+export const listViews = (projectId: string) => json<{ items: SavedView[] }>(`/views${query({ project_id: projectId })}`)
+export const createView = (body: ViewWrite) => json<SavedView>('/views', 'POST', body)
+export const updateView = (id: string, body: Partial<Omit<ViewWrite, 'project_id'>>) => json<SavedView>(`/views/${idPath(id)}`, 'PATCH', body)
+export const deleteView = (id: string) => json<void>(`/views/${idPath(id)}`, 'DELETE')
+export const restoreView = (id: string) => json<SavedView>(`/views/${idPath(id)}/restore`, 'POST')
+// U22 bulk change: one change for many nodes, undone as one through its event.
+export interface BulkChange {
+  ids: string[]; state?: string; priority?: string | null; assignee?: string | null
+  tags_add?: (string | { name: string; color?: string })[]; tags_remove?: string[]; parent_id?: string
+}
+export interface BulkResult { event_id: number | null; items: WorkNode[]; unchanged: string[]; skipped: { id: string; key?: string; reason: string }[] }
+export const bulkChange = (body: BulkChange) => json<BulkResult>('/nodes/bulk', 'POST', body)
+export const undoEvent = (eventId: number) => json<unknown>(`/events/${eventId}/undo`, 'POST')
 export const getProjects = (includeArchived = false) => json<{ items: ProjectSummary[] }>(`/projects${includeArchived ? '?include_archived=true' : ''}`)
 // B2 ticket activity and comments.
 export type ChangeField = 'status' | 'priority' | 'assignee' | 'title' | 'parent'
