@@ -14,6 +14,7 @@ import (
 	"os"
 	"os/exec"
 	"path/filepath"
+	"sort"
 	"strings"
 	"time"
 
@@ -126,14 +127,38 @@ func LoadProfileAssets(ctx context.Context, pool *pgxpool.Pool, store attachment
 	return assets, err
 }
 
-func Available() bool {
-	for _, candidate := range []string{"chromium", "chromium-browser", "google-chrome", "/Applications/Google Chrome.app/Contents/MacOS/Google Chrome"} {
-		if _, err := exec.LookPath(candidate); err == nil {
-			return true
+// browserPath finds the Chromium used for rendering. It never falls back to a
+// desktop browser such as /Applications/Google Chrome.app: launching the
+// operator's own browser headless from parallel test runs crashed it
+// (2026-09-25). Order: AEON_CHROMIUM_PATH, chromium on PATH (the runtime
+// image), then Playwright's headless shell for local development and tests.
+func browserPath() string {
+	if p := strings.TrimSpace(os.Getenv("AEON_CHROMIUM_PATH")); p != "" {
+		if _, err := os.Stat(p); err == nil {
+			return p
+		}
+		return ""
+	}
+	for _, candidate := range []string{"chromium", "chromium-browser"} {
+		if p, err := exec.LookPath(candidate); err == nil {
+			return p
 		}
 	}
-	return false
+	if home, err := os.UserHomeDir(); err == nil {
+		for _, pattern := range []string{
+			filepath.Join(home, "Library/Caches/ms-playwright/chromium_headless_shell-*/chrome-headless-shell-*/chrome-headless-shell"),
+			filepath.Join(home, ".cache/ms-playwright/chromium_headless_shell-*/chrome-headless-shell-*/chrome-headless-shell"),
+		} {
+			if matches, _ := filepath.Glob(pattern); len(matches) > 0 {
+				sort.Strings(matches)
+				return matches[len(matches)-1]
+			}
+		}
+	}
+	return ""
 }
+
+func Available() bool { return browserPath() != "" }
 
 // Render serves a private, bounded print entry to a fresh Chromium process.
 // No network resource from the document is allowed by the page CSP.
@@ -194,6 +219,11 @@ func Render(ctx context.Context, assets fs.FS, in Payload) ([]byte, error) {
 	}
 	defer os.RemoveAll(home)
 	opts := append([]chromedp.ExecAllocatorOption{}, chromedp.DefaultExecAllocatorOptions[:]...)
+	path := browserPath()
+	if path == "" {
+		return nil, errors.New("quote PDF renderer: no Chromium found (set AEON_CHROMIUM_PATH)")
+	}
+	opts = append(opts, chromedp.ExecPath(path))
 	opts = append(opts, chromedp.DisableGPU, chromedp.NoSandbox, chromedp.UserDataDir(filepath.Join(home, "profile")))
 	// Chromium must not inherit database, OIDC, or future SMTP credentials.
 	opts = append(opts, chromedp.ModifyCmdFunc(func(cmd *exec.Cmd) {
