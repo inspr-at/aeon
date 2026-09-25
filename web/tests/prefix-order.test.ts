@@ -13,11 +13,6 @@ import { join, relative } from 'node:path'
 const root = new URL('../src/', import.meta.url).pathname
 // Files other packages own right now; each entry names its owner and must still match.
 const ALLOW: { file: string; why: string }[] = [
-  { file: 'components/journey/GateCard.vue', why: 'Journey view, AEON-139 (builder A)' },
-  { file: 'components/journey/JourneyRail.vue', why: 'Journey view, AEON-139 (builder A)' },
-  { file: 'components/journey/ReleaseWalker.vue', why: 'Journey view, AEON-139 (builder A)' },
-  { file: 'components/journey/WalkerBar.vue', why: 'Journey view, AEON-139 (builder A)' },
-  { file: 'styles/journey.css', why: 'Journey view, AEON-139 (builder A)' },
   { file: 'components/knowledge/KnowledgeEntryPage.vue', why: 'Knowledge, AEON-138' },
 ]
 

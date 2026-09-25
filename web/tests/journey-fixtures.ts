@@ -23,6 +23,7 @@ export interface JourneyWorld {
     requirements_digest_sha256: string; requirements_approval_scope: string
     launch_readiness: { can_admit: boolean; reason: string }
     stage_source?: 'journey' | 'derived'
+    imported?: boolean
   }
   approvals: { id: string; agent_principal_id: string; scope: string; resource_kind: 'node'; resource_id: string; run_id: null; rationale: string; expires_at: string; proposed_at: string; decision: 'approved' | 'denied' | null; decided_by_principal_id: string | null; risk: 'low' | 'medium' | 'high' }[]
   intake: { sources: unknown[]; turns: unknown[]; drafts: { id: string; kind: string; title: string; body: string; base_event_id: number; citations: unknown[]; ticket_suggestions: unknown[]; status: string; proposed_at: string; accepted_at: string | null; requirement_kind?: string }[] }
@@ -30,6 +31,9 @@ export interface JourneyWorld {
   releases: { id: string; key: string; kind_id: string; title: string; body: string; fields: Record<string, unknown>; state: string; parent_id: string; position: string; created_at: string; updated_at: string; deleted_at: null }[]
   walkers: Record<string, { release_node_id: string; project_node_id: string; state: string; revision: number; features: { feature_node_id: string; epic_key: string; title: string; selection: string; included_count: number; open_count: number }[]; tickets: { ticket_node_id: string; key: string; title: string; feature_node_id: string | null; included: boolean; position: number; estimated_hours: number | null; screen_node_ids: string[] }[] }>
   handoffs: Record<string, unknown>
+  // U24: what an imported project brought besides its tickets.
+  projectBody?: string
+  knowledge?: { id: string; key: string; type: string; kind: string; slug: string; title: string; status: string; state: string; project: { id: string; key: string; title: string }; excerpt: string; link_count: number; created_at: string; updated_at: string; updated_by: null; imported: boolean }[]
 }
 
 const LABEL: Record<string, string> = {
@@ -129,6 +133,7 @@ export function journeyWorld(start: JourneyStart = 'plan', options: WorldOptions
   if (start === 'build' && !options.noGate) world.approvals = []
   if (options.derived) {
     world.journey.stage_source = 'derived'
+    world.journey.imported = true
     world.intake = { sources: [], turns: [], drafts: [] }
     world.requirements = []
   }
@@ -154,6 +159,9 @@ export async function mockJourney(page: Page, world: JourneyWorld, options: { fa
     if (path === '/api/me') return route.fulfill({ json: { principal: { id: me.id, name: me.name, kind: options.kind ?? 'person', roles: ['member'] }, tenant: { id: 't1', name: 'INSPR Studio' } } })
     if (path === '/api/kinds') return route.fulfill({ json: { items: ['epic', 'ticket', 'task', 'project', 'release'].map(slug => ({ id: `k-${slug}`, slug, label: slug[0].toUpperCase() + slug.slice(1), short_prefix: slug.slice(0, 3).toUpperCase(), icon: slug, allowed_child_kinds: null, field_schema: {} })) } })
     if (path === '/api/plugins') return route.fulfill({ json: PLUGINS })
+    // U24: the project node itself (its description stands in for an imported project's brief).
+    if (path === `/api/nodes/${PROJECT}` && method === 'GET') return route.fulfill({ json: { id: PROJECT, key: 'PRJ-17', kind_id: 'k-project', title: 'Pharos', body: world.projectBody ?? '', fields: { classic: { key: 'PHAROS' } }, state: 'active', parent_id: null, position: '0', created_at: ago(60 * 24 * 90), updated_at: ago(60), deleted_at: null } })
+    if (path === '/api/knowledge' && world.knowledge) return route.fulfill({ json: { items: world.knowledge, total: world.knowledge.length, truncated: false, counts: { type: {}, status: {} } } })
     // The agent asking for the gates: one Claude session, so it has a name.
     if (path === '/api/harness-sessions') return route.fulfill({ json: { items: [{
       id: '5e000000-0000-4000-8000-000000000001', project_id: PROJECT, agent_principal_id: AGENT, run_id: null, ticket_node_id: 'n-1', harness: 'claude', host: 'camy',

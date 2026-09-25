@@ -7,6 +7,7 @@ import AppIcon from '../AppIcon.vue'
 import GateApprovals from './GateApprovals.vue'
 import GateCard from './GateCard.vue'
 import HandoffList from './HandoffList.vue'
+import LaterCard from './LaterCard.vue'
 
 // Access: who may use the release. Janus prepares and applies a bounded permit;
 // the step is skipped when no ticket in the release changes access.
@@ -41,7 +42,7 @@ const approval = computed(() => offeredApproval(ctx.approvals.value, journey.val
           </dd>
         </dl>
       </section>
-      <section class="j-card" aria-labelledby="access-handoffs">
+      <section v-if="handoffs.length || state !== 'later'" class="j-card" aria-labelledby="access-handoffs">
         <header class="j-card-head"><p id="access-handoffs" class="eyebrow">Handoffs · prepare and apply</p></header>
         <HandoffList :handoffs="handoffs" :now="ctx.now.value" empty="No access change was handed to Janus yet." />
       </section>
@@ -57,7 +58,7 @@ const approval = computed(() => offeredApproval(ctx.approvals.value, journey.val
         <p v-if="!approval" class="j-note">An agent asks for the access gate; it appears here for you to approve.</p>
       </GateCard>
       <GateCard v-else-if="state === 'done'" eyebrow="Approved" title="Permit granted" tone="record"><p>The bounded permit is in place for this release.</p></GateCard>
-      <GateCard v-else eyebrow="Later" title="Not yet" tone="record"><p>Who may use it.</p></GateCard>
+      <LaterCard v-else stage="access" />
     </div>
   </div>
 </template>

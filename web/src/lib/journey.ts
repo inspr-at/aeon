@@ -4,6 +4,7 @@
 // face only shows them and sends the one action with the journey's revision.
 import { api, APIError, getKinds, listNodes, type ListItem, type WorkNode } from './api.ts'
 import type { Approval } from './agents.ts'
+import { statusMeta } from './work.ts'
 
 export const STAGES = ['inspire', 'shape', 'requirements', 'plan', 'build', 'deploy', 'access', 'live'] as const
 export type Stage = typeof STAGES[number]
@@ -43,7 +44,12 @@ export interface Journey {
   // B11, not on the server yet: how the stage was reached ('derived' from an
   // imported project's history). Absent means unknown.
   stage_source?: 'journey' | 'derived'
+  // U24: the project came from classic Paimos with its history (older servers:
+  // only while the stage is still derived from it).
+  imported?: boolean
 }
+// Whether the project came with its history rather than starting here.
+export const isImported = (journey: Pick<Journey, 'imported' | 'stage_source'>) => journey.imported ?? journey.stage_source === 'derived'
 export interface Requirement {
   node_id: string; project_node_id: string; kind: 'functional' | 'nonfunctional'; revision: number
   status: 'draft' | 'agreed' | 'superseded'; title: string; feature_node_id: string | null; generated_ticket_ids: string[]
@@ -163,6 +169,20 @@ export function releaseRefs(nodes: WorkNode[]): ReleaseRef[] {
 }
 export const CALENDAR_VERSION = /^v?[1-9]\d(0[1-9]|1[0-2])(0[1-9]|[12]\d|3[01])([01]\d|2[0-3])[0-5]\d[0-5]\d\.0\.0$/
 export const releaseName = (release: Pick<ReleaseRef, 'number'>) => `Release ${release.number}`
+// Work that was finished (done, accepted, delivered), apart from work that was
+// dropped (cancelled, archived): progress counts the first and leaves out the second.
+export const isDropped = (state: string) => ['cancelled', 'archived'].includes(statusMeta(state).key)
+export const isFinished = (state: string) => statusMeta(state).closed && !isDropped(state)
+// A release node's state in release words: an imported release kept its classic
+// status (done, backlog, …), and "Backlog" would read as unscheduled work.
+export function releaseStateLabel(state: string): string {
+  const s = state.toLowerCase().replace(/[\s-]+/g, '_')
+  if (s === 'done' || s === 'released' || s === 'closed') return 'Released'
+  if (s === 'cancelled' || s === 'canceled') return 'Cancelled'
+  if (s === 'in_progress' || s === 'active' || s === 'building') return 'In progress'
+  if (s === 'qa') return 'In QA'
+  return 'Planned'
+}
 export const RELEASE_STATE_LABEL: Record<ReleaseState, string> = {
   planning: 'Planning', building: 'Building', candidate: 'Candidate', deploying: 'Deploying', refused: 'Refused', access: 'Access', released: 'Live', superseded: 'Superseded',
 }

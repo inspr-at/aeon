@@ -65,7 +65,7 @@ function stepLabel(stage: Stage, index: number) {
 .rail {
   --rail-gold: var(--gold);
   position: relative; display: grid; gap: 8px; padding: 12px 18px 14px; border-radius: var(--radius);
-  background: var(--glass); box-shadow: var(--shadow); backdrop-filter: blur(18px) saturate(1.1); -webkit-backdrop-filter: blur(18px) saturate(1.1);
+  background: var(--glass); box-shadow: var(--shadow); -webkit-backdrop-filter: blur(18px) saturate(1.1); backdrop-filter: blur(18px) saturate(1.1);
 }
 .rail-title { display: flex; align-items: baseline; gap: 16px; min-width: 0; font-size: 13px; color: var(--ink-2); }
 .rail-title .tt { flex-shrink: 0; white-space: nowrap; }

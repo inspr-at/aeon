@@ -1,7 +1,7 @@
 <!-- SPDX-License-Identifier: AGPL-3.0-only -->
 <script setup lang="ts">
 import { computed, ref } from 'vue'
-import { CALENDAR_VERSION, releaseName, type ReleaseRef } from '../../lib/journey'
+import { CALENDAR_VERSION, releaseName, releaseStateLabel, type ReleaseRef } from '../../lib/journey'
 import { absoluteTime, relativeTime, statusMeta } from '../../lib/work'
 import AppIcon from '../AppIcon.vue'
 import StatusIcon from '../work/StatusIcon.vue'
@@ -30,7 +30,7 @@ const shown = computed(() => all.value || !props.limit ? newest.value : newest.v
             <ReleaseVersion v-if="release.version && CALENDAR_VERSION.test(release.version)" class="ver" :version="release.version" scheme="inspr-calendar-v2" :interactive="false" />
             <span v-else-if="release.version" class="mono ver-text">{{ release.version }}</span>
             <span class="mono key">{{ release.key }}</span>
-            <span>· {{ statusMeta(release.state).label }}</span>
+            <span>· {{ releaseStateLabel(release.state) }}</span>
           </small>
         </button>
         <time :datetime="release.created_at" :data-tip="absoluteTime(release.created_at)">{{ relativeTime(release.created_at, { now }) }}</time>

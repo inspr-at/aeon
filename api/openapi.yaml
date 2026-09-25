@@ -3011,6 +3011,7 @@ components:
         revision: {type: integer, minimum: 1}
         stage: {type: string, enum: [inspire, shape, requirements, plan, build, deploy, access, live]}
         stage_source: {type: string, enum: [journey, derived], description: Whether stage selection uses recorded journey history or the imported-project data derivation}
+        imported: {type: boolean, description: 'True for a project imported from classic Paimos with its history; its stages before Plan were never recorded here'}
         stages: {type: array, items: {$ref: '#/components/schemas/JourneyStage'}}
         next_action: {$ref: '#/components/schemas/JourneyNextAction'}
         requirements_revision: {type: integer, minimum: 0}
