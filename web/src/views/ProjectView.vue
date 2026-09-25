@@ -912,6 +912,7 @@ function keydown(event: KeyboardEvent) {
       break
     case 'p': if (ticketKey.value) { event.preventDefault(); panel.value?.openPriority() } break
     case 'a': if (ticketKey.value) { event.preventDefault(); panel.value?.openAssignee() } break
+    case 'r': if (ticketKey.value) { event.preventDefault(); panel.value?.openLink() } break
     case 'c': if (ticketKey.value) { event.preventDefault(); panel.value?.focusComposer() } break
     case 'f': if (ticketKey.value) { event.preventDefault(); if (fullView.value) collapse(); else expand() } break
   }

@@ -1017,7 +1017,11 @@ paths:
           $ref: '#/components/responses/Error'
     post:
       operationId: createRelation
-      description: Relations are directed except relates, which is symmetric and stored with the smaller UUID as source.
+      description: >-
+        Relations are directed except relates, which is symmetric and stored with the smaller UUID as source.
+        A 409 message reads as words and names items by key, so clients can show it as it stands: an identical
+        link that already exists, or a blocks, implements or duplicates link that would close a loop through
+        live items (the message spells out the chain). A link from an item to itself is a 400.
       security: *auth
       requestBody:
         $ref: '#/components/requestBodies/RelationCreate'

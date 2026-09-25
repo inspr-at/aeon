@@ -80,7 +80,9 @@ async function json<T>(path: string, method = 'GET', body?: unknown, headers: Re
     // A session that ended mid-work: the page keeps what was typed, and the shell
     // offers to sign in again beside it (AEON-140), instead of the bare word "unauthorized".
     if (response.status === 401) { sessionEnded.handler?.(); throw new APIError(401, 'your session has ended', data && typeof data === 'object' ? data : {}) }
-    throw new APIError(response.status, typeof data?.error === 'string' ? data.error : `Request failed (${response.status})`, data && typeof data === 'object' ? data : {})
+    // Modules answer {error} or {code, message}; either reads as the reason.
+    const reason = typeof data?.error === 'string' && data.error ? data.error : typeof data?.message === 'string' && data.message ? data.message : `Request failed (${response.status})`
+    throw new APIError(response.status, reason, data && typeof data === 'object' ? data : {})
   }
   return response.status === 204 ? undefined as T : response.json()
 }
@@ -192,6 +194,10 @@ export const deleteComment = (nodeId: string, commentId: string) => json<void>(`
 export type RelationType = 'blocks' | 'relates' | 'implements' | 'cites' | 'duplicates' | 'customer_of' | 'contact_for'
 export interface Relation { id: string; source_node_id: string; target_node_id: string; type: RelationType; created_at: string }
 export const getRelations = (nodeId: string) => json<{ items: Relation[]; next_cursor: string | null }>(`/relations${query({ node_id: nodeId, limit: 100 })}`)
+// A 409 carries the server's reason in words (an existing link, or a loop it
+// spells out by key); callers show error.message as it stands.
+export const createRelation = (body: { source_node_id: string; target_node_id: string; type: RelationType }) => json<Relation>('/relations', 'POST', body)
+export const deleteRelation = (id: string) => json<void>(`/relations/${idPath(id)}`, 'DELETE')
 export interface NodePreview { id: string; key: string; title: string; state: string }
 export const lookupNodes = (ids: string[]) => json<{ items: NodePreview[] }>(`/nodes/lookup${query({ ids })}`)
 

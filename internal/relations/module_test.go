@@ -114,7 +114,7 @@ func TestRelationsCRUDAndTenantIsolation(t *testing.T) {
 	for _, typ := range []string{"blocks", "implements", "cites", "duplicates"} {
 		create(t, f, f.nodes[1], f.nodes[0], typ)
 	}
-	create(t, f, f.nodes[0], f.nodes[1], "blocks") // Directed reverse pair is distinct.
+	create(t, f, f.nodes[0], f.nodes[1], "cites") // Directed reverse pair is distinct.
 	ev := logEvents(t, f)
 	if len(ev) != 6 {
 		t.Fatalf("events %d want 6", len(ev))
@@ -158,6 +158,87 @@ func TestRelationsCRUDAndTenantIsolation(t *testing.T) {
 	if len(ev) != 7 || ev[6].Type != "relation.deleted" || string(ev[6].After) != "null" || !bytes.Equal(ev[0].After, ev[6].Before) {
 		t.Fatalf("delete event %+v", ev)
 	}
+}
+
+func refused(t *testing.T, w *httptest.ResponseRecorder, status int, message string) {
+	t.Helper()
+	expect(t, w, status)
+	var body struct{ Code, Message string }
+	if err := json.Unmarshal(w.Body.Bytes(), &body); err != nil {
+		t.Fatal(err)
+	}
+	if body.Message != message {
+		t.Fatalf("message %q want %q", body.Message, message)
+	}
+}
+
+func post(f fixture, source, target, typ string) *httptest.ResponseRecorder {
+	return request(f.handler, f.a, "POST", "/api/relations", fmt.Sprintf(`{"source_node_id":%q,"target_node_id":%q,"type":%q}`, source, target, typ))
+}
+
+// TestRefusalsReadAsWords covers the reasons the relation picker shows as they
+// stand: an existing link, a loop of any length, and a link to itself.
+func TestRefusalsReadAsWords(t *testing.T) {
+	f := setup(t)
+	a, b, c := f.nodes[0], f.nodes[1], f.nodes[2]
+	create(t, f, a, b, "blocks")
+	refused(t, post(f, a, b, "blocks"), 409, "TSK-1 already blocks TSK-2.")
+	refused(t, post(f, b, a, "blocks"), 409, "TSK-2 cannot block TSK-1: TSK-1 already blocks TSK-2, so this link would make a loop.")
+	create(t, f, b, c, "blocks")
+	refused(t, post(f, c, a, "blocks"), 409, "TSK-3 cannot block TSK-1: TSK-1 blocks TSK-2, which blocks TSK-3, so this link would make a loop.")
+	// Other types keep their own graph: the reverse citation and a relates
+	// link in either spelling stay allowed once.
+	create(t, f, c, a, "cites")
+	create(t, f, a, c, "cites")
+	create(t, f, c, a, "relates")
+	// relates is stored with the smaller UUID first, and the reason names it so.
+	want := "TSK-1 already relates to TSK-3."
+	if a > c {
+		want = "TSK-3 already relates to TSK-1."
+	}
+	refused(t, post(f, a, c, "relates"), 409, want)
+	create(t, f, a, b, "implements")
+	refused(t, post(f, b, a, "implements"), 409, "TSK-2 cannot implement TSK-1: TSK-1 already implements TSK-2, so this link would make a loop.")
+	create(t, f, b, a, "duplicates")
+	refused(t, post(f, a, b, "duplicates"), 409, "TSK-1 cannot duplicate TSK-2: TSK-2 already duplicates TSK-1, so this link would make a loop.")
+	refused(t, post(f, a, a, "blocks"), 400, "an item cannot be linked to itself")
+	// A deleted item breaks the chain; the loop is no longer there.
+	err := db.InTenant(t.Context(), f.db.App, f.a.TenantID, func(tx pgx.Tx) error {
+		_, err := tx.Exec(t.Context(), `UPDATE nodes SET deleted_at=now() WHERE id=$1`, b)
+		return err
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	create(t, f, c, a, "blocks")
+	// Undo cannot restore a link that a later one turned into a loop.
+	err = db.InTenant(t.Context(), f.db.App, f.a.TenantID, func(tx pgx.Tx) error {
+		_, err := tx.Exec(t.Context(), `UPDATE nodes SET deleted_at=NULL WHERE id=$1`, b)
+		return err
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	var first Relation
+	w := request(f.handler, f.a, "GET", "/api/relations?node_id="+a+"&limit=200", "")
+	expect(t, w, 200)
+	var list page
+	if err := json.Unmarshal(w.Body.Bytes(), &list); err != nil {
+		t.Fatal(err)
+	}
+	for _, r := range list.Items {
+		if r.Type == "blocks" && r.SourceNodeID == a {
+			first = r
+		}
+	}
+	expect(t, request(f.handler, f.a, "DELETE", "/api/relations/"+first.ID, ""), 204)
+	create(t, f, b, a, "blocks") // Now C blocks A and B blocks A: no loop.
+	events := logEvents(t, f)
+	last := events[len(events)-2] // The deletion of A blocks B.
+	if last.Type != "relation.deleted" {
+		t.Fatalf("event %+v", last)
+	}
+	expect(t, request(f.handler, f.a, "POST", fmt.Sprintf("/api/events/%d/undo", last.ID), ""), 409)
 }
 
 func TestPaginationValidationAndAtomicity(t *testing.T) {

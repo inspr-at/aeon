@@ -19,6 +19,7 @@ const ALLOW: { file: string; includes: string; why: string }[] = [
   { file: 'components/quotes/editor/QuoteAcceptance.vue', includes: '.quote-signatures > div { border-top', why: 'the printed signature line of a quote' },
   { file: 'components/CommandPalette.vue', includes: '.spinner', why: 'a spinner arc, not an edge' },
   { file: 'components/work/TicketTable.vue', includes: '.spinner', why: 'a spinner arc, not an edge' },
+  { file: 'components/work/RelationPicker.vue', includes: '.spinner', why: 'a spinner arc, not an edge' },
 ]
 
 function files(dir: string): string[] {
