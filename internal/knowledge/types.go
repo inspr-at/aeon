@@ -275,13 +275,14 @@ const excerptRunes = 200
 // around the first query word found. A leading copy of the title is dropped.
 // cut says body is a window that starts inside the text.
 func excerpt(body, title string, words []string, cut bool) string {
+	if !cut {
+		body = withoutTitle(body, title)
+	}
 	text := plainText(body)
 	if cut {
 		if i := strings.IndexFunc(text, unicode.IsSpace); i > 0 {
 			text = "…" + strings.TrimSpace(text[i:])
 		}
-	} else if t := strings.TrimSpace(title); t != "" && strings.HasPrefix(strings.ToLower(text), strings.ToLower(t)) {
-		text = strings.TrimLeft(text[len(t):], ":.;, ")
 	}
 	runes := []rune(text)
 	if len(runes) <= excerptRunes {
@@ -321,6 +322,22 @@ func excerpt(body, title string, words []string, cut bool) string {
 		out += "…"
 	}
 	return out
+}
+
+// withoutTitle drops a first heading that only repeats the title.
+func withoutTitle(body, title string) string {
+	trimmed := strings.TrimLeft(body, " \t\r\n")
+	line, rest, _ := strings.Cut(trimmed, "\n")
+	if !headingMark.MatchString(line) {
+		return body
+	}
+	norm := func(s string) string {
+		return strings.Join(strings.Fields(strings.ToLower(strings.Trim(s, "# \t"))), " ")
+	}
+	if norm(headingMark.ReplaceAllString(line, "")) != norm(title) {
+		return body
+	}
+	return rest
 }
 
 // queryWords splits a search into words for excerpts and body probes.

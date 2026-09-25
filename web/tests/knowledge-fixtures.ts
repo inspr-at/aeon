@@ -137,8 +137,8 @@ function plain(body: string) {
   return parts.join(' ').replace(/,$/, '')
 }
 function excerpt(entry: MockEntry, q: string) {
-  let text = plain(entry.body)
-  if (text.toLowerCase().startsWith(entry.title.toLowerCase())) text = text.slice(entry.title.length).replace(/^[:.;, ]+/, '')
+  const heading = /^\s*#{1,6}\s+(.+?)\s*(?:\n|$)/.exec(entry.body)
+  let text = plain(heading && heading[1].toLowerCase() === entry.title.toLowerCase() ? entry.body.slice(heading[0].length) : entry.body)
   const first = words(q).map(w => text.toLowerCase().indexOf(w)).find(i => i >= 0) ?? -1
   if (first > 60) text = `…${text.slice(first - 60)}`
   return text.length > 200 ? `${text.slice(0, 200).replace(/\s+\S*$/, '')}…` : text

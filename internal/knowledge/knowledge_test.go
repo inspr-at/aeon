@@ -391,6 +391,9 @@ func TestExcerpt(t *testing.T) {
 	if got := excerpt("tail of a sentence and then more words", "", nil, true); got != "…of a sentence and then more words" {
 		t.Fatalf("cut %q", got)
 	}
+	if got := excerpt("Aeon is deployed by Pharos.", "Aeon", nil, false); got != "Aeon is deployed by Pharos." {
+		t.Fatalf("a sentence that starts with the title keeps it: %q", got)
+	}
 	if statusOf("Cancelled") != statusArchived || statusOf("open") != statusActive || statusOf("proposed") != statusProposed {
 		t.Fatal("status classes")
 	}

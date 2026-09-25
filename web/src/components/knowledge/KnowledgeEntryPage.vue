@@ -103,10 +103,21 @@ const body = computed(() => entry.value ? withoutTitle(entry.value.body, entry.v
 const minutes = computed(() => readingMinutes(body.value))
 const toc = computed(() => wantsToc(headings.value, body.value) ? headings.value.filter(h => h.level >= 2 && h.level <= 3) : [])
 const rule = computed(() => entry.value?.type === 'guideline' ? detailText(entry.value.metadata.rule) : '')
+// External systems and related projects lead with where they live and what they are for.
+const HEADLINE = ['rule', 'url', 'instance_url', 'purpose', 'relationship']
+const headline = computed(() => {
+  const current = entry.value
+  if (!current || (current.type !== 'external-system' && current.type !== 'related-project')) return null
+  const address = detailText(current.metadata[current.type === 'external-system' ? 'url' : 'instance_url'])
+  const about = detailText(current.metadata[current.type === 'external-system' ? 'purpose' : 'relationship'])
+  return address || about ? { address: validUrl(address) ? address : '', about } : null
+})
 const details = computed(() => {
   const current = entry.value
   if (!current) return []
-  return DETAIL_FIELDS[current.type].map(field => ({ ...field, value: detailText(current.metadata[field.key]) })).filter(field => field.value && field.key !== 'rule')
+  return DETAIL_FIELDS[current.type].map(field => ({ ...field, value: detailText(current.metadata[field.key]) }))
+    .filter(field => field.value && !HEADLINE.includes(field.key))
+    .map(field => field.kind === 'choice' ? { ...field, value: field.value[0].toUpperCase() + field.value.slice(1) } : field)
 })
 function linkFor(id: string) { return `${location.origin}${entryPath(props.project.routeKey, entry.value?.type ?? props.type, entry.value?.slug ?? props.slug, id)}` }
 async function copy(text: string, label: string) {
@@ -193,7 +204,9 @@ const slugIssue = computed(() => slugProblem(entry.value?.type ?? props.type, dr
 const titleIssue = computed(() => draft.title.trim() ? '' : 'A title is needed.')
 const detailIssue = (key: string, kind: string) => kind === 'url' && !validUrl(draft.details[key] ?? '') ? 'Use a full address, starting with https://' : ''
 const oldCommand = computed(() => entry.value ? cliCommand(brand.value.product, props.project.routeKey, entry.value.type, entry.value.slug) : '')
-const diffLines = computed(() => conflict.value ? lineDiff(conflict.value.body, draft.body) : [])
+// Blank lines that only moved add noise to a comparison of prose.
+const diffLines = computed(() => conflict.value ? lineDiff(conflict.value.body, draft.body).filter(line => line.kind === 'same' || line.text.trim()) : [])
+const listWords = (words: string[]) => words.length < 2 ? words.join('') : `${words.slice(0, -1).join(', ')} and ${words[words.length - 1]}`
 const conflictFields = computed(() => {
   const theirs = conflict.value
   if (!theirs) return []
@@ -348,6 +361,18 @@ async function setArchived(archived: boolean) {
     else toast(e instanceof Error ? e.message : 'That did not work.', { tone: 'error' })
   }
 }
+async function confirmProposed() {
+  const current = entry.value
+  if (!current || !writable.value) return
+  try {
+    const saved = await updateKnowledge(current.id, { status: 'active' }, current.updated_at)
+    applySaved(saved, current.slug)
+    toast(`${saved.slug} is confirmed. Agents rely on it now.`, saved.event_id ? { action: { label: 'Undo', run: () => void undo(saved.event_id!) } } : {})
+  } catch (e) {
+    if (e instanceof KnowledgeError && e.status === 412 && e.entry) { entry.value = e.entry; props.state.upsert(e.entry); toast('Someone changed this entry just now. Read the newer version before you confirm it.', { tone: 'error' }) }
+    else toast(e instanceof Error ? e.message : 'That did not work.', { tone: 'error' })
+  }
+}
 async function remove() {
   const current = entry.value
   if (!current || !writable.value) return
@@ -421,7 +446,7 @@ const whoUpdated = computed(() => entry.value?.imported ? 'imported' : entry.val
 <template>
   <article ref="root" class="entry-page" :class="{ editing }" tabindex="-1" :aria-label="entry ? `${meta.label}: ${entry.title}` : 'Knowledge entry'">
     <!-- The bar: back, what it is, where it is in the list, and the actions. -->
-    <header class="e-bar">
+    <header class="e-bar"><div class="e-bar-inner">
       <RouterLink class="icon-btn sm flat" :to="listLink()" aria-label="Back to Knowledge" data-tip="Back to Knowledge · Esc" @click.prevent="emit('close')"><AppIcon name="chevron-left" :size="16" /></RouterLink>
       <button type="button" class="kind-chip" :aria-label="`Copy the slug ${entry?.slug ?? slug}`" :data-tip="`Copy ${meta.label.toLowerCase()} slug`" @click="copy(entry?.slug ?? slug, entry?.slug ?? slug)">
         <AppIcon :name="meta.icon" :size="13" /><span class="kind-type">{{ meta.label }}</span><span class="kind-slug">{{ entry?.slug ?? slug }}</span><AppIcon name="copy" :size="11" class="copy-glyph" />
@@ -443,7 +468,7 @@ const whoUpdated = computed(() => entry.value?.imported ? 'imported' : entry.val
         <button v-if="writable" type="button" class="btn sm edit-btn" aria-keyshortcuts="e" data-tip="Edit the text, title, slug and status · e" @click="startEdit()"><AppIcon name="edit" :size="13" />Edit</button>
         <button ref="moreButton" type="button" class="icon-btn sm flat" aria-label="More actions" aria-haspopup="menu" :aria-expanded="!!moreAnchor" data-tip="More" @click="toggleMore"><AppIcon name="more" :size="15" /></button>
       </template>
-    </header>
+    </div></header>
 
     <div v-if="missing" class="e-state glass-card" role="alert">
       <span class="state-icon"><AppIcon :name="meta.icon" :size="20" /></span>
@@ -472,7 +497,7 @@ const whoUpdated = computed(() => entry.value?.imported ? 'imported' : entry.val
           <span class="conflict-icon"><AppIcon name="history" :size="16" /></span>
           <div class="conflict-text">
             <p class="conflict-title">{{ conflict.updated_by?.name ?? 'Someone' }} saved a newer version {{ relativeTime(conflict.updated_at, { now, long: true }) }}</p>
-            <p class="conflict-sub">They changed the {{ conflictFields.length ? conflictFields.join(', ') : 'entry' }}. Your draft is kept; choose what to do with it.</p>
+            <p class="conflict-sub">They changed the {{ conflictFields.length ? listWords(conflictFields) : 'details' }}. Your draft is kept; choose what to do with it.</p>
           </div>
         </div>
         <div class="conflict-actions">
@@ -488,7 +513,7 @@ const whoUpdated = computed(() => entry.value?.imported ? 'imported' : entry.val
               <span v-if="line.kind !== 'same'" class="sr-only">{{ line.kind === 'add' ? 'Only in your draft:' : 'Only in theirs:' }}</span>
               <span class="text">{{ line.text || ' ' }}</span>
             </li>
-            <li v-if="!diffLines.some(line => line.kind !== 'same')" class="diff-line same"><span class="gutter" /><span class="text calm">The text is the same; they changed the {{ conflictFields.join(', ') || 'details' }}.</span></li>
+            <li v-if="!diffLines.some(line => line.kind !== 'same')" class="diff-line same"><span class="gutter" /><span class="text calm">The text is the same; they changed the {{ conflictFields.length ? listWords(conflictFields) : 'details' }}.</span></li>
           </ol>
         </figure>
       </div>
@@ -570,12 +595,20 @@ const whoUpdated = computed(() => entry.value?.imported ? 'imported' : entry.val
         <h1 class="e-title">{{ entry.title }}</h1>
         <p class="e-byline dot-list">
           <span>Updated <time :datetime="entry.updated_at" :data-tip="absoluteTime(entry.updated_at)">{{ relativeTime(entry.updated_at, { now, long: true }) }}</time> {{ whoUpdated }}</span>
-          <span v-if="body.trim()">{{ minutes }} min read</span>
+          <span v-if="minutes >= 2">{{ minutes }} min read</span>
           <span class="mono e-key">{{ entry.key }}</span>
         </p>
         <p v-if="entry.status === 'archived'" class="e-note" role="note"><AppIcon name="archive" :size="14" />Archived: kept for the record, and agents skip it.<button v-if="writable" type="button" class="inline-link" @click="setArchived(false)">Make it active</button></p>
-        <p v-else-if="entry.status === 'proposed'" class="e-note proposed" role="note"><AppIcon name="sparkle" :size="14" />Proposed: a draft waiting for someone to confirm it.<button v-if="writable" type="button" class="inline-link" @click="startEdit()">Review and edit</button></p>
+        <p v-else-if="entry.status === 'proposed'" class="e-note proposed" role="note">
+          <AppIcon name="sparkle" :size="14" />Proposed{{ entry.author ? ` by ${entry.author.name}` : '' }}: a draft waiting for a person to confirm it.
+          <span v-if="writable" class="note-actions"><button type="button" class="inline-link" @click="startEdit('body')">Edit first</button><button type="button" class="btn sm" @click="confirmProposed"><AppIcon name="check" :size="13" />Confirm</button></span>
+        </p>
         <aside v-if="rule" class="e-rule" aria-label="The rule"><span class="rule-label">The rule</span><p>{{ rule }}</p></aside>
+        <aside v-if="headline" class="e-rule e-where" :aria-label="entry.type === 'external-system' ? 'Where it lives' : 'The project'">
+          <span class="rule-label">{{ entry.type === 'external-system' ? 'Where it lives' : 'The project' }}</span>
+          <a v-if="headline.address" class="where-link" :href="headline.address" target="_blank" rel="noopener noreferrer">{{ headline.address.replace(/^https?:\/\//, '').replace(/\/$/, '') }}<AppIcon name="external" :size="13" /></a>
+          <p v-if="headline.about" class="where-about">{{ headline.about }}</p>
+        </aside>
 
         <details v-if="toc.length" class="e-toc-inline">
           <summary><AppIcon name="chevron-right" :size="13" class="disclosure-chev" />On this page<span class="mono">{{ toc.length }}</span></summary>
@@ -658,9 +691,11 @@ const whoUpdated = computed(() => entry.value?.imported ? 'imported' : entry.val
 </template>
 
 <style scoped>
-.entry-page { width: 100%; max-width: 1480px; margin: 0 auto; padding-bottom: 32px; outline: none; }
+.entry-page { width: 100%; padding-bottom: 32px; outline: none; }
+.e-grid, .e-edit { max-width: 1480px; margin-inline: auto; }
 /* ---------- The bar ---------- */
-.e-bar { position: sticky; top: 0; z-index: 6; display: flex; align-items: center; gap: 6px; height: 52px; margin: 0 calc(-1 * var(--gutter)); padding: 0 var(--gutter); background: var(--glass); box-shadow: 0 1px 0 var(--line); backdrop-filter: blur(18px) saturate(1.2); -webkit-backdrop-filter: blur(18px) saturate(1.2); }
+.e-bar-inner { display: flex; align-items: center; gap: 6px; max-width: 1480px; height: 52px; margin: 0 auto; }
+.e-bar { position: sticky; top: 0; z-index: 6; margin: 0 calc(-1 * var(--gutter)); padding: 0 var(--gutter); background: var(--glass); box-shadow: 0 1px 0 var(--line); backdrop-filter: blur(18px) saturate(1.2); -webkit-backdrop-filter: blur(18px) saturate(1.2); }
 .kind-chip { display: inline-flex; flex-shrink: 1; align-items: center; gap: 7px; min-width: 0; height: 28px; margin-left: 2px; padding: 0 10px 0 9px; border: 0; border-radius: 8px; background: var(--chip-teal-bg); box-shadow: inset 0 0 0 1px var(--chip-teal-line); color: var(--teal-ink); }
 .kind-chip:hover { box-shadow: inset 0 0 0 1px var(--teal); }
 .kind-chip:focus-visible { box-shadow: var(--focus-ring); }
@@ -702,11 +737,18 @@ const whoUpdated = computed(() => entry.value?.imported ? 'imported' : entry.val
 .e-note svg { color: var(--ink-3); flex-shrink: 0; }
 .e-note.proposed { background: var(--gold-wash); box-shadow: inset 0 0 0 1px rgba(214, 155, 49, .35); color: var(--ink); }
 .e-note.proposed svg { color: var(--gold-ink); }
+.note-actions { display: inline-flex; align-items: center; gap: 12px; margin-left: auto; }
+.note-actions .inline-link { margin-left: 0; }
 .inline-link { margin-left: auto; padding: 0; border: 0; background: transparent; color: var(--teal-ink); font-size: 12.5px; font-weight: 600; text-decoration: underline; text-underline-offset: 2px; }
 .inline-link:focus-visible { box-shadow: var(--focus-ring); border-radius: 4px; }
 .e-rule { margin-top: 18px; padding: 14px 18px; border-radius: 14px; background: var(--chip-teal-bg); box-shadow: inset 0 0 0 1px var(--chip-teal-line); }
 .rule-label { font: 500 10px/1.4 var(--mono); letter-spacing: .14em; text-transform: uppercase; color: var(--teal-ink); font-variant-ligatures: none; }
 .e-rule p { margin-top: 4px; font-size: 15.5px; font-weight: 550; line-height: 1.5; color: var(--ink); }
+.e-where { display: grid; justify-items: start; gap: 4px; }
+.where-link { display: inline-flex; align-items: center; gap: 6px; margin-top: 2px; border-radius: 6px; color: var(--teal-ink); font-size: 16px; font-weight: 600; overflow-wrap: anywhere; }
+.where-link:hover { text-decoration: underline; text-underline-offset: 3px; }
+.where-link:focus-visible { box-shadow: var(--focus-ring); }
+.e-where .where-about { margin-top: 0; font-size: 14px; font-weight: 400; color: var(--ink-2); }
 .e-body { margin-top: 26px; font-size: 15px; line-height: 1.72; }
 .e-body :deep(h2) { font-size: 1.28em; margin-top: 1.8em; }
 .e-body :deep(h3) { font-size: 1.08em; margin-top: 1.5em; }
@@ -748,7 +790,7 @@ a.link-row:focus-visible { box-shadow: var(--focus-ring); }
 .link-title { min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 
 /* ---------- States ---------- */
-.e-state { display: grid; justify-items: center; gap: 8px; margin-top: 30px; padding: 56px 24px; text-align: center; }
+.e-state { display: grid; justify-items: center; gap: 8px; max-width: 1480px; margin: 30px auto 0; padding: 56px 24px; text-align: center; }
 .e-state h2 { font-size: 18px; }
 .e-state > p { max-width: 460px; font-size: 13.5px; color: var(--ink-2); }
 .state-icon { display: grid; place-items: center; width: 48px; height: 48px; margin-bottom: 6px; border-radius: 15px; background: var(--chip-teal-bg); box-shadow: inset 0 0 0 1px var(--chip-teal-line); color: var(--teal-ink); }
@@ -844,7 +886,8 @@ a.link-row:focus-visible { box-shadow: var(--focus-ring); }
   .e-prop-slug { grid-column: 1 / -1; grid-row: 2; }
 }
 @media (max-width: 720px) {
-  .e-bar { margin: 0 -12px; padding: 0 6px 0 8px; height: 56px; }
+  .e-bar { margin: 0 -12px; padding: 0 6px 0 8px; }
+  .e-bar-inner { height: 56px; }
   .e-bar .icon-btn { width: 44px; height: 44px; }
   .kind-type, .position, .copy-glyph { display: none; }
   .edit-btn { height: 40px; }

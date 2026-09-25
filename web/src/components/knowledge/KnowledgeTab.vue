@@ -149,14 +149,14 @@ const who = (item: KnowledgeItem) => item.imported ? 'imported' : item.updated_b
       <kbd v-else-if="!draft" class="keycap slash" aria-hidden="true">/</kbd>
       <button v-if="draft" type="button" class="clear-q" aria-label="Clear search" @click="clearSearch"><AppIcon name="close" :size="12" /></button>
     </label>
-    <button type="button" class="btn sm k-menu-btn" :class="{ on: filters.status !== 'current' }" aria-haspopup="dialog" :aria-expanded="menu?.kind === 'status'" :aria-label="`Status: ${statusView.label}`" data-tip="Which entries to show" @click="openMenu('status', $event)">
+    <button v-if="!nothingYet" type="button" class="btn sm k-menu-btn" :class="{ on: filters.status !== 'current' }" aria-haspopup="dialog" :aria-expanded="menu?.kind === 'status'" :aria-label="`Status: ${statusView.label}`" data-tip="Which entries to show" @click="openMenu('status', $event)">
       <span class="k-menu-dim">Status</span>{{ statusView.label }}<AppIcon name="chevron" :size="12" class="k-chev" />
     </button>
-    <button type="button" class="btn sm k-menu-btn k-sort-btn" aria-haspopup="dialog" :aria-expanded="menu?.kind === 'sort'" :aria-label="`Sort: ${sortLabel}`" data-tip="Order within each kind" @click="openMenu('sort', $event)">
+    <button v-if="!nothingYet" type="button" class="btn sm k-menu-btn k-sort-btn" aria-haspopup="dialog" :aria-expanded="menu?.kind === 'sort'" :aria-label="`Sort: ${sortLabel}`" data-tip="Order within each kind" @click="openMenu('sort', $event)">
       <AppIcon name="sliders" :size="13" /><span class="k-sort-label">{{ sortLabel }}</span><AppIcon name="chevron" :size="12" class="k-chev" />
     </button>
     <span class="k-spacer" />
-    <span class="k-count mono" role="status" aria-live="polite"><template v-if="state.loaded.value">{{ plural(shown, 'entry', 'entries') }}</template></span>
+    <span class="k-count mono" role="status" aria-live="polite"><template v-if="state.loaded.value && !nothingYet">{{ plural(shown, 'entry', 'entries') }}</template></span>
     <button v-if="canWrite" type="button" class="btn primary k-new" aria-label="New knowledge entry" aria-keyshortcuts="n" data-tip="New entry · n" @click="openCreate()">
       <AppIcon name="plus" :size="14" /><span class="k-new-label">New entry</span>
     </button>
@@ -247,7 +247,7 @@ const who = (item: KnowledgeItem) => item.imported ? 'imported' : item.updated_b
                 <span class="k-meta">
                   <span v-if="item.status !== 'active'" class="k-status" :class="item.status">{{ statusLabel(item.status) }}</span>
                   <span class="k-slug mono"><template v-for="(part, i) in highlightWords(item.slug, q)" :key="i"><mark v-if="part.match">{{ part.text }}</mark><template v-else>{{ part.text }}</template></template></span>
-                  <span v-if="item.link_count" class="k-links mono" :aria-label="`${item.link_count} linked`" :data-tip="`Linked to ${plural(item.link_count, 'ticket or entry', 'tickets or entries')}`"><AppIcon name="link" :size="12" />{{ item.link_count }}</span>
+                  <span class="k-links mono"><span v-if="item.link_count" class="k-links-inner" :data-tip="`Linked to ${plural(item.link_count, 'ticket or entry', 'tickets or entries')}`"><AppIcon name="link" :size="12" />{{ item.link_count }}<span class="sr-only"> linked</span></span></span>
                   <time class="k-time mono" :datetime="item.updated_at" :data-tip="`Updated ${absoluteTime(item.updated_at)}${who(item) ? ` ${who(item)}` : ''}`">{{ relativeTime(item.updated_at, { now }) }}</time>
                 </span>
               </RouterLink>
@@ -347,7 +347,7 @@ const who = (item: KnowledgeItem) => item.imported ? 'imported' : item.updated_b
 .k-group-head h2 { font: 650 15px/1.3 var(--font); letter-spacing: -.005em; color: var(--ink); }
 .k-group-count { font-size: 11.5px; color: var(--ink-3); }
 .k-group-hint { flex: 1; min-width: 0; margin-left: 6px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; font-size: 12.5px; color: var(--ink-3); }
-.k-add { gap: 5px; padding: 0 10px 0 8px; color: var(--ink-2); }
+.k-add { gap: 5px; margin-left: auto; padding: 0 10px 0 8px; color: var(--ink-2); }
 .k-add:hover { color: var(--teal-ink); }
 .k-rows { margin: 0; padding: 4px 6px 6px; list-style: none; }
 .k-row {
@@ -367,7 +367,8 @@ li + li .k-row::before { content: ''; position: absolute; top: 0; left: 12px; ri
 .k-row.archived .k-title { color: var(--ink-2); }
 .k-meta { display: flex; align-items: center; gap: 12px; flex-shrink: 0; }
 .k-slug { max-width: 220px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; font-size: 11.5px; color: var(--ink-3); font-variant-ligatures: none; }
-.k-links { display: inline-flex; align-items: center; gap: 4px; font-size: 11.5px; color: var(--ink-3); }
+.k-links { display: inline-flex; justify-content: flex-end; width: 34px; font-size: 11.5px; color: var(--ink-3); }
+.k-links-inner { display: inline-flex; align-items: center; gap: 4px; }
 .k-time { width: 64px; text-align: right; font-size: 12px; color: var(--ink-2); white-space: nowrap; }
 .k-status { display: inline-flex; align-items: center; height: 20px; padding: 0 8px; border-radius: 999px; font: 600 10px/1 var(--mono); letter-spacing: .08em; text-transform: uppercase; font-variant-ligatures: none; }
 .k-status.proposed { background: var(--gold-wash); box-shadow: inset 0 0 0 1px rgba(214, 155, 49, .45); color: var(--gold-ink); }
@@ -427,6 +428,7 @@ li + li .k-row::before { content: ''; position: absolute; top: 0; left: 12px; ri
 @media (max-width: 600px) {
   .k-kinds { margin: 0 -12px; padding: 2px 12px 4px; }
   .k-search { flex: 1; width: auto; }
+  .k-search .slash { display: none; }
   .k-search .field { height: 44px; font-size: 16px; }
   .k-menu-btn { height: 44px; }
   .k-sort-btn { width: 44px; padding: 0; justify-content: center; }
