@@ -1,6 +1,6 @@
 <!-- SPDX-License-Identifier: AGPL-3.0-only -->
 <script setup lang="ts">
-import { computed, nextTick, onBeforeUnmount, onMounted, ref, watch } from 'vue'
+import { computed, defineAsyncComponent, nextTick, onBeforeUnmount, onMounted, ref, watch } from 'vue'
 import { useRoute, useRouter } from 'vue-router'
 import { minorMoney } from '../../lib/crm'
 import { usePreference } from '../../lib/preferences'
@@ -20,12 +20,14 @@ import BizIcon from '../../components/business/BizIcon.vue'
 import BusinessPage from '../../components/business/BusinessPage.vue'
 import ChoiceFacet from '../../components/business/ChoiceFacet.vue'
 import QuoteCreateDialog from '../../components/business/QuoteCreateDialog.vue'
-import QuoteWorkspace from '../../components/business/QuoteWorkspace.vue'
 import PanelSplitter from '../../components/PanelSplitter.vue'
 import AmountFacet from '../../components/quotes/list/AmountFacet.vue'
 import DateFacet from '../../components/quotes/list/DateFacet.vue'
 import QuoteTable from '../../components/quotes/list/QuoteTable.vue'
 import RowMenu from '../../components/business/RowMenu.vue'
+
+const QuoteWorkspace = defineAsyncComponent(() => import('../../components/business/QuoteWorkspace.vue'))
+type QuoteWorkspaceInstance = InstanceType<typeof import('../../components/business/QuoteWorkspace.vue')['default']>
 
 // Business › Quotes: every quote in one list you can search, filter (status,
 // customer, date, amount), sort and size, with the ticket list's keyboard (j/k,
@@ -40,7 +42,7 @@ const sort = computed<Sort>(() => pref.value.value?.sort ?? DEFAULT_SORT)
 const widths = computed(() => pref.value.value?.widths ?? {})
 const search = ref<HTMLInputElement>()
 const table = ref<InstanceType<typeof QuoteTable>>()
-const workspace = ref<InstanceType<typeof QuoteWorkspace>>()
+const workspace = ref<QuoteWorkspaceInstance>()
 const create = ref<InstanceType<typeof QuoteCreateDialog>>()
 const filter = computed(() => store.filter)
 const today = todayIso()

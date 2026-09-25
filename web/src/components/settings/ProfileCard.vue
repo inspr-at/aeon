@@ -1,6 +1,6 @@
 <!-- SPDX-License-Identifier: AGPL-3.0-only -->
 <script setup lang="ts">
-import { computed, onBeforeUnmount, onMounted, reactive, ref, watch } from 'vue'
+import { computed, defineAsyncComponent, onBeforeUnmount, onMounted, reactive, ref, watch } from 'vue'
 import { deriveInitials, uploadProblem } from '../../lib/avatar'
 import { confirmAction } from '../../lib/confirm'
 import { fieldMessage, ProfileError, shortNameProblem, type Profile, type ProfilePatch } from '../../lib/profile'
@@ -11,8 +11,9 @@ import { useSession } from '../../stores/session'
 import AppIcon from '../AppIcon.vue'
 import BizIcon from '../business/BizIcon.vue'
 import Avatar, { forgetMissing } from '../Avatar.vue'
-import AvatarCropDialog from './AvatarCropDialog.vue'
 import ChoicePicker, { type Choice } from './ChoicePicker.vue'
+
+const AvatarCropDialog = defineAsyncComponent(() => import('./AvatarCropDialog.vue'))
 
 // Your profile: photo, names, handle, initials, time zone and language. Each field
 // saves on its own (Enter or leaving it), with Undo in the toast; the server's
