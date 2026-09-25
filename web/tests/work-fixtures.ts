@@ -37,6 +37,8 @@ export interface MockOptions {
   conflictOn?: string
   bigProject?: number
   failUpload?: boolean
+  // The signed-in person is a workspace admin (shared project groups).
+  admin?: boolean
 }
 
 const CLOSED = ['done', 'cancelled', 'archived', 'delivered', 'accepted']
@@ -301,7 +303,7 @@ export async function mockWork(page: Page, data: Fixtures, options: MockOptions 
       batch.undone = true
       return route.fulfill({ status: 201, json: { id: batch.id + 1, type: 'node.bulk_changed', undo_of: batch.id } })
     }
-    if (path === '/api/me') return route.fulfill({ json: { principal: { id: me.id, name: me.name, roles: options.readOnly ? ['viewer'] : ['member'] }, tenant: { id: 't1', name: 'INSPR Studio' } } })
+    if (path === '/api/me') return route.fulfill({ json: { principal: { id: me.id, name: me.name, roles: options.readOnly ? ['viewer'] : options.admin ? ['admin'] : ['member'] }, tenant: { id: 't1', name: 'INSPR Studio' } } })
     if (path === '/api/kinds') return route.fulfill({ json: { items: ['epic', 'ticket', 'task', 'project'].map(slug => ({ id: `k-${slug}`, slug, label: slug[0].toUpperCase() + slug.slice(1), short_prefix: slug.slice(0, 3).toUpperCase(), icon: slug, allowed_child_kinds: null, field_schema: {} })) } })
     if (path === '/api/relations') return route.fulfill({ json: { items: data.relations.filter(r => r.source_node_id === query.get('node_id') || r.target_node_id === query.get('node_id')), next_cursor: null } })
     if (path === '/api/nodes/lookup') {
@@ -356,7 +358,7 @@ export async function mockWork(page: Page, data: Fixtures, options: MockOptions 
       return route.fulfill({ json: { items: data.projects.filter(p => archived || p.state !== 'archived').map(p => {
         const inside = data.nodes.filter(n => n.project === p.id).map(n => normal(n.state))
         const count = (states: string[]) => inside.filter(state => states.includes(state)).length
-        return { id: p.id, key: p.key, title: p.title, state: p.state, open: count(['new', 'backlog']), in_progress: count(['in_progress', 'qa']), done: count(['done', 'delivered', 'accepted']), cancelled: count(['cancelled']), total: inside.length, last_activity: p.last }
+        return { id: p.id, key: p.key, title: p.title, state: p.state, open: count(['new', 'backlog']), in_progress: count(['in_progress', 'qa']), done: count(['done', 'delivered', 'accepted']), cancelled: count(['cancelled']), total: inside.length, last_activity: p.last, people: (p.id === 'p-pharos' ? [mira, me] : p.id === 'p-aeon' ? [me] : []).map(person => ({ ...person, kind: 'person' })) }
       }) } })
     }
     if (path === '/api/nodes' && method === 'GET') {

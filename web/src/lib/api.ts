@@ -125,7 +125,10 @@ export interface ListQuery {
 export interface ProjectSummary {
   id: string; key: string; title: string; state: string
   open: number; in_progress: number; done: number; cancelled?: number; total: number; last_activity: string
+  // The people (and agents) most recently active in the project, newest first; absent on older servers.
+  people?: ProjectPerson[]
 }
+export interface ProjectPerson { id: string; name: string; kind: 'person' | 'agent' }
 function listQuery(params: ListQuery): string {
   const values: Record<string, string | number | boolean | undefined> = {}
   for (const [key, value] of Object.entries(params)) {
@@ -156,6 +159,16 @@ export interface BulkResult { event_id: number | null; items: WorkNode[]; unchan
 export const bulkChange = (body: BulkChange) => json<BulkResult>('/nodes/bulk', 'POST', body)
 export const undoEvent = (eventId: number) => json<unknown>(`/events/${eventId}/undo`, 'POST')
 export const getProjects = (includeArchived = false) => json<{ items: ProjectSummary[] }>(`/projects${includeArchived ? '?include_archived=true' : ''}`)
+// Shared project groups (AEON-136): everyone reads them; admins write, and every
+// write answers the event that POST /events/{id}/undo reverses.
+export interface SharedProjectGroup { id: string; name: string; position: number; project_ids: string[]; created_by: string; created_at: string; updated_at: string }
+export interface ProjectGroupWrite { group?: SharedProjectGroup; assignments?: { project_id: string; group_id: string | null }[]; event_id: number | null }
+export const getProjectGroups = () => json<{ items: SharedProjectGroup[] }>('/project-groups')
+export const createProjectGroup = (body: { name: string; project_ids?: string[]; position?: number }) => json<ProjectGroupWrite>('/project-groups', 'POST', body)
+export const updateProjectGroup = (id: string, body: { name?: string; position?: number }) => json<ProjectGroupWrite>(`/project-groups/${idPath(id)}`, 'PATCH', body)
+export const deleteProjectGroup = (id: string) => json<ProjectGroupWrite>(`/project-groups/${idPath(id)}`, 'DELETE')
+export const assignProjectGroup = (groupId: string | null, projectIds: string[]) => json<ProjectGroupWrite>('/project-groups/assign', 'POST', { group_id: groupId, project_ids: projectIds })
+export const undoGroupEvent = (eventId: number) => json<unknown>(`/events/${eventId}/undo`, 'POST')
 // B2 ticket activity and comments.
 export type ChangeField = 'status' | 'priority' | 'assignee' | 'title' | 'parent'
 export interface ActivityChange { field: ChangeField; from: string | null; to: string | null }

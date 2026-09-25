@@ -325,7 +325,10 @@ test('project header shows the project summary counts, cancelled work out of sco
   await page.goto('/p/PHAROS')
   const stats = page.locator('.head-stats')
   await expect(stats).toContainText('3 open')
-  await expect(stats).toContainText('2 in progress')
+  // "Doing" on screen; the full "in progress" for screen readers and in the tooltip.
+  await expect(stats).toContainText('2 doing')
+  await expect(stats).toHaveAttribute('aria-label', /2 in progress/)
+  await expect(stats.locator('.stat').nth(1)).toHaveAttribute('data-tip', /^In progress/)
   await expect(stats).toContainText('1 done')
   await expect(stats).toContainText('17%')
   await expect(stats.locator('.progress-line')).toHaveAttribute('data-tip', '1 of 6 done · 1 cancelled')
