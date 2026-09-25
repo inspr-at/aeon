@@ -16,6 +16,13 @@ var explicitIssueFields = []string{
 	"release", "sprint_ids", "needs_review", "archived", "accepted_at",
 }
 
+// knowledgeTypes are the classic issue types the knowledge module serves. It
+// finds an entry by fields.slug and reads fields.metadata (AEON-138).
+var knowledgeTypes = map[string]bool{
+	"memory": true, "runbook": true, "guideline": true,
+	"external_system": true, "related_project": true,
+}
+
 func mappedFields(original, refs Record, sourceID string, project bool) Record {
 	classic := Record{"source_id": sourceID}
 	for name, value := range original {
@@ -45,6 +52,14 @@ func mappedFields(original, refs Record, sourceID string, project bool) Record {
 	} {
 		if v, ok := refs[field]; ok {
 			fields[name] = v
+		}
+	}
+	if knowledgeTypes[canonicalType(stringField(original, "type"))] {
+		if slug := stringField(original, "slug"); slug != "" {
+			fields["slug"] = slug
+		}
+		if metadata, ok := original["metadata"].(map[string]any); ok && len(metadata) > 0 {
+			fields["metadata"] = metadata
 		}
 	}
 	return fields
