@@ -130,10 +130,6 @@ export function shortDigest(digest: string): string {
   return `${digest.slice(0, 8)}…${digest.slice(-8)}`
 }
 
-export function isTenantAdmin(identity: { principal: { kind?: string; roles?: string[] } } | null): boolean {
-  return identity?.principal.kind === 'person' && identity.principal.roles?.includes('admin') === true
-}
-
 export async function listPlugins(): Promise<BusinessPlugin[]> {
   const response = await api('/plugins')
   if (!response.ok) throw new BusinessAPIError(response.status, await errorMessage(response))

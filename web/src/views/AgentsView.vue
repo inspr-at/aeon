@@ -2,7 +2,7 @@
 <script setup lang="ts">
 import { computed, nextTick, onBeforeUnmount, onMounted, ref, watch } from 'vue'
 import { useRoute, useRouter } from 'vue-router'
-import { canWrite } from '../lib/activity'
+import { can } from '../lib/authz'
 import { message, subscribeAgents, type AgentAccount, type Approval, type SessionControl } from '../lib/agents'
 import { controlBlocked, decidedApprovals, type Resource } from '../lib/agentState'
 import { confirmAction } from '../lib/confirm'
@@ -10,7 +10,6 @@ import { toast } from '../lib/toast'
 import { useAgents, type HeldRequest, type SessionView } from '../stores/agents'
 import { useProjects } from '../stores/projects'
 import { useSession } from '../stores/session'
-import { isTenantAdmin } from '../components/business/catalog'
 import { settingsLink } from '../lib/settings'
 import AppIcon from '../components/AppIcon.vue'
 import AccountsCard from '../components/agents/AccountsCard.vue'
@@ -31,8 +30,7 @@ const queue = ref<InstanceType<typeof ApprovalQueue>>()
 
 const sessionId = computed(() => typeof route.params.sessionId === 'string' ? route.params.sessionId : '')
 const selected = computed(() => agents.views.find(v => v.session.id === sessionId.value))
-const roles = computed(() => session.identity?.principal.roles ?? [])
-const writable = computed(() => canWrite(roles.value))
+const writable = computed(() => can('harness.control'))
 const history = computed(() => decidedApprovals(agents.approvals, agents.now))
 const counts = computed(() => ({ working: agents.grouped.working.length, idle: agents.grouped.idle.length }))
 const summary = computed(() => {
@@ -211,7 +209,7 @@ watch(sessionId, id => { if (id) cursor.value = `s:${id}` }, { immediate: true }
         <p class="summary"><span v-if="summary">{{ summary }}</span><span v-else class="skeleton summary-skeleton" /></p>
       </div>
       <div class="head-side">
-        <RouterLink v-if="isTenantAdmin(session.identity)" class="context-link" :to="settingsLink('workspace', 'agent-keys')">Agent keys<AppIcon name="arrow" :size="13" /></RouterLink>
+        <RouterLink v-if="can('keys.manage')" class="context-link" :to="settingsLink('workspace', 'agent-keys')">Agent keys<AppIcon name="arrow" :size="13" /></RouterLink>
         <p class="live" :class="{ on: live }" :data-tip="live ? 'Updates arrive as they happen' : 'Refreshing every 20 seconds'">
           <span class="live-mark" aria-hidden="true" />{{ live ? 'Live' : 'Polling' }}
         </p>

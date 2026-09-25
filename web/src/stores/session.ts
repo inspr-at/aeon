@@ -3,6 +3,7 @@ import { defineStore } from 'pinia'
 import { ref } from 'vue'
 import { api, getSession, type Identity } from '../lib/api'
 import { restoreTheme } from '../lib/theme'
+import { clearPermissions, refreshPermissions } from '../lib/authz'
 
 export class SignInError extends Error {
   readonly reason: 'not_member' | 'disabled' | 'invalid' | 'network' | 'failed'
@@ -19,10 +20,13 @@ export const useSession = defineStore('session', () => {
     try {
       const session = await getSession()
       identity.value = session.identity
+      clearPermissions()
+      if (session.identity) void refreshPermissions()
       devMode.value = session.devMode
       if (session.identity) void restoreTheme()
     } catch {
       identity.value = null
+      clearPermissions()
       devMode.value = false
       error.value = 'We couldn’t reach your workspace. Please try again.'
     }
@@ -32,6 +36,7 @@ export const useSession = defineStore('session', () => {
     const response = await api('/auth/logout', { method: 'POST' })
     if (!response.ok) throw new Error('Sign out failed')
     identity.value = null
+    clearPermissions()
   }
 
   // Errors carry a reason the sign-in page can explain: not_member, disabled, invalid, network, failed.

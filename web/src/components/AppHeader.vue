@@ -13,7 +13,7 @@ import { useQuotes } from '../stores/quotes'
 import { useProfile } from '../stores/profile'
 import Avatar from './Avatar.vue'
 import { dark, setTheme, themeChoice, toggleTheme, type ThemeChoice } from '../lib/theme'
-import { canWrite } from '../lib/activity'
+import { can } from '../lib/authz'
 import { command, consume, run } from '../lib/commands'
 import { fatal } from '../lib/fatal'
 import { accountEmail, accountName } from '../lib/api'
@@ -42,7 +42,7 @@ const trigger = ref<HTMLButtonElement>()
 const panel = ref<HTMLElement>()
 const palette = ref<InstanceType<typeof CommandPalette>>()
 const themes: { value: ThemeChoice; label: string; icon: 'sun' | 'moon' | 'monitor' }[] = [{ value: 'light', label: 'Light', icon: 'sun' }, { value: 'dark', label: 'Dark', icon: 'moon' }, { value: 'system', label: 'System', icon: 'monitor' }]
-const writable = computed(() => canWrite(session.identity?.principal.roles))
+const writable = computed(() => can('nodes.write', project.value?.id))
 const name = computed(() => session.identity ? accountName(session.identity) : '')
 const email = computed(() => session.identity ? accountEmail(session.identity) : '')
 

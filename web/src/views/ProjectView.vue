@@ -4,7 +4,7 @@ import { setPageTitle } from '../lib/brand'
 import { computed, defineAsyncComponent, nextTick, onBeforeUnmount, onMounted, ref, watch } from 'vue'
 import { onBeforeRouteLeave, onBeforeRouteUpdate, useRoute, useRouter } from 'vue-router'
 import { APIError, createNode, listNodes, type ListItem, type SavedView } from '../lib/api'
-import { canWrite } from '../lib/activity'
+import { can } from '../lib/authz'
 import { confirmAction } from '../lib/confirm'
 import { asListItem, guardedMove, keyPrefix, kinds } from '../lib/useTicket'
 import { useOutline } from '../lib/useOutline'
@@ -147,7 +147,7 @@ const creating = ref(false)
 // Full page: the same ticket workspace in a two-column page instead of the side panel.
 const fullView = fullViewQuery
 const me = computed(() => session.identity ? { id: session.identity.principal.id, name: session.identity.principal.name } : null)
-const writable = computed(() => canWrite(session.identity?.principal.roles))
+const writable = computed(() => can('nodes.write', projectId.value ?? undefined))
 
 // ---------- Rows, groups and keyboard order ----------
 const displayRows = computed(() => {

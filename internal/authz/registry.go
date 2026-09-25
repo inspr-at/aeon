@@ -1,0 +1,115 @@
+// SPDX-License-Identifier: AGPL-3.0-only
+
+package authz
+
+import (
+	"fmt"
+	"sort"
+	"strings"
+)
+
+type Permission struct {
+	Key         string   `json:"key"`
+	Group       string   `json:"group"`
+	Description string   `json:"description"`
+	Risk        string   `json:"risk"`
+	GrantableAt []string `json:"grantable_at"`
+}
+
+// Registry is the versioned permission catalog. Each key is unique and uses
+// the same dot notation as agent key scopes.
+var Registry = makeRegistry()
+
+func makeRegistry() []Permission {
+	groups := []struct{ group, actions string }{
+		{"nodes", "read write delete move restore configure"},
+		{"kinds", "read manage"}, {"tags", "read manage"},
+		{"relations", "read write delete"}, {"comments", "read write delete"},
+		{"attachments", "read write delete"}, {"knowledge", "read write delete"},
+		{"journey", "read act manage"}, {"requirements", "read write agree"},
+		{"releases", "read write deploy"}, {"intake", "read write decide"},
+		{"stage_handoffs", "read write decide"}, {"harness", "read write worker control manage"},
+		{"work_orders", "read write assign"}, {"runs", "read write control claim"},
+		{"run", "create read claim telemetry"}, {"account", "read manage route probe"},
+		{"approvals", "read request propose decide revoke"}, {"inbox", "read send manage"},
+		{"stage", "prepare deploy verify apply"},
+		{"models", "read manage resolve"}, {"plugins", "read manage invoke"},
+		{"imports", "read manage"}, {"views", "read write share"},
+		{"events", "read undo"}, {"search", "read"},
+		{"hours", "read write approve"}, {"quotes", "read write issue accept delete manage portal_read portal_accept"},
+		{"crm", "read write manage"}, {"cost_units", "read write manage"},
+		{"project_groups", "read write"}, {"profile", "read write"},
+		{"settings", "read manage"}, {"members", "read manage"},
+		{"roles", "read manage"}, {"keys", "read manage"},
+		{"audit", "read"}, {"authz", "read"},
+	}
+	out := make([]Permission, 0, 130)
+	for _, g := range groups {
+		for _, action := range strings.Fields(g.actions) {
+			risk := "medium"
+			if action == "read" || action == "resolve" {
+				risk = "low"
+			}
+			if action == "delete" || action == "deploy" || action == "decide" || action == "manage" || action == "issue" || action == "approve" || action == "undo" {
+				risk = "high"
+			}
+			at := []string{"workspace", "project"}
+			switch g.group {
+			case "kinds", "models", "plugins", "imports", "profile", "settings", "members", "roles", "keys", "audit", "authz":
+				at = []string{"workspace"}
+			}
+			out = append(out, Permission{Key: g.group + "." + action, Group: g.group, Description: fmt.Sprintf("%s %s", strings.Title(action), strings.ReplaceAll(g.group, "_", " ")), Risk: risk, GrantableAt: at})
+		}
+	}
+	out = append(out, Permission{Key: "ownership.transfer", Group: "ownership", Description: "Transfer workspace ownership", Risk: "high", GrantableAt: []string{"workspace"}})
+	sort.Slice(out, func(i, j int) bool { return out[i].Key < out[j].Key })
+	return out
+}
+
+func Lookup(key string) (Permission, bool) {
+	i := sort.Search(len(Registry), func(i int) bool { return Registry[i].Key >= key })
+	if i < len(Registry) && Registry[i].Key == key {
+		return Registry[i], true
+	}
+	return Permission{}, false
+}
+
+var builtinKeys = []string{"owner", "admin", "member", "viewer", "guest", "customer"}
+
+func builtinPermissions(key string) []string {
+	out := make([]string, 0, len(Registry))
+	for _, p := range Registry {
+		allow := false
+		switch key {
+		case "owner":
+			allow = true
+		case "admin":
+			allow = p.Key != "ownership.transfer"
+		case "member":
+			switch p.Group {
+			case "kinds", "models", "plugins", "imports", "settings", "members", "roles", "keys", "audit", "ownership":
+			default:
+				allow = p.Key != "nodes.configure" && p.Key != "releases.deploy" && p.Key != "approvals.decide" && p.Key != "hours.approve" && p.Key != "quotes.issue" && p.Key != "stage_handoffs.decide" && p.Key != "stage.deploy" && p.Key != "stage.apply" && p.Key != "intake.decide"
+			}
+		case "viewer":
+			allow = p.Key == "profile.write" || p.Key == "authz.read" || (p.Risk == "low" && strings.HasSuffix(p.Key, ".read"))
+		case "guest":
+			allow = p.Key == "comments.write" || p.Key == "profile.write" || p.Key == "authz.read" || (p.Risk == "low" && strings.HasSuffix(p.Key, ".read"))
+		case "customer":
+			allow = p.Key == "profile.read" || p.Key == "profile.write" || p.Key == "quotes.portal_read" || p.Key == "quotes.portal_accept" || p.Key == "authz.read"
+		}
+		if allow {
+			out = append(out, p.Key)
+		}
+	}
+	return out
+}
+
+func BuiltinPermissions(key string) ([]string, bool) {
+	for _, k := range builtinKeys {
+		if k == key {
+			return builtinPermissions(key), true
+		}
+	}
+	return nil, false
+}

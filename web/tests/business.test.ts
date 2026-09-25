@@ -3,7 +3,7 @@ import { test } from 'node:test'
 import assert from 'node:assert/strict'
 import { businessAreas } from '../src/components/business/areas.ts'
 import {
-  availability, disablePermissions, installationWrite, isTenantAdmin, parseCatalog, pinAction, pluginGate, statusLabel,
+  availability, disablePermissions, installationWrite, parseCatalog, pinAction, pluginGate, statusLabel,
   type BusinessPlugin,
 } from '../src/components/business/catalog.ts'
 import { formatDuration } from '../src/components/business/duration.ts'
@@ -107,10 +107,6 @@ test('installation write pins the compiled digest and declared permissions', () 
   })
   assert.deepEqual(disablePermissions(item), ['views.provide'])
   assert.deepEqual(installationWrite(plugin('business_costs'), false).manifest_digest_sha256, build)
-  assert.equal(isTenantAdmin({ principal: { kind: 'person', roles: ['admin'] } }), true)
-  assert.equal(isTenantAdmin({ principal: { kind: 'person', roles: ['customer'] } }), false)
-  assert.equal(isTenantAdmin({ principal: { kind: 'agent', roles: ['admin'] } }), false)
-  assert.equal(isTenantAdmin(null), false)
 })
 
 test('parseCatalog rejects a malformed plugin list', () => {

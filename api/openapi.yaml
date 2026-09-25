@@ -6,6 +6,63 @@ info:
 servers:
   - url: /api
 paths:
+  /authz/permissions:
+    get:
+      operationId: listAuthzPermissions
+      summary: Versioned permission registry
+      responses:
+        '200': {description: Permission descriptors, content: {application/json: {schema: {type: array, items: {$ref: '#/components/schemas/AuthzPermission'}}}}
+        '403': {description: Permission denied}
+  /me/permissions:
+    get:
+      operationId: getMyPermissions
+      summary: Effective workspace and optional project permissions
+      parameters:
+        - {name: project_id, in: query, schema: {type: string, format: uuid}}
+      responses:
+        '200': {description: Effective grants, content: {application/json: {schema: {$ref: '#/components/schemas/EffectivePermissions'}}}}
+        '403': {description: Permission denied}
+  /roles:
+    get:
+      operationId: listRoles
+      responses:
+        '200': {description: Built-in and custom roles, content: {application/json: {schema: {type: array, items: {$ref: '#/components/schemas/AuthzRole'}}}}}
+    post:
+      operationId: createRole
+      requestBody: {required: true, content: {application/json: {schema: {$ref: '#/components/schemas/RoleWrite'}}}}
+      responses:
+        '201': {description: Role created, content: {application/json: {schema: {$ref: '#/components/schemas/AuthzRole'}}}}
+        '403': {description: Permission denied or role escalation}
+  /roles/{id}:
+    parameters:
+      - {name: id, in: path, required: true, schema: {type: string, format: uuid}}
+    patch:
+      operationId: updateRole
+      requestBody: {required: true, content: {application/json: {schema: {$ref: '#/components/schemas/RoleWrite'}}}}
+      responses:
+        '200': {description: Updated custom role, content: {application/json: {schema: {$ref: '#/components/schemas/AuthzRole'}}}}
+        '403': {description: Permission denied or role escalation}
+    delete:
+      operationId: deleteRole
+      parameters:
+        - {name: reassign_to, in: query, schema: {type: string, format: uuid}}
+      responses:
+        '204': {description: Custom role deleted}
+        '409': {description: Role still has bindings}
+  /members:
+    get:
+      operationId: listMembers
+      responses:
+        '200': {description: Workspace people, agents, invites and imported identities, content: {application/json: {schema: {$ref: '#/components/schemas/MemberDirectory'}}}}
+  /members/{principal_id}/workspace-role:
+    put:
+      operationId: setWorkspaceRole
+      parameters:
+        - {name: principal_id, in: path, required: true, schema: {type: string, format: uuid}}
+      requestBody: {required: true, content: {application/json: {schema: {type: object, required: [role_id], properties: {role_id: {type: [string, 'null'], format: uuid}}}}}}
+      responses:
+        '200': {description: Updated member, content: {application/json: {schema: {$ref: '#/components/schemas/Member'}}}}
+        '403': {description: Permission denied or role escalation}
   /health:
     get:
       summary: Liveness and database readiness
@@ -2880,6 +2937,78 @@ components:
     session: {type: apiKey, in: cookie, name: aeon_session}
     agentKey: {type: http, scheme: bearer, description: Bearer token aeon_<prefix>_<secret>}
   schemas:
+    AuthzPermission:
+      type: object
+      required: [key, group, description, risk, grantable_at]
+      properties:
+        key: {type: string}
+        group: {type: string}
+        description: {type: string}
+        risk: {type: string, enum: [low, medium, high]}
+        grantable_at: {type: array, items: {type: string, enum: [workspace, project]}}
+    AuthzRoleRef:
+      type: object
+      required: [id, key, name]
+      properties:
+        id: {type: string, format: uuid}
+        key: {type: string}
+        name: {type: string}
+    AuthzRole:
+      type: object
+      required: [id, key, name, description, builtin, permissions, based_on, member_count]
+      properties:
+        id: {type: string, format: uuid}
+        key: {type: string}
+        name: {type: string}
+        description: {type: string}
+        builtin: {type: boolean}
+        permissions: {type: array, items: {type: string}}
+        based_on: {type: [string, 'null'], format: uuid}
+        member_count: {type: integer}
+    RoleWrite:
+      type: object
+      properties:
+        name: {type: string}
+        description: {type: string}
+        permissions: {type: array, items: {type: string}}
+        based_on: {type: string, format: uuid}
+    EffectivePermissions:
+      type: object
+      required: [workspace, project]
+      properties:
+        workspace:
+          type: object
+          required: [role, permissions]
+          properties:
+            role: {oneOf: [{$ref: '#/components/schemas/AuthzRoleRef'}, {type: 'null'}]}
+            permissions: {type: array, items: {type: string}}
+        project:
+          oneOf:
+            - {type: 'null'}
+            - {type: object, required: [id, role, permissions], properties: {id: {type: string, format: uuid}, role: {oneOf: [{$ref: '#/components/schemas/AuthzRoleRef'}, {type: 'null'}]}, permissions: {type: array, items: {type: string}}}}
+    Member:
+      type: object
+      required: [principal_id, name, avatar_url, email, status, identity, workspace_role, project_roles, aliases, classic_role, last_active_at]
+      properties:
+        principal_id: {type: string, format: uuid}
+        name: {type: string}
+        avatar_url: {type: [string, 'null']}
+        email: {type: [string, 'null']}
+        status: {type: string, enum: [active, deactivated]}
+        identity: {type: [string, 'null'], enum: [inspr_id, null]}
+        workspace_role: {oneOf: [{$ref: '#/components/schemas/AuthzRoleRef'}, {type: 'null'}]}
+        project_roles: {type: array, items: {type: object}}
+        aliases: {type: array, items: {type: object}}
+        classic_role: {type: [string, 'null']}
+        last_active_at: {type: [string, 'null'], format: date-time}
+    MemberDirectory:
+      type: object
+      required: [people, agents, invites, imported]
+      properties:
+        people: {type: array, items: {$ref: '#/components/schemas/Member'}}
+        agents: {type: array, items: {type: object}}
+        invites: {type: array, items: {type: object}}
+        imported: {type: array, items: {type: object}}
     Greeting:
       type: object
       additionalProperties: false
