@@ -72,7 +72,9 @@
 //
 // Reruns update nodes only when imported content changes and deduplicate
 // auxiliary events. Native writes are serialized per tenant and source with a
-// transaction advisory lock and use events.Append inside db.InTenant.
+// transaction advisory lock and use events.Append inside db.InTenant. After a
+// successful write, the importer refreshes statistics on its touched tables so
+// large snapshots are queryable without waiting for autovacuum.
 //
 // BackfillRelations replays import.relation events already stored for one
 // tenant and applies the mapping above. It is the function the coordinator

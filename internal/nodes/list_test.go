@@ -210,6 +210,14 @@ func TestList6000Performance(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
+	// Importer writes refresh statistics after the bulk transaction; exercise
+	// the same plan here so row estimates cannot hide a slow recursive walk.
+	if err := db.InTenant(t.Context(), appPool, p.TenantID, func(tx pgx.Tx) error {
+		_, err := tx.Exec(t.Context(), `ANALYZE nodes`)
+		return err
+	}); err != nil {
+		t.Fatal(err)
+	}
 	path := "/api/nodes?within=" + root.ID + "&sort=state,-updated_at&limit=50&facets=state,kind,priority,assignee"
 	var fastest time.Duration
 	for i := 0; i < 3; i++ {
