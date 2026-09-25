@@ -102,6 +102,7 @@ const qr = computed(() => fresh.value ? quoteQr(fresh.value) : null)
           <rect x="-2" y="-2" :width="qr.size + 4" :height="qr.size + 4" fill="#fff" /><path :d="qr.path" fill="#000" />
         </svg>
       </div>
+	  <p v-if="link?.copy_unavailable_reason === 'key_not_configured' && fresh" class="hint" role="status">This server has no customer-link key. Copy or save this link now. It cannot be copied or shown as a QR code after you leave this page.</p>
 
       <p v-if="state === 'active'" class="d-text">Opens this version until <strong>{{ when(link!.expires_at) }}</strong>{{ acceptable ? ', and can accept it.' : '. Acceptance is closed.' }}</p>
       <p v-else-if="state === 'revoked'" class="d-text">Revoked on {{ when(link!.revoked_at) }}. It no longer opens the quote.</p>
@@ -122,10 +123,11 @@ const qr = computed(() => fresh.value ? quoteQr(fresh.value) : null)
       <div v-if="state === 'active' || state === 'expired'" class="actions">
         <button type="button" class="btn sm ghost danger-text" :disabled="busy" @click="revoke">Revoke link</button>
       </div>
-      <p v-if="state === 'active' && !fresh && acceptable" class="hint">This older link cannot be copied again. Revoke it to create a new one.</p>
+	  <p v-if="state === 'active' && !fresh && link?.copy_unavailable_reason === 'key_not_configured'" class="hint" role="status">This server has no customer-link key. This link cannot be copied or shown as a QR code again. Revoke it to create a new one.</p>
+	  <p v-else-if="state === 'active' && !fresh && acceptable" class="hint">This older link cannot be copied again. Revoke it to create a new one.</p>
       <p v-if="error" class="d-error" role="alert"><AppIcon name="alert" :size="13" />{{ error }}</p>
 
-      <p class="privacy"><BizIcon name="lock" :size="13" /><span>The page shows only this frozen version: no other quotes, customers or people. It is never cached or indexed. The verifier and admin-only copy are stored separately.</span></p>
+      <p class="privacy"><BizIcon name="lock" :size="13" /><span>The page shows only this frozen version: no other quotes, customers or people. It is never cached or indexed. The verifier is stored separately from any encrypted admin-only copy.</span></p>
     </template>
   </section>
 </template>

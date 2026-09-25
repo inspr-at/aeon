@@ -26,9 +26,11 @@ import (
 	"time"
 
 	"github.com/inspr-at/aeon/internal/attachments"
+	"github.com/inspr-at/aeon/internal/config"
 	"github.com/inspr-at/aeon/internal/db"
 	"github.com/inspr-at/aeon/internal/events"
 	"github.com/inspr-at/aeon/internal/httpapi"
+	"github.com/inspr-at/aeon/internal/linkvault"
 	"github.com/inspr-at/aeon/internal/plugins"
 	"github.com/inspr-at/aeon/internal/plugins/fence"
 	"github.com/inspr-at/aeon/internal/quotepdf"
@@ -49,6 +51,7 @@ type Module struct {
 	assets        fs.FS
 	store         *attachments.Store
 	publicBaseURL string
+	linkKey       []byte
 	mu            sync.Mutex
 	attempts      map[string][]time.Time
 }
@@ -83,7 +86,11 @@ func newModule(pool *pgxpool.Pool, registry *plugins.Registry, assets fs.FS, sto
 			return nil, errors.New("invalid public base URL")
 		}
 	}
-	return &Module{pool: pool, registry: registry, assets: assets, store: store, publicBaseURL: strings.TrimRight(publicBaseURL, "/"), attempts: make(map[string][]time.Time)}, nil
+	key, err := config.LinkKeyFromEnv()
+	if err != nil {
+		return nil, err
+	}
+	return &Module{pool: pool, registry: registry, assets: assets, store: store, publicBaseURL: strings.TrimRight(publicBaseURL, "/"), linkKey: key, attempts: make(map[string][]time.Time)}, nil
 }
 
 func (m *Module) Mount(mux *http.ServeMux) {
@@ -172,15 +179,16 @@ func (m *Module) gate(ctx context.Context, tx pgx.Tx, tenantID, permission strin
 }
 
 type managedLink struct {
-	ID                  string     `json:"id"`
-	PublicTenant        string     `json:"public_tenant"`
-	QuoteNodeID         string     `json:"quote_node_id"`
-	Version             int        `json:"version"`
-	TargetContentSHA256 string     `json:"target_content_sha256"`
-	ExpiresAt           time.Time  `json:"expires_at"`
-	RevokedAt           *time.Time `json:"revoked_at,omitempty"`
-	Path                string     `json:"path,omitempty"`
-	Token               string     `json:"token,omitempty"`
+	ID                    string     `json:"id"`
+	PublicTenant          string     `json:"public_tenant"`
+	QuoteNodeID           string     `json:"quote_node_id"`
+	Version               int        `json:"version"`
+	TargetContentSHA256   string     `json:"target_content_sha256"`
+	ExpiresAt             time.Time  `json:"expires_at"`
+	RevokedAt             *time.Time `json:"revoked_at,omitempty"`
+	Path                  string     `json:"path,omitempty"`
+	Token                 string     `json:"token,omitempty"`
+	CopyUnavailableReason string     `json:"copy_unavailable_reason,omitempty"`
 }
 
 func (m *Module) createLink(w http.ResponseWriter, r *http.Request) {
@@ -262,7 +270,15 @@ func (m *Module) createLink(w http.ResponseWriter, r *http.Request) {
 		if err != nil {
 			return err
 		}
-		_, err = tx.Exec(r.Context(), `INSERT INTO quote_public_link_tokens(tenant_id,link_id,token) VALUES($1::uuid,$2::uuid,$3)`, p.TenantID, out.ID, token)
+		if m.linkKey != nil {
+			ciphertext, err := linkvault.Encrypt(m.linkKey, p.TenantID, out.ID, token)
+			if err != nil {
+				return err
+			}
+			_, err = tx.Exec(r.Context(), `INSERT INTO quote_public_link_tokens(tenant_id,link_id,ciphertext) VALUES($1::uuid,$2::uuid,$3)`, p.TenantID, out.ID, ciphertext)
+		} else {
+			out.CopyUnavailableReason = "key_not_configured"
+		}
 		out.Path = "/offers/" + publicTenant + "/" + token
 		return err
 	})
@@ -289,10 +305,17 @@ func (m *Module) linkInfo(w http.ResponseWriter, r *http.Request) {
 		if err := m.gate(r.Context(), tx, p.TenantID, fence.PermViewsProvide); err != nil {
 			return err
 		}
-		var token *string
-		err := tx.QueryRow(r.Context(), `SELECT l.id::text,s.selector,l.quote_node_id::text,l.version,l.target_content_sha256,l.expires_at,l.revoked_at,t.token FROM quote_public_links l JOIN quote_public_tenant_selectors s ON s.tenant_id=l.tenant_id LEFT JOIN quote_public_link_tokens t ON t.tenant_id=l.tenant_id AND t.link_id=l.id WHERE l.quote_node_id=$1::uuid AND l.version=$2 ORDER BY l.issued_at DESC LIMIT 1`, id, version).Scan(&out.ID, &out.PublicTenant, &out.QuoteNodeID, &out.Version, &out.TargetContentSHA256, &out.ExpiresAt, &out.RevokedAt, &token)
-		if err == nil && token != nil && out.RevokedAt == nil {
-			out.Path = "/offers/" + out.PublicTenant + "/" + *token
+		var ciphertext []byte
+		var verifier string
+		err := tx.QueryRow(r.Context(), `SELECT l.id::text,s.selector,l.quote_node_id::text,l.version,l.target_content_sha256,l.expires_at,l.revoked_at,l.token_sha256,t.ciphertext FROM quote_public_links l JOIN quote_public_tenant_selectors s ON s.tenant_id=l.tenant_id LEFT JOIN quote_public_link_tokens t ON t.tenant_id=l.tenant_id AND t.link_id=l.id WHERE l.quote_node_id=$1::uuid AND l.version=$2 ORDER BY l.issued_at DESC LIMIT 1`, id, version).Scan(&out.ID, &out.PublicTenant, &out.QuoteNodeID, &out.Version, &out.TargetContentSHA256, &out.ExpiresAt, &out.RevokedAt, &verifier, &ciphertext)
+		if err == nil && out.RevokedAt == nil && m.linkKey == nil {
+			out.CopyUnavailableReason = "key_not_configured"
+		} else if err == nil && out.RevokedAt == nil && ciphertext != nil {
+			token, decryptErr := linkvault.Decrypt(m.linkKey, p.TenantID, out.ID, ciphertext)
+			if decryptErr != nil || hash(token) != verifier {
+				return errors.New("link cannot be re-copied")
+			}
+			out.Path = "/offers/" + out.PublicTenant + "/" + token
 		}
 		return err
 	})

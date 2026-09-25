@@ -99,3 +99,41 @@ func TestMessagingKey(t *testing.T) {
 		t.Fatalf("dev without a file gets an in-memory key: %v", err)
 	}
 }
+
+func TestLinkKeyRequiresPersistentFile(t *testing.T) {
+	t.Setenv("AEON_DATABASE_URL", "postgres://example")
+	t.Setenv("AEON_LINK_KEY_FILE", "")
+	t.Setenv("AEON_MESSAGING_KEY_FILE", "")
+	cfg, err := FromEnv()
+	if err != nil || cfg.LinkKey != nil {
+		t.Fatalf("no file must disable retention: %v", err)
+	}
+	file := filepath.Join(t.TempDir(), "link-key")
+	if err := os.WriteFile(file, []byte("synthetic-host-generated-link-key-0123456789\n"), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	t.Setenv("AEON_LINK_KEY_FILE", file)
+	cfg, err = FromEnv()
+	if err != nil || len(cfg.LinkKey) != 32 {
+		t.Fatalf("link key not derived: %v", err)
+	}
+	again, err := LinkKeyFromEnv()
+	if err != nil || string(again) != string(cfg.LinkKey) {
+		t.Fatalf("link key is not stable: %v", err)
+	}
+	if err := os.WriteFile(file, []byte("short"), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := FromEnv(); err == nil {
+		t.Fatal("short link key accepted")
+	}
+	t.Setenv("AEON_LINK_KEY_FILE", "")
+	if err := os.WriteFile(file, []byte("synthetic-host-generated-link-key-0123456789\n"), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	t.Setenv("AEON_MESSAGING_KEY_FILE", file)
+	cfg, err = FromEnv()
+	if err != nil || len(cfg.LinkKey) != 32 || string(cfg.LinkKey) == string(cfg.MessagingKey) {
+		t.Fatalf("messaging file fallback must be domain-separated: %v", err)
+	}
+}

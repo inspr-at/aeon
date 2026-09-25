@@ -17,6 +17,7 @@ import (
 	"time"
 
 	"github.com/inspr-at/aeon/internal/events"
+	"github.com/inspr-at/aeon/internal/linkvault"
 	"github.com/inspr-at/aeon/internal/plugins/fence"
 	"github.com/inspr-at/aeon/internal/tenant"
 	"github.com/jackc/pgx/v5"
@@ -61,10 +62,13 @@ func publicLinkPart(size int) (string, error) {
 	return base64.RawURLEncoding.EncodeToString(bytes), nil
 }
 
-// createIssuedLink is called after the issue row is written, in the same
-// tenant transaction. The public projection gets only a verifier; the private
-// token row is read solely by the authenticated admin management endpoint.
-func createIssuedLink(ctx context.Context, tx pgx.Tx, p tenant.Principal, id string, version int, digest string) error {
+// createIssuedLink runs only with a persistent key: automatic issuance has no
+// response channel for showing a one-time token. Without a key, the admin
+// creates the link explicitly after finalization and receives it once.
+func createIssuedLink(ctx context.Context, tx pgx.Tx, p tenant.Principal, id string, version int, digest string, key []byte) error {
+	if key == nil {
+		return nil
+	}
 	token, err := publicLinkPart(32)
 	if err != nil {
 		return err
@@ -89,7 +93,11 @@ func createIssuedLink(ctx context.Context, tx pgx.Tx, p tenant.Principal, id str
 	if err != nil {
 		return err
 	}
-	_, err = tx.Exec(ctx, `INSERT INTO quote_public_link_tokens(tenant_id,link_id,token) VALUES($1::uuid,$2::uuid,$3)`, p.TenantID, linkID, token)
+	ciphertext, err := linkvault.Encrypt(key, p.TenantID, linkID, token)
+	if err != nil {
+		return err
+	}
+	_, err = tx.Exec(ctx, `INSERT INTO quote_public_link_tokens(tenant_id,link_id,ciphertext) VALUES($1::uuid,$2::uuid,$3)`, p.TenantID, linkID, ciphertext)
 	return err
 }
 func (m *Module) finalize(w http.ResponseWriter, r *http.Request) {
@@ -263,7 +271,7 @@ func (m *Module) finalize(w http.ResponseWriter, r *http.Request) {
 		if err != nil {
 			return err
 		}
-		if err = createIssuedLink(r.Context(), tx, p, id, versionNo, digest); err != nil {
+		if err = createIssuedLink(r.Context(), tx, p, id, versionNo, digest, m.linkKey); err != nil {
 			return err
 		}
 		out, err = readQuote(r.Context(), tx, id, false)
