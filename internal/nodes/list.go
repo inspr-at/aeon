@@ -419,7 +419,9 @@ func listFilterSQL(q listQuery) (string, []any) {
         AND (cardinality($4::text[])=0 OR coalesce(nullif(n.fields->>'priority',''),'none')=ANY($4::text[]))
         AND (cardinality($5::text[])=0 OR coalesce(assignee.id::text,'none')=ANY($5::text[])
             OR assignee.id IN (SELECT coalesce(linked_to,id) FROM principals WHERE id::text=ANY($5::text[])))
-        AND ($6::text='' OR n.key ILIKE '%'||$6::text||'%' OR n.title ILIKE '%'||$6::text||'%')
+        AND ($6::text='' OR n.key ILIKE '%'||$6::text||'%' OR n.title ILIKE '%'||$6::text||'%'
+            OR EXISTS(SELECT 1 FROM node_key_aliases a WHERE a.tenant_id=n.tenant_id AND a.node_id=n.id
+                AND a.key ILIKE '%'||$6::text||'%'))
         AND ($7::uuid IS NULL OR (n.id IN (SELECT id FROM scope) AND n.id<>$7::uuid))
         AND ($7::uuid IS NOT NULL OR NOT $8::bool OR (CASE WHEN $10::bool THEN n.id IN (SELECT id FROM scope) AND n.id<>$9::uuid ELSE n.parent_id IS NOT DISTINCT FROM $9::uuid END))
         AND (NOT $11::bool OR n.state NOT IN ('done','cancelled','archived','delivered','accepted'))

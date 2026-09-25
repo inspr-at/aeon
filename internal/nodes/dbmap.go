@@ -50,6 +50,8 @@ func mapDB(err error) *httpError {
 			return conflict("cannot restore node under deleted parent")
 		case "invalid tenant or key prefix":
 			return badRequest("invalid key prefix")
+		case "node key is reserved by alias", "node key is current":
+			return conflict("node key already exists")
 		default:
 			return nil
 		}

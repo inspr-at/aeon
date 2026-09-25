@@ -398,10 +398,12 @@ func (rt *runtime) updateIssue(in issuePatch) error {
 		if err != nil {
 			return err
 		}
-		if n.ParentID == nil || *n.ParentID != proj.ID {
-			if err := rt.do(http.MethodPost, "/api/nodes/"+url.PathEscape(n.ID)+"/move", map[string]any{"parent_id": proj.ID}, &n); err != nil {
-				return err
-			}
+		var moved movedIssue
+		if err := rt.do(http.MethodPost, "/api/nodes/"+url.PathEscape(n.ID)+"/project-move", map[string]any{"project_id": proj.ID}, &moved); err != nil {
+			return err
+		}
+		if err := rt.do(http.MethodGet, "/api/nodes/"+url.PathEscape(n.ID), nil, &n); err != nil {
+			return err
 		}
 	}
 	if parent := strings.TrimSpace(in.Parent); parent != "" {

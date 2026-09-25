@@ -15,8 +15,7 @@ import (
 
 // sync check re-renders each skill file that carries a paimos-managed header
 // (and each path recorded by skill render) and reports drift. It does not
-// contact a classic instance. run-agent watch and baseline-batch stay
-// unsupported. This command adds no httpapi.Module and no plugin manifest.
+// contact a classic instance. This command adds no httpapi.Module or plugin manifest.
 
 type renderedSkillEntry struct {
 	Project string `json:"project"`

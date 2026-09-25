@@ -87,6 +87,12 @@ func (c *Client) Me(ctx context.Context) (Me, error) {
 // Do sends one JSON request. path is absolute from the instance root, for example /api/me.
 // A nil dest discards a success body. The token is not included in errors.
 func (c *Client) Do(ctx context.Context, method, path string, body, dest any) error {
+	return c.DoWithHeaders(ctx, method, path, body, dest, nil)
+}
+
+// DoWithHeaders sends one JSON request with additional non-credential protocol
+// headers such as a run's daemon fencing identity.
+func (c *Client) DoWithHeaders(ctx context.Context, method, path string, body, dest any, headers map[string]string) error {
 	if c.BaseURL == "" {
 		return fmt.Errorf("instance URL is empty")
 	}
@@ -111,6 +117,9 @@ func (c *Client) Do(ctx context.Context, method, path string, body, dest any) er
 	}
 	if c.Token != "" {
 		req.Header.Set("Authorization", "Bearer "+c.Token)
+	}
+	for name, value := range headers {
+		req.Header.Set(name, value)
 	}
 	hc := c.HTTP
 	if hc == nil {

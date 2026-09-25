@@ -242,15 +242,11 @@ func TestCompatibilityVerbs(t *testing.T) {
 	}
 
 	code, _, errOut := runCLI([]string{"paimos", "--json", "run-agent", "watch"}, "")
-	if code != 3 {
+	if code != 2 {
 		t.Fatalf("json code %d err %s", code, errOut)
 	}
-	var body map[string]string
-	if err := json.Unmarshal([]byte(errOut), &body); err != nil {
-		t.Fatal(err)
-	}
-	if body["error"] != reasonRunAgent {
-		t.Fatalf("json error %q", body["error"])
+	if !strings.Contains(errOut, "--project is required") {
+		t.Fatalf("usage error %q", errOut)
 	}
 }
 

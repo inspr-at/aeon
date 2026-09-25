@@ -55,6 +55,8 @@ func New(pool *pgxpool.Pool, registry *plugins.Registry, checks ...LaunchChecks)
 func (m *Module) Mount(mux *http.ServeMux) {
 	mux.HandleFunc("POST /api/stage-handoffs", m.request)
 	mux.HandleFunc("GET /api/stage-handoffs/{handoffId}", m.get)
+	mux.HandleFunc("POST /api/stage-handoffs/{handoffId}/classic-batch-alias", m.bindClassicBatchAlias)
+	mux.HandleFunc("POST /api/projects/{projectId}/baseline-batches/batches/{batchId}/built-receipt", m.reportClassicBuilt)
 	mux.HandleFunc("POST /api/stage-handoffs/{handoffId}/evidence", m.evidence)
 	mux.HandleFunc("POST /api/stage-handoffs/{handoffId}/result", m.result)
 }

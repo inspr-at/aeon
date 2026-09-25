@@ -159,7 +159,11 @@ func (rt *runtime) nodeByKey(key string) (apiNode, error) {
 		return apiNode{}, err
 	}
 	if found == nil {
-		return apiNode{}, rt.fail(fmt.Errorf("issue %q not found", key), "")
+		var resolved apiNode
+		if err := rt.do(http.MethodGet, "/api/node-keys/"+url.PathEscape(key), nil, &resolved); err != nil {
+			return apiNode{}, rt.fail(fmt.Errorf("issue %q not found", key), "")
+		}
+		return resolved, nil
 	}
 	return *found, nil
 }
