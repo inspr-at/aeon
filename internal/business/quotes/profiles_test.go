@@ -11,6 +11,8 @@ import (
 	"image/png"
 	"net/http"
 	"net/http/httptest"
+	"os"
+	"path/filepath"
 	"testing"
 
 	"github.com/inspr-at/aeon/internal/db"
@@ -249,6 +251,21 @@ func TestProfileRevisionsAssetsAndTenantIsolation(t *testing.T) {
 	mux.ServeHTTP(fontRec, fontReq)
 	if fontRec.Code != 200 || fontRec.Header().Get("Content-Security-Policy") != "" {
 		t.Fatalf("font CSP %q", fontRec.Header().Get("Content-Security-Policy"))
+	}
+	// A registered asset whose bytes are not in the store (a restored database
+	// without its files) is not found, not a server error (AEON-140).
+	stored, err := os.ReadDir(os.Getenv("AEON_FILES_DIR"))
+	if err != nil || len(stored) == 0 {
+		t.Fatalf("store is empty: %v", err)
+	}
+	for _, entry := range stored {
+		if err := os.RemoveAll(filepath.Join(os.Getenv("AEON_FILES_DIR"), entry.Name())); err != nil {
+			t.Fatal(err)
+		}
+	}
+	status, _ = call("example-one", "GET", "/api/quote-profiles/assets/"+asset.ID, nil)
+	if status != 404 {
+		t.Fatalf("asset without bytes %d, want 404", status)
 	}
 	definition.Cover["brand_asset_id"] = brandID
 	definition.Footer.DotsAssetID = brandID

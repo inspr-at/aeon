@@ -24,7 +24,7 @@ defineProps<{ eyebrow: string; title: string; tone?: 'calm' | 'problem' }>()
 .status-card {
   position: relative; width: min(480px, 100%); padding: 34px 36px 28px; text-align: center; border-radius: 22px; border: 1px solid var(--glass-edge);
   background: linear-gradient(165deg, var(--surface-raised-2), var(--glass) 60%); box-shadow: var(--shadow);
-  backdrop-filter: blur(20px) saturate(1.15); -webkit-backdrop-filter: blur(20px) saturate(1.15);
+  -webkit-backdrop-filter: blur(20px) saturate(1.15); backdrop-filter: blur(20px) saturate(1.15);
 }
 .status-card::after { content: ''; position: absolute; left: 12%; right: 12%; top: 0; height: 1px; background: linear-gradient(90deg, transparent, var(--glass-edge), var(--aqua), var(--glass-edge), transparent); opacity: .8; }
 .mark-halo { display: inline-grid; place-items: center; width: 72px; height: 72px; margin-bottom: 18px; border-radius: 20px; background: #f7f6f2; box-shadow: 0 0 0 1px var(--glass-rim), 0 14px 32px -16px rgba(14, 111, 108, .55), 0 0 40px -10px rgba(164, 229, 223, .9); }

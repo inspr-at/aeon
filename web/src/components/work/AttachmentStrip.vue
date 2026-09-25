@@ -1,6 +1,6 @@
 <!-- SPDX-License-Identifier: AGPL-3.0-only -->
 <script setup lang="ts">
-import { nextTick, ref } from 'vue'
+import { nextTick, reactive, ref } from 'vue'
 import { contentUrl, fileKind, fileSize, isImage, type Attachment } from '../../lib/attachments'
 import type { Upload } from '../../lib/useAttachments'
 import AppIcon from '../AppIcon.vue'
@@ -19,6 +19,9 @@ const dragging = ref<string | null>(null)
 const over = ref<number | null>(null)
 const editing = ref<string | null>(null)
 const draft = ref('')
+// Images whose picture could not be read (bytes not stored yet, or gone) show as a
+// file card that says so, not as a broken image.
+const unreadable = reactive(new Set<string>())
 
 function pick() { picker.value?.click() }
 function picked(event: Event) {
@@ -83,11 +86,11 @@ function saveCaption(item: Attachment) { if (editing.value !== item.id) return; 
         :draggable="canWrite ? 'true' : undefined" @dragstart="dragStart($event, item)" @dragover="dragOver($event, index)" @drop="drop"
       >
         <button
-          type="button" class="tile" :class="{ file: !isImage(item) }" :data-attachment-id="item.id"
+          type="button" class="tile" :class="{ file: !isImage(item) || unreadable.has(item.id) }" :data-attachment-id="item.id"
           :aria-label="`Open ${item.caption || item.name}${canWrite ? '. Alt and arrows move it, Delete removes it' : ''}`" @click="emit('open', item.id)" @keydown="keydown($event, item, index)"
         >
-          <img v-if="isImage(item)" :src="contentUrl(item.id, 'thumb')" :alt="item.caption || item.name" loading="lazy" decoding="async" draggable="false" />
-          <span v-else class="file-card"><span class="badge">{{ fileKind(item) }}</span><span class="file-name">{{ item.name }}</span><span class="file-size">{{ fileSize(item.size) }}</span></span>
+          <img v-if="isImage(item) && !unreadable.has(item.id)" :src="contentUrl(item.id, 'thumb')" :alt="item.caption || item.name" loading="lazy" decoding="async" draggable="false" @error="unreadable.add(item.id)" />
+          <span v-else class="file-card"><span class="badge">{{ fileKind(item) }}</span><span class="file-name">{{ item.name }}</span><span class="file-size">{{ unreadable.has(item.id) ? 'No preview' : fileSize(item.size) }}</span></span>
         </button>
         <button v-if="canWrite" type="button" class="remove" :aria-label="`Delete ${item.name}`" data-tip="Delete · you can undo" @click="emit('remove', item)"><AppIcon name="close" :size="11" /></button>
         <template v-if="layout === 'gallery'">

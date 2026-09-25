@@ -286,6 +286,9 @@ defineExpose({ focusSearch, openFilterMenu, input })
 @container toolbar (max-width: 920px) { .list-search { width: 150px; } .facet-btn { padding: 0 11px; } .facet-btn:not(.on) .facet-end { display: none; } }
 @container toolbar (max-width: 820px) { .list-search { width: 112px; } .list-search .field { padding-right: 10px; } .facet-btn { padding: 0 10px; } .facet-btn:not(.on) .facet-end { display: none; } .view-seg button { padding: 0 7px; } }
 @container toolbar (max-width: 760px) { .facet-btn[data-dim="assignee"]:not(.on) { display: none; } }
+/* Docked beside a wide ticket panel the list can be phone-narrow: unused quick
+   filters wait in the Filter menu, so the controls take two lines, not three. */
+@container toolbar (max-width: 460px) { .facet-btn:not(.on):not(.more-btn) { display: none; } }
 /* Narrowest docked width: a labelled pill replaces the switch and its longer label. */
 .closed-pill { display: none; gap: 6px; padding: 0 11px 0 9px; color: var(--ink-2); }
 .closed-pill.on { color: var(--teal-ink); }

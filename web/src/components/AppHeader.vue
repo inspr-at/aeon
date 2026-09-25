@@ -270,7 +270,7 @@ onBeforeUnmount(() => { document.removeEventListener('pointerdown', outside); wi
 .app-header {
   position: relative; z-index: 20; height: var(--header-h); padding: 0 var(--gutter); display: flex; align-items: center; gap: 14px;
   background: var(--glass-2); border-bottom: 1px solid var(--glass-edge); box-shadow: 0 1px 0 var(--line);
-  backdrop-filter: blur(16px) saturate(1.2); -webkit-backdrop-filter: blur(16px) saturate(1.2);
+  -webkit-backdrop-filter: blur(16px) saturate(1.2); backdrop-filter: blur(16px) saturate(1.2);
 }
 .lockup { display: inline-flex; align-items: center; gap: 10px; min-height: 40px; padding-right: 4px; color: var(--ink); flex-shrink: 0; border-radius: 10px; }
 .lockup:focus-visible { box-shadow: var(--focus-ring); }
