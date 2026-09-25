@@ -15,6 +15,7 @@ import (
 )
 
 var offerNumber = regexp.MustCompile(`^A([0-9]{6})-([0-9]{2,})$`)
+var exactMillimetres = regexp.MustCompile(`^-?(?:0|[1-9][0-9]*)(?:\.[0-9])?$`)
 
 type legacyDocument struct {
 	Title      string                 `json:"title"`
@@ -131,6 +132,9 @@ func convertDocument(instance string, o Offer, contactID string) (Document, erro
 			for k, v := range n {
 				copyNode[k] = v
 			}
+			if _, err := normalizeNodeDimensions(copyNode); err != nil {
+				return Document{}, fmt.Errorf("offer %d section %d node %d: %w", o.ID, i, j, err)
+			}
 			copyNode["id"] = stableID(instance, "offer", o.ID, fmt.Sprintf("section-%d-node", i), j)
 			section.Nodes = append(section.Nodes, copyNode)
 		}
@@ -161,6 +165,52 @@ func convertDocument(instance string, o Offer, contactID string) (Document, erro
 		return Document{}, errors.New("issued offer needs a position")
 	}
 	return d, nil
+}
+
+// Classic emits layout measurements as JSON numbers; Aeon's quote document
+// uses exact decimal strings. This is also used by the operator repair so an
+// import and a repair produce the same draft shape without floating point.
+func normalizeNodeDimensions(node map[string]any) (bool, error) {
+	changed := false
+	for _, dimension := range []struct {
+		field    string
+		min, max int64
+	}{
+		{"marker_x_mm", -300, 300}, {"marker_y_mm", -200, 200}, {"text_start_mm", -200, 400},
+	} {
+		field := dimension.field
+		value, ok := node[field]
+		if !ok {
+			continue
+		}
+		number, ok := value.(json.Number)
+		if !ok {
+			continue
+		}
+		text := number.String()
+		if !exactMillimetres.MatchString(text) {
+			return false, fmt.Errorf("%s has unsupported precision", field)
+		}
+		signed := strings.TrimPrefix(text, "-")
+		parts := strings.Split(signed, ".")
+		whole, err := strconv.ParseInt(parts[0], 10, 64)
+		if err != nil || whole > 1000 {
+			return false, fmt.Errorf("%s is out of range", field)
+		}
+		tenths := whole * 10
+		if len(parts) == 2 {
+			tenths += int64(parts[1][0] - '0')
+		}
+		if strings.HasPrefix(text, "-") {
+			tenths = -tenths
+		}
+		if tenths < dimension.min || tenths > dimension.max {
+			return false, fmt.Errorf("%s is out of range", field)
+		}
+		node[field] = text
+		changed = true
+	}
+	return changed, nil
 }
 func lineTotal(price int64, quantity string) (int64, error) {
 	if price < 0 {

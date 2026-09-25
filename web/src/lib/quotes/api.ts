@@ -12,6 +12,21 @@ export interface MutationReceipt {
   document?: QuoteDocumentData; document_sha256?: string; updated_at?: string; updated_by_principal_id?: string
 }
 const quotePath = (quoteId: string) => `/quotes/${encodeURIComponent(quoteId)}/draft`
+// Recovery data created before the classic import fix can still carry JSON
+// numbers for prose measurements. Convert only these layout fields on send;
+// amounts and every other field remain exactly as the editor supplied them.
+function writableDocument(document: QuoteDocumentData): QuoteDocumentData {
+  const copy = structuredClone(document)
+  const limits: Record<string, [number, number]> = { marker_x_mm: [-30, 30], marker_y_mm: [-20, 20], text_start_mm: [-20, 40] }
+  for (const section of copy.sections) for (const node of section.nodes) {
+    const fields = node as unknown as Record<string, unknown>
+    for (const [field, [min, max]] of Object.entries(limits)) {
+      const value = fields[field]
+      if (typeof value === 'number' && Number.isFinite(value) && value >= min && value <= max && Number.isInteger(value * 10)) fields[field] = String(value)
+    }
+  }
+  return copy
+}
 async function parse<T>(response: Response): Promise<T> {
   const body = await response.json().catch(() => ({})) as Record<string, unknown>
   if (!response.ok) throw new APIError(response.status, typeof body.error === 'string' ? body.error : `Quote request failed (${response.status})`, body)
@@ -24,6 +39,6 @@ export async function saveDraft(quoteId: string, draftRevision: number, document
   if (!Number.isSafeInteger(draftRevision) || draftRevision < 1) throw new Error('Invalid draft revision')
   return parse<MutationReceipt>(await api(quotePath(quoteId), {
     method: 'PATCH', headers: { 'Content-Type': 'application/json', 'If-Match': `"qd-${draftRevision}"` },
-    body: JSON.stringify({ client_session_id: clientSessionId, mutation_id: mutationId, writer_version: 2, document }),
+    body: JSON.stringify({ client_session_id: clientSessionId, mutation_id: mutationId, writer_version: 2, document: writableDocument(document) }),
   }))
 }

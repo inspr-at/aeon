@@ -46,3 +46,65 @@ test('Quotes list opens a live draft in the session and presence editor', async 
   await expect(page.getByRole('button', { name: 'Save draft' })).toBeDisabled()
   await expect.poll(() => presenceJoined).toBe(true)
 })
+
+test('an imported-style draft saves its prose measurements through the editor', async ({ page }) => {
+  await mockWork(page, fixtures())
+  await mockBusiness(page, businessData({ enabled: ['business_costs', 'business_crm', 'business_quotes', 'business_hours'] }))
+  const imported = structuredClone(document)
+  imported.sections[0]!.nodes = [{ id: '44444444-4444-4444-8444-444444444444', kind: 'item', text: 'Imported work', marker: 'decimal', numbering: 'outline', section_bound: true, depth: 1, marker_x_mm: '3', text_start_mm: '1.5' }] as typeof imported.sections[0]['nodes']
+  let sent: Record<string, any> | null = null
+  await page.route('**/api/quotes**', route => {
+    const path = new URL(route.request().url()).pathname
+    if (path === `/api/quotes/${quoteId}/draft` && route.request().method() === 'PATCH') {
+      sent = route.request().postDataJSON()
+      return route.fulfill({ json: { mutation_id: sent!.mutation_id, acknowledged_revision: 2, acknowledged_quote_revision: 2, current_revision: 2, current_quote_revision: 2, replayed: false, document: sent!.document } })
+    }
+    if (path === `/api/quotes/${quoteId}/draft`) return route.fulfill({ json: {
+      document: imported, document_sha256: 'a'.repeat(64), draft_revision: 1, quote_revision: 1,
+      schema_version: 1, minimum_writer_version: 1, base_version: 0,
+      updated_at: '2026-09-24T09:00:00Z', updated_by_principal_id: '22222222-2222-4222-8222-222222222222',
+    } })
+    if (path === `/api/quotes/${quoteId}/presence`) return route.fulfill({ json: { session_id: '33333333-3333-4333-8333-333333333333', snapshot: {
+      sessions: [], draft_revision: 1, quote_revision: 1, state: 'draft',
+    } } })
+    if (path.endsWith('/collaboration/stream')) return route.fulfill({ contentType: 'text/event-stream', body: '' })
+    if (path === `/api/quotes/${quoteId}`) return route.fulfill({ json: { quote_node_id: quoteId, offer_no: 'A260924-1', state: 'draft' } })
+    return route.fallback()
+  })
+  await page.goto(`/business/quotes/${quoteId}`)
+  await page.getByRole('textbox', { name: 'Angebotstitel' }).fill('Saved imported draft')
+  await expect(page.locator('.quote-titlebar .save-state')).toHaveText('Saved')
+  expect(sent?.document.sections[0].nodes[0]).toMatchObject({ marker_x_mm: '3', text_start_mm: '1.5' })
+  expect(sent?.document.title).toBe('Saved imported draft')
+})
+
+test('draft save shows a server field reason with a Show link', async ({ page }) => {
+  await mockWork(page, fixtures())
+  await mockBusiness(page, businessData({ enabled: ['business_costs', 'business_crm', 'business_quotes', 'business_hours'] }))
+  await page.route('**/api/quotes**', route => {
+    const path = new URL(route.request().url()).pathname
+    if (path === `/api/quotes/${quoteId}/draft` && route.request().method() === 'PATCH') {
+      return route.fulfill({ status: 400, json: { error: 'invalid quote document', errors: { 'document.sections[0].spacing_before_mm': 'millimetres out of range' } } })
+    }
+    if (path === `/api/quotes/${quoteId}/draft`) return route.fulfill({ json: {
+      document, document_sha256: 'a'.repeat(64), draft_revision: 1, quote_revision: 1,
+      schema_version: 1, minimum_writer_version: 1, base_version: 0,
+      updated_at: '2026-09-24T09:00:00Z', updated_by_principal_id: '22222222-2222-4222-8222-222222222222',
+    } })
+    if (path === `/api/quotes/${quoteId}/presence`) return route.fulfill({ json: { session_id: '33333333-3333-4333-8333-333333333333', snapshot: {
+      sessions: [], draft_revision: 1, quote_revision: 1, state: 'draft',
+    } } })
+    if (path.endsWith('/collaboration/stream')) return route.fulfill({ contentType: 'text/event-stream', body: '' })
+    if (path === `/api/quotes/${quoteId}`) return route.fulfill({ json: { quote_node_id: quoteId, offer_no: 'A260924-1', state: 'draft' } })
+    return route.fallback()
+  })
+  await page.goto(`/business/quotes/${quoteId}`)
+  const title = page.getByRole('textbox', { name: 'Angebotstitel' })
+  await title.fill('Changed synthetic draft')
+  await page.getByRole('button', { name: 'Save draft' }).click()
+  const notice = page.locator('.save-failure')
+  await expect(notice).toContainText('Millimetres out of range.')
+  await expect(notice.getByRole('list', { name: 'What to fix' })).toContainText('Section 1 “Scope”: spacing before mm')
+  await notice.getByRole('button', { name: /^Show Section 1/ }).click()
+  await expect.poll(() => page.evaluate(() => !!document.activeElement?.closest('[data-section-id="11111111-1111-4111-8111-111111111111"]'))).toBe(true)
+})

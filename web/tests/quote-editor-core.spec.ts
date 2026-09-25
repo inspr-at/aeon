@@ -22,6 +22,23 @@ async function blank(page: Page) {
   await page.goto('/')
 }
 
+test('draft save converts measurements in old browser recovery without changing money', async ({ page }) => {
+  await blank(page)
+  let sent: any
+  await page.route('**/api/quotes/*/draft', route => {
+    sent = route.request().postDataJSON()
+    return route.fulfill({ json: { mutation_id: nodeId, acknowledged_revision: 2, acknowledged_quote_revision: 2, current_revision: 2, current_quote_revision: 2, replayed: false } })
+  })
+  await page.evaluate(async ({ document, quoteId, sectionId }) => {
+    const { saveDraft } = await import(/* @vite-ignore */ '/src/lib/quotes/api.ts')
+    document.sections[0].nodes = [{ id: sectionId, kind: 'item', text: 'Legacy item', marker: 'decimal', marker_x_mm: 3, text_start_mm: 1.5 }] as any
+    await saveDraft(quoteId, 1, document as any, '11111111-1111-4111-8111-111111111111', '22222222-2222-4222-8222-222222222222')
+  }, { document: fixture(), quoteId: 'aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa', sectionId })
+  expect(sent.document.sections[0].nodes[0].marker_x_mm).toBe('3')
+  expect(sent.document.sections[0].nodes[0].text_start_mm).toBe('1.5')
+  expect(sent.document.positions[0].unit_price_cents).toBe(105)
+})
+
 test('structured prose, all six levels, numbering, section and row changes survive JSON and history', async ({ page }) => {
   await blank(page)
   const result = await page.evaluate(async ({ document, positionId }) => {
