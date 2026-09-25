@@ -123,7 +123,7 @@ function dismiss() { const { error: _error, ...rest } = route.query; void router
 .signin-card {
   position: relative; width: min(420px, 100%); padding: 30px 32px 12px; border-radius: 22px; border: 1px solid var(--glass-edge);
   background: linear-gradient(165deg, var(--surface-raised-2), var(--glass) 70%); box-shadow: var(--shadow-pop), var(--shadow);
-  backdrop-filter: blur(22px) saturate(1.15); -webkit-backdrop-filter: blur(22px) saturate(1.15);
+  -webkit-backdrop-filter: blur(22px) saturate(1.15); backdrop-filter: blur(22px) saturate(1.15);
 }
 .signin-card::after { content: ''; position: absolute; left: 12%; right: 12%; top: 0; height: 1px; background: linear-gradient(90deg, transparent, var(--glass-edge), var(--aqua), var(--glass-edge), transparent); }
 .brand { display: flex; align-items: center; gap: 11px; }

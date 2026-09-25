@@ -206,7 +206,7 @@ function menuKeys(event: KeyboardEvent) {
 <style scoped>
 /* Each side keeps at least what it holds (the zoom moves off centre before anything
    overlaps); when even that does not fit, the bar folds (see fit()). */
-.titlebar { display: grid; grid-template-columns: minmax(min-content, 1fr) auto minmax(min-content, 1fr); align-items: center; gap: 12px; min-height: 52px; padding: 8px 16px; border-bottom: 1px solid var(--line-2); background: var(--surface-raised-2); backdrop-filter: blur(14px) saturate(1.15); -webkit-backdrop-filter: blur(14px) saturate(1.15); }
+.titlebar { display: grid; grid-template-columns: minmax(min-content, 1fr) auto minmax(min-content, 1fr); align-items: center; gap: 12px; min-height: 52px; padding: 8px 16px; border-bottom: 1px solid var(--line-2); background: var(--surface-raised-2); -webkit-backdrop-filter: blur(14px) saturate(1.15); backdrop-filter: blur(14px) saturate(1.15); }
 .dock { border-radius: var(--radius) var(--radius) 0 0; }
 .left, .right { display: flex; align-items: center; gap: 8px; min-width: 0; }
 .right { justify-content: flex-end; gap: 6px; }

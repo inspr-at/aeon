@@ -487,17 +487,25 @@ func (m *Module) listNodes(ctx context.Context, tenantID string, q listQuery) (n
 
 // Native fields win, including an explicit null (unassignment). Classic IDs
 // are resolved only through this tenant's source-qualified identity mapping.
+// The references are read from n.fields once per node (the OFFSET 0 keeps that
+// subquery from being inlined): imported fields are large and stored out of
+// line, and comparing them against every principal re-read them each time,
+// about 0.4 ms per row on production data (AEON-140).
 const assigneeJoin = ` LEFT JOIN LATERAL (
+    SELECT CASE
+            WHEN n.fields ? 'assignee' THEN coalesce(n.fields->'assignee'->>'id',n.fields->>'assignee')
+            WHEN n.fields ? 'assignee_id' THEN n.fields->>'assignee_id' END AS native,
+        NOT (n.fields ? 'assignee' OR n.fields ? 'assignee_id') AS classic_only,
+        (n.fields->'classic'->>'source_id')||':'||(n.fields->'classic'->>'assignee_id') AS classic_subject
+    OFFSET 0
+) aref ON true
+LEFT JOIN LATERAL (
     SELECT coalesce(target.id,person.id) AS id,coalesce(target.name,person.name) AS name FROM principals person
     LEFT JOIN principals target ON target.tenant_id=person.tenant_id AND target.id=person.linked_to
     LEFT JOIN identities identity ON identity.id=person.identity_id
     WHERE person.tenant_id=n.tenant_id AND (
-        person.id::text = CASE
-            WHEN n.fields ? 'assignee' THEN coalesce(n.fields->'assignee'->>'id',n.fields->>'assignee')
-            WHEN n.fields ? 'assignee_id' THEN n.fields->>'assignee_id' END
-        OR (NOT (n.fields ? 'assignee' OR n.fields ? 'assignee_id')
-            AND identity.issuer='paimos-classic'
-            AND identity.subject=(n.fields->'classic'->>'source_id')||':'||(n.fields->'classic'->>'assignee_id'))
+        person.id::text = aref.native
+        OR (aref.classic_only AND identity.issuer='paimos-classic' AND identity.subject=aref.classic_subject)
     ) LIMIT 1
 ) assignee ON true `
 

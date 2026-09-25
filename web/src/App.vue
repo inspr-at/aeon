@@ -19,8 +19,18 @@ import { brand } from './lib/brand'
 import { toast } from './lib/toast'
 import { displayHeadline, getRelease } from './lib/releases'
 import { headerFolded } from './lib/chrome'
+import { sessionEnded } from './lib/api'
 
 const ReleasesSheet = defineAsyncComponent(() => import('./components/releases/ReleasesSheet.vue'))
+// A request that finds the session ended keeps the page as it is (drafts included)
+// and offers sign-in in a new tab; back here, saving again works (AEON-140).
+sessionEnded.handler = () => {
+  if (!session.identity) return
+  toast('Your session has ended. Sign in again in a new tab; what you typed stays on this page.', {
+    sticky: true, key: 'session-ended', tone: 'error',
+    action: { label: 'Sign in', run: () => { window.open('/signin?error=expired', '_blank', 'noopener') } },
+  })
+}
 
 const session = useSession()
 const route = useRoute()

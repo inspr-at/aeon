@@ -41,7 +41,7 @@ const at = (event: MouseEvent) => event.currentTarget as HTMLElement
 .bulk-bar {
   position: absolute; bottom: 0; display: flex; align-items: center; gap: 2px; max-width: calc(100vw - 24px); height: 48px; padding: 0 6px 0 16px;
   border-radius: 999px; border: 1px solid var(--glass-edge); background: var(--glass); box-shadow: var(--shadow-pop);
-  backdrop-filter: blur(20px) saturate(1.25); -webkit-backdrop-filter: blur(20px) saturate(1.25); pointer-events: auto;
+  -webkit-backdrop-filter: blur(20px) saturate(1.25); backdrop-filter: blur(20px) saturate(1.25); pointer-events: auto;
 }
 .count { display: inline-flex; align-items: baseline; gap: 6px; margin-right: 6px; font-size: 13px; color: var(--ink-2); white-space: nowrap; }
 .count b { font-size: 14px; font-weight: 700; color: var(--ink); font-variant-numeric: tabular-nums; }

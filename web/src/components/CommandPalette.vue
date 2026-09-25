@@ -347,12 +347,12 @@ const iconOf = (result: Result): BizIconName => result.type === 'action' ? resul
 
 <style scoped>
 .palette { width: min(680px, calc(100vw - 24px)); max-width: none; margin: 11dvh auto auto; padding: 0; border: 0; background: transparent; color: var(--ink); overflow: visible; }
-.palette::backdrop { background: var(--palette-scrim); backdrop-filter: blur(3px) saturate(1.05); -webkit-backdrop-filter: blur(3px) saturate(1.05); }
+.palette::backdrop { background: var(--palette-scrim); -webkit-backdrop-filter: blur(3px) saturate(1.05); backdrop-filter: blur(3px) saturate(1.05); }
 .sheet {
   display: flex; flex-direction: column; border-radius: 18px; border: 1px solid var(--glass-edge); overflow: hidden;
   /* Near-opaque: the list behind must never read through the results. */
   background: linear-gradient(165deg, var(--surface-raised), var(--surface-raised-2) 70%) var(--surface-raised); box-shadow: var(--shadow-pop), var(--shadow);
-  backdrop-filter: blur(22px) saturate(1.2); -webkit-backdrop-filter: blur(22px) saturate(1.2);
+  -webkit-backdrop-filter: blur(22px) saturate(1.2); backdrop-filter: blur(22px) saturate(1.2);
 }
 @media (prefers-reduced-motion: no-preference) {
   .palette[open] .sheet { animation: palette-in .18s cubic-bezier(.2, .7, .2, 1); }

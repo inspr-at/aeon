@@ -140,9 +140,13 @@ onMounted(async () => { await business.loadPlugins(); if (business.open.costs) v
       <div v-if="!business.costUnitsLoaded" class="sk" aria-hidden="true"><span v-for="i in 4" :key="i" class="skeleton" /></div>
       <div v-else-if="!shown.length && !creating" class="state">
         <span class="state-icon"><AppIcon name="tag" :size="18" /></span>
-        <h2>{{ term ? `No cost unit matches “${term}”` : 'No cost units yet' }}</h2>
-        <p>A cost unit prices work: Development, Design, Consulting. Each gets bill and internal rates per hour, day or item.</p>
-        <button v-if="business.admin && !term" type="button" class="btn" @click="startCreate"><AppIcon name="plus" :size="14" />New cost unit</button>
+        <h2>{{ term ? `No cost unit matches “${term}”` : retiredCount ? 'No cost unit in use' : 'No cost units yet' }}</h2>
+        <p v-if="!term && retiredCount">{{ plural(retiredCount, 'retired cost unit') }} {{ retiredCount === 1 ? 'is' : 'are' }} hidden. Show {{ retiredCount === 1 ? 'it' : 'them' }} with Retired, or add one for current work.</p>
+        <p v-else>A cost unit prices work: Development, Design, Consulting. Each gets bill and internal rates per hour, day or item.</p>
+        <div v-if="!term && (business.admin || retiredCount)" class="state-actions">
+          <button v-if="retiredCount" type="button" class="btn ghost" @click="showRetired = true">Show retired</button>
+          <button v-if="business.admin" type="button" class="btn" @click="startCreate"><AppIcon name="plus" :size="14" />New cost unit</button>
+        </div>
       </div>
       <div v-for="unit in shown" :key="unit.node.id" class="unit" :class="{ retired: retired(unit) }">
         <header class="unit-head">
@@ -210,7 +214,7 @@ onMounted(async () => { await business.loadPlugins(); if (business.open.costs) v
 .unit-name { font-size: 14.5px; font-weight: 650; }
 .key { font-size: 11px; color: var(--ink-3); }
 .retired-chip { height: 18px; font-size: 10px; text-transform: uppercase; letter-spacing: .08em; }
-.link-btn { display: inline-flex; align-items: center; gap: 5px; height: 26px; padding: 0 10px; border: 0; border-radius: 999px; background: transparent; color: var(--teal-ink); font-size: 12.5px; font-weight: 600; }
+.link-btn { display: inline-flex; align-items: center; gap: 5px; flex-shrink: 0; height: 26px; padding: 0 10px; white-space: nowrap; border: 0; border-radius: 999px; background: transparent; color: var(--teal-ink); font-size: 12.5px; font-weight: 600; }
 .link-btn:hover { background: var(--row-hover); }
 .link-btn:focus-visible { box-shadow: var(--focus-ring); }
 .rates { width: calc(100% - 36px); margin: 4px 18px 0; border-collapse: collapse; table-layout: fixed; font-size: 13px; }
@@ -241,6 +245,7 @@ tr.ended td:not(:last-child) { color: var(--ink-3); }
 .state { display: grid; justify-items: center; gap: 8px; padding: 48px 24px 56px; text-align: center; }
 .state h2 { font-size: 17px; }
 .state p { max-width: 460px; font-size: 13.5px; }
+.state-actions { display: flex; flex-wrap: wrap; justify-content: center; gap: 8px; margin-top: 4px; }
 .state .btn { margin-top: 8px; }
 .state-icon { display: grid; place-items: center; width: 44px; height: 44px; margin-bottom: 4px; border-radius: 50%; background: var(--chip-teal-bg); box-shadow: inset 0 0 0 1px var(--chip-teal-line); color: var(--teal-ink); }
 @container rates (max-width: 700px) {
