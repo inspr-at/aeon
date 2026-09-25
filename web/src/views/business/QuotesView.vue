@@ -338,7 +338,8 @@ watch(openId, id => { if (id) store.cursor = id })
       <div v-if="store.error && !items" class="state glass-card" role="alert">
         <span class="state-icon danger"><AppIcon name="alert" :size="18" /></span>
         <h2>{{ store.status === 403 ? 'Quotes are not open to you' : 'Quotes could not be loaded' }}</h2>
-        <p>{{ store.status === 403 ? 'Only admins and members of this workspace see its quotes. A workspace admin can change your role.' : store.error }}</p>
+        <p>{{ store.status === 403 ? 'Only admins and members of this workspace see its quotes. A workspace admin can change your role.' : 'The list did not load this time. Nothing is lost; try again in a moment.' }}</p>
+        <p v-if="store.status !== 403 && store.error" class="state-detail">The server said: {{ store.error }}</p>
         <button v-if="store.status !== 403" type="button" class="btn" @click="store.load(true)"><AppIcon name="refresh" :size="14" />Try again</button>
       </div>
       <div v-else-if="items && !all.length" class="state glass-card">
@@ -422,6 +423,8 @@ watch(openId, id => { if (id) store.cursor = id })
 .state.inline { max-width: none; margin: 0; padding: 40px 24px 36px; border-top: 1px solid var(--line); }
 .state h2 { font-size: 17px; text-wrap: balance; overflow-wrap: anywhere; }
 .state p { max-width: 52ch; font-size: 13.5px; color: var(--ink-2); }
+/* What the server said, for whoever helps: small and quiet under the plain words. */
+.state .state-detail { font: 500 11.5px/1.5 var(--mono); color: var(--ink-3); font-variant-ligatures: none; }
 .state-actions { display: flex; flex-wrap: wrap; justify-content: center; gap: 8px; margin-top: 8px; }
 .state-icon { display: grid; place-items: center; width: 44px; height: 44px; margin-bottom: 4px; border-radius: 50%; background: var(--chip-teal-bg); box-shadow: inset 0 0 0 1px var(--chip-teal-line); color: var(--teal-ink); }
 .state-icon.danger { background: var(--danger-bg); box-shadow: inset 0 0 0 1px var(--danger-line); color: var(--danger); }

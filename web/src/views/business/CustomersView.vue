@@ -216,7 +216,8 @@ watch(() => business.open.crm, on => { if (on) void store.load(true) })
     <div v-if="store.error && !store.items" class="state glass-card" role="alert">
       <span class="state-icon danger"><AppIcon name="alert" :size="18" /></span>
       <h2>Customers could not be loaded</h2>
-      <p>{{ store.error }}</p>
+      <p>The list did not load this time. Nothing is lost; try again in a moment.</p>
+      <p v-if="store.error" class="state-detail">The server said: {{ store.error }}</p>
       <button type="button" class="btn" @click="store.load(true)"><AppIcon name="refresh" :size="14" />Try again</button>
     </div>
     <div v-else-if="store.items && !every.length" class="state glass-card">
@@ -274,6 +275,8 @@ watch(() => business.open.crm, on => { if (on) void store.load(true) })
 .state.inline { max-width: none; margin: 0; padding: 40px 24px 36px; border-top: 1px solid var(--line); }
 .state h2 { font-size: 17px; text-wrap: balance; overflow-wrap: anywhere; }
 .state p { max-width: 50ch; font-size: 13.5px; color: var(--ink-2); }
+/* What the server said, for whoever helps: small and quiet under the plain words. */
+.state .state-detail { font: 500 11.5px/1.5 var(--mono); color: var(--ink-3); font-variant-ligatures: none; }
 .state > .btn { margin-top: 8px; }
 .state-actions { display: flex; flex-wrap: wrap; justify-content: center; gap: 8px; margin-top: 8px; }
 .state-icon { display: grid; place-items: center; width: 44px; height: 44px; margin-bottom: 4px; border-radius: 50%; background: var(--chip-teal-bg); box-shadow: inset 0 0 0 1px var(--chip-teal-line); color: var(--teal-ink); }
