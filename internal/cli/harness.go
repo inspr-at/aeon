@@ -12,8 +12,10 @@ import (
 	"fmt"
 	"io"
 	"net/http"
+	"net/url"
 	"os"
 	"path/filepath"
+	"strconv"
 	"strings"
 	"time"
 
@@ -27,29 +29,96 @@ func (rt *runtime) cmdHarnessV2() *Command {
 	}}
 }
 
-func harnessSecret(path, label string) (string, error) {
+func (rt *runtime) harnessSecret(path, label string) (string, error) {
 	if path == "" {
 		return "", usagef("--%s is required", label)
 	}
+	var raw []byte
+	var err error
 	if path == "-" {
-		return "", usagef("--%s must be a protected file", label)
+		raw, err = io.ReadAll(io.LimitReader(rt.stdin, 8193))
+	} else {
+		stat, statErr := os.Lstat(path)
+		if statErr != nil {
+			return "", statErr
+		}
+		if !stat.Mode().IsRegular() || stat.Mode().Perm()&0o077 != 0 || stat.Size() > 8192 {
+			return "", usagef("--%s must be a private regular file", label)
+		}
+		raw, err = os.ReadFile(path)
 	}
-	stat, err := os.Lstat(path)
 	if err != nil {
 		return "", err
 	}
-	if !stat.Mode().IsRegular() || stat.Mode().Perm()&0o077 != 0 {
-		return "", usagef("--%s must be a private regular file", label)
-	}
-	raw, err := os.ReadFile(path)
-	if err != nil {
-		return "", err
+	if len(raw) > 8192 {
+		return "", usagef("--%s is too large", label)
 	}
 	value := strings.TrimSpace(string(raw))
 	if len(value) < 16 || strings.ContainsAny(value, "\r\n") {
 		return "", usagef("--%s must contain one value", label)
 	}
 	return value, nil
+}
+
+func (rt *runtime) harnessRegistration(path string) (string, string, error) {
+	var raw []byte
+	var err error
+	if path == "-" {
+		raw, err = io.ReadAll(io.LimitReader(rt.stdin, 8193))
+	} else {
+		stat, statErr := os.Lstat(path)
+		if statErr != nil {
+			return "", "", statErr
+		}
+		if !stat.Mode().IsRegular() || stat.Mode().Perm()&0o077 != 0 || stat.Size() > 8192 {
+			return "", "", usagef("--registration-file must be a private regular file")
+		}
+		raw, err = os.ReadFile(path)
+	}
+	if err != nil {
+		return "", "", err
+	}
+	if len(raw) > 8192 {
+		return "", "", usagef("--registration-file is too large")
+	}
+	decoder := json.NewDecoder(bytes.NewReader(raw))
+	start, err := decoder.Token()
+	if err != nil || start != json.Delim('{') {
+		return "", "", usagef("--registration-file must contain a JSON object")
+	}
+	seen := map[string]bool{}
+	ref, lease := "", ""
+	for decoder.More() {
+		keyToken, e := decoder.Token()
+		key, ok := keyToken.(string)
+		if e != nil || !ok || seen[key] {
+			return "", "", usagef("--registration-file has duplicate or invalid fields")
+		}
+		seen[key] = true
+		switch key {
+		case "harness_session_ref":
+			err = decoder.Decode(&ref)
+		case "worker_lease":
+			err = decoder.Decode(&lease)
+		default:
+			return "", "", usagef("--registration-file has an unknown field")
+		}
+		if err != nil {
+			return "", "", usagef("--registration-file has invalid JSON")
+		}
+	}
+	end, err := decoder.Token()
+	if err != nil || end != json.Delim('}') {
+		return "", "", usagef("--registration-file has invalid JSON")
+	}
+	if err := decoder.Decode(new(any)); !errors.Is(err, io.EOF) || len(seen) != 2 {
+		return "", "", usagef("--registration-file must contain only harness_session_ref and worker_lease")
+	}
+	ref, lease = strings.TrimSpace(ref), strings.TrimSpace(lease)
+	if len(ref) < 16 || len(lease) < 32 || strings.ContainsAny(ref+lease, "\r\n") {
+		return "", "", usagef("--registration-file contains an invalid registration")
+	}
+	return ref, lease, nil
 }
 
 // harnessDo refuses redirects, so a private registration reference or worker
@@ -84,7 +153,7 @@ func (rt *runtime) harnessDo(method, path, lease string, body, dest any) error {
 	hc := &http.Client{Timeout: 30 * time.Second, CheckRedirect: func(*http.Request, []*http.Request) error { return errors.New("harness request redirect refused") }}
 	res, err := hc.Do(req)
 	if err != nil {
-		return rt.fail(err, "")
+		return rt.fail(err, lease)
 	}
 	defer res.Body.Close()
 	raw, err := io.ReadAll(io.LimitReader(res.Body, 1<<20))
@@ -99,7 +168,7 @@ func (rt *runtime) harnessDo(method, path, lease string, body, dest any) error {
 		if v.Error == "" {
 			v.Error = http.StatusText(res.StatusCode)
 		}
-		return rt.fail(&client.StatusError{Status: res.StatusCode, Message: v.Error}, "")
+		return rt.fail(&client.StatusError{Status: res.StatusCode, Message: v.Error}, lease)
 	}
 	if dest != nil && len(bytes.TrimSpace(raw)) > 0 {
 		if err = json.Unmarshal(raw, dest); err != nil {
@@ -134,8 +203,42 @@ func harnessPath(projectID, sessionID string) string {
 	return path
 }
 
+func (rt *runtime) harnessTicket(projectID, key string, classicID int) (*string, error) {
+	if key != "" && classicID != 0 {
+		return nil, usagef("--ticket and --ticket-id cannot be combined")
+	}
+	if classicID < 0 {
+		return nil, usagef("--ticket-id must be positive")
+	}
+	if key != "" {
+		n, err := rt.nodeByKey(key)
+		if err != nil {
+			return nil, err
+		}
+		return &n.ID, nil
+	}
+	if classicID == 0 {
+		return nil, nil
+	}
+	nodes, err := rt.walkNodes(url.Values{"parent_id": {projectID}, "include_descendants": {"true"}}, nil)
+	if err != nil {
+		return nil, err
+	}
+	for _, n := range nodes {
+		classic, _ := fieldMap(n.Fields)["classic"].(map[string]any)
+		if id, ok := classic["id"].(float64); ok && id == float64(classicID) {
+			return &n.ID, nil
+		}
+		if id, ok := classic["id"].(string); ok && id == strconv.Itoa(classicID) {
+			return &n.ID, nil
+		}
+	}
+	return nil, rt.fail(fmt.Errorf("classic ticket id %d not found in project", classicID), "")
+}
+
 func (rt *runtime) harnessRegister() *Command {
-	var project, agent, harness, host, refFile, leaseFile, management, role, parent, ticket, shape, runID, orderID string
+	var project, agent, harness, host, refFile, leaseFile, registrationFile, management, role, parent, ticket, shape, runID, orderID string
+	var ticketIDFlag int
 	var caps []string
 	return &Command{Name: "register", Short: "Register one public harness generation", Use: "harness register --project KEY --agent NAME --harness KIND --host HOST --harness-session-file PATH --worker-lease-file PATH", addFlags: func(fs *flagSet) {
 		fs.string(&project, "project", 'p', "project key")
@@ -144,10 +247,12 @@ func (rt *runtime) harnessRegister() *Command {
 		fs.string(&host, "host", 0, "non-secret host label")
 		fs.string(&refFile, "harness-session-file", 0, "private external reference file")
 		fs.string(&leaseFile, "worker-lease-file", 0, "private generation lease file")
+		fs.string(&registrationFile, "registration-file", 0, "private JSON with both registration secrets, or - for stdin")
 		fs.string(&management, "management", 0, "managed or unmanaged")
 		fs.string(&role, "role", 0, "worker or coordinator")
 		fs.string(&parent, "parent-session", 0, "parent public session UUID")
 		fs.string(&ticket, "ticket", 0, "ticket node key")
+		fs.int(&ticketIDFlag, "ticket-id", "classic numeric ticket id")
 		fs.string(&shape, "work-shape", 0, "ship or scout")
 		fs.string(&runID, "run-id", 0, "Aeon agent run UUID")
 		fs.string(&orderID, "work-order-id", 0, "Aeon work order UUID")
@@ -165,6 +270,32 @@ func (rt *runtime) harnessRegister() *Command {
 		if management != "managed" && management != "unmanaged" || role != "worker" && role != "coordinator" {
 			return usagef("invalid management or role")
 		}
+		var err error
+		var ref, lease string
+		if registrationFile != "" {
+			if refFile != "" || leaseFile != "" {
+				return usagef("--registration-file cannot be combined with --harness-session-file or --worker-lease-file")
+			}
+			ref, lease, err = rt.harnessRegistration(registrationFile)
+			if err != nil {
+				return err
+			}
+		} else {
+			if refFile == "-" && leaseFile == "-" {
+				return usagef("--harness-session-file and --worker-lease-file cannot both read stdin")
+			}
+			ref, err = rt.harnessSecret(refFile, "harness-session-file")
+			if err != nil {
+				return err
+			}
+			lease, err = rt.harnessSecret(leaseFile, "worker-lease-file")
+			if err != nil {
+				return err
+			}
+		}
+		if len(lease) < 32 {
+			return usagef("worker lease must contain at least 32 characters")
+		}
 		projectID, err := rt.harnessProject(project)
 		if err != nil {
 			return err
@@ -176,17 +307,6 @@ func (rt *runtime) harnessRegister() *Command {
 		if me.Principal.Name != agent {
 			return usagef("--agent must name the authenticated agent")
 		}
-		ref, err := harnessSecret(refFile, "harness-session-file")
-		if err != nil {
-			return err
-		}
-		lease, err := harnessSecret(leaseFile, "worker-lease-file")
-		if err != nil {
-			return err
-		}
-		if len(lease) < 32 {
-			return usagef("worker lease must contain at least 32 characters")
-		}
 		var ticketID, parentID, run, order *string
 		if parent != "" {
 			if !validUUID(parent) {
@@ -194,12 +314,11 @@ func (rt *runtime) harnessRegister() *Command {
 			}
 			parentID = &parent
 		}
-		if ticket != "" {
-			n, e := rt.nodeByKey(ticket)
-			if e != nil {
-				return e
-			}
-			ticketID = &n.ID
+		ticketID, err = rt.harnessTicket(projectID, ticket, ticketIDFlag)
+		if err != nil {
+			return err
+		}
+		if ticketID != nil {
 			if shape != "ship" && shape != "scout" {
 				return usagef("--work-shape must be ship or scout")
 			}
@@ -254,13 +373,14 @@ func (rt *runtime) harnessRead(kind string) *Command {
 }
 func (rt *runtime) harnessBind() *Command {
 	var project, session, parent, ticket, shape string
-	var revision int
+	var revision, ticketIDFlag int
 	return &Command{Name: "bind", Short: "Compare-and-set hierarchy and ticket binding", Use: "harness bind --project KEY --session UUID --revision N --parent-session UUID --ticket KEY --work-shape ship|scout", addFlags: func(fs *flagSet) {
 		fs.string(&project, "project", 'p', "project key")
 		fs.string(&session, "session", 0, "public session UUID")
 		fs.int(&revision, "revision", "current revision")
 		fs.string(&parent, "parent-session", 0, "parent session or empty")
 		fs.string(&ticket, "ticket", 0, "ticket key or empty")
+		fs.int(&ticketIDFlag, "ticket-id", "classic numeric ticket id")
 		fs.string(&shape, "work-shape", 0, "ship, scout or unknown")
 	}, run: func([]string) error {
 		id, err := rt.harnessProject(project)
@@ -277,12 +397,11 @@ func (rt *runtime) harnessBind() *Command {
 			}
 			parentID = &parent
 		}
-		if ticket != "" {
-			n, e := rt.nodeByKey(ticket)
-			if e != nil {
-				return e
-			}
-			ticketID = &n.ID
+		ticketID, err = rt.harnessTicket(id, ticket, ticketIDFlag)
+		if err != nil {
+			return err
+		}
+		if ticketID != nil {
 			if shape != "ship" && shape != "scout" {
 				return usagef("bound ticket needs ship or scout")
 			}
@@ -298,7 +417,7 @@ func (rt *runtime) harnessBind() *Command {
 	}}
 }
 func (rt *runtime) harnessWorker(kind string) *Command {
-	var project, session, agent, leaseFile, phase, activity, deliveryID, level, reason string
+	var project, session, agent, leaseFile, phase, activity, activityKind, deliveryID, level, reason string
 	var sequence, cursor int
 	return &Command{Name: kind, Short: "Act as the attributed harness worker", Use: "harness " + kind + " --project KEY --session UUID --agent NAME --worker-lease-file PATH", addFlags: func(fs *flagSet) {
 		fs.string(&project, "project", 'p', "project key")
@@ -309,6 +428,7 @@ func (rt *runtime) harnessWorker(kind string) *Command {
 		case "heartbeat":
 			fs.string(&phase, "phase", 0, "starting, working, yielded or stopping")
 			fs.string(&activity, "activity", 0, "unknown, busy or idle")
+			fs.string(&activityKind, "activity-kind", 0, "classic content-free adapter event kind")
 			fs.int(&sequence, "activity-sequence", "monotonic sequence")
 		case "complete-delivery":
 			fs.string(&deliveryID, "delivery-id", 0, "leased delivery UUID")
@@ -332,7 +452,7 @@ func (rt *runtime) harnessWorker(kind string) *Command {
 		if me.Principal.Name != agent {
 			return usagef("--agent must name the authenticated principal")
 		}
-		lease, err := harnessSecret(leaseFile, "worker-lease-file")
+		lease, err := rt.harnessSecret(leaseFile, "worker-lease-file")
 		if err != nil {
 			return err
 		}
@@ -344,6 +464,19 @@ func (rt *runtime) harnessWorker(kind string) *Command {
 		case "heartbeat":
 			if phase == "" {
 				phase = "working"
+			}
+			if activityKind != "" {
+				if sequence <= 0 {
+					return usagef("--activity-kind requires positive --activity-sequence")
+				}
+				switch activityKind {
+				case "session_started", "turn_started", "tool_started", "control_applied":
+					activity = "busy"
+				case "turn_completed":
+					activity = "idle"
+				default:
+					return usagef("unknown activity kind %q", activityKind)
+				}
 			}
 			body = map[string]any{"phase": phase, "activity": activity, "activity_sequence": sequence}
 		case "complete-delivery":
@@ -406,7 +539,7 @@ func (rt *runtime) harnessControl(kind string) *Command {
 			if me.Principal.Name != agent {
 				return usagef("--agent must name the authenticated principal")
 			}
-			lease, err = harnessSecret(leaseFile, "worker-lease-file")
+			lease, err = rt.harnessSecret(leaseFile, "worker-lease-file")
 			if err != nil {
 				return err
 			}

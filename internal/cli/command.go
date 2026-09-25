@@ -235,7 +235,11 @@ func globalFlag(name string, attached bool) (takesValue, ok bool) {
 }
 
 func (rt *runtime) bindGlobals(fs *flagSet) {
-	fs.string(&rt.configPath, "config", 0, "config file (default ~/.aeon/config.yaml)")
+	defaultConfig := "~/.aeon/config.yaml"
+	if rt.program == "paimos" {
+		defaultConfig = "~/.paimos/config.yaml"
+	}
+	fs.string(&rt.configPath, "config", 0, "config file (default "+defaultConfig+")")
 	fs.string(&rt.instance, "instance", 0, "named instance (default: default_instance)")
 	fs.bool(&rt.jsonOut, "json", 0, "emit JSON")
 	fs.string(&rt.agentName, "agent-name", 0, "agent name recorded on writes")

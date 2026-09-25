@@ -37,7 +37,11 @@ func (rt *runtime) configFile() (string, error) {
 	if err != nil {
 		return "", fmt.Errorf("locate home directory: %w", err)
 	}
-	return filepath.Join(home, ".aeon", "config.yaml"), nil
+	program := ".aeon"
+	if rt.program == "paimos" {
+		program = ".paimos"
+	}
+	return filepath.Join(home, program, "config.yaml"), nil
 }
 
 func (rt *runtime) loadConfig() (fileConfig, string, error) {

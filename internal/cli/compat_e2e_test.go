@@ -22,6 +22,7 @@ import (
 
 	"github.com/jackc/pgx/v5"
 
+	"github.com/inspr-at/aeon/internal/activity"
 	"github.com/inspr-at/aeon/internal/auth"
 	"github.com/inspr-at/aeon/internal/db"
 	"github.com/inspr-at/aeon/internal/dbtest"
@@ -80,6 +81,7 @@ func TestCompatEndToEnd(t *testing.T) {
 		Modules: []httpapi.Module{
 			authMod,
 			nodes.New(opened.App, nodes.SQLWriter{}),
+			activity.New(opened.App),
 			search.New(opened.App, nil),
 			modelregistry.New(opened.App),
 			inbox.New(opened.App),
@@ -280,7 +282,7 @@ func TestCompatEndToEnd(t *testing.T) {
 	}
 
 	code, out, errOut = runCLI([]string{"paimos", "--config", missing, "onboard", "--project", "AEON", "--agent", "worker"}, "")
-	if code != 0 || !strings.Contains(out, "# Welcome to AEON") || !strings.Contains(out, "paimos session start --project AEON --agent worker") || !strings.Contains(out, key) {
+	if code != 0 || !strings.Contains(out, "# Welcome to AEON") || !strings.Contains(out, "paimos session start --project AEON --agent worker") || strings.Contains(out, "## Recent context") {
 		t.Fatalf("onboard code %d out %q err %q", code, out, errOut)
 	}
 
@@ -366,6 +368,7 @@ func TestCompatEndToEnd(t *testing.T) {
 
 	assertEvent(t, opened, worker.TenantID, "node.created")
 	assertEvent(t, opened, worker.TenantID, "node.updated")
+	assertEvent(t, opened, worker.TenantID, "comment.created")
 	assertEvent(t, opened, worker.TenantID, "inbox.sent")
 	assertEvent(t, opened, worker.TenantID, "inbox.acked")
 	assertEvent(t, opened, worker.TenantID, "inbox.target_created")

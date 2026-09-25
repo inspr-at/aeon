@@ -135,6 +135,7 @@ func (rt *runtime) root() *Command {
 		rt.cmdAuth(),
 		rt.cmdWhoami(""),
 		rt.cmdIssue(),
+		rt.cmdProject(),
 		rt.cmdKnowledge(),
 		rt.cmdSearch("search"),
 		rt.cmdModel(),
@@ -155,9 +156,13 @@ func (rt *runtime) root() *Command {
 		},
 	}
 	subs = append(subs, rt.compatStubs()...)
+	defaultConfig := "~/.aeon/config.yaml"
+	if rt.program == "paimos" {
+		defaultConfig = "~/.paimos/config.yaml"
+	}
 	return &Command{
 		Short: "Agents-first command line for PAIMOS AEON",
-		Long:  "Named instances and the default live in ~/.aeon/config.yaml. Agent API keys are stored next to that file and are never printed.",
+		Long:  "Named instances and the default live in " + defaultConfig + ". Agent API keys are stored next to that file and are never printed.",
 		Use:   "<command> [flags]",
 		subs:  subs,
 	}

@@ -10,8 +10,8 @@ import (
 // Knowledge CLI types use the classic kebab-case URL segment. Node kind
 // slugs are snake_case: node_kinds.slug rejects hyphens, and the importer
 // already stores external_system and related_project. The nine starter
-// kinds stay unchanged. The first knowledge command ensures the two extra
-// kinds through POST /api/kinds, which records kind.created. Node writes
+// kinds stay unchanged. Creation ensures the requested kind through
+// POST /api/kinds, which records kind.created. Reads never create kinds. Node writes
 // still go through the mounted nodes module and record node.created.
 // This package exports no httpapi.Module and no plugins.Plugin.
 
@@ -46,12 +46,15 @@ var ensuredKnowledgeKinds = []apiKind{
 	{Slug: "related_project", Label: "Related project", ShortPrefix: "RPR"},
 }
 
-func (rt *runtime) ensureKnowledgeKinds() error {
+func (rt *runtime) ensureKnowledgeKind(slug string) error {
 	table, err := rt.loadKinds()
 	if err != nil {
 		return err
 	}
 	for _, spec := range ensuredKnowledgeKinds {
+		if spec.Slug != slug {
+			continue
+		}
 		if _, ok := table.bySlug[spec.Slug]; ok {
 			continue
 		}

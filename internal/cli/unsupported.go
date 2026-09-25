@@ -31,6 +31,8 @@ const (
 	reasonKnowledgeKind = "Aeon knowledge types are memory, runbook, guideline, external-system, and related-project"
 
 	reasonExpectsReply = "tell --expects-reply and --action-request open a classic obligation; Aeon inbox send has no held reply"
+
+	reasonIssueMove = "issue move cannot preserve classic re-key and old-key alias semantics because Aeon node keys are immutable"
 )
 
 // unsupportedCompat is the table of doctrine invocations Aeon does not serve.
@@ -43,6 +45,7 @@ var unsupportedCompat = []struct {
 }{
 	{"run-agent watch", []string{"run-agent", "watch"}, reasonRunAgent},
 	{"baseline-batch report-built", []string{"baseline-batch", "report-built"}, reasonBaseline},
+	{"issue move", []string{"issue", "move", "AEON-1", "--to", "OPS"}, reasonIssueMove},
 	{"paimos-agentd serve", nil, reasonAgentd},
 	{"listen --follow", []string{"listen", "--project", "AEON", "--follow"}, reasonListenFollow},
 }
