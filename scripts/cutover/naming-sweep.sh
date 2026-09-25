@@ -47,11 +47,21 @@ def swept(path, content):
         out = out.replace("bin/aeon", "bin/paimos")
     if path == ".github/workflows/release.yml":
         out = out.replace("aeon-agentd", "paimos-agentd")
+        out = out.replace("./cmd/paimos-agentd", "./cmd/aeon-agentd")
+        out = out.replace("ghcr.io/inspr-at/aeon", "ghcr.io/inspr-at/paimos")
     if path.endswith((".go", ".md", ".txt")) or path == "justfile":
         for verb in ("serve", "import", "tenant", "agent-key", "files", "principal"):
             out = out.replace("aeon " + verb, "paimos " + verb)
+        out = out.replace("./cmd/paimos serve", "./cmd/aeon serve")
+        out = out.replace("cmd/paimos-agentd", "cmd/aeon-agentd")
     if path.endswith(".md"):
         out = out.replace("`aeon`", "`paimos`")
+    if path == "README.md":
+        out = out.replace(
+            " Invoking the same binary as `paimos` (argv[0]) answers the same verbs, so existing doctrine commands keep their shape.",
+            " Existing doctrine commands keep their shape.",
+        )
+        out = out.replace("\naeon ", "\npaimos ")
     if path == "cmd/aeon-agentd/main.go":
         out = out.replace("usage: aeon-agentd", "usage: paimos-agentd")
     if path == "cmd/aeon-agentd/doc.go":
