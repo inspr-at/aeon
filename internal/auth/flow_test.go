@@ -60,6 +60,14 @@ func TestOIDCTenantSelection(t *testing.T) {
 	if me.Tenant.Slug != "augmentoring" || len(me.Principal.Roles) != 1 || me.Principal.Roles[0] != "customer" {
 		t.Fatalf("wrong tenant membership: %+v", me)
 	}
+	for _, path := range []string{"/api/nodes", "/api/events", "/api/search?q=customer", "/api/relations", "/api/imports"} {
+		if status, _, _ := do(t, c, http.MethodGet, app.URL+path, "", nil); status != http.StatusForbidden {
+			t.Fatalf("customer reached %s: %d", path, status)
+		}
+	}
+	if status, _, _ := do(t, c, http.MethodGet, app.URL+"/api/quotes/aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa", "", nil); status != http.StatusNotFound {
+		t.Fatalf("customer quote path blocked before its contact guard: %d", status)
+	}
 	other := newHTTPClient()
 	login, err = other.Get(app.URL + "/api/auth/login?tenant=inspr")
 	if err != nil {
@@ -368,6 +376,14 @@ func TestDevLoginAndAgentKeys(t *testing.T) {
 	if agentMe.Principal.Kind != "agent" || agentMe.Principal.Name != "ci" || agentMe.Identity != nil || agentMe.Principal.ID != created.PrincipalID {
 		t.Fatalf("agent me %+v identity %v", agentMe.Principal, agentMe.Identity)
 	}
+	for _, path := range []string{"/api/nodes", "/api/relations", "/api/search?q=anything"} {
+		if status, _, _ := do(t, c, http.MethodGet, app.URL+path, "", authz); status != http.StatusForbidden {
+			t.Fatalf("events:read agent reached %s: %d", path, status)
+		}
+	}
+	if status, _, _ := do(t, c, http.MethodGet, app.URL+"/api/events", "", authz); status != http.StatusNotFound {
+		t.Fatalf("events:read agent denied its scoped path: %d", status)
+	}
 	if status, _, _ = do(t, c, http.MethodPost, app.URL+"/api/agent-keys", `{"name":"nope"}`, authz); status != http.StatusForbidden {
 		t.Fatalf("agent create %d", status)
 	}
@@ -541,9 +557,12 @@ func TestAgentKeyRLS(t *testing.T) {
 			t.Fatalf("policy %q", expr)
 		}
 	}
-	var sessionRLS bool
-	if err := adminPool.QueryRow(t.Context(), `SELECT relrowsecurity FROM pg_class WHERE relname = 'sessions'`).Scan(&sessionRLS); err != nil || sessionRLS {
-		t.Fatalf("sessions rls %v %v", sessionRLS, err)
+	var sessionRLS, sessionForced bool
+	if err := adminPool.QueryRow(t.Context(), `SELECT relrowsecurity,relforcerowsecurity FROM pg_class WHERE relname = 'sessions'`).Scan(&sessionRLS, &sessionForced); err != nil || !sessionRLS || !sessionForced {
+		t.Fatalf("sessions rls=%v force=%v err=%v", sessionRLS, sessionForced, err)
+	}
+	if count := scalar(t, appPool, `SELECT count(*) FROM sessions`); count != 0 {
+		t.Fatalf("unscoped app role saw %d sessions", count)
 	}
 
 	secret := strings.TrimPrefix(created.Token, "aeon_"+created.Prefix+"_")

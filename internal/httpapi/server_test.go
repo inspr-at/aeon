@@ -3,7 +3,9 @@
 package httpapi
 
 import (
+	"bytes"
 	"encoding/json"
+	"log/slog"
 	"net/http"
 	"net/http/httptest"
 	"strings"
@@ -38,20 +40,23 @@ func TestHandlersAndMiddleware(t *testing.T) {
 		if err := json.Unmarshal(get(t, (&Server{Brand: &custom}).Handler(), "/api/version", "").Body.Bytes(), &branded); err != nil || branded.Brand != custom {
 			t.Fatalf("custom brand %+v %v", branded, err)
 		}
-		if rec.Header().Get("Content-Security-Policy") != "default-src 'self'; img-src 'self' blob: data:" {
+		if rec.Header().Get("Content-Security-Policy") != "default-src 'self'; img-src 'self' blob: data:; object-src 'none'; base-uri 'self'; form-action 'self'; frame-ancestors 'none'" {
 			t.Fatalf("csp %q", rec.Header().Get("Content-Security-Policy"))
 		}
 		if rec.Header().Get("X-Content-Type-Options") != "nosniff" {
 			t.Fatal("missing nosniff")
+		}
+		if rec.Header().Get("X-Frame-Options") != "DENY" || rec.Header().Get("Permissions-Policy") == "" {
+			t.Fatal("missing browser isolation headers")
 		}
 		if rec.Header().Get("X-Request-ID") == "" {
 			t.Fatal("missing request id")
 		}
 	})
 
-	t.Run("request id echoed", func(t *testing.T) {
+	t.Run("request id generated", func(t *testing.T) {
 		rec := get(t, (&Server{}).Handler(), "/api/version", "trace-1")
-		if rec.Header().Get("X-Request-ID") != "trace-1" {
+		if rec.Header().Get("X-Request-ID") == "trace-1" || rec.Header().Get("X-Request-ID") == "" {
 			t.Fatalf("id %q", rec.Header().Get("X-Request-ID"))
 		}
 	})
@@ -85,7 +90,7 @@ func TestHandlersAndMiddleware(t *testing.T) {
 		if !strings.Contains(rec.Body.String(), "<title>"+brand.Default().Wordmark+"</title>") {
 			t.Fatalf("body %s", rec.Body.String())
 		}
-		if rec.Header().Get("Content-Security-Policy") != "default-src 'self'; img-src 'self' blob: data:" {
+		if rec.Header().Get("Content-Security-Policy") != "default-src 'self'; img-src 'self' blob: data:; object-src 'none'; base-uri 'self'; form-action 'self'; frame-ancestors 'none'" {
 			t.Fatal("csp missing on placeholder")
 		}
 		// The deployment's brand names the placeholder too.
@@ -211,4 +216,25 @@ func get(t *testing.T, h http.Handler, path, requestID string) *httptest.Respons
 	rec := httptest.NewRecorder()
 	h.ServeHTTP(rec, req)
 	return rec
+}
+
+func TestCapabilityAndPanicDetailsNeverEnterRequestLogs(t *testing.T) {
+	var logs bytes.Buffer
+	previous := slog.Default()
+	slog.SetDefault(slog.New(slog.NewTextHandler(&logs, nil)))
+	t.Cleanup(func() { slog.SetDefault(previous) })
+	token := strings.Repeat("A", 43)
+	secretPanic := "upstream-credential-must-stay-private"
+	s := &Server{Modules: []Module{moduleFunc(func(mux *http.ServeMux) {
+		mux.HandleFunc("GET /api/public/quotes/{selector}/{token}", func(http.ResponseWriter, *http.Request) {
+			panic(secretPanic)
+		})
+	})}}
+	rec := get(t, s.Handler(), "/api/public/quotes/selector/"+token, token)
+	if rec.Code != http.StatusInternalServerError {
+		t.Fatalf("status %d", rec.Code)
+	}
+	if strings.Contains(logs.String(), token) || strings.Contains(logs.String(), secretPanic) {
+		t.Fatal("capability path or panic value entered request logs")
+	}
 }

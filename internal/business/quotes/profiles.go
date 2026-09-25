@@ -737,7 +737,7 @@ func (m *Module) profileAssetGet(w http.ResponseWriter, r *http.Request) {
 		respond(w, 0, nil, e)
 		return
 	}
-	if !person(p) {
+	if !staff(p) {
 		respond(w, 0, nil, denied())
 		return
 	}

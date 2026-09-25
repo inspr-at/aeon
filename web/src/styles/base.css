@@ -143,6 +143,31 @@ code, kbd, pre, samp, .mono, .eyebrow, .chip, .keycap, .key, .mono-label { font-
 .seg button { display: inline-flex; align-items: center; justify-content: center; gap: 6px; height: 26px; min-width: 28px; padding: 0 11px; border: 0; border-radius: 999px; background: transparent; color: var(--ink-2); font-size: 12.5px; font-weight: 600; }
 @media (hover: hover) { .seg button:hover { color: var(--teal-ink); background: var(--row-hover); } }
 .seg button:active { background: var(--row-selected); }
+
+/* Keep the compact visual controls while giving fingers a full hit area. */
+@media (max-width: 600px) {
+  .btn, .icon-btn, .seg button, .row-menu-item, .status-btn,
+  .title-link, .jump, .who, .res-key, .date-trigger, .link-btn,
+  .ticket-chip, .more-link, .reach-link, .hours-chip, .prop-btn, .key-chip,
+  .project-link, .ekey, .journey-chip, .row-main {
+    position: relative;
+  }
+  .btn::before, .icon-btn::before, .seg button::before, .row-menu-item::before,
+  .status-btn::before, .title-link::before, .jump::before, .who::before,
+  .res-key::before, .date-trigger::before, .link-btn::before,
+  .ticket-chip::before, .more-link::before, .reach-link::before,
+  .hours-chip::before,
+  .prop-btn::before, .key-chip::before, .project-link::before,
+  .ekey::before, .journey-chip::before, .row-main::before {
+    content: '';
+    position: absolute;
+    top: 50%; left: 50%;
+    width: max(100%, 44px); height: max(100%, 44px);
+    transform: translate(-50%, -50%);
+  }
+  .switch { min-width: 44px; min-height: 44px; }
+  .field { min-height: 44px; }
+}
 .seg button[aria-pressed="true"], .seg button[aria-checked="true"] { background: var(--seg-on); color: var(--teal-ink); box-shadow: 0 1px 2px rgba(32, 60, 61, .12), inset 0 0 0 1px var(--glass-edge); }
 .seg.icons button { padding: 0 7px; }
 

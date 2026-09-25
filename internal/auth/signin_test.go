@@ -251,7 +251,8 @@ func TestCallbackFailureRedirects(t *testing.T) {
 				t.Fatal("OIDC cookie retained")
 			}
 			text := logs.String()
-			if !strings.Contains(text, `"reason":"`+tc.reason+`"`) || !strings.Contains(text, `"request_id":"b6-`+tc.name+`"`) {
+			requestID := res.Header.Get("X-Request-ID")
+			if requestID == "" || requestID == "b6-"+tc.name || !strings.Contains(text, `"reason":"`+tc.reason+`"`) || !strings.Contains(text, `"request_id":"`+requestID+`"`) || strings.Contains(text, `"request_id":"b6-`+tc.name+`"`) {
 				t.Fatalf("missing correlated reason: %s", text)
 			}
 			if strings.Contains(text, "untrusted-provider-detail") || strings.Contains(string(body), "untrusted-provider-detail") {

@@ -19,7 +19,7 @@ const fit = ref<'width' | 'page'>('width')
 const guides = ref(false)
 const size = ref({ width: 800, height: 900 })
 let sizer: ResizeObserver | undefined
-watch(desk, el => { sizer?.disconnect(); if (el) { sizer = new ResizeObserver(([entry]) => { size.value = { width: entry!.contentRect.width, height: entry!.contentRect.height } }); sizer.observe(el) } })
+watch(desk, el => { sizer?.disconnect(); if (el) { size.value = { width: el.clientWidth, height: el.clientHeight }; sizer = new ResizeObserver(([entry]) => { size.value = { width: entry!.contentRect.width, height: entry!.contentRect.height } }); sizer.observe(el) } })
 onBeforeUnmount(() => sizer?.disconnect())
 const PAGE_W = 793.7, PAGE_H = 1122.5
 const scale = computed(() => {

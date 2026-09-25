@@ -1,6 +1,6 @@
 <!-- SPDX-License-Identifier: AGPL-3.0-only -->
 <script setup lang="ts">
-import { computed, nextTick, onBeforeUnmount, onMounted, ref, watch } from 'vue'
+import { computed, defineAsyncComponent, nextTick, onBeforeUnmount, onMounted, ref, watch } from 'vue'
 import { useRoute, useRouter } from 'vue-router'
 import { minorMoney } from '../../lib/crm'
 import { usePreference } from '../../lib/preferences'
@@ -20,12 +20,14 @@ import BizIcon from '../../components/business/BizIcon.vue'
 import BusinessPage from '../../components/business/BusinessPage.vue'
 import ChoiceFacet from '../../components/business/ChoiceFacet.vue'
 import QuoteCreateDialog from '../../components/business/QuoteCreateDialog.vue'
-import QuoteWorkspace from '../../components/business/QuoteWorkspace.vue'
 import PanelSplitter from '../../components/PanelSplitter.vue'
 import AmountFacet from '../../components/quotes/list/AmountFacet.vue'
 import DateFacet from '../../components/quotes/list/DateFacet.vue'
 import QuoteTable from '../../components/quotes/list/QuoteTable.vue'
 import RowMenu from '../../components/business/RowMenu.vue'
+
+const QuoteWorkspace = defineAsyncComponent(() => import('../../components/business/QuoteWorkspace.vue'))
+type QuoteWorkspaceInstance = InstanceType<typeof import('../../components/business/QuoteWorkspace.vue')['default']>
 
 // Business › Quotes: every quote in one list you can search, filter (status,
 // customer, date, amount), sort and size, with the ticket list's keyboard (j/k,
@@ -40,14 +42,16 @@ const sort = computed<Sort>(() => pref.value.value?.sort ?? DEFAULT_SORT)
 const widths = computed(() => pref.value.value?.widths ?? {})
 const search = ref<HTMLInputElement>()
 const table = ref<InstanceType<typeof QuoteTable>>()
-const workspace = ref<InstanceType<typeof QuoteWorkspace>>()
+const workspace = ref<QuoteWorkspaceInstance>()
 const create = ref<InstanceType<typeof QuoteCreateDialog>>()
 const filter = computed(() => store.filter)
 const today = todayIso()
 const creatorNotices = ref<AcceptanceNotice[]>([])
+const noticesReady = ref(false)
 async function loadCreatorNotices() {
   try { creatorNotices.value = await acceptanceNotices(true) }
   catch { creatorNotices.value = [] }
+  finally { noticesReady.value = true }
 }
 const noticeName = (id: string) => all.value.find(q => q.quote_node_id === id)?.offer_no || 'Quote'
 const noticeTime = (at: string) => new Intl.DateTimeFormat('en-GB', { dateStyle: 'medium', timeStyle: 'short' }).format(new Date(at))
@@ -305,6 +309,7 @@ watch(openId, id => { if (id) store.cursor = id })
         <button type="button" class="btn primary" aria-keyshortcuts="n" data-tip="New quote · n" @click="openCreate"><AppIcon name="plus" :size="14" />New quote</button>
       </template>
 
+      <template v-if="noticesReady && (store.items || store.error)">
       <div class="toolbar" role="search">
         <label class="search-field list-search">
           <AppIcon name="search" :size="14" />
@@ -368,6 +373,8 @@ watch(openId, id => { if (id) store.cursor = id })
       <p v-if="items && rows.length" class="keys-hint dot-list" aria-hidden="true">
         <span><kbd class="keycap">j</kbd><kbd class="keycap">k</kbd> move</span><span><kbd class="keycap"><AppIcon name="enter" /></kbd> open</span><span><kbd class="keycap">shift</kbd><kbd class="keycap"><AppIcon name="enter" /></kbd> own page</span><span><kbd class="keycap">shift</kbd><kbd class="keycap">F10</kbd> actions</span><span><kbd class="keycap">/</kbd> search</span><span v-if="business.staff"><kbd class="keycap">n</kbd> new quote</span>
       </p>
+      </template>
+      <div v-else class="quote-list-placeholder" aria-hidden="true"><span class="skeleton" /><span class="skeleton" /><span class="skeleton" /></div>
     </BusinessPage>
     <PanelSplitter v-if="openId" class="quote-panel-splitter early" field="quotePanel" css-var="--quote-panel-user-w" target=".quote-dock" :reserve="480" />
     <div v-if="openId" class="quote-dock">
@@ -384,6 +391,10 @@ watch(openId, id => { if (id) store.cursor = id })
    480px of the window, so the two share it without a gap. */
 .quotes-view { --panel-default: clamp(560px, calc(640px + (100vw - 1440px) * .4), 48vw); --panel-w: min(var(--quote-panel-user-w, var(--panel-default)), 72vw, calc(100vw - 480px)); }
 .summary-skeleton { display: inline-block; width: 220px; }
+.quote-list-placeholder { display: grid; align-content: start; gap: 14px; min-height: 400px; padding-top: 10px; }
+.quote-list-placeholder .skeleton { width: min(100%, 620px); height: 36px; }
+.quote-list-placeholder .skeleton:first-child { width: min(100%, 300px); height: 44px; }
+.quote-list-placeholder .skeleton:last-child { height: 220px; }
 /* Phones wrap the summary to two lines; the loading line holds both. */
 .summary-loading { display: inline-block; }
 .summary-skeleton.line2 { display: none; }
@@ -442,7 +453,7 @@ watch(openId, id => { if (id) store.cursor = id })
   .list-search { flex: 1 1 100%; width: auto; }
   .list-search .field { height: 44px; font-size: 16px; }
   .slash { display: none; }
-  .facets { flex: 1 1 100%; }
+  .facets { flex: 1 1 100%; row-gap: 20px; }
   .keys-hint { display: none; }
   .state { padding: 32px 18px; }
 }

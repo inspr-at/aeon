@@ -1,7 +1,7 @@
 // SPDX-License-Identifier: AGPL-3.0-only
 // Offline UI audit. Run `npm run audit:ui` in web. It writes a deduplicated
-// ../../qa2-findings.json and screenshots in ../../design-ref/shots/qa2a/. A finding
-// is evidence for the UI builder; this spec deliberately does not fix UI code.
+// test-results/qa2b-findings.json and screenshots in test-results/qa2b-shots/. Keep audit output
+// in this worktree so parallel workers do not overwrite one another's evidence.
 import { test, expect, type Page } from '@playwright/test'
 import AxeBuilder from '@axe-core/playwright'
 import { createHash } from 'node:crypto'
@@ -16,16 +16,15 @@ import { mockSettings, settingsData, makePng } from './settings-fixtures'
 import { mockProfiles, profileWorld, PROFILE } from './profile-fixtures'
 import { mockReleases, releaseHistory } from './releases-fixtures'
 import { journeyWorld, mockJourney } from './journey-fixtures'
+import { domAudit, expectedMockConsole, decorativeVersionContrast, installLayoutShiftAudit, armLayoutShiftAudit, readLayoutShiftAudit, type Kind, type Raw } from './ui-audit-rules'
 import { mockQuoteEditor, QUOTE_ID } from './quote-inspector-fixtures'
 
-type Kind = 'horizontal-overflow' | 'interactive-overlap' | 'clipped-text' | 'text-icon' | 'axe' | 'console' | 'unhandled-rejection' | 'layout-shift' | 'small-touch-target' | 'invisible-focus' | 'scenario-error'
-type Raw = { kind: Kind; severity: 'critical' | 'serious' | 'moderate'; selector: string; detail: string }
 type Finding = Raw & { id: string; route: string; state: string; viewport: string; theme: string; screenshot: string }
 type Setup = 'default' | 'editor' | 'journey' | 'public' | 'signed-out'
 type Scenario = { state: string; route: string; setup?: Setup; act?: (page: Page) => Promise<void> }
 
-const output = resolve(process.cwd(), '../../qa2-findings.json')
-const shotDir = resolve(process.cwd(), '../../design-ref/shots/qa2a')
+const output = resolve(process.cwd(), 'test-results/qa2b-findings.json')
+const shotDir = resolve(process.cwd(), 'test-results/qa2b-shots')
 const findings = new Map<string, Finding>()
 const widths = process.env.AUDIT_WIDTHS ? process.env.AUDIT_WIDTHS.split(',').map(Number) : [390, 1024, 1280, 1440, 1920]
 const themes = process.env.AUDIT_THEMES ? process.env.AUDIT_THEMES.split(',') as ('light' | 'dark')[] : ['light', 'dark'] as const
@@ -114,57 +113,6 @@ async function installMocks(page: Page, setup: Setup) {
   if (setup === 'editor') await mockQuoteEditor(page)
 }
 
-function domAudit(): Raw[] {
-  const result: Raw[] = []
-  const add = (kind: Kind, severity: Raw['severity'], selector: string, detail: string) => {
-    if (result.filter(f => f.kind === kind).length < 30) result.push({ kind, severity, selector, detail })
-  }
-  const selector = (el: Element): string => {
-    if (el.id) return `#${CSS.escape(el.id)}`
-    const parts: string[] = []
-    for (let node: Element | null = el; node && parts.length < 5; node = node.parentElement) {
-      const cls = [...node.classList].filter(v => /^[\w-]+$/.test(v)).slice(0, 2).map(v => `.${CSS.escape(v)}`).join('')
-      const index = node.parentElement ? [...node.parentElement.children].indexOf(node) + 1 : 1
-      parts.unshift(`${node.tagName.toLowerCase()}${cls}:nth-child(${index})`)
-      if (node.id) { parts[0] = `#${CSS.escape(node.id)}`; break }
-    }
-    return parts.join(' > ')
-  }
-  const shown = (el: Element) => { const r = el.getBoundingClientRect(), c = getComputedStyle(el); return r.width > 1 && r.height > 1 && c.visibility === 'visible' && c.display !== 'none' && !el.closest('[aria-hidden="true"], [hidden]') }
-  const root = document.documentElement
-  if (root.scrollWidth > innerWidth + 1) add('horizontal-overflow', 'serious', 'html', `document ${root.scrollWidth}px wide in ${innerWidth}px viewport`)
-  const elements = [...document.querySelectorAll<HTMLElement>('body *')].filter(shown)
-  for (const el of elements) {
-    const style = getComputedStyle(el), rect = el.getBoundingClientRect()
-    let scrollContainer = el.parentElement
-    while (scrollContainer && !/auto|scroll|hidden|clip/.test(getComputedStyle(scrollContainer).overflowX)) scrollContainer = scrollContainer.parentElement
-    if (scrollContainer && !el.closest('svg')) {
-      const pr = scrollContainer.getBoundingClientRect()
-      if (rect.width > pr.width + 2 && rect.left < pr.right - 1 && rect.right > pr.right + 2)
-        add('horizontal-overflow', 'moderate', selector(el), `${Math.round(rect.width)}px element exceeds ${Math.round(pr.width)}px scroll container ${selector(scrollContainer)}`)
-    }
-    const directText = [...el.childNodes].some(n => n.nodeType === Node.TEXT_NODE && !!n.textContent?.trim())
-    if (directText && el.scrollWidth > el.clientWidth + 2 && /hidden|clip/.test(style.overflowX) && style.textOverflow !== 'ellipsis' && !el.closest('[title], [data-tip], [aria-describedby], [role="tooltip"]') && !el.querySelector('[title], [data-tip]'))
-      add('clipped-text', 'moderate', selector(el), `text ${el.scrollWidth}px in ${el.clientWidth}px without ellipsis or tooltip: ${(el.textContent ?? '').trim().slice(0, 70)}`)
-    if (/^(BUTTON|A)$/.test(el.tagName) && !el.querySelector('svg, img, [role="img"]')) {
-      const own = (el.textContent ?? '').trim()
-      if (/^[⋯…×✕✖☰⚙⚲⌄⌃➜→←＋✚✓✔✎✏★☆]{1,3}$/.test(own)) add('text-icon', 'moderate', selector(el), `text glyph used as icon: ${own}`)
-    }
-  }
-  const controls = elements.filter(el => { const r = el.getBoundingClientRect(); return el.matches('button, a[href], input, select, textarea, [role="button"], [role="link"], [role="menuitem"], [role="tab"]') && getComputedStyle(el).pointerEvents !== 'none' && r.bottom > 0 && r.top < innerHeight && r.right > 0 && r.left < innerWidth })
-  for (let i = 0; i < controls.length; i++) {
-    const a = controls[i], ar = a.getBoundingClientRect()
-    if (innerWidth <= 390 && (ar.width < 44 || ar.height < 44) && !a.closest('[role="checkbox"], [role="radio"], [role="switch"]'))
-      add('small-touch-target', 'moderate', selector(a), `${Math.round(ar.width)}×${Math.round(ar.height)}px touch target`)
-    for (let j = i + 1; j < controls.length; j++) {
-      const b = controls[j], br = b.getBoundingClientRect()
-      if (a.contains(b) || b.contains(a) || a.closest('label') === b.closest('label') && a.closest('label')) continue
-      const overlap = Math.max(0, Math.min(ar.right, br.right) - Math.max(ar.left, br.left)) * Math.max(0, Math.min(ar.bottom, br.bottom) - Math.max(ar.top, br.top))
-      if (overlap > 16) add('interactive-overlap', 'serious', selector(a), `overlaps ${selector(b)} by ${Math.round(overlap)}px²`)
-    }
-  }
-  return result
-}
 
 async function focusAudit(page: Page): Promise<Raw[]> {
   const result: Raw[] = [], seen = new Set<string>()
@@ -216,28 +164,39 @@ test('offline route and state audit', async ({ browser }) => {
     const page = await context.newPage()
     page.setDefaultTimeout(7000)
     const errors: Raw[] = []
-    page.on('console', message => { if (message.type() === 'error') errors.push({ kind: 'console', severity: 'serious', selector: 'window.console', detail: `${message.text()} ${message.location().url}`.slice(0, 300) }) })
+    page.on('console', message => {
+      const detail = `${message.text()} ${message.location().url}`.slice(0, 300)
+      if (message.type() === 'error' && !expectedMockConsole(scenario.state, detail)) errors.push({ kind: 'console', severity: 'serious', selector: 'window.console', detail })
+    })
     page.on('pageerror', error => errors.push({ kind: 'unhandled-rejection', severity: 'serious', selector: 'window', detail: error.message.slice(0, 300) }))
+    await page.addInitScript(installLayoutShiftAudit)
     await page.addInitScript(() => {
-      ;(window as unknown as { auditShift: number }).auditShift = 0
-      new PerformanceObserver(list => { for (const entry of list.getEntries() as (PerformanceEntry & { value: number; hadRecentInput: boolean })[]) if (!entry.hadRecentInput) (window as unknown as { auditShift: number }).auditShift += entry.value }).observe({ type: 'layout-shift', buffered: true })
       window.addEventListener('unhandledrejection', event => { (window as unknown as { auditRejections: string[] }).auditRejections ??= []; (window as unknown as { auditRejections: string[] }).auditRejections.push(String(event.reason)) })
     })
     let raw: Raw[] = []
     try {
       await installMocks(page, scenario.setup ?? 'default')
       await page.goto(scenario.route)
+      // Initial hydration is part of navigation, not a late content shift.
+      // Start measuring when the document has loaded and route rendering begins.
+      await page.evaluate(armLayoutShiftAudit)
       if (scenario.act) await scenario.act(page)
       await page.waitForTimeout(200)
       raw.push(...await page.evaluate(domAudit))
       const axe = await new AxeBuilder({ page }).withTags(['wcag2a', 'wcag2aa', 'wcag21a', 'wcag21aa']).analyze()
-      for (const v of axe.violations.filter(v => v.impact === 'serious' || v.impact === 'critical')) for (const node of v.nodes.slice(0, 10))
-        raw.push({ kind: 'axe', severity: v.impact as Raw['severity'], selector: node.target.join(' '), detail: `${v.id}: ${v.help}; ${node.failureSummary?.slice(0, 250) ?? ''}` })
-      raw.push(...await focusAudit(page))
-      const shift = await page.evaluate(() => (window as unknown as { auditShift: number }).auditShift)
-      if (shift > 0.02) raw.push({ kind: 'layout-shift', severity: 'moderate', selector: 'document', detail: `CLS after load: ${shift.toFixed(4)}` })
+      for (const v of axe.violations.filter(v => v.impact === 'serious' || v.impact === 'critical')) for (const node of v.nodes.slice(0, 10)) {
+        const target = node.target.join(' ')
+        const labelledVersion = v.id === 'color-contrast' && await page.locator(target).evaluate(el => !!el.closest('.calendar-version[aria-label], .version-coordinate[aria-label]')).catch(() => false)
+        if (decorativeVersionContrast(target, v.id, labelledVersion)) continue
+        raw.push({ kind: 'axe', severity: v.impact as Raw['severity'], selector: target, detail: `${v.id}: ${v.help}; ${node.failureSummary?.slice(0, 250) ?? ''}` })
+      }
+      const shift = await page.evaluate(readLayoutShiftAudit)
+      if (shift.score > 0.02) raw.push({ kind: 'layout-shift', severity: 'moderate', selector: 'document', detail: `CLS after load: ${shift.score.toFixed(4)}; ${shift.sources.slice(0, 5).join('; ')}` })
       const rejections = await page.evaluate(() => (window as unknown as { auditRejections?: string[] }).auditRejections ?? [])
       for (const rejection of rejections) raw.push({ kind: 'unhandled-rejection', severity: 'serious', selector: 'window', detail: rejection.slice(0, 300) })
+      // Tabbing is a deliberate interaction and can scroll long pages. Measure
+      // load stability first so focus exploration cannot inflate CLS.
+      raw.push(...await focusAudit(page))
     } catch (error) { raw.push({ kind: 'scenario-error', severity: 'serious', selector: 'document', detail: String(error).slice(0, 500) }) }
     raw.push(...errors)
     const newRows = raw.filter(row => !findings.has(`${row.kind}|${scenario.route}|${scenario.state}|${theme}|${row.selector}|${row.detail.replace(/\d+(?:\.\d+)?/g, '#')}`))

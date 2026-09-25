@@ -304,6 +304,13 @@ export async function mockWork(page: Page, data: Fixtures, options: MockOptions 
     if (path === '/api/me') return route.fulfill({ json: { principal: { id: me.id, name: me.name, roles: options.readOnly ? ['viewer'] : ['member'] }, tenant: { id: 't1', name: 'INSPR Studio' } } })
     if (path === '/api/kinds') return route.fulfill({ json: { items: ['epic', 'ticket', 'task', 'project'].map(slug => ({ id: `k-${slug}`, slug, label: slug[0].toUpperCase() + slug.slice(1), short_prefix: slug.slice(0, 3).toUpperCase(), icon: slug, allowed_child_kinds: null, field_schema: {} })) } })
     if (path === '/api/relations') return route.fulfill({ json: { items: data.relations.filter(r => r.source_node_id === query.get('node_id') || r.target_node_id === query.get('node_id')), next_cursor: null } })
+    if (path === '/api/nodes/lookup') {
+      const ids = (query.get('ids') ?? '').split(',')
+      return route.fulfill({ json: { items: ids.flatMap(id => {
+        const node = data.nodes.find(n => n.id === id)
+        return node ? [{ id: node.id, key: node.key, title: node.title, state: node.state }] : []
+      }) } })
+    }
     const activityPath = /^\/api\/nodes\/([^/]+)\/(activity|comments)(?:\/(\d+))?$/.exec(path)
     if (activityPath) {
       const [, nodeId, part, commentId] = activityPath

@@ -17,6 +17,44 @@ import (
 	"github.com/inspr-at/aeon/internal/dbtest"
 )
 
+func TestEveryTenantTableHasForcedRLS(t *testing.T) {
+	database := dbtest.Open(t)
+	rows, err := database.Admin.Query(t.Context(), `
+		SELECT c.relname,
+		       EXISTS(SELECT 1 FROM pg_attribute a WHERE a.attrelid=c.oid AND a.attname='tenant_id' AND NOT a.attisdropped),
+		       c.relrowsecurity,c.relforcerowsecurity,
+		       (SELECT count(*) FROM pg_policy p WHERE p.polrelid=c.oid)
+		FROM pg_class c JOIN pg_namespace n ON n.oid=c.relnamespace
+		WHERE n.nspname='public' AND c.relkind='r'
+		ORDER BY c.relname`)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer rows.Close()
+	count := 0
+	for rows.Next() {
+		var name string
+		var hasTenant, enabled, forced bool
+		var policies int
+		if err := rows.Scan(&name, &hasTenant, &enabled, &forced, &policies); err != nil {
+			t.Fatal(err)
+		}
+		if name == "tenants" || name == "identities" || name == "schema_migrations" {
+			continue
+		}
+		count++
+		if !hasTenant || !enabled || !forced || policies == 0 {
+			t.Errorf("%s: tenant_id=%t RLS=%t FORCE=%t policies=%d", name, hasTenant, enabled, forced, policies)
+		}
+	}
+	if err := rows.Err(); err != nil {
+		t.Fatal(err)
+	}
+	if count < 50 {
+		t.Fatalf("audited only %d tenant tables", count)
+	}
+}
+
 //go:embed migrations/*.sql
 var migrationFiles embed.FS
 

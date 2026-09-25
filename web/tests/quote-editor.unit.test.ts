@@ -2,7 +2,8 @@
 import { describe, expect, it } from 'vitest'
 import { reactive } from 'vue'
 import { QuoteEditor } from '../src/lib/quotes/editor.ts'
-import type { QuoteDocumentData } from '../src/lib/quotes/types.ts'
+import { documentTotal, positionTotal } from '../src/lib/quotes/layout.ts'
+import type { QuoteDocumentData, QuotePosition } from '../src/lib/quotes/types.ts'
 
 const sectionId = '11111111-1111-4111-8111-111111111111'
 const fixture = (): QuoteDocumentData => ({
@@ -38,5 +39,23 @@ describe('QuoteEditor snapshots', () => {
     editor.redo()
     expect(editor.document.sections[0]!.spacing_after_mm).toBe('2.0')
     expect(() => editor.setSectionSettings(sectionId, { spacingBeforeMm: '40.1' })).toThrow(/range/)
+  })
+})
+
+const position = (quantity: string, unitPriceCents: number): QuotePosition => ({
+  id: '33333333-3333-4333-8333-333333333333', pricing_source: 'manual', short_text: 'Work', long_text: '',
+  quantity, unit_label: 'item', unit_price_cents: unitPriceCents, total_cents: 0, currency: 'EUR',
+})
+
+describe('cent half-up totals', () => {
+  it('rounds an exact half cent up and refuses a float quantity or price', () => {
+    expect(positionTotal(position('1.00', 100))).toBe(100)
+    expect(positionTotal(position('1.50', 9999))).toBe(14999)
+    expect(positionTotal(position('0.01', 50))).toBe(1)
+    expect(positionTotal(position('0.01', 49))).toBe(0)
+    expect(positionTotal(position('2.25', 10))).toBe(23)
+    expect(documentTotal([position('0.01', 50), position('1.00', 100)])).toBe(101)
+    expect(() => positionTotal(position('1.005', 100))).toThrow(/quantity/)
+    expect(() => positionTotal({ ...position('1.00', 100), unit_price_cents: 10.5 })).toThrow(/minor-unit/)
   })
 })

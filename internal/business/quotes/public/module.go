@@ -423,6 +423,9 @@ func (m *Module) resolve(ctx context.Context, selector, token string, lock bool,
 }
 func (m *Module) read(w http.ResponseWriter, r *http.Request) {
 	safeHeaders(w)
+	if !m.limitPublic(w, r, "read", 120) {
+		return
+	}
 	var out publicQuote
 	err := m.resolve(r.Context(), r.PathValue("publicTenant"), r.PathValue("token"), false, func(_ pgx.Tx, q publicQuote) error { out = q; return nil })
 	if err != nil {
@@ -433,6 +436,9 @@ func (m *Module) read(w http.ResponseWriter, r *http.Request) {
 }
 func (m *Module) pdf(w http.ResponseWriter, r *http.Request) {
 	safeHeaders(w)
+	if !m.limitPublic(w, r, "pdf", 20) {
+		return
+	}
 	var out publicQuote
 	err := m.resolve(r.Context(), r.PathValue("publicTenant"), r.PathValue("token"), false, func(_ pgx.Tx, q publicQuote) error { out = q; return nil })
 	if err != nil {
@@ -509,12 +515,19 @@ func sameSite(r *http.Request) bool {
 	}
 	return true
 }
-func (m *Module) allow(key string) bool {
+func (m *Module) allow(key string, limit int) bool {
 	m.mu.Lock()
 	defer m.mu.Unlock()
 	now := time.Now()
-	if len(m.attempts) > 10000 {
-		m.attempts = make(map[string][]time.Time)
+	if len(m.attempts) >= 10000 {
+		for k, times := range m.attempts {
+			if len(times) == 0 || now.Sub(times[len(times)-1]) >= time.Minute {
+				delete(m.attempts, k)
+			}
+		}
+		if len(m.attempts) >= 10000 && m.attempts[key] == nil {
+			return false
+		}
 	}
 	seen := m.attempts[key][:0]
 	for _, at := range m.attempts[key] {
@@ -522,12 +535,23 @@ func (m *Module) allow(key string) bool {
 			seen = append(seen, at)
 		}
 	}
-	if len(seen) >= 10 {
+	if len(seen) >= limit {
 		m.attempts[key] = seen
 		return false
 	}
 	m.attempts[key] = append(seen, now)
 	return true
+}
+func (m *Module) limitPublic(w http.ResponseWriter, r *http.Request, operation string, limit int) bool {
+	remote, _, err := net.SplitHostPort(r.RemoteAddr)
+	if err != nil {
+		remote = r.RemoteAddr
+	}
+	if m.allow(operation+":"+remote, limit) {
+		return true
+	}
+	fail(w, 429, "too many attempts")
+	return false
 }
 func evidence(in acceptanceWrite, linkID string) string {
 	value, _ := json.Marshal([]any{linkID, in.Version, in.ExpectedContentSHA256, in.Name, in.Company, in.Note, in.Confirm})
@@ -552,6 +576,9 @@ func serviceActor(ctx context.Context, tx pgx.Tx, tenantID string) (tenant.Princ
 }
 func (m *Module) accept(w http.ResponseWriter, r *http.Request) {
 	safeHeaders(w)
+	if !m.limitPublic(w, r, "accept", 10) {
+		return
+	}
 	if !sameSite(r) {
 		fail(w, 403, "cross-site acceptance denied")
 		return
@@ -571,10 +598,6 @@ func (m *Module) accept(w http.ResponseWriter, r *http.Request) {
 	remote, _, _ := net.SplitHostPort(r.RemoteAddr)
 	if remote == "" {
 		remote = r.RemoteAddr
-	}
-	if !m.allow(hash(r.PathValue("token")) + ":" + remote) {
-		fail(w, 429, "too many attempts")
-		return
 	}
 	var out acceptanceResult
 	replayed := false

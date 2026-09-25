@@ -63,7 +63,7 @@ const KEYS: { keys: string[][]; label: string }[] = [
       <ProfileCard v-else />
     </SettingsCard>
 
-    <SettingsCard title="Appearance" icon="sun" anchor="appearance">
+    <SettingsCard v-if="profile || profileError" title="Appearance" icon="sun" anchor="appearance">
       <template #lead>Light, dark, or whatever your system uses. Saved to your account, so it stays after a reload and on your other devices.</template>
       <template #aside>
         <div ref="themeGroup" class="seg" role="radiogroup" aria-label="Theme" @keydown="themeKeys">
@@ -74,7 +74,7 @@ const KEYS: { keys: string[][]; label: string }[] = [
       </template>
     </SettingsCard>
 
-    <SettingsCard title="Greeting" icon="sparkle" anchor="greeting">
+    <SettingsCard v-if="profile || profileError" title="Greeting" icon="sparkle" anchor="greeting">
       <template #lead>A short, personal line when you open {{ brand.short_name }}. Only you see it.</template>
       <template #aside>
         <span v-if="!profile && !profileError" class="skeleton switch-skeleton" role="status" aria-label="Loading" />
@@ -87,7 +87,7 @@ const KEYS: { keys: string[][]; label: string }[] = [
       <template v-if="profileError" #default><p class="error-line" role="alert"><AppIcon name="alert" :size="13" />{{ profileError }}</p></template>
     </SettingsCard>
 
-    <SettingsCard title="Keyboard" icon="keyboard" anchor="keys">
+    <SettingsCard v-if="profile || profileError" title="Keyboard" icon="keyboard" anchor="keys">
       <template #lead>Most of {{ brand.short_name }} works from the keyboard.</template>
       <template #aside><button type="button" class="btn sm" aria-keyshortcuts="?" @click="run({ name: 'shortcuts' })">All shortcuts<kbd class="keycap" aria-hidden="true">?</kbd></button></template>
       <dl class="keys">

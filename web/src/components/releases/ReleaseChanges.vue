@@ -65,6 +65,7 @@ li { padding: 6px 10px 7px; margin-left: -10px; border-radius: 9px; }
 .type { font-size: 11px; text-transform: lowercase; }
 .ticket { font-size: 11px; color: var(--teal-ink); }
 .commit { font-size: 11px; color: var(--ink-3); border-radius: 4px; }
+@media (max-width: 600px) { a.commit { display: inline-flex; align-items: center; min-height: 44px; } }
 @media (hover: hover) { a.commit:hover { color: var(--teal-ink); text-decoration: underline; text-underline-offset: 2px; } }
 @media (max-width: 760px) { ul { padding-left: 0; } li { margin-left: 0; padding: 6px 4px 7px; } }
 </style>

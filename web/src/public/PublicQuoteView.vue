@@ -105,7 +105,8 @@ function toDecision() { decision.value?.scrollIntoView({ behavior: 'smooth', blo
 
 // The paper keeps its A4 proportions and shrinks to the screen, never scrolls sideways.
 const desk = ref<HTMLElement>()
-const scale = ref(1)
+const initialDeskWidth = Math.min(880, window.innerWidth - (window.innerWidth <= 600 ? 24 : 40))
+const scale = ref(Math.min(1, Math.max(0.3, Math.floor(initialDeskWidth) / 794)))
 let sizer: ResizeObserver | undefined
 let frame = 0
 const fit = (width: number) => Math.min(1, Math.max(0.3, Math.floor(width) / 794))
@@ -241,7 +242,7 @@ onBeforeUnmount(() => { sizer?.disconnect(); cancelAnimationFrame(frame); window
 .pq-status.ok { color: var(--ink) !important; font-weight: 600; }
 .pq-status.ok svg { flex-shrink: 0; margin-top: 3px; color: var(--ok); }
 .pq-actions { display: flex; flex-wrap: wrap; gap: 8px; margin-top: 6px; }
-.pq-btn { display: inline-flex; align-items: center; justify-content: center; gap: 7px; min-height: 42px; padding: 0 18px; border: 1px solid var(--line-2); border-radius: 10px; background: var(--surface-raised); color: var(--ink); font: 600 14px/1 var(--font); text-decoration: none; white-space: nowrap; cursor: pointer; }
+.pq-btn { display: inline-flex; align-items: center; justify-content: center; gap: 7px; min-height: 44px; padding: 0 18px; border: 1px solid var(--line-2); border-radius: 10px; background: var(--surface-raised); color: var(--ink); font: 600 14px/1 var(--font); text-decoration: none; white-space: nowrap; cursor: pointer; }
 @media (hover: hover) { .pq-btn:hover { background: var(--row-hover); } }
 .pq-btn:focus-visible { outline: none; box-shadow: var(--focus-ring); }
 .pq-btn.primary { border-color: var(--teal); background: var(--teal); color: var(--button-ink); }

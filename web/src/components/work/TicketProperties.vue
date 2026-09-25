@@ -97,6 +97,7 @@ const target = (event: Event) => event.currentTarget as HTMLElement
 <style scoped>
 .props { margin: 0; }
 .props.row { display: flex; flex-wrap: wrap; gap: 6px; }
+@media (max-width: 600px) { .props.row { gap: 12px; } }
 .props.row dt { position: absolute; width: 1px; height: 1px; overflow: hidden; clip-path: inset(50%); }
 .props.row dd { margin: 0; }
 .props.column { display: grid; gap: 2px; }
@@ -131,7 +132,7 @@ const target = (event: Event) => event.currentTarget as HTMLElement
 .inline-label { font: 500 9.5px/1 var(--mono); letter-spacing: .12em; text-transform: uppercase; color: var(--ink-3); font-variant-ligatures: none; }
 /* Phones: the chips wrap onto more lines; nothing scrolls sideways or is cut. */
 @media (max-width: 720px) {
-  .props.row { row-gap: 8px; margin-top: 14px; }
+  .props.row { row-gap: 14px; margin-top: 14px; }
   .row .prop-btn, .row .prop-static { height: 34px; }
   .row .epic-chip { max-width: 100%; }
   .row .agent-chips { flex-wrap: wrap; }

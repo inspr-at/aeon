@@ -4,6 +4,7 @@ package cli
 
 import (
 	"fmt"
+	"net/http"
 	"net/url"
 	"sort"
 	"strings"
@@ -20,7 +21,165 @@ type projectView struct {
 }
 
 func (rt *runtime) cmdProject() *Command {
-	return &Command{Name: "project", Short: "Projects", Use: "project <list>", subs: []*Command{rt.cmdProjectList()}}
+	return &Command{Name: "project", Short: "Projects", Use: "project <list|show|create|update|repos|releases|anchors|tags>", subs: []*Command{
+		rt.cmdProjectList(), rt.cmdProjectCreate(), rt.cmdProjectShow(), rt.cmdProjectUpdate(),
+		rt.cmdProjectResource("repos"), rt.cmdProjectResource("releases"), rt.cmdProjectResource("anchors"), rt.cmdProjectResource("tags"),
+	}}
+}
+
+func projectShape(n apiNode) projectView {
+	state := n.State
+	if state == "" {
+		state = "active"
+	}
+	return projectView{ID: n.ID, Key: projectDisplayKey(n, n.Key), Name: n.Title, Description: n.Body, Status: state}
+}
+
+func (rt *runtime) cmdProjectCreate() *Command {
+	var name, key, desc, descFile string
+	var dryRun bool
+	return &Command{Name: "create", Short: "Create a project node", Use: "project create --name NAME [--key KEY] [--description TEXT|--description-file PATH] [--dry-run]",
+		addFlags: func(fs *flagSet) {
+			fs.string(&name, "name", 0, "project name")
+			fs.string(&key, "key", 0, "short project key")
+			fs.string(&desc, "description", 0, "project description")
+			fs.string(&descFile, "description-file", 0, "description file or - for stdin")
+			fs.bool(&dryRun, "dry-run", 0, "show the request without sending")
+		}, run: func([]string) error {
+			if strings.TrimSpace(name) == "" {
+				return usagef("--name is required")
+			}
+			bodyText, err := rt.readText(desc, descFile, "description")
+			if err != nil {
+				return err
+			}
+			if dryRun {
+				preview := map[string]any{"name": name}
+				if key != "" {
+					preview["key"] = strings.ToUpper(key)
+				}
+				if bodyText != "" {
+					preview["description"] = bodyText
+				}
+				return rt.printJSON(map[string]any{"dry_run": true, "method": "POST", "path": "/api/projects", "body": preview})
+			}
+			kind, err := rt.kind("project")
+			if err != nil {
+				return err
+			}
+			body := map[string]any{"kind_id": kind.ID, "title": name, "body": bodyText, "state": "active", "fields": map[string]any{}}
+			if key != "" {
+				body["key_prefix"] = strings.ToUpper(key)
+				body["fields"] = map[string]any{"project_key": strings.ToUpper(key)}
+			}
+			var n apiNode
+			if err := rt.do(http.MethodPost, "/api/nodes", body, &n); err != nil {
+				return err
+			}
+			view := projectShape(n)
+			if rt.jsonOut {
+				return rt.printJSON(view)
+			}
+			_, err = fmt.Fprintf(rt.stdout, "✓ created %s — %s\n", view.Key, view.Name)
+			return err
+		}}
+}
+
+func (rt *runtime) cmdProjectShow() *Command {
+	return &Command{Name: "show", Short: "Show a project", Use: "project show <key|id>", minArgs: 1, maxArgs: 1, run: func(args []string) error {
+		n, err := rt.projectNode(args[0])
+		if err != nil {
+			return err
+		}
+		v := projectShape(n)
+		if rt.jsonOut {
+			return rt.printJSON(v)
+		}
+		_, err = fmt.Fprintf(rt.stdout, "%s — %s\nstatus: %s\ndescription: %s\n", v.Key, v.Name, v.Status, v.Description)
+		return err
+	}}
+}
+
+func (rt *runtime) cmdProjectUpdate() *Command {
+	var state string
+	var dryRun bool
+	return &Command{Name: "update", Short: "Update a project's lifecycle state", Use: "project update <key|id> --status STATE [--dry-run]", minArgs: 1, maxArgs: 1,
+		addFlags: func(fs *flagSet) {
+			fs.string(&state, "status", 0, "active, frozen, archived, or deleted")
+			fs.bool(&dryRun, "dry-run", 0, "show request")
+		},
+		run: func(args []string) error {
+			state = strings.ToLower(strings.TrimSpace(state))
+			switch state {
+			case "active", "frozen", "archived", "deleted":
+			case "":
+				return usagef("--status is required")
+			default:
+				return usagef("--status must be active, frozen, archived, or deleted")
+			}
+			n, err := rt.projectNode(args[0])
+			if err != nil {
+				return err
+			}
+			path := "/api/nodes/" + url.PathEscape(n.ID)
+			body := map[string]any{"state": state}
+			if dryRun {
+				return rt.printJSON(map[string]any{"dry_run": true, "method": "PATCH", "path": path, "body": body})
+			}
+			var changed apiNode
+			if err := rt.do(http.MethodPatch, path, body, &changed); err != nil {
+				return err
+			}
+			v := projectShape(changed)
+			if rt.jsonOut {
+				return rt.printJSON(v)
+			}
+			_, err = fmt.Fprintf(rt.stdout, "✓ %s is now %s\n", v.Key, v.Status)
+			return err
+		}}
+}
+
+func (rt *runtime) cmdProjectResource(resource string) *Command {
+	return &Command{Name: resource, Short: "List project " + resource, Use: "project " + resource + " <key|id>", minArgs: 1, maxArgs: 1, run: func(args []string) error {
+		p, err := rt.projectNode(args[0])
+		if err != nil {
+			return err
+		}
+		var values []any
+		fields := fieldMap(p.Fields)
+		if raw, ok := fields[resource].([]any); ok {
+			values = raw
+		}
+		if values == nil {
+			if classic, ok := fields["classic"].(map[string]any); ok {
+				if raw, ok := classic[resource].([]any); ok {
+					values = raw
+				}
+			}
+		}
+		if resource == "tags" {
+			values = []any{}
+			for _, s := range fieldStrings(fields, "tags") {
+				values = append(values, map[string]any{"name": s})
+			}
+		}
+		if values == nil {
+			values = []any{}
+		}
+		if rt.jsonOut {
+			return rt.printJSON(values)
+		}
+		if len(values) == 0 {
+			_, err = fmt.Fprintln(rt.stdout, "(none)")
+			return err
+		}
+		for _, v := range values {
+			if _, err = fmt.Fprintln(rt.stdout, v); err != nil {
+				return err
+			}
+		}
+		return nil
+	}}
 }
 
 func (rt *runtime) cmdProjectList() *Command {
