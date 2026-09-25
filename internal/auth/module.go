@@ -197,7 +197,8 @@ func coreAgentScope(r *http.Request) (string, bool) {
 		return "events:undo", true
 	case path == "/api/search":
 		return "search:read", true
-	case path == "/api/views", strings.HasPrefix(path, "/api/views/"), strings.HasPrefix(path, "/api/preferences/"):
+	case path == "/api/views", strings.HasPrefix(path, "/api/views/"), strings.HasPrefix(path, "/api/preferences/"),
+		path == "/api/project-groups", strings.HasPrefix(path, "/api/project-groups/"):
 		return scope("views")
 	default:
 		return "", false

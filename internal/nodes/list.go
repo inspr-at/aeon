@@ -669,7 +669,20 @@ type projectSummary struct {
 	Cancelled    int       `json:"cancelled"`
 	Total        int       `json:"total"`
 	LastActivity time.Time `json:"last_activity"`
+	// The people (and agents) most recently active in the project, newest first:
+	// actors of the tenant's latest events (90 days, at most 20000) on the project
+	// or anything below it, a linked principal shown as the person it links to.
+	People []projectPerson `json:"people"`
 }
+type projectPerson struct {
+	ID   string `json:"id"`
+	Name string `json:"name"`
+	Kind string `json:"kind"`
+}
+
+// recentPeoplePerProject bounds the avatars a project summary carries.
+const recentPeoplePerProject = 5
+
 type projectPage struct {
 	Items []projectSummary `json:"items"`
 }
@@ -700,26 +713,49 @@ func (m *Module) handleListProjects(w http.ResponseWriter, r *http.Request) {
                     SELECT id,parent_id,state,updated_at,kind_id FROM nodes
                     WHERE tenant_id=current_setting('aeon.tenant_id')::uuid AND parent_id=s.node_id AND deleted_at IS NULL OFFSET 0
                 ) c
+            ), summary AS (
+                SELECT p.id,p.key,p.title,p.state,
+                    count(*) FILTER (WHERE s.depth>0 AND k.slug IN ('ticket','task','epic') AND s.state IN ('new','backlog'))::int AS open,
+                    count(*) FILTER (WHERE s.depth>0 AND k.slug IN ('ticket','task','epic') AND s.state IN ('in_progress','qa'))::int AS in_progress,
+                    count(*) FILTER (WHERE s.depth>0 AND k.slug IN ('ticket','task','epic') AND s.state IN ('accepted','delivered','done'))::int AS done,
+                    count(*) FILTER (WHERE s.depth>0 AND k.slug IN ('ticket','task','epic') AND s.state='cancelled')::int AS cancelled,
+                    count(*) FILTER (WHERE s.depth>0 AND k.slug IN ('ticket','task','epic'))::int AS total,
+                    max(s.updated_at) AS last_activity
+                FROM projects p JOIN subtree s ON s.project_id=p.id
+                JOIN node_kinds k ON k.id=s.kind_id AND k.tenant_id=current_setting('aeon.tenant_id')::uuid
+                GROUP BY p.id,p.key,p.title,p.state
+            ), recent AS (
+                SELECT e.node_id,e.actor_principal_id,e.at FROM events e
+                WHERE e.tenant_id=current_setting('aeon.tenant_id')::uuid AND e.node_id IS NOT NULL AND e.at > now() - interval '90 days'
+                ORDER BY e.at DESC,e.id DESC LIMIT 20000
+            ), actors AS (
+                SELECT s.project_id,coalesce(a.linked_to,a.id) AS person,max(r.at) AS at
+                FROM recent r JOIN subtree s ON s.node_id=r.node_id
+                JOIN principals a ON a.tenant_id=current_setting('aeon.tenant_id')::uuid AND a.id=r.actor_principal_id
+                GROUP BY s.project_id,coalesce(a.linked_to,a.id)
+            ), ranked AS (
+                SELECT project_id,person,at,row_number() OVER (PARTITION BY project_id ORDER BY at DESC,person) AS n FROM actors
+            ), people AS (
+                SELECT r.project_id,json_agg(json_build_object('id',who.id::text,'name',who.name,'kind',who.kind) ORDER BY r.at DESC,r.person) AS people
+                FROM ranked r JOIN principals who ON who.tenant_id=current_setting('aeon.tenant_id')::uuid AND who.id=r.person
+                WHERE r.n <= $2
+                GROUP BY r.project_id
             )
-            SELECT p.id::text,p.key,p.title,p.state,
-                count(*) FILTER (WHERE s.depth>0 AND k.slug IN ('ticket','task','epic') AND s.state IN ('new','backlog'))::int AS open,
-                count(*) FILTER (WHERE s.depth>0 AND k.slug IN ('ticket','task','epic') AND s.state IN ('in_progress','qa'))::int AS in_progress,
-                count(*) FILTER (WHERE s.depth>0 AND k.slug IN ('ticket','task','epic') AND s.state IN ('accepted','delivered','done'))::int AS done,
-                count(*) FILTER (WHERE s.depth>0 AND k.slug IN ('ticket','task','epic') AND s.state='cancelled')::int AS cancelled,
-                count(*) FILTER (WHERE s.depth>0 AND k.slug IN ('ticket','task','epic'))::int AS total,
-                max(s.updated_at) AS last_activity
-            FROM projects p JOIN subtree s ON s.project_id=p.id
-            JOIN node_kinds k ON k.id=s.kind_id AND k.tenant_id=current_setting('aeon.tenant_id')::uuid
-            GROUP BY p.id,p.key,p.title,p.state
-            ORDER BY last_activity DESC,p.id`, includeArchived)
+            SELECT s.id::text,s.key,s.title,s.state,s.open,s.in_progress,s.done,s.cancelled,s.total,s.last_activity,coalesce(pp.people,'[]'::json)
+            FROM summary s LEFT JOIN people pp ON pp.project_id=s.id
+            ORDER BY s.last_activity DESC,s.id`, includeArchived, recentPeoplePerProject)
 		if err != nil {
 			return dbErr("list projects", err)
 		}
 		for rows.Next() {
 			var item projectSummary
-			if err := rows.Scan(&item.ID, &item.Key, &item.Title, &item.State, &item.Open, &item.InProgress, &item.Done, &item.Cancelled, &item.Total, &item.LastActivity); err != nil {
+			var people []byte
+			if err := rows.Scan(&item.ID, &item.Key, &item.Title, &item.State, &item.Open, &item.InProgress, &item.Done, &item.Cancelled, &item.Total, &item.LastActivity, &people); err != nil {
 				rows.Close()
 				return err
+			}
+			if err := json.Unmarshal(people, &item.People); err != nil || item.People == nil {
+				item.People = []projectPerson{}
 			}
 			page.Items = append(page.Items, item)
 		}
