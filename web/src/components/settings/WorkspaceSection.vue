@@ -3,7 +3,7 @@
 import { computed, onMounted, ref } from 'vue'
 import { listPrincipals, type Principal } from '../../lib/business'
 import { keyState, listAgentKeys, statusOf, type AgentKey } from '../../lib/settings'
-import { absoluteTime, relativeTime } from '../../lib/work'
+import { absoluteTime, relativeTime, sentenceCase } from '../../lib/work'
 import { useSession } from '../../stores/session'
 import AppIcon from '../AppIcon.vue'
 import Avatar from '../Avatar.vue'
@@ -22,8 +22,9 @@ const isCustomer = (p: Principal) => p.roles.length > 0 && p.roles.every(role =>
 const people = computed(() => (members.value ?? []).filter(p => p.kind === 'person' && !isCustomer(p)))
 const customers = computed(() => (members.value ?? []).filter(p => p.kind === 'person' && isCustomer(p)))
 const agentsIn = computed(() => (members.value ?? []).filter(p => p.kind === 'agent' && !p.roles.includes('system')))
-const ROLE: Record<string, string> = { admin: 'Admin', member: 'Member', viewer: 'Viewer', customer: 'Customer' }
-const roleText = (roles: string[]) => roles.map(r => ROLE[r] ?? r).join(' · ') || 'No role'
+const ROLE: Record<string, string> = { admin: 'Admin', member: 'Member', viewer: 'Viewer', customer: 'Customer', super_admin: 'Super admin', reviewer: 'Reviewer', external: 'External' }
+// Roles imported from classic keep their meaning; they read as words, not identifiers.
+const roleText = (roles: string[]) => roles.map(r => ROLE[r] ?? sentenceCase(r)).join(' · ') || 'No role'
 const STATE: Record<string, string> = { active: 'Active', expired: 'Expired', revoked: 'Revoked' }
 
 async function loadMembers() {

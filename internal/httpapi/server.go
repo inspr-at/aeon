@@ -60,6 +60,7 @@ func (s *Server) build() {
 	for i := len(s.Middleware) - 1; i >= 0; i-- {
 		api = s.Middleware[i](api)
 	}
+	api = routePatternMiddleware(s.Mux, api)
 	api = commonMiddleware(api)
 
 	root := http.NewServeMux()

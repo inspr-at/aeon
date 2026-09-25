@@ -16,9 +16,13 @@
     "e2e": "playwright test"
   },
   "dependencies": {
+    "3d-force-graph": "1.80.0",
+    "force-graph": "1.51.4",
     "markdown-it": "^15.0.2",
     "pinia": "^4.0.3",
     "qrcode-generator": "^1.5.2",
+    "three": "0.186.1",
+    "three-spritetext": "1.10.0",
     "vue": "^3.5.42",
     "vue-router": "^5.3.1"
   },
@@ -27,6 +31,7 @@
     "@playwright/test": "^1.63.0",
     "@types/markdown-it": "^14.2.0",
     "@types/node": "^24.13.3",
+    "@types/three": "0.183.1",
     "@vitejs/plugin-vue": "^6.0.8",
     "@vue/tsconfig": "^0.9.1",
     "jsqr": "1.4.0",

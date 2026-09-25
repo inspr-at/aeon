@@ -210,3 +210,57 @@ func addPrincipalIn(t *testing.T, tenantID, name string) struct{ ID string } {
 	}
 	return struct{ ID string }{id}
 }
+
+// Imported tickets carry large fields that Postgres keeps out of line. The
+// assignee projection reads its references once per row, so counting people
+// over a project of such tickets stays fast (AEON-140: 0.5 s before on the
+// production copy for about 900 rows).
+func TestListAssigneeFacetOverLargeImportedFields(t *testing.T) {
+	p := newPrincipal(t, "large-fields")
+	project := kindBySlug(t, p, "project")
+	ticket := kindBySlug(t, p, "ticket")
+	root := mustNode(t, p, `{"kind_id":"`+project.ID+`","title":"Imported project"}`)
+	// A workspace of people, most of them linked to classic accounts.
+	for i := 0; i < 14; i++ {
+		var identity string
+		if err := adminPool.QueryRow(t.Context(), `INSERT INTO identities (issuer, subject) VALUES ('paimos-classic', 'ppm-large:'||$1::int) RETURNING id::text`, i).Scan(&identity); err != nil {
+			t.Fatal(err)
+		}
+		if _, err := adminPool.Exec(t.Context(), `INSERT INTO principals (tenant_id, kind, name, identity_id) VALUES ($1, 'person', 'person '||$2::int, $3)`, p.TenantID, i, identity); err != nil {
+			t.Fatal(err)
+		}
+	}
+	err := db.InTenant(t.Context(), appPool, p.TenantID, func(tx pgx.Tx) error {
+		_, err := tx.Exec(t.Context(), `INSERT INTO nodes (tenant_id,key,kind_id,title,fields,state,parent_id,position)
+            SELECT $1::uuid,'IMP-'||g,$2::uuid,'Imported '||g,
+                jsonb_build_object('priority','medium','classic',jsonb_build_object('source_id','ppm-large','assignee_id',100+g%5,
+                    'description',(SELECT string_agg(md5(g::text||':'||i),' ') FROM generate_series(1,200) i))),
+                CASE g%4 WHEN 3 THEN 'done' ELSE 'backlog' END,$3::uuid,g FROM generate_series(1,1500) AS g`, p.TenantID, ticket.ID, root.ID)
+		return err
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	path := "/api/nodes?within=" + root.ID + "&kind=ticket&facets=assignee,tag&limit=1"
+	var fastest time.Duration
+	for i := 0; i < 3; i++ {
+		start := time.Now()
+		status, body := call(t, &p, http.MethodGet, path, "")
+		elapsed := time.Since(start)
+		page := decode[nodePage](t, status, body, http.StatusOK)
+		if page.Facets["assignee"]["none"] != 1500 {
+			t.Fatalf("assignee facet: %#v", page.Facets["assignee"])
+		}
+		if fastest == 0 || elapsed < fastest {
+			fastest = elapsed
+		}
+	}
+	t.Logf("1500 imported rows, assignee and tag facets: fastest of 3 = %s", fastest)
+	limit := 150 * time.Millisecond
+	if os.Getenv("CI") != "" {
+		limit = 600 * time.Millisecond
+	}
+	if fastest >= limit {
+		t.Fatalf("facets over large fields exceeded %s: %s", limit, fastest)
+	}
+}

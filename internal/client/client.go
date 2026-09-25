@@ -92,6 +92,9 @@ func (c *Client) Do(ctx context.Context, method, path string, body, dest any) er
 
 // DoWithHeaders sends one JSON request with additional non-credential protocol
 // headers such as a run's daemon fencing identity.
+// MaxResponseBytes caps one response body the client reads.
+const MaxResponseBytes = 64 << 20
+
 func (c *Client) DoWithHeaders(ctx context.Context, method, path string, body, dest any, headers map[string]string) error {
 	if c.BaseURL == "" {
 		return fmt.Errorf("instance URL is empty")
@@ -130,9 +133,16 @@ func (c *Client) DoWithHeaders(ctx context.Context, method, path string, body, d
 		return err
 	}
 	defer res.Body.Close()
-	payload, err := io.ReadAll(io.LimitReader(res.Body, 1<<20))
+	// A page of 200 imported tickets carries their full bodies and fields and
+	// passes 1 MiB on production data (AEON-140); a cut-off read then failed as
+	// "unexpected end of JSON input". Read up to MaxResponseBytes and say so
+	// plainly when a response is larger.
+	payload, err := io.ReadAll(io.LimitReader(res.Body, MaxResponseBytes+1))
 	if err != nil {
 		return err
+	}
+	if len(payload) > MaxResponseBytes {
+		return fmt.Errorf("%s %s: response is larger than %d MiB", method, path, MaxResponseBytes>>20)
 	}
 	if res.StatusCode < 200 || res.StatusCode >= 300 {
 		return &StatusError{Status: res.StatusCode, Message: errorMessage(payload)}
@@ -147,11 +157,16 @@ func (c *Client) DoWithHeaders(ctx context.Context, method, path string, body, d
 }
 
 func errorMessage(payload []byte) string {
+	// Modules answer {"error": ...} or {"code": ..., "message": ...}; show the words.
 	var wrap struct {
-		Error string `json:"error"`
+		Error   string `json:"error"`
+		Message string `json:"message"`
 	}
 	if json.Unmarshal(payload, &wrap) == nil && wrap.Error != "" {
 		return wrap.Error
+	}
+	if wrap.Message != "" {
+		return wrap.Message
 	}
 	s := strings.TrimSpace(string(payload))
 	if len(s) > 240 {

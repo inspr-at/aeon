@@ -77,10 +77,15 @@ async function json<T>(path: string, method = 'GET', body?: unknown, headers: Re
   })
   if (!response.ok) {
     const data = await response.json().catch(() => ({}))
+    // A session that ended mid-work: the page keeps what was typed, and the shell
+    // offers to sign in again beside it (AEON-140), instead of the bare word "unauthorized".
+    if (response.status === 401) { sessionEnded.handler?.(); throw new APIError(401, 'your session has ended', data && typeof data === 'object' ? data : {}) }
     throw new APIError(response.status, typeof data?.error === 'string' ? data.error : `Request failed (${response.status})`, data && typeof data === 'object' ? data : {})
   }
   return response.status === 204 ? undefined as T : response.json()
 }
+// The shell registers what happens when a request finds the session ended.
+export const sessionEnded: { handler: (() => void) | null } = { handler: null }
 function query(values: object): string {
   const params = new URLSearchParams()
   for (const [key, value] of Object.entries(values)) {

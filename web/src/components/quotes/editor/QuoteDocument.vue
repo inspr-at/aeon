@@ -350,7 +350,9 @@ button.quote-mark.selected { box-shadow: 0 0 0 1.5px var(--teal); }
 .quote-section.drop-before::before, .quote-section.drop-after::after { content: ''; position: absolute; left: 0; right: 0; height: 2px; border-radius: 2px; background: var(--teal); pointer-events: none; }
 .quote-section.drop-before::before { top: -3mm; }
 .quote-section.drop-after::after { bottom: -3mm; }
-.quote-overflow { max-width: 210mm; margin: 0 auto 4mm; background: var(--danger-bg); border: 1px solid var(--danger-line); border-radius: 8px; padding: 3mm; }
+/* The render warning is app chrome, not document text: the app's font and the danger ink,
+   so it stays readable on the dark theme's danger tint (AEON-140). */
+.quote-overflow { max-width: 210mm; margin: 0 auto 4mm; background: var(--danger-bg); border: 1px solid var(--danger-line); border-radius: 8px; padding: 3mm; color: var(--danger); font: 500 13px/1.4 var(--font); }
 .quote-measure { position: absolute; left: -10000px; top: 0; width: 210mm; padding: 20mm 21mm; box-sizing: border-box; visibility: hidden; background: var(--quote-paper); }.quote-height-probe { height: 245mm; position: absolute; pointer-events: none; }
 @media print { .quote-page { margin: 0; box-shadow: none; break-after: page; background: var(--quote-paper); color: var(--ink); } .quote-document { color: var(--ink); } .quote-section-handle,.quote-overflow,.quote-measure,.quote-mark.missing { display: none !important; } button.quote-mark { box-shadow: none !important; } @page { size: A4; margin: 0; } }
 </style>

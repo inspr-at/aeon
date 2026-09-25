@@ -168,6 +168,11 @@ defineExpose({ isDirty })
 .marker-toggle:focus-visible { box-shadow: var(--focus-ring); }
 .session { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; color: var(--ink); font: 600 12px/1 var(--mono); font-variant-ligatures: none; }
 .role { white-space: nowrap; }
+/* A work marker keeps one line in a narrow column: the session name gives way,
+   its time and edit actions stay beside it (AEON-140). */
+.marker .system-line { flex-wrap: nowrap; }
+.marker .marker-toggle { flex: 0 1 auto; }
+.marker .role, .marker .chev, .marker .sep, .marker .system-line time, .marker .line-actions { flex-shrink: 0; white-space: nowrap; }
 .chev { color: var(--ink-3); }
 .marker-toggle[aria-expanded="true"] .chev { transform: rotate(180deg); }
 .marker-detail { display: grid; gap: 3px; margin: 0; padding: 8px 12px; border-radius: 10px; background: var(--surface-sunken); font-size: 12px; }

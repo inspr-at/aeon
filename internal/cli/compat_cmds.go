@@ -55,7 +55,8 @@ func (rt *runtime) resolveModel(role, author, harness string) error {
 		return usagef("review-gate requires --author-family")
 	}
 	if author != "" && author != "openai" && author != "anthropic" && author != "xai" && author != "cursor" {
-		return usagef("unknown author family %q", author)
+		// Families name the model's maker, not the harness (codex runs openai models).
+		return usagef("unknown author family %q: use openai, anthropic, xai or cursor", author)
 	}
 	harness = strings.TrimSpace(harness)
 	if harness != "" && !modelHarnesses[harness] {
