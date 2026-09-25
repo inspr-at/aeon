@@ -722,7 +722,8 @@ func (m *Module) selectProfile(w http.ResponseWriter, r *http.Request) {
 		respond(w, 0, nil, e)
 		return
 	}
-	if in.ExpectedDraftRevision < 1 || !uuidRe.MatchString(in.ProfileID) {
+	// An empty profile_id returns the draft to the standard document (U19).
+	if in.ExpectedDraftRevision < 1 || (in.ProfileID != "" && !uuidRe.MatchString(in.ProfileID)) {
 		respond(w, 0, nil, bad("invalid profile selection"))
 		return
 	}
@@ -768,7 +769,11 @@ func (m *Module) selectProfile(w http.ResponseWriter, r *http.Request) {
 		if err != nil {
 			return err
 		}
-		return appendEvent(r.Context(), tx, p, id, "quote.profile_selected", map[string]any{"profile": before, "draft_revision": current.DraftRevision}, map[string]any{"profile_id": profile.ID, "profile_revision": profile.Revision, "draft_revision": out.DraftRevision})
+		after := map[string]any{"profile_id": "", "profile_revision": 0, "draft_revision": out.DraftRevision}
+		if profile != nil {
+			after["profile_id"], after["profile_revision"] = profile.ID, profile.Revision
+		}
+		return appendEvent(r.Context(), tx, p, id, "quote.profile_selected", map[string]any{"profile": before, "draft_revision": current.DraftRevision}, after)
 	})
 	respond(w, 200, out, e)
 }

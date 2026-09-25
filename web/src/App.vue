@@ -154,7 +154,8 @@ watch(() => [route.path, route.params.projectKey, route.params.ticketKey] as con
 </template>
 
 <style scoped>
-.app-shell { height: 100%; display: grid; grid-template-rows: var(--header-h) minmax(0, 1fr) var(--footer-h); }
+/* One column the width of the window: a long breadcrumb shrinks, it never widens the page. */
+.app-shell { height: 100%; display: grid; grid-template-columns: minmax(0, 1fr); grid-template-rows: var(--header-h) minmax(0, 1fr) var(--footer-h); }
 .app-shell.bare { --footer-h: 0px; grid-template-rows: minmax(0, 1fr); }
 .app-shell.header-folded { grid-template-rows: minmax(0, 1fr) var(--footer-h); }
 @media (max-width: 600px) {

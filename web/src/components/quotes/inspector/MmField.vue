@@ -5,8 +5,9 @@ import { clampMm, formatMm, parseMm, scrubMm, stepMm, type MmRange } from '../..
 
 // A millimetre value: the unit sits inside the field, arrow keys step 0.5 mm
 // (Shift: 5 mm), dragging the label scrubs the value, Enter or leaving the field
-// commits what was typed, Escape brings the stored value back.
-const props = defineProps<{ label: string; value: number | 'mixed' | null; range: MmRange; disabled?: boolean; hint?: string }>()
+// commits what was typed, Escape brings the stored value back. The document
+// profile editor also uses it for point sizes (unit "pt").
+const props = withDefaults(defineProps<{ label: string; value: number | 'mixed' | null; range: MmRange; disabled?: boolean; hint?: string; unit?: 'mm' | 'pt' }>(), { hint: undefined, unit: 'mm' })
 const emit = defineEmits<{ commit: [value: number] }>()
 const id = useId()
 const draft = ref<string | null>(null)
@@ -15,12 +16,14 @@ const scrub = ref<{ start: number; x: number; moved: boolean; value: number; poi
 let dragged = false
 const current = computed(() => typeof props.value === 'number' ? props.value : 0)
 const shown = computed(() => scrub.value ? formatMm(scrub.value.value) : draft.value ?? (props.value === 'mixed' ? '' : formatMm(current.value)))
-const invalid = computed(() => draft.value !== null && draft.value.trim() !== '' && (parseMm(draft.value) === null || parseMm(draft.value)! < props.range.min || parseMm(draft.value)! > props.range.max))
-const rangeText = computed(() => `${formatMm(props.range.min)} to ${formatMm(props.range.max)} mm`)
+const invalid = computed(() => draft.value !== null && draft.value.trim() !== '' && (parse(draft.value) === null || parse(draft.value)! < props.range.min || parse(draft.value)! > props.range.max))
+const rangeText = computed(() => `${formatMm(props.range.min)} to ${formatMm(props.range.max)} ${props.unit}`)
+const unitWord = computed(() => props.unit === 'pt' ? 'points' : 'millimetres')
+const parse = (raw: string) => parseMm(raw.replace(/\s*pt$/i, ''))
 
 function commitDraft() {
   if (draft.value === null) return
-  const parsed = parseMm(draft.value)
+  const parsed = parse(draft.value)
   if (parsed === null || parsed < props.range.min || parsed > props.range.max) return
   draft.value = null
   if (parsed !== current.value || props.value === 'mixed') emit('commit', parsed)
@@ -28,7 +31,7 @@ function commitDraft() {
 function keys(event: KeyboardEvent) {
   if (event.key === 'ArrowUp' || event.key === 'ArrowDown') {
     event.preventDefault()
-    const base = draft.value !== null ? parseMm(draft.value) ?? current.value : current.value
+    const base = draft.value !== null ? parse(draft.value) ?? current.value : current.value
     draft.value = null
     const next = stepMm(base, event.key === 'ArrowUp' ? 1 : -1, event.shiftKey, props.range)
     if (next !== current.value || props.value === 'mixed') emit('commit', next)
@@ -69,10 +72,10 @@ function labelClick(event: MouseEvent) { if (dragged) { event.preventDefault(); 
         :id="id" class="mm-field" type="text" inputmode="decimal" autocomplete="off" spellcheck="false" role="spinbutton"
         :value="shown" :placeholder="value === 'mixed' ? 'Mixed' : undefined" :disabled="disabled"
         :aria-valuenow="value === 'mixed' ? undefined : current" :aria-valuemin="range.min" :aria-valuemax="range.max"
-        :aria-valuetext="value === 'mixed' ? 'Mixed' : `${formatMm(current)} millimetres`" :aria-invalid="invalid || undefined" :aria-describedby="hint ? `${id}-hint` : undefined"
+        :aria-valuetext="value === 'mixed' ? 'Mixed' : `${formatMm(current)} ${unitWord}`" :aria-invalid="invalid || undefined" :aria-describedby="hint ? `${id}-hint` : undefined"
         @input="draft = ($event.target as HTMLInputElement).value" @keydown="keys" @change="commitDraft" @blur="commitDraft(); draft = null"
       />
-      <span class="mm-unit" aria-hidden="true">mm</span>
+      <span class="mm-unit" aria-hidden="true">{{ unit }}</span>
     </div>
     <p v-if="hint || invalid" :id="`${id}-hint`" class="mm-hint" :class="{ bad: invalid }">{{ invalid ? `Use ${rangeText}.` : hint }}</p>
   </div>

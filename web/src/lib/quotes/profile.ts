@@ -2,6 +2,7 @@
 import { api } from '../api'
 import type { QuoteProfileDefinition, QuoteProfileSnapshot } from './types'
 import { decimalCents } from './layout'
+import { clone } from './profileForm'
 
 export interface QuoteProfile { id: string; name: string; revision: number; definition: QuoteProfileDefinition; archived: boolean }
 export const profileAssetUrl = (id: string) => `/api/quote-profiles/assets/${encodeURIComponent(id)}`
@@ -20,7 +21,22 @@ export const saveProfile = (name: string, definition: QuoteProfileDefinition, ex
 }))
 export const archiveProfile = async (id: string) => { const response = await api(`/quote-profiles/${id}`, { method: 'DELETE' }); if (!response.ok) throw new Error(`Archive failed (${response.status})`) }
 export const undoProfile = (profile: QuoteProfile) => json<QuoteProfile>(api(`/quote-profiles/${profile.id}/undo`, { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ expected_revision: profile.revision }) }))
-export const uploadProfileAsset = (file: File) => json<{ id: string; content_type: string }>(api('/quote-profiles/assets', { method: 'POST', headers: { 'Content-Type': 'application/octet-stream' }, body: file }))
+export const uploadProfileAsset = (file: Blob) => json<{ id: string; content_type: string; sha256?: string; size?: number }>(api('/quote-profiles/assets', { method: 'POST', headers: { 'Content-Type': 'application/octet-stream' }, body: file }))
+// One profile, now or at a kept revision (issued quotes show the one they froze).
+export const getProfile = (id: string, revision?: number) => json<QuoteProfile>(api(`/quote-profiles/${encodeURIComponent(id)}${revision ? `?revision=${revision}` : ''}`))
+// A copy starts as its own profile at revision 1; undoing it archives the copy.
+export const duplicateProfile = (profile: QuoteProfile, name: string) => saveProfile(name, clone(profile.definition))
+// Snapshots the profile's current revision into an editable draft.
+export const selectQuoteProfile = (quoteId: string, expectedDraftRevision: number, profileId: string) => json<{ draft_revision: number }>(api(`/quotes/${encodeURIComponent(quoteId)}/profile`, {
+  method: 'PUT', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ expected_draft_revision: expectedDraftRevision, profile_id: profileId }),
+}))
+// A snapshot for the editor's preview: its id changes with the fonts, so a face
+// added, swapped or removed before saving loads under a fresh family name.
+export function previewSnapshot(definition: QuoteProfileDefinition, key = 'draft'): QuoteProfileSnapshot {
+  let hash = 0
+  for (const ch of JSON.stringify(definition.fonts)) hash = (hash * 31 + ch.charCodeAt(0)) >>> 0
+  return { id: `preview-${key.replace(/[^a-z0-9]/gi, '')}-${hash.toString(36)}`, revision: 1, definition }
+}
 
 export function defaultProfile(): QuoteProfileDefinition {
   return {
@@ -42,6 +58,13 @@ export function defaultProfile(): QuoteProfileDefinition {
   }
 }
 
+// A date as the document prints it: de-AT "21.09.2026", English in the European
+// order "21/09/2026" (a quote from Graz is not written for the US).
+export function profileDate(profile: QuoteProfileSnapshot | null | undefined, iso: string): string {
+  if (!iso) return ''
+  const locale = profile?.definition.locale === 'en' ? 'en-GB' : 'de-AT'
+  return new Intl.DateTimeFormat(locale, { day: '2-digit', month: '2-digit', year: 'numeric', timeZone: 'UTC' }).format(new Date(`${iso}T00:00:00Z`))
+}
 export const profileLabel = (profile: QuoteProfileSnapshot | null | undefined, key: string, fallback: string) => profile?.definition.labels[key] || fallback
 export const pageNumber = (profile: QuoteProfileSnapshot | null | undefined, page: number, total: number) => (profile?.definition.footer.page_number_format || '{page} / {total}').replaceAll('{page}', String(page)).replaceAll('{total}', String(total))
 export function profileMoney(cents: number, currency: string, profile: QuoteProfileSnapshot | null | undefined): string {

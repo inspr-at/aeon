@@ -68,7 +68,9 @@ const businessCrumbs = computed(() => {
   if (/^\/business\/quotes\/[^/]+$/.test(route.path)) return [{ label: 'Quotes', to: '/business/quotes' }, { label: pageName.value || 'Quote', to: '' }]
   return [{ label: String(route.meta.title ?? ''), to: '' }]
 })
-const settingsSection = computed(() => route.path.startsWith('/settings') ? SETTINGS_SECTIONS.find(section => section.id === sectionOf(route.params.section)) ?? null : null)
+// Document profiles live under Business: Settings / Business / Document profiles.
+const profilesPage = computed(() => route.path.startsWith('/settings/business/profiles'))
+const settingsSection = computed(() => route.path.startsWith('/settings') ? SETTINGS_SECTIONS.find(section => section.id === (profilesPage.value ? 'business' : sectionOf(route.params.section))) ?? null : null)
 const placeLabel = (id: PlaceId) => id === 'agents' && agents.needsCount ? `Agents, ${agents.needsCount} ${agents.needsCount === 1 ? 'needs' : 'need'} you` : undefined
 
 async function toggleMenu() {
@@ -192,9 +194,14 @@ onBeforeUnmount(() => { document.removeEventListener('pointerdown', outside); wi
         </template>
       </template>
       <template v-else-if="settingsSection">
-        <RouterLink class="crumb settings-crumb" to="/settings"><AppIcon name="gear" :size="14" />Settings</RouterLink>
+        <RouterLink class="crumb settings-crumb" to="/settings"><AppIcon name="gear" :size="14" /><span class="crumb-label">Settings</span></RouterLink>
         <span class="sep" aria-hidden="true">/</span>
-        <span class="crumb current" aria-current="page">{{ settingsSection.label }}</span>
+        <template v-if="profilesPage">
+          <RouterLink class="crumb" to="/settings/business">{{ settingsSection.label }}</RouterLink>
+          <span class="sep" aria-hidden="true">/</span>
+          <span class="crumb current" aria-current="page">Document profiles</span>
+        </template>
+        <span v-else class="crumb current" aria-current="page">{{ settingsSection.label }}</span>
       </template>
       <span v-else class="crumb current" aria-current="page">{{ pageTitle }}</span>
     </nav>
@@ -273,6 +280,11 @@ onBeforeUnmount(() => { document.removeEventListener('pointerdown', outside); wi
 .crumb:focus-visible { box-shadow: var(--focus-ring); }
 .crumb[aria-current="page"] { color: var(--ink); }
 .crumb.current { color: var(--ink); cursor: default; }
+/* A long trail shrinks from the start: Settings folds to its gear, earlier crumbs
+   clip, the page you are on stays whole. */
+@media (max-width: 1180px) { .crumbs:has(> .crumb ~ .crumb ~ .crumb) .settings-crumb .crumb-label { position: absolute; width: 1px; height: 1px; overflow: hidden; clip-path: inset(50%); white-space: nowrap; } }
+.crumbs > .crumb:not(.current) { flex-shrink: 1; overflow: hidden; }
+.crumbs > .crumb.current, .crumbs > .sep { flex-shrink: 0; }
 .crumb.current:hover { background: transparent; }
 .crumb-name { overflow: hidden; text-overflow: ellipsis; color: var(--ink); }
 .project-crumb { min-width: 0; }

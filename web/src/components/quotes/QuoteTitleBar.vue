@@ -77,6 +77,8 @@ function menuKeys(event: KeyboardEvent) {
         <span v-if="canSave && local === 'dirty' && !compact" class="save-note">Unsaved changes</span>
       </div>
       <div v-if="compact" class="win">
+        <!-- Narrow bars keep the zoom its room: the profile rides on the first row. -->
+        <slot name="profile" />
         <QuotePeople :presence="presence" :principal-id="principalId" compact />
         <template v-if="layout === 'dock'">
           <button type="button" class="icon-btn sm flat" aria-label="Open on its own page" data-tip="Open on its own page" @click="emit('expand')"><AppIcon name="expand" :size="15" /></button>
@@ -91,6 +93,7 @@ function menuKeys(event: KeyboardEvent) {
         <button type="button" class="icon-btn sm flat" :disabled="!canUndo" aria-label="Undo" :aria-keyshortcuts="mac ? 'Meta+Z' : 'Control+Z'" :data-tip="`Undo · ${mod}Z`" @mousedown.prevent @click="emit('undo')"><QuoteIcon name="undo" :size="15" /></button>
         <button type="button" class="icon-btn sm flat" :disabled="!canRedo" aria-label="Redo" :aria-keyshortcuts="mac ? 'Meta+Shift+Z' : 'Control+Shift+Z'" :data-tip="`Redo · ${mac ? 'Shift Cmd ' : 'Ctrl Shift '}Z`" @mousedown.prevent @click="emit('redo')"><QuoteIcon name="redo" :size="15" /></button>
       </div>
+      <slot v-if="!compact" name="profile" />
       <div class="print-pair">
         <button type="button" class="btn sm pdf" :disabled="printing" data-tip="Print or save as PDF" aria-label="PDF" @click="emit('print')"><QuoteIcon name="print" :size="15" /><span class="pdf-text">PDF</span></button>
         <button

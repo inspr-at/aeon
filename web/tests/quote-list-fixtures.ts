@@ -82,6 +82,8 @@ export interface QuoteMockOptions {
   // The next draft save meets a newer one from Mira (412), with her change applied first.
   conflictNext?: { quote: string; apply: (doc: QuoteDoc) => void }
   role?: 'admin' | 'member'
+  // U19: the profile snapshot a draft takes when its title bar picks one (null: archived or unknown).
+  profile?: (id: string) => unknown | null
 }
 
 export async function mockQuotes(page: Page, world: QuoteWorld, options: QuoteMockOptions = {}) {
@@ -173,6 +175,18 @@ export async function mockQuotes(page: Page, world: QuoteWorld, options: QuoteMo
       r.archived = body.archived === true; r.revision++
       log(qid, 'quote.visibility_changed', { archived: was }, { archived: r.archived })
       return route.fulfill({ json: projection(r) })
+    }
+    if (rest === 'profile' && method === 'PUT') {
+      if (r.state !== 'draft' || r.archived) return route.fulfill({ status: 409, json: { error: 'quote is not editable' } })
+      if (body.expected_draft_revision !== draft.revision) return route.fulfill({ status: 409, json: { error: 'draft revision is stale' } })
+      const id = String(body.profile_id ?? '')
+      const snapshot = id ? options.profile?.(id) ?? null : null
+      if (id && !snapshot) return route.fulfill({ status: 409, json: { error: 'profile is archived' } })
+      const doc = draft.document as { profile?: unknown }
+      if (snapshot) doc.profile = structuredClone(snapshot)
+      else delete doc.profile
+      draft.revision++; r.revision++
+      return route.fulfill({ json: { document: draft.document, document_sha256: `${'d'.repeat(60)}${String(draft.revision).padStart(4, '0')}`, draft_revision: draft.revision, quote_revision: r.revision, schema_version: 1, minimum_writer_version: 1, base_version: r.current_version, updated_at: new Date().toISOString(), updated_by_principal_id: me.id } })
     }
     if (rest === 'versions') return route.fulfill({ json: list })
     const v = /^versions\/(\d+)(?:\/(.*))?$/.exec(rest)

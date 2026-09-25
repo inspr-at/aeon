@@ -2043,9 +2043,10 @@ paths:
     put:
       operationId: selectQuoteProfile
       summary: Snapshot the current profile revision into an editable quote draft
+      description: An empty profile_id removes the profile, so the draft prints as the standard document again.
       security: [{session: []}]
       parameters: [{name: quoteId, in: path, required: true, schema: {type: string, format: uuid}}]
-      requestBody: {required: true, content: {application/json: {schema: {type: object, required: [expected_draft_revision, profile_id], properties: {expected_draft_revision: {type: integer, minimum: 1}, profile_id: {type: string, format: uuid}}}}}}
+      requestBody: {required: true, content: {application/json: {schema: {type: object, required: [expected_draft_revision, profile_id], properties: {expected_draft_revision: {type: integer, minimum: 1}, profile_id: {type: string, description: 'A profile id, or empty for the standard document', pattern: '^([0-9a-fA-F-]{36})?$'}}}}}}
       responses:
         '200': {description: Updated draft, content: {application/json: {schema: {$ref: '#/components/schemas/QuoteDraft'}}}}
         '409': {$ref: '#/components/responses/Error'}
