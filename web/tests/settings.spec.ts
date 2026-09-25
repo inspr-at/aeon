@@ -81,6 +81,7 @@ test('Workspace lists members and agent keys, read-only', async ({ page }) => {
   await expect(rows).toHaveCount(3)
   await expect(rows.nth(0)).toContainText('aeon-coordinator')
   await expect(rows.nth(0)).toContainText('aeon_c0or_…')
+  await expect(rows.nth(0)).toContainText('None')
   await expect(rows.nth(1)).toContainText('journey:write')
   await expect(rows.nth(2).locator('.state')).toHaveText('Revoked')
   // Read-only: nothing to create or revoke yet.

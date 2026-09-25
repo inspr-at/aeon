@@ -109,12 +109,7 @@ func keyJSON(rec keyRecord) agentKeyJSON {
 }
 
 func isAdmin(p tenant.Principal) bool {
-	for _, r := range p.Roles {
-		if r == "admin" {
-			return true
-		}
-	}
-	return false
+	return tenant.IsAdmin(p)
 }
 
 func (m *Module) requireAdmin(w http.ResponseWriter, r *http.Request) (tenant.Principal, bool) {
@@ -159,6 +154,10 @@ func (m *Module) handleCreateAgentKey(w http.ResponseWriter, r *http.Request) {
 	}
 	rec, err := m.createAgentKey(r.Context(), p, name, scopes, body.ExpiresAt)
 	if err != nil {
+		if errors.Is(err, errServicePrincipal) {
+			writeForbidden(w)
+			return
+		}
 		writeInternal(w)
 		return
 	}

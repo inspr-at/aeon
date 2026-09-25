@@ -34,12 +34,17 @@ func setup(t *testing.T) fixture {
 	f := fixture{db: d}
 	for i, p := range []*tenant.Principal{&f.a, &f.b} {
 		p.Kind = tenant.Agent
+		p.Roles = []string{}
+		if i == 0 {
+			p.Kind = tenant.Person
+			p.Roles = []string{"admin"}
+		}
 		err := d.Admin.QueryRow(t.Context(), `INSERT INTO tenants(slug,name) VALUES($1,'Test') RETURNING id::text`, fmt.Sprint("tenant", i)).Scan(&p.TenantID)
 		if err != nil {
 			t.Fatal(err)
 		}
 		err = db.InTenant(t.Context(), d.App, p.TenantID, func(tx pgx.Tx) error {
-			if err := tx.QueryRow(t.Context(), `INSERT INTO principals(tenant_id,kind,name) VALUES($1,'agent','Test') RETURNING id::text`, p.TenantID).Scan(&p.ID); err != nil {
+			if err := tx.QueryRow(t.Context(), `INSERT INTO principals(tenant_id,kind,name,roles) VALUES($1,$2,'Test',$3) RETURNING id::text`, p.TenantID, p.Kind, p.Roles).Scan(&p.ID); err != nil {
 				return err
 			}
 			for j := 1; j <= 3; j++ {
@@ -247,6 +252,8 @@ func TestUndoAuthorizationRestorationAndConflicts(t *testing.T) {
 	f := setup(t)
 	first := create(t, f, f.nodes[0], f.nodes[1], "blocks")
 	other := f.a
+	other.Kind = tenant.Agent
+	other.Roles = nil
 	err := db.InTenant(t.Context(), f.db.App, f.a.TenantID, func(tx pgx.Tx) error {
 		return tx.QueryRow(t.Context(), `INSERT INTO principals(tenant_id,kind,name) VALUES($1,'agent','Other') RETURNING id::text`, f.a.TenantID).Scan(&other.ID)
 	})
@@ -255,6 +262,14 @@ func TestUndoAuthorizationRestorationAndConflicts(t *testing.T) {
 	}
 	expect(t, request(f.handler, other, "POST", "/api/events/1/undo", ""), 403)
 	other.Roles = []string{"admin"}
+	expect(t, request(f.handler, other, "POST", "/api/events/1/undo", ""), 403)
+	other.Kind = tenant.Person
+	err = db.InTenant(t.Context(), f.db.App, f.a.TenantID, func(tx pgx.Tx) error {
+		return tx.QueryRow(t.Context(), `INSERT INTO principals(tenant_id,kind,name) VALUES($1,'person','Decider') RETURNING id::text`, f.a.TenantID).Scan(&other.ID)
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
 	expect(t, request(f.handler, other, "POST", "/api/events/1/undo", ""), 201)
 	ev := logEvents(t, f)
 	if len(ev) != 2 || ev[1].UndoOf == nil || *ev[1].UndoOf != 1 || ev[1].ActorPrincipalID != other.ID || string(ev[1].After) != "null" || !bytes.Equal(ev[1].Before, ev[0].After) {

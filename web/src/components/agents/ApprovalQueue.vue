@@ -11,7 +11,7 @@ import AppIcon from '../AppIcon.vue'
 // sees) and held action requests. Decided and expired requests fold into a history.
 type Held = ProjectMessage & { projectId: string }
 const props = defineProps<{
-  pending: Approval[]; held: Held[]; history: Approval[]; now: number; cursor: string; canDecide: boolean; loaded: boolean
+  pending: Approval[]; held: Held[]; history: Approval[]; now: number; cursor: string; canDecide: boolean; canDecideApproval: (approval: Approval) => boolean; loaded: boolean
   asker: (principalId: string) => Asker; resource: (approval: Approval) => Resource
   decide: (approval: Approval, decision: 'approved' | 'denied', reason: string) => Promise<void>
   revoke: (approval: Approval) => Promise<void>
@@ -30,6 +30,8 @@ const reasonField = ref<HTMLTextAreaElement[]>()
 
 async function begin(id: string, mode: Mode) {
   if (!props.canDecide || busy.value) return
+  const approval = props.pending.find(item => item.id === id)
+  if (approval && !props.canDecideApproval(approval)) return
   if (open.value?.id !== id) { reason.value = ''; error.value = '' }
   open.value = { id, mode }
   emit('focusRow', `${mode === 'resolve' || mode === 'dismiss' ? 'm' : 'a'}:${id}`)
@@ -135,7 +137,7 @@ defineExpose({ begin, cancel, isOpen: () => !!open.value })
             </div>
           </form>
         </div>
-        <div v-if="open?.id !== approval.id && canDecide" class="row-actions">
+        <div v-if="open?.id !== approval.id && canDecideApproval(approval)" class="row-actions">
           <button type="button" class="btn sm" aria-keyshortcuts="d" @click.stop="begin(approval.id, 'deny')"><AppIcon name="close" :size="13" />Deny</button>
           <button type="button" class="btn sm" :class="cursor === `a:${approval.id}` ? 'primary' : 'approve-soft'" aria-keyshortcuts="a" @click.stop="begin(approval.id, 'approve')"><AppIcon name="check" :size="13" />Approve</button>
         </div>

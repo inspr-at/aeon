@@ -224,12 +224,12 @@ func ApplyProfileBundle(ctx context.Context, pool *pgxpool.Pool, tenantID, actor
 				return err
 			}
 			if actorID == "" {
-				if err := tx.QueryRow(ctx, `SELECT id::text FROM principals WHERE kind='agent' AND name='Tenant bootstrap' ORDER BY created_at,id LIMIT 1`).Scan(&actorID); err != nil {
+				if err := tx.QueryRow(ctx, `SELECT id::text FROM principals WHERE kind='agent' AND 'operator'=ANY(roles) ORDER BY created_at,id LIMIT 1`).Scan(&actorID); err != nil {
 					return fmt.Errorf("operator actor unavailable; pass --actor-principal-id: %w", err)
 				}
 			}
 			var allowed bool
-			if err := tx.QueryRow(ctx, `SELECT EXISTS(SELECT 1 FROM principals WHERE id=$1::uuid AND (kind='agent' AND name='Tenant bootstrap' OR kind='person' AND 'admin'=ANY(roles)))`, actorID).Scan(&allowed); err != nil {
+			if err := tx.QueryRow(ctx, `SELECT EXISTS(SELECT 1 FROM principals WHERE id=$1::uuid AND (kind='agent' AND 'operator'=ANY(roles) OR kind='person' AND (roles && ARRAY['admin','super_admin']::text[])))`, actorID).Scan(&allowed); err != nil {
 				return err
 			}
 			if !allowed {

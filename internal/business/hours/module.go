@@ -97,7 +97,7 @@ func (m *Module) Mount(mux *http.ServeMux) {
 func fail(status int, message string) error { return workorders.Fail(status, message) }
 
 func admin(p tenant.Principal) bool {
-	return p.Kind == tenant.Person && slices.Contains(p.Roles, "admin")
+	return tenant.IsAdmin(p)
 }
 func (m *Module) gate(ctx context.Context, tx pgx.Tx, p tenant.Principal, operation string) error {
 	if m.registry == nil {

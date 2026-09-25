@@ -42,6 +42,10 @@ func (m *Module) handleUpdateTag(w http.ResponseWriter, r *http.Request) {
 		writeErr(w, err)
 		return
 	}
+	if patch.Name != nil && !tenant.IsAdmin(p) {
+		writeError(w, http.StatusForbidden, "admin required")
+		return
+	}
 	if patch.Name == nil && patch.Color == nil && patch.Description == nil {
 		writeErr(w, badRequest("patch is empty"))
 		return

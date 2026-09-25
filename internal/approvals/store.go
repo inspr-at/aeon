@@ -120,6 +120,9 @@ func (m *Module) decide(ctx context.Context, p tenant.Principal, id, decision, r
 		if err := requirePerson(ctx, tx, p, "only a person may decide a live approval"); err != nil {
 			return err
 		}
+		if !tenant.IsAdmin(p) && !(before.Risk != "high" && hasDecisionRole(p, "member")) {
+			return fail(http.StatusForbidden, "approval decision requires an authorized person")
+		}
 		var existing string
 		err = tx.QueryRow(ctx, `
 			SELECT decision FROM approval_decisions WHERE request_id = $1::uuid`, id).Scan(&existing)
@@ -239,6 +242,18 @@ func requirePerson(ctx context.Context, tx pgx.Tx, p tenant.Principal, msg strin
 		return fail(http.StatusForbidden, msg)
 	}
 	return err
+}
+
+func hasDecisionRole(p tenant.Principal, role string) bool {
+	if p.Kind != tenant.Person {
+		return false
+	}
+	for _, candidate := range p.Roles {
+		if candidate == role {
+			return true
+		}
+	}
+	return false
 }
 
 func verifyResource(ctx context.Context, tx pgx.Tx, agentID string, in proposal) error {
