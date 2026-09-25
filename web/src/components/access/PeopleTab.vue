@@ -258,11 +258,11 @@ async function link(personId: string) {
   /* Phones: each person is a small card: who, then role and status on a line. */
   .people thead { position: absolute; width: 1px; height: 1px; overflow: hidden; clip-path: inset(50%); }
   .people, .people tbody { display: block; }
-  .person { display: grid; grid-template-columns: minmax(0, 1fr) auto auto; grid-template-areas: "who who act" "role status status"; gap: 6px 8px; padding: 10px 0; border-bottom: 1px solid var(--line); }
+  .person { display: grid; grid-template-columns: minmax(0, 1fr) auto auto; grid-template-areas: "who who act" "role status status"; align-items: center; gap: 0 8px; padding: 8px 0 6px; border-bottom: 1px solid var(--line); }
   .people td { display: block; padding: 0; border: 0; }
   .people td.c-id, .people td.c-proj, .people td.c-last { display: none; }
   .c-person { grid-area: who; }
-  .c-role { grid-area: role; padding-left: 40px !important; }
+  .c-role { grid-area: role; padding-left: 32px !important; }
   .c-status { grid-area: status; justify-self: end; }
   .c-act { grid-area: act; width: auto; }
   .more { width: 44px; height: 44px; }

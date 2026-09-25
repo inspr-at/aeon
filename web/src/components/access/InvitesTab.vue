@@ -89,7 +89,9 @@ function again(invite: Invite) {
 .acts { display: flex; justify-content: flex-end; }
 .empty { padding: 18px 0; font-size: 13px; color: var(--ink-3); }
 @media (max-width: 760px) {
-  .seg { width: 100%; overflow-x: auto; }
+  /* Phones: the filters wrap onto a second row instead of hiding off the edge. */
+  .seg { width: 100%; flex-wrap: wrap; border-radius: 16px; }
+  .seg button { flex: 1 1 auto; white-space: nowrap; }
   .invite { grid-template-columns: 32px minmax(0, 1fr) auto; grid-template-areas: "icon text text" ". state acts"; row-gap: 8px; }
   .mail-icon { grid-area: icon; }
   .text { grid-area: text; }

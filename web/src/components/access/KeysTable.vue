@@ -20,9 +20,9 @@ const STATE: Record<string, string> = { active: 'Active', expired: 'Expired', re
         <tr v-for="key in keys" :key="key.id" :class="keyState(key)">
           <th v-if="showName" scope="row">{{ key.name }}<span class="sub">Created {{ relativeTime(key.created_at, { long: true }) }}</span></th>
           <td class="mono">aeon_{{ key.prefix }}_…<span v-if="!showName" class="sub">Created {{ relativeTime(key.created_at, { long: true }) }}</span></td>
-          <td><span v-if="!key.scopes.length" class="muted" data-tip="Everything the agent’s role allows">All of its role</span><span v-for="scope in key.scopes" :key="scope" class="scope mono">{{ scope }}</span></td>
-          <td><time v-if="key.last_used_at" :datetime="key.last_used_at" :data-tip="absoluteTime(key.last_used_at)">{{ relativeTime(key.last_used_at, { long: true }) }}</time><span v-else class="muted">Never</span></td>
-          <td><span class="state" :class="keyState(key)">{{ STATE[keyState(key)] }}</span><span v-if="key.expires_at && keyState(key) === 'active'" class="sub">until {{ absoluteTime(key.expires_at) }}</span></td>
+          <td data-label="Scopes"><span v-if="!key.scopes.length" class="muted" data-tip="Everything the agent’s role allows">All of its role</span><span v-for="scope in key.scopes" :key="scope" class="scope mono">{{ scope }}</span></td>
+          <td data-label="Last used"><time v-if="key.last_used_at" :datetime="key.last_used_at" :data-tip="absoluteTime(key.last_used_at)">{{ relativeTime(key.last_used_at, { long: true }) }}</time><span v-else class="muted">Never</span></td>
+          <td data-label="Status"><span class="state" :class="keyState(key)">{{ STATE[keyState(key)] }}</span><span v-if="key.expires_at && keyState(key) === 'active'" class="sub">until {{ absoluteTime(key.expires_at) }}</span></td>
           <td v-if="revocable" class="act">
             <button v-if="keyState(key) === 'active'" type="button" class="btn sm ghost danger-text" :aria-label="`Revoke key aeon_${key.prefix}`" @click="emit('revoke', key)"><AppIcon name="close" :size="12" />Revoke</button>
           </td>
@@ -52,6 +52,11 @@ tr.revoked, tr.expired { color: var(--ink-2); }
   .keys-table, .keys-table tbody, .keys-table tr, .keys-table th, .keys-table td { display: block; }
   .keys-table tr { padding: 8px 0; border-top: 1px solid var(--line); }
   .keys-table th, .keys-table td { padding: 2px 0; border: 0; }
+  /* Without the header row, each value says what it is. */
+  .keys-table td[data-label] { display: grid; grid-template-columns: 76px minmax(0, 1fr); align-items: baseline; gap: 8px; }
+  .keys-table td[data-label]::before { content: attr(data-label); font: 500 10.5px/1.6 var(--mono); letter-spacing: .1em; text-transform: uppercase; color: var(--ink-3); }
+  .keys-table td[data-label] > * { justify-self: start; }
+  .keys-table td[data-label] > .sub { grid-column: 2; }
   .act { text-align: left; padding-top: 6px; }
   .act .btn { height: 44px; }
 }

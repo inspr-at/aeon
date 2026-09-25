@@ -268,7 +268,9 @@ onMounted(() => { if (!props.role) void nextTick(() => document.getElementById('
   .head { flex-direction: column; }
   .head-acts { justify-content: flex-start; }
   .find { width: 100%; }
-  .seg { width: 100%; overflow-x: auto; }
+  /* Phones: the filters wrap onto a second row instead of hiding off the edge. */
+  .seg { width: 100%; display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); border-radius: 16px; }
+  .seg button { white-space: nowrap; }
 }
 @media (max-width: 600px) {
   .back { height: 44px; }

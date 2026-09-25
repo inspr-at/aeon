@@ -1,6 +1,6 @@
 <!-- SPDX-License-Identifier: AGPL-3.0-only -->
 <script setup lang="ts">
-import { computed, onMounted, ref, useId } from 'vue'
+import { computed, nextTick, onMounted, ref, useId, watch } from 'vue'
 import { LAST_OWNER_REASON, beyond, diff, effectLine, permissionLabel, type Permission, type Role } from '../../lib/access'
 import AppIcon from '../AppIcon.vue'
 import FloatingPanel from '../work/FloatingPanel.vue'
@@ -50,6 +50,8 @@ function keys(event: KeyboardEvent) {
 }
 function apply() { if (!changed.value || pickedReason.value || props.busy) return; emit('choose', picked.value === NONE ? null : picked.value) }
 onMounted(() => { document.getElementById(`${id}-${picked.value}`)?.focus() })
+// The preview grows when a role is picked; the picked role stays in view.
+watch(picked, () => void nextTick(() => document.getElementById(`${id}-${picked.value}`)?.scrollIntoView({ block: 'nearest' })))
 </script>
 
 <template>
@@ -98,7 +100,10 @@ onMounted(() => { document.getElementById(`${id}-${picked.value}`)?.focus() })
 </template>
 
 <style scoped>
-.picker { display: grid; gap: 8px; padding: 4px 4px 2px; }
+/* The choices scroll; what changes and the buttons always stay in view. */
+.picker { display: flex; flex-direction: column; gap: 8px; max-height: calc(var(--floating-max, 620px) - 14px); padding: 4px 4px 2px; }
+.picker > * { flex-shrink: 0; }
+.picker > .options { flex: 1 1 auto; min-height: 96px; }
 .title { padding: 2px 6px 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 .locked { display: grid; grid-template-columns: 14px 1fr; gap: 8px; margin: 0 2px; padding: 9px 10px; border-radius: 10px; background: var(--surface-2); font-size: 12.5px; line-height: 1.45; color: var(--ink-2); }
 .locked svg { margin-top: 2px; color: var(--teal-ink); }

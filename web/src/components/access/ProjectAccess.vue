@@ -109,7 +109,7 @@ watch(() => props.project.id, load)
     <div class="seg" role="radiogroup" aria-label="People to show">
       <button type="button" role="radio" :aria-checked="filter === 'all'" @click="filter = 'all'">Everyone<span class="n mono">{{ counts.all }}</span></button>
       <button type="button" role="radio" :aria-checked="filter === 'project'" @click="filter = 'project'">Project role<span class="n mono">{{ counts.project }}</span></button>
-      <button type="button" role="radio" :aria-checked="filter === 'workspace'" @click="filter = 'workspace'">Through the workspace<span class="n mono">{{ counts.workspace }}</span></button>
+      <button type="button" role="radio" :aria-checked="filter === 'workspace'" @click="filter = 'workspace'" data-tip="Their workspace role reaches this project">Workspace<span class="n mono">{{ counts.workspace }}</span></button>
     </div>
     <div v-if="!rows && !error" class="set-skeleton" role="status" aria-label="Loading project access"><span class="skeleton" /><span class="skeleton" /><span class="skeleton" /></div>
     <p v-else-if="error" class="set-note error" role="alert"><AppIcon name="alert" :size="14" />{{ error }}<button type="button" class="btn sm" @click="load">Try again</button></p>
@@ -174,7 +174,8 @@ a.m-name:hover { color: var(--teal-ink); }
 @media (max-width: 760px) {
   .head { flex-wrap: wrap; }
   .head .btn { width: 100%; justify-content: center; }
-  .seg { width: 100%; overflow-x: auto; }
+  .seg { width: 100%; overflow-x: auto; scrollbar-width: none; }
+  .seg button { flex-shrink: 0; white-space: nowrap; }
 }
 @media (max-width: 600px) {
   .member { grid-template-columns: 30px minmax(0, 1fr) 44px; grid-template-areas: "av text act" ". role role"; row-gap: 4px; padding: 8px 0; }

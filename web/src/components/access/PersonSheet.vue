@@ -161,10 +161,10 @@ onMounted(async () => {
 
     <section v-if="manage" class="block" aria-labelledby="life-h">
       <h3 id="life-h" class="eyebrow">Sign-in</h3>
-      <template v-if="person.status === 'active'">
+      <p v-if="person.status === 'active' && last" class="note"><AppIcon name="shield" :size="14" /><span>{{ first }} is the last active owner, so {{ first }} stays signed in and cannot be deactivated. Make another person an owner first.</span></p>
+      <template v-else-if="person.status === 'active'">
         <p class="effect">Deactivating signs {{ first }} out everywhere and revokes their keys. Their work and history stay.</p>
-        <button type="button" class="btn sm danger" :disabled="last" :aria-describedby="last ? 'deactivate-why' : undefined" @click="deactivate"><AppIcon name="stop" :size="13" />Deactivate {{ first }}</button>
-        <p v-if="last" id="deactivate-why" class="why">{{ LAST_OWNER_REASON }}</p>
+        <button type="button" class="btn sm danger" @click="deactivate"><AppIcon name="stop" :size="13" />Deactivate {{ first }}</button>
       </template>
       <template v-else>
         <p class="effect">{{ first }} cannot sign in. Reactivating brings back their roles and projects as they were.</p>
@@ -213,6 +213,5 @@ onMounted(async () => {
 .aliases .mono { font-size: 12.5px; }
 .src { flex: 1; font-size: 12px; color: var(--ink-3); }
 .btn.danger { justify-self: start; }
-.why { font-size: 12.5px; line-height: 1.45; color: var(--ink-2); }
 @media (max-width: 600px) { .projects li { min-height: 52px; } .role-btn { height: 40px; } .remove { width: 44px; height: 44px; } .block .btn { height: 44px; } }
 </style>

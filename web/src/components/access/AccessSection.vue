@@ -103,7 +103,9 @@ h2 { font: 600 15px/1.35 var(--font); color: var(--ink); }
 .panel { display: grid; grid-template-columns: minmax(0, 1fr); margin-top: 16px; min-width: 0; }
 @media (max-width: 600px) {
   .access-card { padding: 16px 12px 12px; }
-  .tabs { margin: 14px -2px 0; }
-  .tab { height: 44px; flex: 0 0 auto; }
+  /* Phones: all six tabs in view, three to a row. */
+  .tabs { display: grid; grid-template-columns: repeat(3, minmax(0, 1fr)); margin: 14px -2px 0; overflow: visible; }
+  .tab { height: 44px; padding: 0 6px; gap: 5px; font-size: 12.5px; }
+  .tab .n { display: none; }
 }
 </style>
