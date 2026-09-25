@@ -164,7 +164,13 @@ func TestImportedDraftRoundTrip(t *testing.T) {
 		request = request.WithContext(tenant.WithPrincipal(request.Context(), principal))
 		response = httptest.NewRecorder()
 		mux.ServeHTTP(response, request)
-		if response.Code != 400 || !strings.Contains(response.Body.String(), `"document.sections.nodes.marker_x_mm"`) {
+		var refused struct {
+			Errors map[string]string `json:"errors"`
+		}
+		if err := json.Unmarshal(response.Body.Bytes(), &refused); err != nil {
+			t.Fatal(err)
+		}
+		if response.Code != 400 || refused.Errors["document.sections[0].nodes[0].marker_x_mm"] != "must be string" {
 			t.Fatalf("field validation %d: %s", response.Code, response.Body.String())
 		}
 		// Simulate the pre-fix imported row, including its import event, then

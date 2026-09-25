@@ -102,7 +102,7 @@ func decodeDocument(raw []byte) (quoteDocument, error) {
 	if err := dec.Decode(&d); err != nil {
 		var typeError *json.UnmarshalTypeError
 		if errors.As(err, &typeError) {
-			return d, badField("document."+typeError.Field, "must be "+typeError.Type.String())
+			return d, badField(documentFieldPath(raw, typeError.Field, typeError.Value), "must be "+typeError.Type.String())
 		}
 		if field, ok := strings.CutPrefix(err.Error(), `json: unknown field "`); ok {
 			return d, badField("document."+strings.TrimSuffix(field, `"`), "unsupported field")
@@ -131,6 +131,70 @@ func decodeDocument(raw []byte) (quoteDocument, error) {
 		return d, badField("document.profile", "invalid profile snapshot")
 	}
 	return d, nil
+}
+
+// encoding/json omits array indices from UnmarshalTypeError.Field. Restore
+// them so the editor can take a refused save to the affected section or row.
+func documentFieldPath(raw []byte, field, valueKind string) string {
+	fallback := "document." + field
+	var root any
+	if err := json.Unmarshal(raw, &root); err != nil {
+		return fallback
+	}
+	parts := strings.Split(field, ".")
+	var find func(any, int, string) string
+	find = func(value any, depth int, path string) string {
+		if depth == len(parts) {
+			switch valueKind {
+			case "number":
+				if _, ok := value.(float64); ok {
+					return path
+				}
+			case "string":
+				if _, ok := value.(string); ok {
+					return path
+				}
+			case "bool":
+				if _, ok := value.(bool); ok {
+					return path
+				}
+			case "object":
+				if _, ok := value.(map[string]any); ok {
+					return path
+				}
+			case "array":
+				if _, ok := value.([]any); ok {
+					return path
+				}
+			case "null":
+				if value == nil {
+					return path
+				}
+			}
+			return ""
+		}
+		if list, ok := value.([]any); ok {
+			for index, item := range list {
+				if found := find(item, depth, fmt.Sprintf("%s[%d]", path, index)); found != "" {
+					return found
+				}
+			}
+			return ""
+		}
+		object, ok := value.(map[string]any)
+		if !ok {
+			return ""
+		}
+		child, ok := object[parts[depth]]
+		if !ok {
+			return ""
+		}
+		return find(child, depth+1, path+"."+parts[depth])
+	}
+	if found := find(root, 0, "document"); found != "" {
+		return found
+	}
+	return fallback
 }
 
 // Inline marks are part of the full-document write contract introduced by

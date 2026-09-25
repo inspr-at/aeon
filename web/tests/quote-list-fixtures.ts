@@ -58,7 +58,7 @@ export function quoteWorld(options: { empty?: boolean } = {}) {
     row(Q.big, 10, 'Plattform für Patient:innen-Termine mit Anbindung an das Krankenhausinformationssystem', NORDSTERN, 'Klinik Nordstern', 'issued', 7430000, iso(-20), iso(10), { issued_at: stamp(-20) }),
     row(Q.lumen, 8, 'Website Refresh', LUMEN, 'Atelier Lumen', 'draft', undefined, iso(-45), iso(-15)),
   ]
-  const drafts = new Map<string, { document: QuoteDoc; revision: number }>()
+  const drafts = new Map<string, { document: QuoteDoc; revision: number; base?: number }>()
   const versions = new Map<string, Version[]>()
   for (const r of rows) {
     const cents = r.net_total_cents
@@ -140,7 +140,8 @@ export async function mockQuotes(page: Page, world: QuoteWorld, options: QuoteMo
         r.title = write.document.title; r.updated_at = new Date().toISOString()
         return route.fulfill({ json: { mutation_id: write.mutation_id, acknowledged_revision: draft.revision, acknowledged_quote_revision: r.revision, current_revision: draft.revision, current_quote_revision: r.revision, replayed: false, document: draft.document, document_sha256: 'b'.repeat(64), updated_at: new Date().toISOString(), updated_by_principal_id: me.id } })
       }
-      return route.fulfill({ json: { document: draft.document, document_sha256: `${'d'.repeat(60)}${String(draft.revision).padStart(4, '0')}`, draft_revision: draft.revision, quote_revision: r.revision, schema_version: 1, minimum_writer_version: 1, base_version: r.current_version, updated_at: r.updated_at, updated_by_principal_id: me.id } })
+      // As the server: the version this draft was branched from (0 for the first draft).
+      return route.fulfill({ json: { document: draft.document, document_sha256: `${'d'.repeat(60)}${String(draft.revision).padStart(4, '0')}`, draft_revision: draft.revision, quote_revision: r.revision, schema_version: 1, minimum_writer_version: 1, base_version: draft.base ?? 0, updated_at: r.updated_at, updated_by_principal_id: me.id } })
     }
     if (rest === 'finalize' && method === 'POST') {
       if ((options.role ?? 'admin') !== 'admin') return route.fulfill({ status: 403, json: { error: 'quote operation is not available' } })
@@ -158,7 +159,7 @@ export async function mockQuotes(page: Page, world: QuoteWorld, options: QuoteMo
       const current = list.find(v => v.version === r.current_version)
       if (body.expected_quote_revision !== r.revision || body.expected_version !== r.current_version || body.expected_content_sha256 !== current?.content_sha256) return route.fulfill({ status: 409, json: { error: 'quote cannot branch from this version' } })
       Object.assign(r, { state: 'draft', classic_status: 'draft', revision: r.revision + 1 })
-      draft.document = structuredClone(current!.document); draft.revision++
+      draft.document = structuredClone(current!.document); draft.revision++; draft.base = r.current_version
       return route.fulfill({ json: { document: draft.document, draft_revision: draft.revision } })
     }
     if (rest === 'duplicate' && method === 'POST') {
@@ -186,7 +187,7 @@ export async function mockQuotes(page: Page, world: QuoteWorld, options: QuoteMo
       if (snapshot) doc.profile = structuredClone(snapshot)
       else delete doc.profile
       draft.revision++; r.revision++
-      return route.fulfill({ json: { document: draft.document, document_sha256: `${'d'.repeat(60)}${String(draft.revision).padStart(4, '0')}`, draft_revision: draft.revision, quote_revision: r.revision, schema_version: 1, minimum_writer_version: 1, base_version: r.current_version, updated_at: new Date().toISOString(), updated_by_principal_id: me.id } })
+      return route.fulfill({ json: { document: draft.document, document_sha256: `${'d'.repeat(60)}${String(draft.revision).padStart(4, '0')}`, draft_revision: draft.revision, quote_revision: r.revision, schema_version: 1, minimum_writer_version: 1, base_version: draft.base ?? 0, updated_at: new Date().toISOString(), updated_by_principal_id: me.id } })
     }
     if (rest === 'versions') return route.fulfill({ json: list })
     const v = /^versions\/(\d+)(?:\/(.*))?$/.exec(rest)

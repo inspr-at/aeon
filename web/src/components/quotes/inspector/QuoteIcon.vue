@@ -5,9 +5,9 @@ import type { BizIconName } from '../../business/BizIcon.vue'
 // joins, currentColor, centred. Any other name is drawn by BizIcon/AppIcon.
 export type QuoteGlyph = 'bold' | 'italic' | 'clear-format' | 'list-none' | 'list-bullet' | 'list-numbered' | 'indent' | 'outdent'
   | 'undo' | 'redo' | 'sidebar' | 'section-add' | 'page-break' | 'fit-width' | 'fit-page' | 'list-continue' | 'list-restart' | 'list-follow' | 'reset' | 'arrow-up' | 'arrow-down' | 'save' | 'check-circle'
-  | 'bullet-disc' | 'bullet-circle' | 'bullet-square' | 'dash'
+  | 'bullet-disc' | 'bullet-circle' | 'bullet-square' | 'dash' | 'offline'
 export type QuoteIconName = QuoteGlyph | BizIconName
-const GLYPHS = new Set<string>(['bold', 'italic', 'clear-format', 'list-none', 'list-bullet', 'list-numbered', 'indent', 'outdent', 'undo', 'redo', 'sidebar', 'section-add', 'page-break', 'fit-width', 'fit-page', 'list-continue', 'list-restart', 'list-follow', 'reset', 'arrow-up', 'arrow-down', 'save', 'check-circle', 'bullet-disc', 'bullet-circle', 'bullet-square', 'dash'])
+const GLYPHS = new Set<string>(['bold', 'italic', 'clear-format', 'list-none', 'list-bullet', 'list-numbered', 'indent', 'outdent', 'undo', 'redo', 'sidebar', 'section-add', 'page-break', 'fit-width', 'fit-page', 'list-continue', 'list-restart', 'list-follow', 'reset', 'arrow-up', 'arrow-down', 'save', 'check-circle', 'bullet-disc', 'bullet-circle', 'bullet-square', 'dash', 'offline'])
 </script>
 <script setup lang="ts">
 import BizIcon from '../../business/BizIcon.vue'
@@ -43,6 +43,7 @@ withDefaults(defineProps<{ name: QuoteIconName; size?: number }>(), { size: 16 }
     <path v-else-if="name === 'dash'" d="M4.8 8h6.4" />
     <path v-else-if="name === 'save'" d="M3.6 2.6h7.6l2.2 2.2v7.8c0 .4-.4.8-.8.8H3.6c-.4 0-.8-.4-.8-.8V3.4c0-.4.4-.8.8-.8ZM5.4 2.6v3h4.4v-3M5 13.4V9.6h6v3.8" />
     <template v-else-if="name === 'check-circle'"><circle cx="8" cy="8" r="5.8" /><path d="m5.6 8.1 1.7 1.7 3.2-3.3" /></template>
+    <path v-else-if="name === 'offline'" d="M5.2 5.3A3.9 3.9 0 0 0 4.4 12.4h6.9M12.9 11.9a2.8 2.8 0 0 0-1.6-5.1 4 4 0 0 0-3.8-2.9M2.6 2.6l10.8 10.8" />
     <path v-else d="M8 3v10M4.2 9.2 8 13l3.8-3.8" />
   </svg>
   <BizIcon v-else :name="name as BizIconName" :size="size" />

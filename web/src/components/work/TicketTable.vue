@@ -104,7 +104,12 @@ const phoneQuery = window.matchMedia('(max-width: 720px)')
 const phoneChange = () => { phone.value = phoneQuery.matches }
 onMounted(() => {
   phoneChange(); phoneQuery.addEventListener('change', phoneChange)
-  if (card.value) { sizer = new ResizeObserver(([entry]) => { width.value = entry.contentRect.width }); sizer.observe(card.value) }
+  if (card.value) {
+    // The first fit happens before paint, so the columns never jump into place.
+    const box = getComputedStyle(card.value)
+    width.value = card.value.clientWidth - parseFloat(box.paddingLeft) - parseFloat(box.paddingRight)
+    sizer = new ResizeObserver(([entry]) => { width.value = entry.contentRect.width }); sizer.observe(card.value)
+  }
 })
 onBeforeUnmount(() => { phoneQuery.removeEventListener('change', phoneChange); sizer?.disconnect() })
 // ---------- Column widths: drag a header edge, double-click to fit the content ----------
