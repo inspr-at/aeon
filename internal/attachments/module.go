@@ -15,6 +15,7 @@ import (
 	"net/http"
 	"path"
 	"regexp"
+	"slices"
 	"strings"
 	"time"
 
@@ -72,6 +73,10 @@ func principal(w http.ResponseWriter, r *http.Request) (tenant.Principal, bool) 
 	p, ok := tenant.PrincipalFrom(r.Context())
 	if !ok || !uuid(p.ID) || !uuid(p.TenantID) {
 		httpapi.WriteError(w, 401, "unauthorized")
+		return p, false
+	}
+	if p.Kind != tenant.Person || (!slices.Contains(p.Roles, "admin") && !slices.Contains(p.Roles, "member")) {
+		httpapi.WriteError(w, 403, "staff access required")
 		return p, false
 	}
 	return p, true

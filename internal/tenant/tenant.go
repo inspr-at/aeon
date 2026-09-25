@@ -21,6 +21,7 @@ type Principal struct {
 	Kind     PrincipalKind
 	Name     string
 	Roles    []string // e.g. "admin", "member"
+	Scopes   []string // authenticated agent key's outer permission ceiling
 }
 
 type ctxKey struct{}

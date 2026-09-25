@@ -50,7 +50,7 @@ func TestImportStatusTenantPagination(t *testing.T) {
 	request := func(path string) *httptest.ResponseRecorder {
 		t.Helper()
 		req := httptest.NewRequest(http.MethodGet, path, nil)
-		req = req.WithContext(tenant.WithPrincipal(req.Context(), tenant.Principal{ID: principalID, TenantID: tenantID}))
+		req = req.WithContext(tenant.WithPrincipal(req.Context(), tenant.Principal{ID: principalID, TenantID: tenantID, Kind: tenant.Person, Roles: []string{"admin"}}))
 		w := httptest.NewRecorder()
 		mux.ServeHTTP(w, req)
 		return w
@@ -83,5 +83,25 @@ func TestImportStatusTenantPagination(t *testing.T) {
 	foreign := request("/api/imports/" + hiddenID)
 	if foreign.Code != http.StatusNotFound {
 		t.Fatalf("cross-tenant import status=%d body=%s", foreign.Code, foreign.Body.String())
+	}
+}
+
+func TestImportStatusRejectsNonAdminsBeforeDatabaseAccess(t *testing.T) {
+	mux := http.NewServeMux()
+	(&Module{}).Mount(mux)
+	for _, path := range []string{"/api/imports", "/api/imports/aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa"} {
+		for _, actor := range []tenant.Principal{
+			{Kind: tenant.Person, Roles: []string{"member"}},
+			{Kind: tenant.Person, Roles: []string{"customer"}},
+			{Kind: tenant.Agent, Roles: []string{"admin"}},
+		} {
+			req := httptest.NewRequest(http.MethodGet, path, nil)
+			req = req.WithContext(tenant.WithPrincipal(req.Context(), actor))
+			rec := httptest.NewRecorder()
+			mux.ServeHTTP(rec, req)
+			if rec.Code != http.StatusForbidden {
+				t.Errorf("%s %s: got %d", path, actor.Kind, rec.Code)
+			}
+		}
 	}
 }

@@ -8,6 +8,7 @@ import (
 	"errors"
 	"fmt"
 	"net/http"
+	"slices"
 	"strconv"
 	"time"
 
@@ -36,9 +37,8 @@ type pageCursor struct {
 }
 
 func (m *Module) list(w http.ResponseWriter, r *http.Request) {
-	p, ok := tenant.PrincipalFrom(r.Context())
+	p, ok := importAdmin(w, r)
 	if !ok {
-		httpapi.WriteError(w, http.StatusUnauthorized, "authentication required")
 		return
 	}
 	limit, err := parseLimit(r.URL.Query().Get("limit"))
@@ -103,9 +103,8 @@ func (m *Module) list(w http.ResponseWriter, r *http.Request) {
 }
 
 func (m *Module) get(w http.ResponseWriter, r *http.Request) {
-	p, ok := tenant.PrincipalFrom(r.Context())
+	p, ok := importAdmin(w, r)
 	if !ok {
-		httpapi.WriteError(w, http.StatusUnauthorized, "authentication required")
 		return
 	}
 	id := r.PathValue("importId")
@@ -132,6 +131,19 @@ func (m *Module) get(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	httpapi.WriteJSON(w, http.StatusOK, result)
+}
+
+func importAdmin(w http.ResponseWriter, r *http.Request) (tenant.Principal, bool) {
+	p, ok := tenant.PrincipalFrom(r.Context())
+	if !ok {
+		httpapi.WriteError(w, http.StatusUnauthorized, "authentication required")
+		return p, false
+	}
+	if p.Kind != tenant.Person || !slices.Contains(p.Roles, "admin") {
+		httpapi.WriteError(w, http.StatusForbidden, "administrator required")
+		return p, false
+	}
+	return p, true
 }
 
 func parseLimit(raw string) (int, error) {

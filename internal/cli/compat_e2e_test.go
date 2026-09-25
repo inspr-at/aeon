@@ -470,7 +470,7 @@ func mintAgent(t *testing.T, base, name string) mintedKey {
 	if err := json.Unmarshal(raw, &me); err != nil {
 		t.Fatal(err)
 	}
-	status, raw = doJSON(t, hc, http.MethodPost, base+"/api/agent-keys", `{"name":"`+name+`","scopes":["inbox.send"]}`, nil)
+	status, raw = doJSON(t, hc, http.MethodPost, base+"/api/agent-keys", `{"name":"`+name+`","scopes":["inbox.send","nodes:read","nodes:write","nodes:configure","relations:read","relations:write","events:read","events:undo","search:read","views:read","views:write"]}`, nil)
 	if status != http.StatusCreated {
 		t.Fatalf("agent key %s %d %s", name, status, raw)
 	}

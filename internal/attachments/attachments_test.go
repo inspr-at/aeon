@@ -50,6 +50,8 @@ func setup(t *testing.T) (*dbtest.DB, tenant.Principal, string) {
 	if err != nil {
 		t.Fatal(err)
 	}
+	p.Kind = tenant.Person
+	p.Roles = []string{"member"}
 	return d, p, p.Name
 }
 func request(t *testing.T, h http.Handler, p tenant.Principal, method, path, ct string, body io.Reader) *httptest.ResponseRecorder {
@@ -61,6 +63,29 @@ func request(t *testing.T, h http.Handler, p tenant.Principal, method, path, ct 
 	w := httptest.NewRecorder()
 	h.ServeHTTP(w, r)
 	return w
+}
+
+func TestAttachmentRoutesRejectCustomersAndAgents(t *testing.T) {
+	mux := http.NewServeMux()
+	New(nil, Store{}).Mount(mux)
+	id := "aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa"
+	for _, route := range []struct{ method, path string }{
+		{"GET", "/api/nodes/" + id + "/attachments"},
+		{"POST", "/api/nodes/" + id + "/attachments"},
+		{"PATCH", "/api/attachments/" + id},
+		{"DELETE", "/api/attachments/" + id},
+		{"GET", "/api/attachments/" + id + "/content"},
+	} {
+		for _, actor := range []tenant.Principal{
+			{ID: id, TenantID: id, Kind: tenant.Person, Roles: []string{"customer"}},
+			{ID: id, TenantID: id, Kind: tenant.Agent, Roles: []string{"admin"}},
+		} {
+			rec := request(t, mux, actor, route.method, route.path, "", nil)
+			if rec.Code != http.StatusForbidden {
+				t.Errorf("%s %s %s: got %d", route.method, route.path, actor.Kind, rec.Code)
+			}
+		}
+	}
 }
 func fixturePNG(t *testing.T) []byte {
 	t.Helper()
@@ -163,6 +188,8 @@ func TestUploadDedupeVariantsETagIsolationUndoAndOps(t *testing.T) {
 	}); err != nil {
 		t.Fatal(err)
 	}
+	foreign.Kind = tenant.Person
+	foreign.Roles = []string{"member"}
 	w = request(t, mux, foreign, "GET", "/api/attachments/"+a.ID+"/content", "", nil)
 	if w.Code != 404 {
 		t.Fatalf("cross tenant %d", w.Code)
@@ -247,6 +274,19 @@ func TestLimitSniffAndPatchPrecondition(t *testing.T) {
 	w = request(t, mux, p, "GET", "/api/attachments/"+fake[0].ID+"/content", "", nil)
 	if w.Code != 200 || !strings.HasPrefix(w.Header().Get("Content-Disposition"), "attachment") || w.Header().Get("X-Content-Type-Options") != "nosniff" {
 		t.Fatalf("opaque download %d %q", w.Code, w.Header().Get("Content-Disposition"))
+	}
+	ct, b = multipartFile(t, "active.pdf", []byte("%PDF-1.7\n1 0 obj\n<< /Type /Catalog >>\nendobj\n"))
+	w = request(t, mux, p, "POST", "/api/nodes/"+node+"/attachments", ct, b)
+	if w.Code != 201 {
+		t.Fatalf("pdf upload %d %s", w.Code, w.Body.String())
+	}
+	var pdf []Attachment
+	if err := json.Unmarshal(w.Body.Bytes(), &pdf); err != nil || len(pdf) != 1 {
+		t.Fatalf("pdf body %v %s", err, w.Body.String())
+	}
+	w = request(t, mux, p, "GET", "/api/attachments/"+pdf[0].ID+"/content", "", nil)
+	if w.Code != 200 || !strings.HasPrefix(w.Header().Get("Content-Disposition"), "attachment") || !strings.Contains(w.Header().Get("Content-Security-Policy"), "sandbox") {
+		t.Fatalf("pdf served without download isolation: %d %q", w.Code, w.Header().Get("Content-Disposition"))
 	}
 	ct, b = multipartFile(t, "note.txt", []byte("hello"))
 	w = request(t, mux, p, "POST", "/api/nodes/"+node+"/attachments", ct, b)

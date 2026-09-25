@@ -6,11 +6,14 @@ package auth
 import (
 	"context"
 	"net/http"
+	"slices"
+	"strconv"
 	"strings"
 	"sync"
 
 	"github.com/coreos/go-oidc/v3/oidc"
 	"github.com/jackc/pgx/v5"
+	"github.com/jackc/pgx/v5/pgtype"
 	"github.com/jackc/pgx/v5/pgxpool"
 	"golang.org/x/oauth2"
 
@@ -115,8 +118,90 @@ func (m *Module) Middleware(next http.Handler) http.Handler {
 			}
 			return
 		}
+		if kind == credSession && p.Kind == tenant.Person && !slices.Contains(p.Roles, "admin") && !slices.Contains(p.Roles, "member") && !customerRouteAllowed(r, p) {
+			httpapi.WriteError(w, http.StatusForbidden, "customer access denied")
+			return
+		}
+		if kind == credAgent {
+			if scope, controlled := coreAgentScope(r); controlled && (scope == "" || !slices.Contains(p.Scopes, scope)) {
+				httpapi.WriteError(w, http.StatusForbidden, "agent key scope required")
+				return
+			}
+		}
 		next.ServeHTTP(w, r)
 	})
+}
+
+func validRouteUUID(s string) bool {
+	var id pgtype.UUID
+	return len(s) == 36 && id.Scan(s) == nil && id.Valid
+}
+
+// Customer sessions may access only their own profile and quote handlers that
+// independently verify the contact binding and frozen recipient digest.
+func customerRouteAllowed(r *http.Request, p tenant.Principal) bool {
+	if isPublicAPI(r.URL.Path) || r.URL.Path == "/api/me" && r.Method == http.MethodGet {
+		return true
+	}
+	if r.URL.Path == "/api/me/greeting" && r.Method == http.MethodGet || r.URL.Path == "/api/me/profile" && (r.Method == http.MethodGet || r.Method == http.MethodPatch) || r.URL.Path == "/api/me/avatar" && (r.Method == http.MethodPost || r.Method == http.MethodDelete) {
+		return true
+	}
+	parts := strings.Split(strings.Trim(r.URL.Path, "/"), "/")
+	if len(parts) == 5 && parts[0] == "api" && parts[1] == "people" && parts[2] == p.ID && parts[3] == "avatar" && r.Method == http.MethodGet {
+		return true
+	}
+	if len(parts) < 3 || parts[0] != "api" || parts[1] != "quotes" || !validRouteUUID(parts[2]) {
+		return false
+	}
+	if len(parts) == 3 {
+		return r.Method == http.MethodGet
+	}
+	if len(parts) < 5 || parts[3] != "versions" {
+		return false
+	}
+	version, err := strconv.Atoi(parts[4])
+	if err != nil || version < 1 {
+		return false
+	}
+	if len(parts) == 5 {
+		return r.Method == http.MethodGet
+	}
+	return len(parts) == 6 && (parts[5] == "accept" && r.Method == http.MethodPost || parts[5] == "export" && r.Method == http.MethodGet)
+}
+
+// General work APIs predate module-local agent grants. Apply key scopes before
+// they reach those handlers; specialised agent modules keep their own checks.
+func coreAgentScope(r *http.Request) (string, bool) {
+	path := r.URL.Path
+	read := r.Method == http.MethodGet || r.Method == http.MethodHead
+	scope := func(resource string) (string, bool) {
+		if read {
+			return resource + ":read", true
+		}
+		return resource + ":write", true
+	}
+	switch {
+	case path == "/api/projects", path == "/api/nodes", strings.HasPrefix(path, "/api/nodes/"), strings.HasPrefix(path, "/api/node-keys/"):
+		return scope("nodes")
+	case path == "/api/kinds", strings.HasPrefix(path, "/api/kinds/"):
+		if !read {
+			return "nodes:configure", true
+		}
+		return "nodes:read", true
+	case path == "/api/relations", strings.HasPrefix(path, "/api/relations/"):
+		return scope("relations")
+	case path == "/api/events", strings.HasPrefix(path, "/api/events/"):
+		if read {
+			return "events:read", true
+		}
+		return "events:undo", true
+	case path == "/api/search":
+		return "search:read", true
+	case path == "/api/views", strings.HasPrefix(path, "/api/views/"), strings.HasPrefix(path, "/api/preferences/"):
+		return scope("views")
+	default:
+		return "", false
+	}
 }
 
 func isPublicAPI(path string) bool {
