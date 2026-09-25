@@ -550,13 +550,14 @@ paths:
     parameters: [{$ref: '#/components/parameters/NodeId'}]
     get:
       operationId: listNodeAttachments
+      description: Tenant staff people only.
       security: *auth
       responses:
         '200': {description: Live attachments ordered by position and ID, content: {application/json: {schema: {type: array, items: {$ref: '#/components/schemas/Attachment'}}}}}
         '404': {$ref: '#/components/responses/Error'}
     post:
       operationId: addNodeAttachments
-      description: Multipart files (repeat the file field) with optional caption, or a raw image body with X-Filename. Each file is limited by the server's configured maximum (50 MiB by default).
+      description: Tenant staff people only. Multipart files (repeat the file field) with optional caption, or a raw image body with X-Filename. Each file is limited by the server's configured maximum (50 MiB by default).
       security: *auth
       requestBody:
         required: true
@@ -576,7 +577,7 @@ paths:
     parameters: [{name: id, in: path, required: true, schema: {type: string, format: uuid}}]
     patch:
       operationId: updateAttachment
-      description: Optional If-Unmodified-Since compares the exact updated_at timestamp under row lock; stale writes return 412.
+      description: Tenant staff people only. Optional If-Unmodified-Since compares the exact updated_at timestamp under row lock; stale writes return 412.
       security: *auth
       parameters: [{name: If-Unmodified-Since, in: header, schema: {type: string}}]
       requestBody: {required: true, content: {application/json: {schema: {type: object, minProperties: 1, additionalProperties: false, properties: {caption: {type: string}, position: {type: string, description: Decimal rank}}}}}}
@@ -587,6 +588,7 @@ paths:
         '412': {$ref: '#/components/responses/Error'}
     delete:
       operationId: removeAttachment
+      description: Tenant staff people only.
       security: *auth
       responses:
         '204': {description: Soft deleted}
@@ -595,6 +597,7 @@ paths:
     parameters: [{name: id, in: path, required: true, schema: {type: string, format: uuid}}]
     get:
       operationId: getAttachmentContent
+      description: Tenant staff people only.
       security: *auth
       parameters: [{name: variant, in: query, schema: {type: string, enum: [original, preview, thumb], default: original}}]
       responses:
@@ -947,6 +950,7 @@ paths:
   /imports:
     get:
       operationId: listImports
+      description: Tenant administrator only; import source names and failure summaries are operator data.
       security: *auth
       parameters:
         - {$ref: '#/components/parameters/Limit'}
@@ -958,6 +962,7 @@ paths:
     parameters: [{$ref: '#/components/parameters/ImportId'}]
     get:
       operationId: getImport
+      description: Tenant administrator only.
       security: *auth
       responses:
         '200':
@@ -2034,7 +2039,7 @@ paths:
   /quote-profiles/assets/{assetId}:
     get:
       operationId: getQuoteProfileAsset
-      summary: Serve an immutable profile asset same origin
+      summary: Serve an immutable profile asset to tenant staff
       security: [{session: []}]
       parameters: [{name: assetId, in: path, required: true, schema: {type: string, format: uuid}}]
       responses:

@@ -54,6 +54,17 @@ func TestProfileGeometryAndSVGValidation(t *testing.T) {
 	}
 }
 
+func TestProfileAssetRejectsCustomerBeforeDatabaseAccess(t *testing.T) {
+	id := "aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa"
+	req := httptest.NewRequest(http.MethodGet, "/api/quote-profiles/assets/"+id, nil)
+	req = req.WithContext(tenant.WithPrincipal(req.Context(), tenant.Principal{ID: id, TenantID: id, Kind: tenant.Person, Roles: []string{"customer"}}))
+	rec := httptest.NewRecorder()
+	(&Module{}).profileAssetGet(rec, req)
+	if rec.Code != http.StatusForbidden {
+		t.Fatalf("customer profile asset status %d", rec.Code)
+	}
+}
+
 func TestProfileRevisionsAssetsAndTenantIsolation(t *testing.T) {
 	t.Setenv("AEON_FILES_DIR", t.TempDir())
 	database := dbtest.Open(t)

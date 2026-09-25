@@ -11,6 +11,7 @@ import (
 	"strings"
 	"sync"
 	"testing"
+	"time"
 
 	"github.com/inspr-at/aeon/internal/attachments"
 	"github.com/inspr-at/aeon/internal/business/quotes"
@@ -42,6 +43,75 @@ func TestLinkManagementRequiresAdmin(t *testing.T) {
 			mux.ServeHTTP(rec, request)
 			if rec.Code != http.StatusForbidden {
 				t.Errorf("%s %s: %d", route.method, route.path, rec.Code)
+			}
+		}
+	}
+}
+
+func TestPublicSelectorResolverObeysForceRLS(t *testing.T) {
+	database := dbtest.Open(t)
+	ctx := t.Context()
+	tenantID := "aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa"
+	selector := strings.Repeat("s", 32)
+	if err := db.InTenant(ctx, database.App, tenantID, func(tx pgx.Tx) error {
+		if _, err := tx.Exec(ctx, `INSERT INTO tenants(id,slug,name) VALUES($1::uuid,'selector-rls','Selector RLS')`, tenantID); err != nil {
+			return err
+		}
+		_, err := tx.Exec(ctx, `INSERT INTO quote_public_tenant_selectors(tenant_id,selector) VALUES($1::uuid,$2)`, tenantID, selector)
+		return err
+	}); err != nil {
+		t.Fatal(err)
+	}
+	var resolved *string
+	if err := database.App.QueryRow(ctx, `SELECT aeon_resolve_quote_public_tenant($1)::text`, selector).Scan(&resolved); err != nil || resolved != nil {
+		t.Fatalf("resolver escaped RLS without tenant transaction: %v, %v", err, resolved)
+	}
+	for _, supplied := range []string{"", strings.Repeat("x", 32)} {
+		err := db.InTenant(ctx, database.App, zeroTenant, func(tx pgx.Tx) error {
+			if supplied != "" {
+				if _, err := tx.Exec(ctx, `SELECT set_config('aeon.public_quote_selector',$1,true)`, supplied); err != nil {
+					return err
+				}
+			}
+			return tx.QueryRow(ctx, `SELECT aeon_resolve_quote_public_tenant($1)::text`, selector).Scan(&resolved)
+		})
+		if err != nil || resolved != nil {
+			t.Fatalf("resolver accepted mismatched selector %q: %v, %v", supplied, err, resolved)
+		}
+	}
+	if err := db.InTenant(ctx, database.App, zeroTenant, func(tx pgx.Tx) error {
+		if _, err := tx.Exec(ctx, `SELECT set_config('aeon.public_quote_selector',$1,true)`, selector); err != nil {
+			return err
+		}
+		return tx.QueryRow(ctx, `SELECT aeon_resolve_quote_public_tenant($1)::text`, selector).Scan(&resolved)
+	}); err != nil || resolved == nil || *resolved != tenantID {
+		t.Fatalf("matching sentinel lookup = %v, %v", resolved, err)
+	}
+}
+
+func TestPublicRateLimitCoversReadPDFAndAcceptanceAcrossTokens(t *testing.T) {
+	for _, operation := range []struct {
+		method, suffix string
+		limit          int
+	}{
+		{http.MethodGet, "", 120},
+		{http.MethodGet, "/pdf", 20},
+		{http.MethodPost, "/accept", 10},
+	} {
+		m := &Module{attempts: make(map[string][]time.Time)}
+		mux := http.NewServeMux()
+		m.Mount(mux)
+		for i := 0; i <= operation.limit; i++ {
+			token := strings.Repeat("A", 42) + string(rune('A'+i%2))
+			req := httptest.NewRequest(operation.method, "/api/public/quotes/invalid/"+token+operation.suffix, nil)
+			req.RemoteAddr = "192.0.2.5:43210"
+			rec := httptest.NewRecorder()
+			mux.ServeHTTP(rec, req)
+			if i == operation.limit && rec.Code != http.StatusTooManyRequests {
+				t.Fatalf("%s%s request %d: got %d", operation.method, operation.suffix, i, rec.Code)
+			}
+			if i < operation.limit && rec.Code == http.StatusTooManyRequests {
+				t.Fatalf("%s%s request %d limited early", operation.method, operation.suffix, i)
 			}
 		}
 	}

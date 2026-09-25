@@ -12,6 +12,7 @@ import (
 	"time"
 
 	"github.com/inspr-at/aeon/internal/httpapi"
+	"github.com/inspr-at/aeon/internal/tenant"
 )
 
 func TestNewRejectsShortKey(t *testing.T) {
@@ -28,6 +29,41 @@ func TestNewDefaults(t *testing.T) {
 	}
 	if m.cfg.BootstrapTenantSlug != "inspr" {
 		t.Fatalf("slug %q", m.cfg.BootstrapTenantSlug)
+	}
+}
+
+func TestAgentRoleCannotManageKeys(t *testing.T) {
+	req := httptest.NewRequest(http.MethodGet, "/api/agent-keys", nil)
+	req = req.WithContext(tenant.WithPrincipal(req.Context(), tenant.Principal{Kind: tenant.Agent, Roles: []string{"admin"}}))
+	rec := httptest.NewRecorder()
+	_, ok := (&Module{}).requireAdmin(rec, req)
+	if ok || rec.Code != http.StatusForbidden {
+		t.Fatalf("agent with admin role managed keys: %d", rec.Code)
+	}
+}
+
+func TestCustomerRoutesStayBoundToOwnProfileAndQuotes(t *testing.T) {
+	id := "aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa"
+	p := tenant.Principal{ID: id, Kind: tenant.Person, Roles: []string{"customer"}}
+	for _, route := range []struct {
+		method, path string
+		allowed      bool
+	}{
+		{http.MethodGet, "/api/me/greeting", true},
+		{http.MethodGet, "/api/people/" + id + "/avatar/small", true},
+		{http.MethodGet, "/api/people/bbbbbbbb-bbbb-4bbb-8bbb-bbbbbbbbbbbb/avatar/small", false},
+		{http.MethodGet, "/api/quotes/" + id, true},
+		{http.MethodPost, "/api/quotes/" + id + "/versions/1/accept", true},
+		{http.MethodGet, "/api/quotes/" + id + "/versions/1/export", true},
+		{http.MethodGet, "/api/quotes", false},
+		{http.MethodGet, "/api/quotes/" + id + "/draft", false},
+		{http.MethodGet, "/api/quotes/" + id + "/versions/1/public-link", false},
+		{http.MethodGet, "/api/business", false},
+	} {
+		got := customerRouteAllowed(httptest.NewRequest(route.method, route.path, nil), p)
+		if got != route.allowed {
+			t.Errorf("%s %s: allowed=%t", route.method, route.path, got)
+		}
 	}
 }
 
