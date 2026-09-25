@@ -73,6 +73,7 @@ onMounted(() => { void business.loadPlugins() })
 .page-head h1 { margin-top: 6px; }
 .head-main { min-width: 0; }
 .summary { margin-top: 6px; min-height: 20px; font-size: 13.5px; color: var(--ink-2); }
+@media (max-width: 600px) { .summary { min-height: 40px; } }
 .summary :deep(b) { color: var(--ink); font-weight: 600; font-variant-numeric: tabular-nums; }
 .head-actions { display: flex; align-items: center; gap: 8px; flex-shrink: 0; }
 .biz-tabs { display: flex; gap: 4px; margin: 0 0 18px; padding: 3px; width: max-content; max-width: 100%; overflow-x: auto; border-radius: 999px; background: var(--seg-bg); box-shadow: inset 0 1px 2px rgba(32, 60, 61, .08); scrollbar-width: none; }

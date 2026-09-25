@@ -32,7 +32,8 @@ const filter = reactive({ q: '', features: false, fixes: false, tickets: false }
 const cursor = ref<string | null>(null)
 const mode = ref<'browse' | 'compare'>('browse')
 const compareFrom = ref<string | null>(null)
-const showDetail = ref(false)
+// A direct release URL opens the detail on phones from the first frame.
+const showDetail = ref(window.matchMedia('(max-width: 760px)').matches && !!props.target && props.target !== 'all')
 const help = ref(false)
 const evidence = ref(false)
 const missing = ref('')
@@ -248,6 +249,7 @@ const KINDS = [
           <button type="button" class="icon-btn flat sm" aria-label="Dismiss" @click="missing = ''"><AppIcon name="close" :size="12" /></button>
         </p>
         <ReleaseStats v-if="releases.length && !phone" class="stats" :stats="stats" :current="current" :live-since="history?.live_since ?? null" :now="now" />
+        <div v-else-if="!phone && !history && !store.error" class="stats-placeholder skeleton-body" aria-hidden="true"><span v-for="i in 6" :key="i" class="skeleton" /></div>
       </header>
 
       <div class="body">
@@ -343,6 +345,7 @@ const KINDS = [
             :current="selected.version === current" :rollback="selected.version === rollbackTarget" :fresh="store.highlight.has(selected.version)"
             :live-since="history?.live_since ?? null" :now="now" :query="filter.q" :evidence="evidence" @evidence="value => evidence = value"
           />
+          <div v-else-if="store.loading" class="detail-loading skeleton-body" role="status" aria-label="Loading release"><span class="skeleton" /><span class="skeleton" /><span class="skeleton" /></div>
         </section>
       </div>
 
@@ -395,12 +398,19 @@ const KINDS = [
 .notice { display: flex; align-items: center; gap: 10px; padding: 8px 10px 8px 14px; border-radius: 12px; background: var(--glass); border: 1px solid var(--glass-edge); box-shadow: 0 0 0 1px var(--line); color: var(--ink); font-size: 13px; }
 .notice > span { flex: 1; min-width: 0; }
 .notice svg { color: var(--teal-ink); }
+.stats-placeholder { display: grid; grid-template-columns: repeat(6, minmax(0, 1fr)); gap: 10px; height: 110px; }
+.stats-placeholder .skeleton { border-radius: 14px; }
+@media (max-width: 1100px) { .stats-placeholder { grid-template-columns: repeat(3, minmax(0, 1fr)); height: 275px; } }
 
 /* ---------- Body ---------- */
 .body { display: grid; grid-template-columns: minmax(360px, 460px) minmax(0, 1fr); gap: 28px; min-height: 0; }
 .list-pane, .detail-pane { min-height: 0; overflow: auto; overscroll-behavior: contain; scrollbar-gutter: stable; }
 .list-pane { display: flex; flex-direction: column; gap: 10px; padding: 2px 6px 32px 2px; margin-left: -2px; }
 .detail-pane { padding: 6px 4px 48px 8px; }
+.detail-loading { display: grid; align-content: start; gap: 14px; min-height: 70vh; padding: 16px; }
+.detail-loading .skeleton { height: 22px; }
+.detail-loading .skeleton:nth-child(2) { width: 65%; }
+.detail-loading .skeleton:nth-child(3) { height: 180px; }
 .filters, .day-h { background: color-mix(in srgb, var(--canvas) 94%, transparent); backdrop-filter: blur(12px); -webkit-backdrop-filter: blur(12px); }
 .filters { position: sticky; top: 0; z-index: 2; display: flex; align-items: center; justify-content: space-between; gap: 10px; padding: 2px 0 8px; }
 .toggles { display: flex; gap: 6px; }

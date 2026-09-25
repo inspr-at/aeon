@@ -104,7 +104,7 @@ const phoneQuery = window.matchMedia('(max-width: 720px)')
 const phoneChange = () => { phone.value = phoneQuery.matches }
 onMounted(() => {
   phoneChange(); phoneQuery.addEventListener('change', phoneChange)
-  if (card.value) { sizer = new ResizeObserver(([entry]) => { width.value = entry.contentRect.width }); sizer.observe(card.value) }
+  if (card.value) { width.value = card.value.getBoundingClientRect().width; sizer = new ResizeObserver(([entry]) => { width.value = entry.contentRect.width }); sizer.observe(card.value) }
 })
 onBeforeUnmount(() => { phoneQuery.removeEventListener('change', phoneChange); sizer?.disconnect() })
 // ---------- Column widths: drag a header edge, double-click to fit the content ----------
@@ -761,7 +761,7 @@ td.c-title { position: relative; overflow: hidden; }
   .ticket-row .c-assignee { display: none !important; }
   .title-cell { align-items: flex-start; flex-wrap: wrap; gap: 4px 8px; white-space: normal; }
   .title-cell .kind-glyph { margin-top: 2px; }
-  .title-link { flex: 1 1 calc(100% - 30px); white-space: normal; font-size: 14.5px; line-height: 1.35; display: -webkit-box; -webkit-line-clamp: 2; -webkit-box-orient: vertical; }
+  .title-link { flex: 1 1 calc(100% - 30px); min-height: 44px; padding-bottom: 12px; white-space: normal; font-size: 14.5px; line-height: 1.35; display: -webkit-box; -webkit-line-clamp: 2; -webkit-box-orient: vertical; }
   .parent-chip { max-width: calc(100% - 22px); margin-left: 22px; }
   .child-count { display: none; }
   .row-actions { display: none; }

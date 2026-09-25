@@ -562,7 +562,7 @@ const waitingCount = computed(() => allPeriods.value.filter(p => p.state === 'op
           </ul>
         </div>
       </section>
-      <p class="hint"><kbd class="keycap">l</kbd> log time · <kbd class="keycap"><AppIcon name="arrow-left" /></kbd><kbd class="keycap"><AppIcon name="arrow" /></kbd> week · <kbd class="keycap">t</kbd> this week<template v-if="editable"> · <kbd class="keycap">e</kbd> edit entry · <kbd class="keycap">Del</kbd> delete</template></p>
+      <p v-if="weekState === 'ready'" class="hint"><kbd class="keycap">l</kbd> log time · <kbd class="keycap"><AppIcon name="arrow-left" /></kbd><kbd class="keycap"><AppIcon name="arrow" /></kbd> week · <kbd class="keycap">t</kbd> this week<template v-if="editable"> · <kbd class="keycap">e</kbd> edit entry · <kbd class="keycap">Del</kbd> delete</template></p>
     </template>
 
     <!-- ---------- Approvals ---------- -->
@@ -640,6 +640,7 @@ tbody th.c-ticket { font-weight: 400; }
 .ticket-chip { flex-shrink: 0; display: inline-flex; align-items: center; height: 22px; padding: 0 8px; border-radius: 6px; background: var(--chip-teal-bg); box-shadow: inset 0 0 0 1px var(--chip-teal-line); color: var(--teal-ink); font: 600 11.5px/1 var(--mono); text-decoration: none; font-variant-ligatures: none; white-space: nowrap; }
 a.ticket-chip:hover { text-decoration: underline; }
 .ticket-chip:focus-visible { box-shadow: var(--focus-ring); }
+@media (max-width: 600px) { .ticket-chip { height: 44px; } }
 .ticket-chip.plain { background: var(--chip-bg); box-shadow: inset 0 0 0 1px var(--chip-line); color: var(--ink-2); }
 tfoot th, tfoot td { border-bottom: 0 !important; font-weight: 650; color: var(--ink); }
 tfoot th.c-ticket { font: 500 10px/1 var(--mono); letter-spacing: .12em; text-transform: uppercase; color: var(--ink-3); }

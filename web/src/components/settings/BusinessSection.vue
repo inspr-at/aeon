@@ -16,7 +16,7 @@ onMounted(() => { void business.loadPlugins() })
 </script>
 
 <template>
-  <div class="section">
+  <div v-if="business.plugins" class="section">
     <div id="parts" class="parts-anchor">
       <SetupCard variant="manage" />
     </div>
@@ -31,10 +31,15 @@ onMounted(() => { void business.loadPlugins() })
       <IntegrationCard v-else :admin="business.admin" bare />
     </SettingsCard>
   </div>
+  <div v-else-if="business.pluginsError" class="section-error glass-card" role="alert"><p>{{ business.pluginsError }}</p><button type="button" class="btn" @click="business.loadPlugins(true)">Try again</button></div>
+  <div v-else class="section-placeholder skeleton-body" role="status" aria-label="Loading business settings"><span class="skeleton" /><span class="skeleton" /><span class="skeleton" /></div>
 </template>
 
 <style scoped>
 .section { display: grid; gap: 14px; }
+.section-error { display: grid; justify-items: start; gap: 12px; padding: 20px; }
+.section-placeholder { display: grid; align-content: start; gap: 14px; min-height: 100vh; }
+.section-placeholder .skeleton { height: 90px; }
 .parts-anchor { scroll-margin-top: 20px; }
 /* The parts card is the overview's own; here it takes the settings cards' measure. */
 .parts-anchor :deep(.setup) { margin: 0; padding: 20px; }

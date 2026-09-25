@@ -320,6 +320,7 @@ onBeforeUnmount(() => { document.removeEventListener('pointerdown', outside); wi
 .theme-seg { display: grid; grid-template-columns: repeat(3, 1fr); }
 .theme-seg button { height: 30px; gap: 5px; padding: 0 6px; }
 .menu-row { display: flex; align-items: center; gap: 10px; width: 100%; height: 36px; padding: 0 10px; border: 0; border-radius: 8px; background: transparent; color: var(--ink); font-size: 13.5px; text-align: left; }
+@media (max-width: 600px) { .menu-row { height: 44px; } }
 .menu-row svg { color: var(--ink-2); }
 @media (hover: hover) { .menu-row:hover:not(:disabled) { background: var(--row-hover); } }
 .menu-row:active:not(:disabled) { background: var(--row-selected); }
@@ -357,7 +358,7 @@ onBeforeUnmount(() => { document.removeEventListener('pointerdown', outside); wi
   .crumbs > :not(:last-child) { display: none; }
   .crumbs.lead { padding-left: 2px; }
   .crumb { height: 44px; margin: 0; padding: 0 4px; }
-  .crumb.current { min-width: 0; overflow: hidden; text-overflow: ellipsis; }
+  .crumb.current { min-width: 0; max-width: 100%; flex-shrink: 1; overflow: hidden; text-overflow: ellipsis; }
   .crumb-name { display: none; }
   .search-pill { width: 44px; height: 44px; padding: 0; justify-content: center; }
   .pill-text, .pill-keys { display: none; }

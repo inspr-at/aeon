@@ -49,7 +49,7 @@ onMounted(() => { void loadMembers(); void loadKeys() })
       </dl>
     </SettingsCard>
 
-    <SettingsCard title="Members" icon="users" anchor="members">
+    <SettingsCard class="members-card" title="Members" icon="users" anchor="members">
       <template #lead>People and agents who work in this workspace.</template>
       <div v-if="membersState === 'loading'" class="set-skeleton" role="status" aria-label="Loading members"><span class="skeleton" /><span class="skeleton" /><span class="skeleton" /></div>
       <p v-else-if="membersState === 'closed'" class="set-note"><AppIcon name="info" :size="14" />Members show here only while a Business part is on, and none is on in this workspace. A member list of its own arrives with workspace administration.</p>
@@ -75,7 +75,7 @@ onMounted(() => { void loadMembers(); void loadKeys() })
       </template>
     </SettingsCard>
 
-    <SettingsCard title="Agent keys" icon="key" anchor="agent-keys">
+    <SettingsCard class="keys-card" title="Agent keys" icon="key" anchor="agent-keys">
       <template #lead>Keys agents use to work in this workspace. Only a key's prefix is ever shown again.</template>
       <div v-if="!keys && !keysError" class="set-skeleton" role="status" aria-label="Loading agent keys"><span class="skeleton" /><span class="skeleton" /></div>
       <p v-else-if="keysError" class="set-note error" role="alert"><AppIcon name="alert" :size="14" />{{ keysError }}<button type="button" class="btn sm" @click="loadKeys">Try again</button></p>
@@ -101,6 +101,7 @@ onMounted(() => { void loadMembers(); void loadKeys() })
 
 <style scoped>
 .section { display: grid; gap: 14px; }
+@media (min-width: 721px) { .members-card { min-height: 214px; } .keys-card { min-height: 285px; } }
 .group-h { display: flex; align-items: baseline; gap: 6px; margin: 4px 0 6px; font: 600 10.5px/1.5 var(--mono); letter-spacing: .14em; text-transform: uppercase; color: var(--ink-3); }
 .group-h + .people { margin-bottom: 12px; }
 .count { letter-spacing: 0; }

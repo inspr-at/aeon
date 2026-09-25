@@ -45,6 +45,14 @@ const now = ref(Date.now())
 const plugins = ref<PluginInfo[]>([])
 const viewed = computed<Stage>(() => isStage(props.stage) ? props.stage : journey.value?.stage ?? 'inspire')
 const data = useJourneyData(computed(() => projectId.value), journey)
+const intakeLoadedOnce = ref(false)
+watch(projectId, () => { intakeLoadedOnce.value = false })
+watch(data.intake.status, status => { if (status === 'ready' || status === 'error') intakeLoadedOnce.value = true })
+const loadingStage = computed(() => !journey.value
+  ? !store.errors[projectId.value]
+  : (['inspire', 'shape', 'requirements'].includes(viewed.value) && !intakeLoadedOnce.value)
+    || (['plan', 'build', 'deploy', 'access', 'live'].includes(viewed.value) && !!journey.value.current_release_id
+      && !['ready', 'error'].includes(data.releaseNodes.status.value)))
 
 async function refresh(force = true) {
   await Promise.all([store.load(projectId.value, force), agents.refreshApprovals()])
@@ -211,7 +219,7 @@ onBeforeUnmount(() => { window.removeEventListener('keydown', keydown); clearInt
 
 <template>
   <section class="journey-view" aria-labelledby="journey-title">
-    <div v-if="!journey && store.loading[project.id]" class="journey-skeleton" role="status" aria-label="Loading the journey">
+    <div v-if="loadingStage" class="journey-skeleton" role="status" aria-label="Loading the journey">
       <span class="skeleton sk-rail" /><span class="skeleton sk-head" /><span class="skeleton sk-body" />
     </div>
     <div v-else-if="!journey" class="journey-error" role="alert">
@@ -259,8 +267,8 @@ onBeforeUnmount(() => { window.removeEventListener('keydown', keydown); clearInt
 .journey-hint { display: flex; align-items: center; justify-content: center; gap: 5px; padding: 8px 0 0; font-size: 12px; color: var(--ink-3); }
 .journey-hint .keycap + .keycap { margin-left: 2px; }
 .journey-skeleton { display: grid; gap: 14px; }
-.sk-rail { height: 88px; border-radius: var(--radius); }
-.sk-head { width: 320px; height: 34px; border-radius: 8px; }
+.sk-rail { height: 138px; border-radius: var(--radius); }
+.sk-head { width: min(320px, 100%); height: 62px; border-radius: 8px; }
 .sk-body { height: 320px; border-radius: var(--radius); }
 .journey-error { display: grid; justify-items: center; gap: 10px; padding: 72px 24px; text-align: center; }
 .journey-error > svg { color: var(--danger); }

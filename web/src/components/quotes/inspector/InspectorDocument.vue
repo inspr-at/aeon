@@ -93,6 +93,7 @@ function currency(event: Event) {
 .row { display: grid; grid-template-columns: minmax(0, 1fr) 150px; align-items: center; gap: 12px; min-height: 34px; }
 .row-label { font-size: 13px; color: var(--ink-2); }
 .field-sm { width: 100%; height: 30px; padding: 0 8px; border: 1px solid var(--glass-edge); border-radius: 8px; background: var(--field-bg); box-shadow: var(--field-inset), 0 0 0 1px var(--line); color: var(--ink); font-size: 13px; }
+@media (max-width: 600px) { .field-sm { height: 44px; } }
 .field-sm.mono { font-family: var(--mono); text-transform: uppercase; }
 .field-sm:focus { outline: none; box-shadow: var(--focus-ring); }
 .field-sm:disabled { color: var(--ink-3); background: var(--surface-2); }

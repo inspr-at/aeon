@@ -154,6 +154,7 @@ function add(after: string) { const created = props.actions.addBelow(after); if 
 .outline-row:hover .grip, .outline-row:focus-within .grip { opacity: 1; }
 @media (hover: none) { .grip { opacity: 1; } }
 .row-main { display: flex; align-items: baseline; gap: 8px; flex: 1; min-width: 0; height: 36px; padding: 0 6px; border: 0; border-radius: 8px; background: transparent; color: var(--ink); text-align: left; }
+@media (max-width: 600px) { .row-main { height: 44px; } }
 .row-main:focus-visible { box-shadow: var(--focus-ring); }
 .row-number { flex-shrink: 0; min-width: 22px; font: 500 12px/36px var(--mono); color: var(--ink-3); font-variant-numeric: tabular-nums; }
 .row-title { min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; font-size: 13px; line-height: 36px; }
@@ -165,6 +166,7 @@ function add(after: string) { const created = props.actions.addBelow(after); if 
 .row-more:hover { color: var(--ink); background: var(--btn-bg-hover); }
 .row-more:focus-visible { box-shadow: var(--focus-ring); opacity: 1; }
 .add-end { display: inline-flex; align-items: center; justify-self: start; gap: 7px; height: 30px; padding: 0 10px; border: 0; border-radius: 8px; background: transparent; color: var(--teal-ink); font-size: 12.5px; font-weight: 600; }
+@media (max-width: 600px) { .add-end { height: 44px; } }
 .add-end:hover:not(:disabled) { background: var(--row-hover); }
 .add-end:focus-visible { box-shadow: var(--focus-ring); }
 .add-end:disabled { color: var(--ink-3); }

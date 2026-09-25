@@ -257,12 +257,12 @@ defineExpose({ focus: () => root.value?.focus({ preventScroll: true }) })
 .block h3 { margin-bottom: 10px; }
 .telemetry { display: grid; grid-template-columns: repeat(4, minmax(0, 1fr)); gap: 8px; }
 .metric { display: grid; gap: 4px; padding: 10px 12px; border-radius: 10px; background: var(--code-bg); }
-.metric-label { font-size: 11.5px; color: var(--ink-3); }
+.metric-label { font-size: 11.5px; color: var(--ink-2); }
 .metric b { font: 600 15px/1.2 var(--mono); color: var(--ink); font-variant-numeric: tabular-nums; }
 .run-chip { justify-self: start; display: inline-flex; align-items: center; height: 20px; padding: 0 8px; border-radius: 999px; font: 600 10.5px/1 var(--mono); letter-spacing: .04em; font-variant-ligatures: none; background: var(--chip-bg); color: var(--ink-2); box-shadow: inset 0 0 0 1px var(--chip-line); }
-.run-chip.ok { background: rgba(47, 122, 90, .1); color: var(--ok); box-shadow: inset 0 0 0 1px rgba(47, 122, 90, .3); }
+.run-chip.ok { background: rgba(47, 122, 90, .1); color: color-mix(in srgb, var(--ok) 85%, var(--ink)); box-shadow: inset 0 0 0 1px rgba(47, 122, 90, .3); }
 .run-chip.busy { background: var(--chip-teal-bg); color: var(--teal-ink); box-shadow: inset 0 0 0 1px var(--chip-teal-line); }
-.run-chip.bad { background: var(--danger-bg); color: var(--danger); box-shadow: inset 0 0 0 1px var(--danger-line); }
+.run-chip.bad { background: var(--danger-bg); color: color-mix(in srgb, var(--danger) 85%, var(--ink)); box-shadow: inset 0 0 0 1px var(--danger-line); }
 .empty-line { font-size: 13px; color: var(--ink-3); }
 .runs { display: grid; grid-template-columns: minmax(0, 1fr); }
 .run-row { display: grid; grid-template-columns: 92px minmax(0, 1fr) 48px 56px 68px; align-items: center; gap: 10px; min-height: 36px; border-bottom: 1px solid var(--line); font-size: 12.5px; }

@@ -32,7 +32,7 @@ const phoneChange = () => { phone.value = phoneQuery.matches }
 let sizer: ResizeObserver | undefined
 onMounted(() => {
   phoneChange(); phoneQuery.addEventListener('change', phoneChange)
-  if (card.value) { sizer = new ResizeObserver(([entry]) => { width.value = entry.contentRect.width }); sizer.observe(card.value) }
+  if (card.value) { width.value = card.value.getBoundingClientRect().width; sizer = new ResizeObserver(([entry]) => { width.value = entry.contentRect.width }); sizer.observe(card.value) }
 })
 onBeforeUnmount(() => { phoneQuery.removeEventListener('change', phoneChange); sizer?.disconnect() })
 

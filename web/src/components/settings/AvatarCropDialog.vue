@@ -168,6 +168,7 @@ onBeforeUnmount(() => { upload?.abort(); URL.revokeObjectURL(url) })
 .mask { position: absolute; inset: 0; pointer-events: none; background: radial-gradient(circle closest-side, transparent calc(100% - 1px), rgba(255, 255, 255, .85) calc(100% - 1px), rgba(255, 255, 255, .85) 100%, rgba(8, 18, 20, .58) calc(100% + .5px)); }
 .zoom { display: grid; grid-template-columns: auto minmax(0, 1fr) auto; align-items: center; gap: 6px; width: 100%; }
 .slider { width: 100%; accent-color: var(--teal); }
+@media (max-width: 600px) { .slider { height: 44px; } }
 .help { display: grid; justify-items: center; gap: 4px; font-size: 12px; color: var(--ink-2); text-align: center; line-height: 1.6; }
 .help .keys { display: inline-flex; flex-wrap: wrap; justify-content: center; align-items: center; gap: 3px 4px; }
 .previews { display: grid; gap: 10px; align-content: start; }

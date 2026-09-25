@@ -556,6 +556,7 @@ watch(() => props.profileId, () => { void nextTick(() => form.value?.scrollTo({ 
 .profile-switch { display: none; height: 34px; }
 .jumps { display: flex; flex-wrap: wrap; gap: 2px; margin: 0 -4px; }
 .jump { height: 26px; padding: 0 8px; border: 0; border-radius: 999px; background: transparent; color: var(--ink-2); font-size: 12.5px; font-weight: 600; }
+@media (max-width: 600px) { .head-left .icon-btn { width: 44px; height: 44px; } .jump { height: 44px; } }
 @media (hover: hover) { .jump:hover { background: var(--row-hover); color: var(--ink); } }
 .jump[aria-current="true"] { background: var(--chip-teal-bg); color: var(--teal-ink); box-shadow: inset 0 0 0 1px var(--chip-teal-line); }
 .jump:focus-visible { box-shadow: var(--focus-ring); }

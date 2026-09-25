@@ -144,7 +144,7 @@ const offered = computed(() => business.anyOpen)
               <p class="week-total"><b class="mono">{{ hoursLoaded ? formatSpan(weekTotal) : '—' }}</b><span>{{ weekTotal ? 'logged' : 'nothing logged yet' }}</span></p>
               <div class="bars" role="list" aria-label="Hours per day">
                 <div v-for="(day, i) in days" :key="i" class="bar-col" :class="{ today: dayKey(day) === today }" role="listitem" :aria-label="`${WEEKDAYS[i]} ${day.getDate()}: ${perDay[i] ? formatSpan(perDay[i]) : 'nothing logged'}`" :data-tip="`${WEEKDAYS[i]} ${day.getDate()}: ${perDay[i] ? formatSpan(perDay[i]) : 'nothing logged'}`">
-                  <span class="bar-track"><i :style="{ height: `${Math.round(perDay[i] / maxDay * 100)}%` }" /></span>
+                  <span class="bar-track"><i :style="{ transform: `scaleY(${perDay[i] / maxDay})` }" /></span>
                   <span class="bar-day">{{ WEEKDAYS[i].slice(0, 2) }}</span>
                 </div>
               </div>
@@ -243,7 +243,7 @@ const offered = computed(() => business.anyOpen)
 .bars { display: grid; grid-template-columns: repeat(7, 1fr); gap: 8px; height: 110px; }
 .bar-col { display: grid; grid-template-rows: minmax(0, 1fr) auto; justify-items: center; gap: 6px; }
 .bar-track { position: relative; width: 100%; max-width: 26px; height: 100%; border-radius: 7px; background: var(--track); overflow: hidden; }
-.bar-track i { position: absolute; inset: auto 0 0; border-radius: 7px; background: linear-gradient(0deg, #0e6f6c, #a4e5df); box-shadow: 0 0 8px rgba(164, 229, 223, .6); }
+.bar-track i { position: absolute; inset: 0; transform-origin: bottom; border-radius: 7px; background: linear-gradient(0deg, #0e6f6c, #a4e5df); box-shadow: 0 0 8px rgba(164, 229, 223, .6); }
 .bar-day { font: 500 10.5px/1 var(--mono); letter-spacing: .06em; color: var(--ink-3); text-transform: uppercase; font-variant-ligatures: none; }
 .today .bar-day { color: var(--teal-ink); font-weight: 700; }
 .today .bar-track { box-shadow: inset 0 0 0 1px var(--chip-teal-line); }
@@ -251,6 +251,7 @@ const offered = computed(() => business.anyOpen)
 .quiet { font-size: 13px; color: var(--ink-3); }
 .tickets { display: grid; gap: 2px; margin: 0; padding: 0; list-style: none; }
 .ticket-row { display: grid; grid-template-columns: max-content minmax(0, 1fr) 90px 44px; align-items: center; gap: 10px; min-height: 32px; font-size: 13px; }
+@media (max-width: 600px) { .ticket-row { min-height: 44px; } }
 .ticket-chip { display: inline-flex; align-items: center; height: 22px; padding: 0 8px; border-radius: 6px; background: var(--chip-teal-bg); box-shadow: inset 0 0 0 1px var(--chip-teal-line); color: var(--teal-ink); font: 600 11px/1 var(--mono); text-decoration: none; font-variant-ligatures: none; white-space: nowrap; }
 a.ticket-chip:hover { text-decoration: underline; }
 .ticket-chip:focus-visible { box-shadow: var(--focus-ring); }
