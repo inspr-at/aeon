@@ -186,7 +186,7 @@ export async function mockWork(page: Page, data: Fixtures, options: MockOptions 
       return route.fulfill({ json: { items, next_after: null } })
     }
     const undoPath = /^\/api\/events\/(\d+)\/undo$/.exec(path)
-    if (undoPath && method === 'POST') {
+    if (undoPath && method === 'POST' && !data.batches.some(b => b.id === Number(undoPath[1]))) {
       const event = data.events.find(e => e.id === Number(undoPath[1]))
       if (!event || data.events.some(e => e.undo_of === event.id)) return route.fulfill({ status: 409, json: { error: 'conflict' } })
       const restored = { ...event.before, updated_at: new Date(now + 5000).toISOString() }

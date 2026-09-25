@@ -684,6 +684,7 @@ tbody:last-of-type .ticket-row:last-child td { border-bottom: 0; }
 .ticket-row:hover .row-check, .ticket-row.selected .row-check, .ticket-row.cursor .row-check, .selecting .row-check, thead th:hover .head-check, .head-check.shown, .row-check:focus-visible { opacity: 1; }
 .row-check:focus-visible { box-shadow: var(--focus-ring); border-radius: 4px; }
 @media (hover: none) { .row-check { opacity: 1; } .table-card:not(.selecting) .row-check { display: none; } .selectable:not(.selecting) .ticket-row td:first-child { padding-left: 18px; } }
+@media (max-width: 720px) { .table-card:not(.selecting) .row-check { display: none; } .row-check { opacity: 1; } }
 .ticket-row.selected td { background: var(--row-selected); }
 .ticket-row.selected .key { color: var(--teal-ink); }
 .ticket-row.selected { outline: 1px solid var(--chip-teal-line); outline-offset: -1px; }

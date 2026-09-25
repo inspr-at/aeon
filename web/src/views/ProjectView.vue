@@ -656,6 +656,25 @@ watch(() => list.rows.value, rows => {
 })
 watch(selectable, on => { if (!on) clearSelection() })
 const selectedRows = computed(() => list.rows.value.filter(row => selected.value.has(row.id)))
+// Where the list is, so the bulk bar centres over it (a docked panel takes the right).
+const listFrame = ref<{ left: number; width: number } | null>(null)
+let frameObserver: ResizeObserver | undefined
+function measureFrame() {
+  const el = (table.value as unknown as { $el?: HTMLElement } | undefined)?.$el
+  if (!el) return
+  const rect = el.getBoundingClientRect()
+  listFrame.value = { left: Math.round(rect.left), width: Math.round(rect.width) }
+}
+watch(() => selected.value.size > 0, on => {
+  frameObserver?.disconnect()
+  window.removeEventListener('resize', measureFrame)
+  if (!on) return
+  measureFrame()
+  const el = (table.value as unknown as { $el?: HTMLElement } | undefined)?.$el
+  if (el) { frameObserver = new ResizeObserver(measureFrame); frameObserver.observe(el) }
+  window.addEventListener('resize', measureFrame)
+})
+onBeforeUnmount(() => { frameObserver?.disconnect(); window.removeEventListener('resize', measureFrame) })
 const bulkBusy = ref(false)
 const bulkMenu = ref<{ kind: 'status' | 'assignee' | 'priority' | 'labels' | 'move'; anchor: HTMLElement } | null>(null)
 function openBulk(kind: NonNullable<typeof bulkMenu.value>['kind'], anchor?: HTMLElement | null) {
@@ -918,7 +937,7 @@ watch([project, panelItem], ([current, item]) => {
 <template>
   <section class="project-page" :class="{ 'panel-open': !!ticketKey && !fullView, 'full-view': fullView }" :style="{ '--toolbar-h': `${toolbarHeight}px` }" :aria-labelledby="project ? 'project-title' : undefined">
     <template v-if="project">
-      <div v-show="!fullView" class="list-view">
+      <div v-show="!fullView" class="list-view" :class="{ selecting: selectable && selected.size }">
       <header class="project-head">
         <div class="head-main">
           <div class="title-line">
@@ -948,7 +967,7 @@ watch([project, panelItem], ([current, item]) => {
       </header>
 
       <ViewBar
-        v-if="!journeyActive && views.items.length" ref="viewBar" :views="views.items" :active-id="activeView?.id ?? null" :dirty="viewDirty" :default-id="defaultViewId"
+        v-if="!journeyActive" ref="viewBar" :views="views.items" :active-id="activeView?.id ?? null" :dirty="viewDirty" :default-id="defaultViewId" :can-save-new="canSaveView && !activeView"
         :me="me?.id ?? null" :href-for="hrefFor" @open="id => openView(id)" @save="saveActive" @save-as="startSave" @reset="openView(activeView?.id ?? null, true)"
         @rename="startRename" @duplicate="duplicate" @set-default="setDefaultView" @share="share" @copy-link="copyViewLink" @remove="remove"
       />
@@ -956,10 +975,10 @@ watch([project, panelItem], ([current, item]) => {
       <div ref="toolbarWrap" class="toolbar-wrap" :class="{ stuck }">
         <ListToolbar
           ref="toolbar" :filters="filters" :options="options" :label="chipLabel" :total="total" :loading="list.loading.value" :density="density" :stuck="stuck"
-          :can-save="canSaveView" :facet-loading="facetLoading"
+          :facet-loading="facetLoading"
           @search="q => update({ q })" @toggle="toggleValue" @exclude="excludeValue" @clear="dimension => update({ [dimension]: [] })" @clear-all="clearFilters"
           @show-closed="value => update({ showClosed: value })" @group="setGroup" @sort="setSort" @density="setDensity" @date="setDate"
-          @open-sheet="filterSheet?.open()" @need-options="needOptions" @create="startCreate()" @save-view="startSave"
+          @open-sheet="filterSheet?.open()" @need-options="needOptions" @create="startCreate()"
           :view="viewMode" @view="setView" @expand-all="outline.expandAll()" @collapse-all="outline.collapseAll()"
           @expand-groups="setAllGroups(true)" @collapse-groups="setAllGroups(false)"
           :columns="toolbarColumns" @columns="saveColumns" @columns-reset="resetColumns"
@@ -990,7 +1009,7 @@ watch([project, panelItem], ([current, item]) => {
       />
 
       <BulkBar
-        v-if="selectable && selected.size" :count="selected.size" :loaded="sequence.length" :total="total" :busy="bulkBusy" :can-write="writable"
+        v-if="selectable && selected.size" :count="selected.size" :loaded="sequence.length" :total="total" :busy="bulkBusy" :can-write="writable" :frame="listFrame"
         @status="anchor => openBulk('status', anchor)" @assignee="anchor => openBulk('assignee', anchor)" @priority="anchor => openBulk('priority', anchor)"
         @labels="anchor => openBulk('labels', anchor)" @move="anchor => openBulk('move', anchor)" @archive="bulkArchive" @clear="clearSelection" @select-all="selectAllMatching"
       />
@@ -1026,7 +1045,7 @@ watch([project, panelItem], ([current, item]) => {
       />
       <OptionMenu v-else-if="bulkMenu?.kind === 'priority'" :anchor="bulkMenu.anchor" title="Priority" :subject="plural(selected.size, 'ticket')" kind="priority" :options="bulkPriorities" current="-" @choose="bulkPriority" @close="closeBulk" />
       <LabelMenu v-else-if="bulkMenu?.kind === 'labels'" :anchor="bulkMenu.anchor" :labels="bulkLabels" :count="selectedRows.length" :busy="bulkBusy" @apply="bulkLabelsApply" @close="closeBulk" />
-      <EpicPicker v-else-if="bulkMenu?.kind === 'move'" :anchor="bulkMenu.anchor" :project-id="project.id" :current="null" :subject="plural(selected.size, 'ticket')" allow-none @choose="bulkMove" @close="closeBulk" />
+      <EpicPicker v-else-if="bulkMenu?.kind === 'move'" :anchor="bulkMenu.anchor" :project-id="project.id" current="-" :subject="plural(selected.size, 'ticket')" allow-none @choose="bulkMove" @close="closeBulk" />
     </template>
 
     <div v-else-if="projects.error && !projects.loaded" class="page-state" role="alert">
@@ -1072,6 +1091,8 @@ watch([project, panelItem], ([current, item]) => {
 .activity { font-size: 12px; color: var(--ink-3); }
 .activity time { color: var(--ink-2); }
 .stick-mark { height: 1px; margin-bottom: -1px; }
+/* While tickets are selected the bulk bar floats at the bottom: the list can scroll clear of it. */
+.list-view.selecting { padding-bottom: 76px; }
 .toolbar-wrap { position: sticky; top: 0; z-index: 5; margin: 0 calc(-1 * var(--gutter)); padding: 0 var(--gutter); container: toolbar / inline-size; }
 .toolbar-wrap.stuck { background: var(--glass); box-shadow: 0 1px 0 var(--line), 0 12px 24px -20px rgba(16, 35, 39, .35); backdrop-filter: blur(18px) saturate(1.2); -webkit-backdrop-filter: blur(18px) saturate(1.2); }
 .hint { display: flex; align-items: center; justify-content: center; flex-wrap: wrap; gap: 5px; padding: 16px 0 6px; font-size: 12px; color: var(--ink-3); }

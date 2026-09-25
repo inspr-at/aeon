@@ -23,8 +23,6 @@ const props = defineProps<{
   view: 'list' | 'outline' | 'journey'
   // The table's columns for the Display menu's picker.
   columns?: { order: ColumnId[]; visible: ColumnId[]; customised: boolean } | null
-  // The list differs from the saved view it shows (or from the plain list): offer Save view.
-  canSave?: boolean
   facetLoading?: boolean
 }>()
 const emit = defineEmits<{
@@ -48,7 +46,6 @@ const emit = defineEmits<{
   collapseGroups: []
   columns: [order: ColumnId[], visible: ColumnId[]]
   columnsReset: []
-  saveView: [anchor: HTMLElement]
 }>()
 
 const draft = ref(props.filters.q)
@@ -80,7 +77,9 @@ const active = computed(() => activeDimensions(props.filters))
 const secondaryActive = computed(() => active.value.filter(key => !DIMENSION_BY_KEY.get(key)!.primary).length + (props.filters.date ? 1 : 0))
 const filterCount = computed(() => active.value.reduce((sum, key) => sum + props.filters[key].length, 0) + (props.filters.q ? 1 : 0) + (props.filters.date ? 1 : 0))
 const chipCount = computed(() => active.value.length + (props.filters.date ? 1 : 0))
-const displayLabel = computed(() => props.view === 'outline' || props.filters.group === 'none' ? 'Display' : `Grouped by ${props.filters.group === 'tag' ? 'label' : props.filters.group}`)
+const groupWord = computed(() => props.filters.group === 'tag' ? 'label' : props.filters.group)
+const displayLabel = computed(() => props.view === 'outline' || props.filters.group === 'none' ? 'Display' : `Grouped by ${groupWord.value}`)
+const displayText = computed(() => props.view === 'outline' || props.filters.group === 'none' ? 'Display' : `By ${groupWord.value}`)
 
 function title(dimension: Dimension) { return DIMENSION_BY_KEY.get(dimension)!.title }
 function openMenu(dimension: Dimension, anchor: HTMLElement) {
@@ -175,7 +174,7 @@ defineExpose({ focusSearch, openFilterMenu, input })
       </button>
     </div>
 
-    <div v-if="chipCount || canSave" class="chips" aria-label="Applied filters">
+    <div v-if="chipCount" class="chips" aria-label="Applied filters">
       <span v-for="dimension in active" :key="dimension" class="filter-chip" :class="{ negated: !included(filters[dimension]).length }">
         <button type="button" class="chip-body" :aria-label="`Edit ${title(dimension)} filter: ${chipText(dimension)}`" @click="openMenu(dimension, $event.currentTarget as HTMLElement)" @keydown="chipKey($event, () => emit('clear', dimension))"><span class="chip-dim">{{ title(dimension) }}</span><span class="chip-text">{{ chipText(dimension) }}</span></button>
         <button type="button" class="chip-x" :aria-label="`Remove ${title(dimension)} filter`" @click="emit('clear', dimension)"><AppIcon name="close" :size="11" /></button>
@@ -185,7 +184,6 @@ defineExpose({ focusSearch, openFilterMenu, input })
         <button type="button" class="chip-x" aria-label="Remove date filter" @click="emit('date', null)"><AppIcon name="close" :size="11" /></button>
       </span>
       <button v-if="chipCount > 1" type="button" class="btn sm ghost clear-all" @click="emit('clearAll')">Clear all</button>
-      <button v-if="canSave" type="button" class="btn sm ghost save-view" data-tip="Keep this list as a view of the project" @click="emit('saveView', $event.currentTarget as HTMLElement)"><AppIcon name="bookmark" :size="13" />Save view</button>
     </div>
 
     <span class="spacer" />
@@ -200,7 +198,7 @@ defineExpose({ focusSearch, openFilterMenu, input })
       :data-tip="filters.showClosed ? 'Closed tickets are shown\nClick to hide them' : 'Closed tickets are hidden\nClick to show them'" @click="emit('showClosed', !filters.showClosed)"
     ><AppIcon :name="filters.showClosed ? 'eye' : 'eye-off'" :size="14" />Closed</button>
     <button type="button" class="btn sm display-btn" :class="{ on: view === 'list' && filters.group !== 'none' }" aria-haspopup="dialog" :aria-expanded="!!displayAnchor" :aria-label="`Display: ${displayLabel}`" data-tip="Grouping, sort, row height and columns" @click="displayAnchor = displayAnchor ? null : ($event.currentTarget as HTMLElement)">
-      <AppIcon name="layers" :size="13" /><span class="display-label">{{ displayLabel }}</span><AppIcon name="chevron" :size="12" class="facet-chevron" />
+      <AppIcon name="layers" :size="13" /><span class="display-label">{{ displayText }}</span><AppIcon name="chevron" :size="12" class="facet-chevron" />
     </button>
 
     <button type="button" class="btn primary new-btn" aria-label="New ticket" aria-keyshortcuts="n" data-tip="New ticket · n" @click="emit('create')"><AppIcon name="plus" :size="14" /><span class="new-label">New</span></button>
@@ -249,7 +247,8 @@ defineExpose({ focusSearch, openFilterMenu, input })
 .facet-end { display: inline-grid; place-items: center; width: 18px; }
 .facet-chevron { color: var(--ink-3); }
 .facet-count { display: inline-grid; place-items: center; min-width: 17px; height: 17px; padding: 0 5px; border-radius: 999px; background: linear-gradient(180deg, #1a8683, #0e6f6c); color: #fff; font-size: 10.5px; font-weight: 700; }
-.chips { display: flex; align-items: center; flex-wrap: wrap; gap: 6px; min-width: 0; }
+/* Applied filters take their own line under the controls, so the controls never move. */
+.chips { display: flex; align-items: center; flex-wrap: wrap; gap: 6px; order: 20; flex: 1 0 100%; min-width: 0; }
 .filter-chip { display: inline-flex; align-items: center; height: 28px; border-radius: 999px; background: var(--chip-teal-bg); box-shadow: inset 0 0 0 1px var(--chip-teal-line); color: var(--teal-ink); font-size: 12.5px; max-width: 340px; }
 .chip-body { display: inline-flex; align-items: center; gap: 6px; min-width: 0; height: 100%; padding: 0 4px 0 11px; border: 0; border-radius: 999px 0 0 999px; background: transparent; color: inherit; white-space: nowrap; overflow: hidden; font-weight: 600; }
 .chip-text { min-width: 0; overflow: hidden; text-overflow: ellipsis; }
@@ -261,7 +260,6 @@ defineExpose({ focusSearch, openFilterMenu, input })
 .chip-x:active { background: rgba(14, 111, 108, .2); }
 .chip-body:focus-visible, .chip-x:focus-visible { box-shadow: var(--focus-ring); }
 .clear-all { padding: 0 8px; }
-.save-view { gap: 6px; padding: 0 10px 0 9px; color: var(--teal-ink); font-weight: 600; }
 .spacer { flex: 1; }
 /* The count keeps its width while numbers change, so the controls beside it never shift. */
 .count { display: inline-block; min-width: 13ch; text-align: right; font-size: 12px; color: var(--ink-2); white-space: nowrap; }
@@ -273,14 +271,14 @@ defineExpose({ focusSearch, openFilterMenu, input })
 .new-btn { height: 32px; padding: 0 14px 0 11px; gap: 6px; }
 .view-seg { flex-shrink: 0; }
 .view-seg button { height: 26px; padding: 0 11px; }
-/* Narrow list (docked panel or small window): tighter search, no count. */
-@container toolbar (max-width: 1180px) { .view-label { display: none; } .view-seg button { padding: 0 8px; } }
-@container toolbar (max-width: 1000px) { .list-search { width: 190px; } .count { display: none; } .new-btn { width: 32px; padding: 0; } .new-label { display: none; } }
-@container toolbar (max-width: 920px) { .list-search { width: 150px; } .facet-btn { padding: 0 11px; } .facet-btn:not(.on) .facet-end { display: none; } .more-label { display: none; } .more-btn { padding: 0 9px; } }
+/* The controls keep to one line; as the list narrows (a docked panel, a smaller
+   window) labels step back first, then the rarer quick filters, which stay in
+   the Filter menu. */
+@container toolbar (max-width: 1500px) { .more-label { display: none; } .more-btn { padding: 0 9px; } .list-search { width: 208px; } }
+@container toolbar (max-width: 1300px) { .view-label { display: none; } .view-seg button { padding: 0 8px; } }
+@container toolbar (max-width: 1000px) { .list-search { width: 190px; } .count { display: none; } .new-btn { width: 32px; padding: 0; } .new-label { display: none; } .facet-btn[data-dim="type"]:not(.on) { display: none; } .display-label { display: none; } .display-btn { padding: 0 9px; } }
+@container toolbar (max-width: 920px) { .list-search { width: 150px; } .facet-btn { padding: 0 11px; } .facet-btn:not(.on) .facet-end { display: none; } }
 @container toolbar (max-width: 820px) { .list-search { width: 112px; } .list-search .field { padding-right: 10px; } .facet-btn { padding: 0 10px; } .facet-btn:not(.on) .facet-end { display: none; } .view-seg button { padding: 0 7px; } }
-@container toolbar (max-width: 900px) { .display-label { display: none; } .display-btn { padding: 0 9px; } }
-/* A docked panel leaves less room: the rarer quick filters step back into the Filter menu (unless in use). */
-@container toolbar (max-width: 860px) { .facet-btn[data-dim="type"]:not(.on) { display: none; } }
 @container toolbar (max-width: 760px) { .facet-btn[data-dim="assignee"]:not(.on) { display: none; } }
 /* Narrowest docked width: a labelled pill replaces the switch and its longer label. */
 .closed-pill { display: none; gap: 6px; padding: 0 11px 0 9px; color: var(--ink-2); }

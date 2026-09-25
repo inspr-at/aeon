@@ -1,6 +1,6 @@
 <!-- SPDX-License-Identifier: AGPL-3.0-only -->
 <script setup lang="ts">
-import { computed, nextTick } from 'vue'
+import { computed, onUpdated, ref } from 'vue'
 import { SORT_FIELDS, SORT_LABELS, type SortField, type SortKey } from '../../lib/work'
 import AppIcon from '../AppIcon.vue'
 
@@ -12,27 +12,35 @@ const free = computed(() => SORT_FIELDS.filter(field => !props.sort.some(key => 
 const FIRST_DIRECTION: Partial<Record<SortField, boolean>> = { updated_at: true, created_at: true, priority: false }
 function set(index: number, patch: Partial<SortKey>) { emit('change', props.sort.map((key, i) => i === index ? { ...key, ...patch } : key)) }
 function remove(index: number) { emit('change', props.sort.filter((_, i) => i !== index)) }
+// The URL answers a change a moment later; focus goes to the key once it is drawn.
+let focusRow: number | null = null
+onUpdated(() => {
+  if (focusRow === null) return
+  const select = root.value?.querySelector<HTMLElement>(`[data-sort-row="${focusRow}"] select`)
+  if (select) { select.focus(); focusRow = null }
+})
 function add() {
   const field = free.value[0]
   if (!field) return
+  focusRow = props.sort.length
   emit('change', [...props.sort, { field, desc: FIRST_DIRECTION[field] ?? false }])
-  void nextTick(() => document.querySelector<HTMLElement>(`[data-sort-row="${props.sort.length}"] select`)?.focus())
 }
 function move(index: number, step: -1 | 1) {
   const to = index + step
   if (to < 0 || to >= props.sort.length) return
   const next = [...props.sort]
   ;[next[index], next[to]] = [next[to], next[index]]
+  focusRow = to
   emit('change', next)
-  void nextTick(() => document.querySelector<HTMLElement>(`[data-sort-row="${to}"] select`)?.focus())
 }
+const root = ref<HTMLElement>()
 function keydown(event: KeyboardEvent, index: number) {
   if (event.altKey && (event.key === 'ArrowUp' || event.key === 'ArrowDown')) { event.preventDefault(); move(index, event.key === 'ArrowUp' ? -1 : 1) }
 }
 </script>
 
 <template>
-  <div class="sort-editor">
+  <div ref="root" class="sort-editor">
     <div class="head">
       <p class="eyebrow">Sort</p>
       <button v-if="sort.length" type="button" class="reset" data-tip="Newest updated first" @click="emit('change', [])">Default</button>

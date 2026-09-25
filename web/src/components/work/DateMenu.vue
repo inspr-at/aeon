@@ -1,7 +1,7 @@
 <!-- SPDX-License-Identifier: AGPL-3.0-only -->
 <script setup lang="ts">
 import { computed, ref } from 'vue'
-import { DATE_FIELDS, DATE_PRESETS, dateBounds, type DateField, type DateFilter, type DatePreset } from '../../lib/ticketList'
+import { DATE_FIELDS, DATE_PRESETS, dateBounds, shortDate, type DateField, type DateFilter, type DatePreset } from '../../lib/ticketList'
 import AppIcon from '../AppIcon.vue'
 import FloatingPanel from './FloatingPanel.vue'
 
@@ -29,8 +29,7 @@ function presetHint(value: DatePreset) {
   const bounds = dateBounds({ field: field.value, preset: value, from: null, to: null })
   if (!bounds?.from || !bounds.to) return ''
   const start = new Date(bounds.from), end = new Date(new Date(bounds.to).getTime() - 86_400_000)
-  const f = new Intl.DateTimeFormat('en-GB', { day: 'numeric', month: 'short' })
-  return start.toDateString() === end.toDateString() ? f.format(start) : `${f.format(start)} – ${f.format(end)}`
+  return start.toDateString() === end.toDateString() ? shortDate(start) : `${shortDate(start)} – ${shortDate(end)}`
 }
 </script>
 
@@ -88,6 +87,7 @@ function presetHint(value: DatePreset) {
 .preset[aria-pressed="true"] { background: var(--row-selected); }
 .preset-label { flex: 1; }
 .preset-hint { font-size: 11px; color: var(--ink-3); }
+.preset[aria-pressed="true"] .preset-hint, .preset:focus-visible .preset-hint { color: var(--ink-2); }
 .tick { color: var(--teal); }
 .range { display: grid; gap: 6px; margin-top: 2px; padding: 10px 6px 2px; border-top: 1px solid var(--line); }
 .range-row { display: grid; grid-template-columns: 1fr 1fr; gap: 8px; }

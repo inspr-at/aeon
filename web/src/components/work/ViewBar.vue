@@ -15,6 +15,8 @@ const props = defineProps<{
   defaultId: string | null
   me: string | null
   hrefFor: (id: string | null) => string
+  // The plain list differs from its defaults: offer to keep it as a view.
+  canSaveNew?: boolean
 }>()
 const emit = defineEmits<{
   open: [id: string | null]
@@ -51,11 +53,12 @@ function closeMenu(restore: boolean) {
   menu.value = null
   if (restore) anchor?.focus()
 }
-function act(run: () => void) {
-  const anchor = menu.value?.anchor
+function act(run: (open: { view: SavedView; anchor: HTMLElement }) => void) {
+  const open = menu.value
+  if (!open) return
   menu.value = null
-  run()
-  void nextTick(() => { if (document.activeElement === document.body) anchor?.focus() })
+  run(open)
+  void nextTick(() => { if (document.activeElement === document.body && open.anchor.isConnected) open.anchor.focus() })
 }
 function click(event: MouseEvent, id: string | null) {
   if (event.metaKey || event.ctrlKey || event.shiftKey || event.button === 1) return
@@ -98,28 +101,31 @@ defineExpose({ openMenuFor: (anchor: HTMLElement) => { if (active.value) openMen
       </span>
     </div>
     <div v-if="active && dirty" class="changes">
-      <button v-if="mine(active)" type="button" class="btn sm save" @click="emit('save', active)"><AppIcon name="check" :size="13" />Save</button>
-      <button v-else type="button" class="btn sm save" @click="emit('saveAs', $event.currentTarget as HTMLElement)"><AppIcon name="bookmark" :size="13" />Save as new</button>
-      <button type="button" class="btn sm ghost" data-tip="Back to the view as saved" @click="emit('reset')">Reset</button>
+      <button type="button" class="btn sm ghost reset" data-tip="Back to the view as saved" @click="emit('reset')">Reset</button>
+      <button v-if="mine(active)" type="button" class="btn sm save" aria-label="Save changes to the view" @click="emit('save', active)"><AppIcon name="check" :size="13" /><span class="save-label">Save</span></button>
+      <button v-else type="button" class="btn sm save" aria-label="Save as new view" @click="emit('saveAs', $event.currentTarget as HTMLElement)"><AppIcon name="bookmark" :size="13" /><span class="save-label">Save as new</span></button>
+    </div>
+    <div v-else-if="!active && canSaveNew" class="changes">
+      <button type="button" class="btn sm save" aria-label="Save view" data-tip="Keep this list as a view of the project" @click="emit('saveAs', $event.currentTarget as HTMLElement)"><AppIcon name="bookmark" :size="13" /><span class="save-label">Save view</span></button>
     </div>
 
     <FloatingPanel v-if="menu" :anchor="menu.anchor" :width="244" :label="`View ${menu.view.name}`" @close="closeMenu">
       <div ref="list" class="menu" role="menu" :aria-label="`View ${menu.view.name}`" @keydown="move">
         <template v-if="menu.view.id === activeId && dirty">
-          <button v-if="mine(menu.view)" type="button" role="menuitem" class="menu-item" data-autofocus @click="act(() => emit('save', menu!.view))"><AppIcon name="check" :size="14" />Save changes</button>
-          <button type="button" role="menuitem" class="menu-item" @click="act(() => emit('saveAs', menu!.anchor))"><AppIcon name="bookmark" :size="14" />Save as new view</button>
+          <button v-if="mine(menu.view)" type="button" role="menuitem" class="menu-item" data-autofocus @click="act(m => emit('save', m.view))"><AppIcon name="check" :size="14" />Save changes</button>
+          <button type="button" role="menuitem" class="menu-item" @click="act(m => emit('saveAs', m.anchor))"><AppIcon name="bookmark" :size="14" />Save as new view</button>
           <button type="button" role="menuitem" class="menu-item" @click="act(() => emit('reset'))"><AppIcon name="rollback" :size="14" />Reset changes</button>
           <span class="divider" role="separator" />
         </template>
-        <button v-if="mine(menu.view)" type="button" role="menuitem" class="menu-item" :data-autofocus="dirty ? undefined : ''" @click="act(() => emit('rename', menu!.view, menu!.anchor))"><AppIcon name="edit" :size="14" />Rename</button>
-        <button type="button" role="menuitem" class="menu-item" @click="act(() => emit('duplicate', menu!.view))"><AppIcon name="copy" :size="14" />{{ mine(menu.view) ? 'Duplicate' : 'Copy to my views' }}</button>
-        <button v-if="menu.view.id !== defaultId" type="button" role="menuitem" class="menu-item" @click="act(() => emit('setDefault', menu!.view))"><AppIcon name="star" :size="14" />Open the project with it</button>
+        <button v-if="mine(menu.view)" type="button" role="menuitem" class="menu-item" :data-autofocus="dirty ? undefined : ''" @click="act(m => emit('rename', m.view, m.anchor))"><AppIcon name="edit" :size="14" />Rename</button>
+        <button type="button" role="menuitem" class="menu-item" @click="act(m => emit('duplicate', m.view))"><AppIcon name="copy" :size="14" />{{ mine(menu.view) ? 'Duplicate' : 'Copy to my views' }}</button>
+        <button v-if="menu.view.id !== defaultId" type="button" role="menuitem" class="menu-item" @click="act(m => emit('setDefault', m.view))"><AppIcon name="star" :size="14" />Open the project with it</button>
         <button v-else type="button" role="menuitem" class="menu-item" @click="act(() => emit('setDefault', null))"><AppIcon name="star" :size="14" />Stop opening with it</button>
-        <button v-if="mine(menu.view)" type="button" role="menuitem" class="menu-item" @click="act(() => emit('share', menu!.view, !menu!.view.shared))"><AppIcon name="users" :size="14" />{{ menu.view.shared ? 'Make it private' : 'Share with the project' }}</button>
-        <button type="button" role="menuitem" class="menu-item" @click="act(() => emit('copyLink', menu!.view))"><AppIcon name="link" :size="14" />Copy link</button>
+        <button v-if="mine(menu.view)" type="button" role="menuitem" class="menu-item" @click="act(m => emit('share', m.view, !m.view.shared))"><AppIcon name="users" :size="14" />{{ menu.view.shared ? 'Make it private' : 'Share with the project' }}</button>
+        <button type="button" role="menuitem" class="menu-item" @click="act(m => emit('copyLink', m.view))"><AppIcon name="link" :size="14" />Copy link</button>
         <template v-if="mine(menu.view)">
           <span class="divider" role="separator" />
-          <button type="button" role="menuitem" class="menu-item danger" @click="act(() => emit('remove', menu!.view))"><AppIcon name="trash" :size="14" />Delete view</button>
+          <button type="button" role="menuitem" class="menu-item danger" @click="act(m => emit('remove', m.view))"><AppIcon name="trash" :size="14" />Delete view</button>
         </template>
       </div>
     </FloatingPanel>
@@ -154,6 +160,7 @@ defineExpose({ openMenuFor: (anchor: HTMLElement) => { if (active.value) openMen
 .changes { display: flex; align-items: center; gap: 4px; flex-shrink: 0; }
 .changes .btn { gap: 6px; }
 .save { color: var(--teal-ink); font-weight: 600; }
+.reset { color: var(--ink-2); }
 .menu { display: grid; gap: 1px; }
 .menu-item { display: flex; align-items: center; gap: 10px; height: 32px; padding: 0 10px; border: 0; border-radius: 8px; background: transparent; color: var(--ink); font-size: 13.5px; text-align: left; }
 .menu-item svg { flex-shrink: 0; color: var(--ink-3); }
@@ -162,9 +169,11 @@ defineExpose({ openMenuFor: (anchor: HTMLElement) => { if (active.value) openMen
 .menu-item.danger, .menu-item.danger svg { color: var(--danger); }
 .divider { height: 1px; margin: 4px 6px; background: var(--line); }
 @media (max-width: 600px) {
-  .view-bar { padding-bottom: 2px; }
+  .view-bar { gap: 6px; padding-bottom: 2px; }
   .view-tab { height: 32px; }
   .tab-menu { width: 30px; height: 30px; }
-  .changes .ghost { display: none; }
+  .changes .reset { display: none; }
+  .changes .save { width: 34px; height: 34px; padding: 0; justify-content: center; }
+  .save-label { display: none; }
 }
 </style>

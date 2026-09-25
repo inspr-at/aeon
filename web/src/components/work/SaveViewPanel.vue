@@ -5,7 +5,7 @@ import AppIcon from '../AppIcon.vue'
 import FloatingPanel from './FloatingPanel.vue'
 
 // Name a new view (with sharing and "open the project with it"), or rename one.
-const props = defineProps<{ anchor: HTMLElement | null; mode: 'create' | 'rename'; name: string; projectTitle: string; busy?: boolean; error?: string; canShare?: boolean }>()
+const props = withDefaults(defineProps<{ anchor: HTMLElement | null; mode: 'create' | 'rename'; name: string; projectTitle: string; busy?: boolean; error?: string; canShare?: boolean }>(), { canShare: true })
 const emit = defineEmits<{ submit: [value: { name: string; shared: boolean; makeDefault: boolean }]; close: [restoreFocus: boolean] }>()
 const name = ref(props.name)
 const shared = ref(false)
@@ -28,7 +28,7 @@ function submit() {
         <input ref="input" v-model="name" class="field" maxlength="80" placeholder="Name this view" aria-label="View name" data-autofocus />
       </label>
       <template v-if="mode === 'create'">
-        <label v-if="canShare !== false" class="check-row">
+        <label v-if="canShare" class="check-row">
           <input v-model="shared" type="checkbox" class="check-box" />
           <span><b>Share with the project</b><small>Everyone in {{ projectTitle }} sees it; only you change it.</small></span>
         </label>

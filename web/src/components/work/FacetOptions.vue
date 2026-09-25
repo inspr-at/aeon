@@ -77,10 +77,11 @@ function kindIcon(value: string) { return value === 'epic' ? 'epic' : value === 
 .facet-option:active { background: var(--row-selected); }
 .facet-option.muted .option-label { color: var(--ink-3); }
 .option-label { flex: 1; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
-.facet-option.out .option-label { color: var(--ink-2); text-decoration: line-through; text-decoration-color: var(--ink-3); }
+.facet-option.out .option-label { color: var(--ink-2); }
 .not-tag { flex-shrink: 0; height: 17px; padding: 0 6px; border-radius: 999px; background: var(--danger-bg); box-shadow: inset 0 0 0 1px var(--danger-line); color: var(--danger); font: 600 10px/17px var(--mono); letter-spacing: .06em; text-transform: uppercase; font-variant-ligatures: none; }
 .hint { flex-shrink: 0; font-size: 11px; color: var(--ink-3); }
 .count { flex-shrink: 0; min-width: 18px; text-align: right; font-size: 11.5px; color: var(--ink-3); }
+.facet-option:focus-within .count, .facet-option:focus-within .hint { color: var(--ink-2); }
 .no-icon { width: 14px; height: 2px; border-radius: 2px; background: var(--line-2); }
 .kind, .faint { flex-shrink: 0; color: var(--ink-3); }
 .kind.epic { color: var(--gold); }

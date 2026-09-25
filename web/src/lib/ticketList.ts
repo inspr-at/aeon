@@ -195,7 +195,7 @@ export function suggestName(filters: ListFilters, labels: (dimension: Dimension,
   if (filters.q.trim()) parts.push(`“${filters.q.trim()}”`)
   if (!parts.length && filters.group !== 'none') parts.push(`By ${GROUPS.find(g => g.value === filters.group)!.label.toLowerCase()}`)
   const name = parts.slice(0, 3).join(' · ')
-  return (name || 'My view').slice(0, 80)
+  return name ? (name[0].toUpperCase() + name.slice(1)).slice(0, 80) : 'My view'
 }
 
 // ---------- Dates ----------
@@ -225,6 +225,9 @@ export function dateBounds(date: DateFilter | null, now = new Date()): { from: s
   return range(date.from ? dayOf(date.from) : null, date.to ? addDays(dayOf(date.to), 1) : null)
 }
 const MONTHS = ['Jan', 'Feb', 'Mar', 'Apr', 'May', 'Jun', 'Jul', 'Aug', 'Sep', 'Oct', 'Nov', 'Dec']
+export function shortDate(date: Date, now = new Date()): string {
+  return `${date.getDate()} ${MONTHS[date.getMonth()]}${date.getFullYear() === now.getFullYear() ? '' : ` ${date.getFullYear()}`}`
+}
 function shortDay(iso: string, now: Date): string {
   const d = dayOf(iso)
   return `${d.getDate()} ${MONTHS[d.getMonth()]}${d.getFullYear() === now.getFullYear() ? '' : ` ${d.getFullYear()}`}`
