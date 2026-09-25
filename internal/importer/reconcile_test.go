@@ -17,6 +17,7 @@ import (
 	"github.com/inspr-at/aeon/internal/db"
 	"github.com/inspr-at/aeon/internal/dbtest"
 	"github.com/inspr-at/aeon/internal/events"
+	"github.com/inspr-at/aeon/internal/principallink"
 	"github.com/inspr-at/aeon/internal/tenant"
 	"github.com/inspr-at/aeon/internal/tenantbootstrap"
 	"github.com/jackc/pgx/v5"
@@ -141,6 +142,85 @@ func TestReconcileWritesPartialOnInterrupt(t *testing.T) {
 type roundTripFunc func(*http.Request) (*http.Response, error)
 
 func (f roundTripFunc) RoundTrip(r *http.Request) (*http.Response, error) { return f(r) }
+
+func TestRelationChecksumIgnoresNonsemanticFields(t *testing.T) {
+	base := Record{"type": "depends_on", "source_id": 11, "target_id": 10}
+	withMetadata := Record{"type": "depends_on", "source_id": 11, "target_id": 10,
+		"created_at": "2026-09-25T00:00:00Z", "source_title": "renamed"}
+	baseHash, err := relationChecksum(base)
+	if err != nil {
+		t.Fatal(err)
+	}
+	metadataHash, err := relationChecksum(withMetadata)
+	if err != nil || metadataHash != baseHash {
+		t.Fatalf("metadata changed relation identity: %q %q %v", baseHash, metadataHash, err)
+	}
+	withMetadata["target_id"] = 12
+	changedHash, err := relationChecksum(withMetadata)
+	if err != nil || changedHash == baseHash {
+		t.Fatalf("endpoint change went undetected: %q %q %v", baseHash, changedHash, err)
+	}
+}
+
+func TestTargetPersonIDKeepsAliasAndCanonicalLinks(t *testing.T) {
+	users := map[string]map[string]bool{"alias": {"2": true}, "canonical": {"2": true, "7": true}}
+	known := map[string]bool{"2": true, "7": true}
+	if got := targetPersonID(2, "alias", users, known); got != "2" {
+		t.Fatalf("alias: %q", got)
+	}
+	if got := targetPersonID(2, "canonical", users, known); got != "2" {
+		t.Fatalf("linked principal: %q", got)
+	}
+	if got := targetPersonID(8, "", users, known); got != "8" {
+		t.Fatalf("deleted user: %q", got)
+	}
+	if got := targetPersonID(2, "", users, known); got != "projection-missing" {
+		t.Fatalf("missing known-user projection: %q", got)
+	}
+	if got := targetPersonID(2, "other-alias", map[string]map[string]bool{"other-alias": {"7": true}}, known); got != "7" {
+		t.Fatalf("wrong assignment: %q", got)
+	}
+}
+
+func TestReconcileLinkedPrincipalDoesNotChangeClassicAssignment(t *testing.T) {
+	ctx := context.Background()
+	source, closeSource := fakeClassic(t)
+	defer closeSource()
+	d := dbtest.Open(t)
+	if _, err := tenantbootstrap.Create(ctx, d.App, "reconcile-linked", "Reconcile linked"); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := (Importer{Source: source, Writer: PostgresWriter{Pool: d.App}}).RunDelta(ctx, "reconcile-linked", ""); err != nil {
+		t.Fatal(err)
+	}
+	tenantID, err := tenantbootstrap.ResolveSlug(ctx, d.App, "reconcile-linked")
+	if err != nil {
+		t.Fatal(err)
+	}
+	var alias string
+	if err := db.InTenant(ctx, d.App, tenantID, func(tx pgx.Tx) error {
+		return tx.QueryRow(ctx, `SELECT p.id::text FROM principals p JOIN identities i ON i.id=p.identity_id WHERE p.tenant_id=$1 AND i.issuer='paimos-classic' AND i.subject=$2`, tenantID, source.InstanceID()+":7").Scan(&alias)
+	}); err != nil {
+		t.Fatal(err)
+	}
+	canonical, err := tenantbootstrap.BindOIDC(ctx, d.App, "reconcile-linked", "https://id.example.test", "linked", "Linked", "member")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if _, err := principallink.New(d.App).Link(ctx, "reconcile-linked", alias, canonical); err != nil {
+		t.Fatal(err)
+	}
+	report, err := ReconcileWithOptions(ctx, source, d.App, attachments.Store{FilesDir: t.TempDir()}, "reconcile-linked", "", ReconcileOptions{})
+	if err != nil {
+		t.Fatal(err)
+	}
+	for _, project := range report.Projects {
+		links := project.Categories["people_links"]
+		if len(links.Changed)+len(links.Missing)+len(links.Extra) != 0 {
+			t.Fatalf("%s linked assignments: %+v", project.Key, links)
+		}
+	}
+}
 
 func TestReconcileClassicBytesAndDeltaConflict(t *testing.T) {
 	ctx := context.Background()
