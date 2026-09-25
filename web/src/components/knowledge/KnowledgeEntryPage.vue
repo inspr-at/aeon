@@ -7,7 +7,7 @@ import { brand, setPageTitle } from '../../lib/brand'
 import { confirmAction } from '../../lib/confirm'
 import { lineDiff } from '../../lib/crm'
 import {
-  DETAIL_FIELDS, STATUSES, cliCommand, deleteKnowledge, detailText, entryPath, getKnowledge, KnowledgeError, mergeDetails, readingMinutes,
+  DETAIL_FIELDS, STATUSES, cliCommand, deleteKnowledge, detailText, entryParam, entryPath, getKnowledge, kindToken, KnowledgeError, mergeDetails, readingMinutes,
   resolveKnowledge, slugProblem, statusLabel, typeMeta, undoKnowledge, updateKnowledge, validUrl, wantsToc, withoutTitle,
   type Heading, type KnowledgeEntry, type KnowledgeLink, type KnowledgePatch, type KnowledgeStatus, type KnowledgeType,
 } from '../../lib/knowledge'
@@ -27,13 +27,19 @@ import StatusIcon from '../work/StatusIcon.vue'
 // read it, and what it is linked to. Edit mode is the ticket pattern (U11): one
 // form, one Save, a stale copy answers with the newer version and the draft
 // stays; every save and delete offers Undo through the event log.
-const props = defineProps<{
+// mode 'dock' (U25) is the same entry docked beside the list on wide screens,
+// like a ticket's side panel: its own scroller, one column, the list's j and k
+// move it, Esc closes it, and Expand opens the entry's own page (this same
+// component, so a draft and the loaded entry carry over).
+const props = withDefaults(defineProps<{
   project: { id: string; routeKey: string; title: string }
   type: KnowledgeType; slug: string; state: KnowledgeState; canWrite: boolean; canDelete: boolean; now: number
   // The list's search, kind, status and sort, carried so back returns to it.
   listQuery: Record<string, string>
-}>()
+  mode?: 'page' | 'dock'
+}>(), { mode: 'page' })
 const emit = defineEmits<{ close: [] }>()
+const dock = computed(() => props.mode === 'dock')
 const route = useRoute()
 const router = useRouter()
 const projects = useProjects()
@@ -44,6 +50,7 @@ const error = ref('')
 const missing = ref(false)
 const readOnly = ref(false)
 const root = ref<HTMLElement>()
+const scroller = ref<HTMLElement>()
 const article = ref<HTMLElement>()
 const headings = ref<Heading[]>([])
 const activeHeading = ref('')
@@ -61,10 +68,13 @@ async function load() {
   try {
     const found = await resolveKnowledge(props.project.id, props.type, props.slug)
     if (request !== generation) return
+    const switched = entry.value?.id !== found.id
     entry.value = found
+    // The pane starts each entry at its top, unless the address names a section.
+    if (switched && dock.value && !route.hash) scroller.value?.scrollTo({ top: 0 })
     if (found.renamed_from && found.slug !== props.slug) {
       toast(`“${found.renamed_from}” is now called “${found.slug}”. Agents need the new slug.`)
-      void router.replace({ path: entryPath(props.project.routeKey, found.type, found.slug), query: route.query, hash: route.hash })
+      void router.replace(placeOf(found.type, found.slug))
     }
   } catch (e) {
     if (request !== generation) return
@@ -82,6 +92,10 @@ watch([() => props.project.id, () => props.type, () => props.slug], ([, type, sl
   void load()
 }, { immediate: true })
 watch(entry, current => { if (current) setPageTitle(`${current.title} · ${props.project.routeKey} Knowledge`) })
+// Another entry is on its way: the one shown stays, quietly dimmed, so nothing jumps.
+const switching = computed(() => loading.value && !!entry.value && (entry.value.type !== props.type || entry.value.slug !== props.slug))
+// What the list already knows about the entry, to show its name while it loads.
+const listed = computed(() => props.state.items.value.find(item => item.type === props.type && item.slug === props.slug) ?? null)
 
 // ---------- Position in the list: previous, next and the rail ----------
 const sequence = computed(() => props.state.sequence.value)
@@ -94,9 +108,21 @@ function go(step: number) {
   const at = position.value
   if (!at) return
   const next = sequence.value[at.index + step]
-  if (next) void router.replace({ path: entryPath(props.project.routeKey, next.type, next.slug), query: props.listQuery })
+  if (next) void router.replace(placeOf(next.type, next.slug, false))
 }
 function listLink() { return { path: `/p/${encodeURIComponent(props.project.routeKey)}/knowledge`, query: props.listQuery } }
+// Where an entry of this project shows: the pane's ?entry= beside the list, or
+// its own page. keepHash keeps a section (a rename keeps the reader's place).
+function placeOf(type: KnowledgeType, slug: string, keepHash = true) {
+  const hash = keepHash ? route.hash : ''
+  if (dock.value) return { path: route.path, query: { ...route.query, entry: entryParam(type, slug) }, hash }
+  return { path: entryPath(props.project.routeKey, type, slug), query: route.query, hash }
+}
+// The entry's own page, with the list's place so back and Esc return to it.
+function expand() {
+  const current = entry.value
+  void router.push({ path: entryPath(props.project.routeKey, current?.type ?? props.type, current?.slug ?? props.slug), query: props.listQuery, hash: route.hash })
+}
 
 // ---------- Reading: headings, table of contents, anchors ----------
 const body = computed(() => entry.value ? withoutTitle(entry.value.body, entry.value.title) : '')
@@ -145,18 +171,18 @@ watch([() => route.hash, headings], ([hash, list]) => {
 }, { flush: 'post' })
 // The section being read is marked in the table of contents.
 let spy: IntersectionObserver | undefined
-watch([toc, article], async () => {
+watch([toc, article, dock], async () => {
   spy?.disconnect()
   if (!toc.value.length || !article.value) return
   await nextTick()
   const visible = new Map<string, boolean>()
+  const scrollRoot = scrollRootEl()
   spy = new IntersectionObserver(entries => {
     for (const item of entries) visible.set(item.target.id.slice(2), item.isIntersecting)
-    const main = document.getElementById('main')
-    const atEnd = !!main && main.scrollTop > 0 && main.scrollTop + main.clientHeight >= main.scrollHeight - 4
+    const atEnd = !!scrollRoot && scrollRoot.scrollTop > 0 && scrollRoot.scrollTop + scrollRoot.clientHeight >= scrollRoot.scrollHeight - 4
     const first = atEnd ? toc.value[toc.value.length - 1] : toc.value.find(h => visible.get(h.id))
     if (first) activeHeading.value = first.id
-  }, { root: document.getElementById('main'), rootMargin: '-64px 0px -55% 0px' })
+  }, { root: scrollRoot, rootMargin: dock.value ? '-8px 0px -55% 0px' : '-64px 0px -55% 0px' })
   for (const h of toc.value) { const el = document.getElementById(`h-${h.id}`); if (el) spy.observe(el) }
 }, { flush: 'post' })
 // At the very end of the page the last sections cannot reach the top: the last one is where the reader is.
@@ -164,6 +190,15 @@ function scrolledToEnd(event: Event) {
   const el = event.target as HTMLElement
   if (toc.value.length && el.scrollTop + el.clientHeight >= el.scrollHeight - 4) activeHeading.value = toc.value[toc.value.length - 1].id
 }
+// The page scrolls in the app's main area; the docked pane in its own scroller.
+function scrollRootEl() { return dock.value ? scroller.value ?? null : document.getElementById('main') }
+let scrollListener: HTMLElement | null = null
+function listenScroll() {
+  scrollListener?.removeEventListener('scroll', scrolledToEnd)
+  scrollListener = scrollRootEl()
+  scrollListener?.addEventListener('scroll', scrolledToEnd, { passive: true })
+}
+watch(dock, () => void nextTick(listenScroll))
 
 // ---------- Links to tickets and other entries ----------
 const linkGroups = computed(() => {
@@ -178,6 +213,8 @@ const relationLabel = (l: KnowledgeLink) => (RELATION[l.type] ?? [l.type, l.type
 function linkTarget(l: KnowledgeLink) {
   const owner = l.node.project_id ? projects.byId(l.node.project_id) : undefined
   const routeKey = owner?.routeKey ?? props.project.routeKey
+  // Another entry of this project opens in the same pane.
+  if (l.node.type && l.node.slug && dock.value && routeKey === props.project.routeKey) return placeOf(l.node.type, l.node.slug, false)
   if (l.node.type && l.node.slug) return entryPath(routeKey, l.node.type, l.node.slug)
   return owner ? `/p/${encodeURIComponent(routeKey)}/${encodeURIComponent(l.node.key)}` : null
 }
@@ -282,7 +319,7 @@ function applySaved(saved: KnowledgeEntry, previousSlug: string) {
   loading.value = false; missing.value = false; error.value = ''
   entry.value = saved
   props.state.upsert(saved)
-  if (saved.slug !== previousSlug || saved.type !== props.type) void router.replace({ path: entryPath(props.project.routeKey, saved.type, saved.slug), query: route.query, hash: route.hash })
+  if (saved.slug !== previousSlug || saved.type !== props.type) void router.replace(placeOf(saved.type, saved.slug))
 }
 async function undo(eventId: number) {
   try {
@@ -417,7 +454,7 @@ async function restore(eventId: number, gone: KnowledgeEntry) {
   try {
     await undoKnowledge(eventId)
     await props.state.load()
-    toast(`${gone.slug} is back`, { action: { label: 'Open', run: () => void router.push(entryPath(props.project.routeKey, gone.type, gone.slug)) } })
+    toast(`${gone.slug} is back`, { action: { label: 'Open', run: () => void router.push(placeOf(gone.type, gone.slug, false)) } })
   } catch (e) { toast(e instanceof Error ? e.message : 'Undo did not work.', { tone: 'error' }) }
 }
 
@@ -431,9 +468,11 @@ function keydown(event: KeyboardEvent) {
   if (document.querySelector('dialog[open], .floating') || typing(event.target)) return
   switch (event.key) {
     case 'e': if (writable.value && entry.value) { event.preventDefault(); void startEdit() } break
-    case 'j': event.preventDefault(); go(1); break
-    case 'k': event.preventDefault(); go(-1); break
-    case 'Escape': event.preventDefault(); emit('close'); break
+    // Docked, the list moves the selection (and so this pane) with j and k.
+    case 'j': if (!dock.value) { event.preventDefault(); go(1) } break
+    case 'k': if (!dock.value) { event.preventDefault(); go(-1) } break
+    // Beside the graph, Escape clears the graph's selection, which closes this pane too.
+    case 'Escape': if (dock.value && route.query.mode === 'graph') return; event.preventDefault(); emit('close'); break
   }
 }
 // Opening a new entry from the Create dialog starts in the text.
@@ -450,14 +489,14 @@ onMounted(() => {
   window.addEventListener('keydown', keydown)
   window.addEventListener('focus', checkNewer)
   wideQuery.addEventListener('change', onWide)
-  document.getElementById('main')?.addEventListener('scroll', scrolledToEnd, { passive: true })
+  listenScroll()
   poll = setInterval(checkNewer, 60_000)
 })
 onBeforeUnmount(() => {
   window.removeEventListener('keydown', keydown)
   window.removeEventListener('focus', checkNewer)
   wideQuery.removeEventListener('change', onWide)
-  document.getElementById('main')?.removeEventListener('scroll', scrolledToEnd)
+  scrollListener?.removeEventListener('scroll', scrolledToEnd)
   clearInterval(poll); spy?.disconnect()
 })
 defineExpose({ isDirty: () => !skipGuard && dirty.value, startEdit, editing, entryId: () => entry.value?.id ?? null })
@@ -465,10 +504,10 @@ const whoUpdated = computed(() => entry.value?.imported ? 'imported' : entry.val
 </script>
 
 <template>
-  <article ref="root" class="entry-page" :class="{ editing }" tabindex="-1" :aria-label="entry ? `${meta.label}: ${entry.title}` : 'Knowledge entry'">
+  <component :is="dock ? 'aside' : 'article'" ref="root" class="entry-page" :class="[mode, { editing }]" tabindex="-1" :aria-label="entry ? `${meta.label}: ${entry.title}` : 'Knowledge entry'">
     <!-- The bar: back, what it is, where it is in the list, and the actions. -->
     <header class="e-bar"><div class="e-bar-inner">
-      <RouterLink class="icon-btn sm flat" :to="listLink()" aria-label="Back to Knowledge" data-tip="Back to Knowledge · Esc" @click.prevent="emit('close')"><AppIcon name="chevron-left" :size="16" /></RouterLink>
+      <RouterLink v-if="!dock" class="icon-btn sm flat" :to="listLink()" aria-label="Back to Knowledge" data-tip="Back to Knowledge · Esc" @click.prevent="emit('close')"><AppIcon name="chevron-left" :size="16" /></RouterLink>
       <button type="button" class="kind-chip" :aria-label="`Copy the slug ${entry?.slug ?? slug}`" :data-tip="`Copy ${meta.label.toLowerCase()} slug`" @click="copy(entry?.slug ?? slug, entry?.slug ?? slug)">
         <AppIcon :name="meta.icon" :size="13" /><span class="kind-type">{{ meta.label }}</span><span class="kind-slug">{{ entry?.slug ?? slug }}</span><AppIcon name="copy" :size="11" class="copy-glyph" />
       </button>
@@ -487,9 +526,13 @@ const whoUpdated = computed(() => entry.value?.imported ? 'imported' : entry.val
       </template>
       <template v-else-if="entry">
         <button v-if="writable" type="button" class="btn sm edit-btn" aria-keyshortcuts="e" data-tip="Edit the text, title, slug and status · e" @click="startEdit()"><AppIcon name="edit" :size="13" />Edit</button>
+        <button v-if="dock" type="button" class="icon-btn sm flat" aria-label="Open as full page" data-tip="Full page" @click="expand"><AppIcon name="expand" :size="14" /></button>
         <button ref="moreButton" type="button" class="icon-btn sm flat" aria-label="More actions" aria-haspopup="menu" :aria-expanded="!!moreAnchor" data-tip="More" @click="toggleMore"><AppIcon name="more" :size="15" /></button>
       </template>
+      <button v-if="dock && !editing" type="button" class="icon-btn sm flat" aria-label="Close the preview" aria-keyshortcuts="Escape" data-tip="Close · Esc" @click="emit('close')"><AppIcon name="close" :size="15" /></button>
     </div></header>
+
+    <div ref="scroller" class="e-scroll" :class="{ switching }" :aria-busy="switching || undefined">
 
     <div v-if="missing" class="e-state glass-card" role="alert">
       <span class="state-icon"><AppIcon :name="meta.icon" :size="20" /></span>
@@ -497,7 +540,7 @@ const whoUpdated = computed(() => entry.value?.imported ? 'imported' : entry.val
       <p>It may have been deleted, or the link is older than its last rename that anyone recorded.</p>
       <div class="state-actions">
         <RouterLink class="btn" :to="{ path: `/p/${encodeURIComponent(project.routeKey)}/knowledge`, query: { q: slug } }"><AppIcon name="search" :size="14" />Search for “{{ slug }}”</RouterLink>
-        <button type="button" class="btn" @click="emit('close')">Back to Knowledge</button>
+        <button type="button" class="btn" @click="emit('close')">{{ dock ? 'Close' : 'Back to Knowledge' }}</button>
       </div>
     </div>
     <div v-else-if="error && !entry" class="e-state glass-card" role="alert">
@@ -507,7 +550,12 @@ const whoUpdated = computed(() => entry.value?.imported ? 'imported' : entry.val
       <button type="button" class="btn" @click="load()"><AppIcon name="refresh" :size="14" />Try again</button>
     </div>
     <div v-else-if="!entry" class="e-skeleton" role="status" aria-label="Loading the entry">
-      <span class="skeleton sk-eyebrow" /><span class="skeleton sk-title" /><span class="skeleton sk-meta" />
+      <template v-if="listed">
+        <p class="e-eyebrow"><span class="e-type" :style="{ '--kind': `var(${kindToken(type)})` }"><AppIcon :name="meta.icon" :size="13" />{{ meta.label }}</span></p>
+        <p class="e-title sk-known">{{ listed.title }}</p>
+      </template>
+      <template v-else><span class="skeleton sk-eyebrow" /><span class="skeleton sk-title" /></template>
+      <span class="skeleton sk-meta" />
       <span v-for="n in 7" :key="n" class="skeleton sk-line" :style="{ width: `${62 + (n * 17) % 34}%` }" />
     </div>
 
@@ -590,7 +638,7 @@ const whoUpdated = computed(() => entry.value?.imported ? 'imported' : entry.val
       <section class="e-edit-body" aria-labelledby="e-body-label">
         <h3 id="e-body-label" class="eyebrow">Text</h3>
         <MarkdownEditor
-          ref="editor" v-model="draft.body" label="Text" bare :split="wide" :min-rows="wide ? 18 : 10"
+          ref="editor" v-model="draft.body" label="Text" bare :split="wide && !dock" :min-rows="wide && !dock ? 18 : 12"
           :placeholder="`What should someone know before they ${entry.type === 'runbook' ? 'run this' : entry.type === 'guideline' ? 'follow this' : 'rely on this'}? Use ## headings; long entries get a table of contents.`"
           @save="save" @cancel="cancelEdit"
         />
@@ -612,7 +660,7 @@ const whoUpdated = computed(() => entry.value?.imported ? 'imported' : entry.val
       </nav>
 
       <div ref="article" class="e-article">
-        <p class="e-eyebrow"><span class="e-type"><AppIcon :name="meta.icon" :size="13" />{{ meta.label }}</span><span v-if="entry.status !== 'active'" class="k-status" :class="entry.status">{{ statusLabel(entry.status) }}</span></p>
+        <p class="e-eyebrow"><span class="e-type" :style="{ '--kind': `var(${kindToken(entry.type)})` }"><AppIcon :name="meta.icon" :size="13" />{{ meta.label }}</span><span v-if="entry.status !== 'active'" class="k-status" :class="entry.status">{{ statusLabel(entry.status) }}</span></p>
         <h1 class="e-title">{{ entry.title }}</h1>
         <p class="e-byline dot-list">
           <span>Updated <time :datetime="entry.updated_at" :data-tip="absoluteTime(entry.updated_at)">{{ relativeTime(entry.updated_at, { now, long: true }) }}</time> {{ whoUpdated }}</span>
@@ -630,6 +678,19 @@ const whoUpdated = computed(() => entry.value?.imported ? 'imported' : entry.val
           <a v-if="headline.address" class="where-link" :href="headline.address" target="_blank" rel="noopener noreferrer">{{ headline.address.replace(/^https?:\/\//, '').replace(/\/$/, '') }}<AppIcon name="external" :size="13" /></a>
           <p v-if="headline.about" class="where-about">{{ headline.about }}</p>
         </aside>
+
+        <!-- Docked, what it is sits under the title: the pane has no side column. -->
+        <dl v-if="dock" class="e-facts" aria-label="Details">
+          <div :class="{ wide: entry.slug.length > 24 }"><dt>Slug</dt><dd><button type="button" class="slug-copy mono" :aria-label="`Copy the slug ${entry.slug}`" data-tip="Copy the slug" @click="copy(entry.slug, entry.slug)">{{ entry.slug }}<AppIcon name="copy" :size="11" /></button></dd></div>
+          <div><dt>Status</dt><dd>{{ statusLabel(entry.status) }}</dd></div>
+          <div><dt>Written by</dt><dd :class="{ unset: !entry.author }">{{ entry.author?.name ?? (entry.imported ? 'Imported' : 'Unknown') }}</dd></div>
+          <div><dt>Key</dt><dd class="mono">{{ entry.key }}</dd></div>
+          <div v-for="field in details" :key="field.key" class="wide">
+            <dt>{{ field.label }}</dt>
+            <dd v-if="field.kind === 'url' && validUrl(field.value)"><a :href="field.value" target="_blank" rel="noopener noreferrer" class="ext-link">{{ field.value.replace(/^https?:\/\//, '') }}<AppIcon name="external" :size="11" /></a></dd>
+            <dd v-else :class="{ mono: field.key === 'secret_path' || field.key === 'key' }">{{ field.value }}</dd>
+          </div>
+        </dl>
 
         <details v-if="toc.length" class="e-toc-inline">
           <summary><AppIcon name="chevron-right" :size="13" class="disclosure-chev" />On this page<span class="mono">{{ toc.length }}</span></summary>
@@ -650,7 +711,7 @@ const whoUpdated = computed(() => entry.value?.imported ? 'imported' : entry.val
           <span class="k-command"><code><template v-for="(part, i) in oldCommand.split(' ')" :key="i"><span class="tok">{{ part }}</span>{{ ' ' }}</template></code><button type="button" class="icon-btn sm flat" aria-label="Copy the agent command" data-tip="Copy" @click="copy(oldCommand, 'the command')"><AppIcon name="copy" :size="13" /></button></span>
         </section>
 
-        <section class="e-card" aria-labelledby="e-details-title">
+        <section v-if="!dock" class="e-card" aria-labelledby="e-details-title">
           <p id="e-details-title" class="card-title"><AppIcon name="info" :size="14" />Details</p>
           <dl class="facts">
             <div><dt>Kind</dt><dd>{{ meta.label }}</dd></div>
@@ -695,6 +756,7 @@ const whoUpdated = computed(() => entry.value?.imported ? 'imported' : entry.val
         </nav>
       </aside>
     </div>
+    </div>
 
     <FloatingPanel v-if="moreAnchor && entry" :anchor="moreAnchor" :width="248" align="end" :label="`Actions for ${entry.slug}`" @close="closeMore">
       <div class="more-menu" role="menu" :aria-label="`Actions for ${entry.slug}`" @keydown="menuKeys">
@@ -708,7 +770,7 @@ const whoUpdated = computed(() => entry.value?.imported ? 'imported' : entry.val
         </template>
       </div>
     </FloatingPanel>
-  </article>
+  </component>
 </template>
 
 <style scoped>
@@ -716,7 +778,7 @@ const whoUpdated = computed(() => entry.value?.imported ? 'imported' : entry.val
 .e-grid, .e-edit { max-width: 1480px; margin-inline: auto; }
 /* ---------- The bar ---------- */
 .e-bar-inner { display: flex; align-items: center; gap: 6px; max-width: 1480px; height: 52px; margin: 0 auto; }
-.e-bar { position: sticky; top: 0; z-index: 6; margin: 0 calc(-1 * var(--gutter)); padding: 0 var(--gutter); background: var(--glass); box-shadow: 0 1px 0 var(--line); backdrop-filter: blur(18px) saturate(1.2); -webkit-backdrop-filter: blur(18px) saturate(1.2); }
+.e-bar { position: sticky; top: 0; z-index: 6; margin: 0 calc(-1 * var(--gutter)); padding: 0 var(--gutter); background: var(--glass); box-shadow: 0 1px 0 var(--line); -webkit-backdrop-filter: blur(18px) saturate(1.2); backdrop-filter: blur(18px) saturate(1.2); }
 .kind-chip { display: inline-flex; flex-shrink: 1; align-items: center; gap: 7px; min-width: 0; height: 28px; margin-left: 2px; padding: 0 10px 0 9px; border: 0; border-radius: 8px; background: var(--chip-teal-bg); box-shadow: inset 0 0 0 1px var(--chip-teal-line); color: var(--teal-ink); }
 .kind-chip:hover { box-shadow: inset 0 0 0 1px var(--teal); }
 .kind-chip:focus-visible { box-shadow: var(--focus-ring); }
@@ -747,6 +809,7 @@ const whoUpdated = computed(() => entry.value?.imported ? 'imported' : entry.val
 .e-article { min-width: 0; max-width: 760px; }
 .e-eyebrow { display: flex; align-items: center; gap: 10px; margin-bottom: 10px; }
 .e-type { display: inline-flex; align-items: center; gap: 6px; font: 500 10.5px/1.5 var(--mono); letter-spacing: .16em; text-transform: uppercase; color: var(--teal-ink); font-variant-ligatures: none; }
+.e-type svg { color: var(--kind, currentColor); }
 .k-status { display: inline-flex; align-items: center; height: 20px; padding: 0 8px; border-radius: 999px; font: 600 10px/1 var(--mono); letter-spacing: .08em; text-transform: uppercase; font-variant-ligatures: none; }
 .k-status.proposed { background: var(--gold-wash); box-shadow: inset 0 0 0 1px rgba(214, 155, 49, .45); color: var(--gold-ink); }
 .k-status.archived { background: var(--chip-bg); box-shadow: inset 0 0 0 1px var(--chip-line); color: var(--ink-2); }
@@ -935,4 +998,63 @@ a.link-row:focus-visible { box-shadow: var(--focus-ring); }
   .slug-input, .slug-prefix { font-size: 16px; }
 }
 @media (max-width: 600px) { .nav { display: none; } }
+
+/* ---------- Docked beside the list (U25) ----------
+   The ticket side panel's glass pane: fixed at the right, as wide as --panel-w
+   (the page sets it, and the splitter beside it), with its own scroller. */
+.entry-page.dock {
+  position: fixed; z-index: 15; top: calc(var(--header-h) + 10px); right: 10px; bottom: calc(var(--footer-h) + 10px); width: var(--panel-w);
+  display: flex; flex-direction: column; padding: 0; overflow: hidden;
+  border-radius: var(--radius); border: 1px solid var(--glass-edge);
+  background: linear-gradient(165deg, var(--surface-raised), var(--surface-raised-2)); box-shadow: var(--shadow-pop), var(--shadow);
+  -webkit-backdrop-filter: blur(20px) saturate(1.15); backdrop-filter: blur(20px) saturate(1.15);
+}
+.entry-page.dock:focus-visible { box-shadow: var(--shadow-pop), var(--focus-ring); }
+@media (prefers-reduced-motion: no-preference) {
+  .entry-page.dock { animation: dock-in .22s cubic-bezier(.2, .7, .2, 1); }
+  @keyframes dock-in { from { opacity: 0; transform: translateX(24px); } to { opacity: 1; transform: none; } }
+}
+.dock .e-bar { position: static; flex-shrink: 0; margin: 0; padding: 0 8px 0 12px; background: transparent; box-shadow: none; border-bottom: 1px solid var(--line); -webkit-backdrop-filter: none; backdrop-filter: none; }
+.dock .e-bar-inner { max-width: none; height: 52px; }
+.dock .kind-chip { margin-left: 0; }
+.dock .e-scroll { flex: 1; min-height: 0; overflow: auto; overscroll-behavior: contain; padding: 22px 26px 30px; }
+/* Its own formatting context: a state's top margin stays inside, so the scroller never moves. */
+.e-scroll { display: flow-root; }
+.e-scroll.switching { opacity: .55; }
+@media (prefers-reduced-motion: no-preference) { .e-scroll { transition: opacity .15s ease .08s; } }
+.dock .e-grid, .dock .e-edit { display: block; max-width: none; margin: 0; padding: 0; }
+.dock .e-edit { display: grid; gap: 16px; }
+.dock .e-rail, .dock .e-toc { display: none; }
+.dock .e-article { max-width: 72ch; }
+.dock .e-title { font-size: clamp(24px, 1.9vw, 30px); }
+.dock .e-body { margin-top: 22px; font-size: 14.5px; line-height: 1.7; }
+.dock .e-state { margin: 8px 0 0; padding: 40px 12px; border: 0; background: transparent; box-shadow: none; -webkit-backdrop-filter: none; backdrop-filter: none; }
+.dock .e-skeleton { max-width: 72ch; margin: 0; }
+.sk-known { margin-bottom: 4px; }
+/* One column: what it is under the title, the text, then how agents read it and its links. */
+.dock .e-aside { position: static; display: grid; grid-template-columns: minmax(0, 1fr); gap: 14px; max-width: 72ch; max-height: none; margin-top: 30px; overflow: visible; padding: 0; }
+.dock .e-card { background: var(--surface-2); box-shadow: inset 0 0 0 1px var(--line); border-color: transparent; }
+.e-facts { display: grid; grid-template-columns: repeat(auto-fill, minmax(150px, 1fr)); gap: 12px 20px; margin: 20px 0 0; padding: 14px 16px; border-radius: 12px; background: var(--surface-2); box-shadow: inset 0 0 0 1px var(--line); }
+.e-facts > div { display: grid; gap: 3px; min-width: 0; }
+.e-facts .wide { grid-column: 1 / -1; }
+.e-facts dt { font: 500 10px/1.4 var(--mono); letter-spacing: .14em; text-transform: uppercase; color: var(--ink-3); font-variant-ligatures: none; }
+.e-facts dd { margin: 0; min-width: 0; font-size: 13px; line-height: 1.45; color: var(--ink); overflow-wrap: anywhere; }
+.e-facts dd.mono { font-family: var(--mono); font-size: 12.5px; font-variant-ligatures: none; }
+.e-facts dd.unset { color: var(--ink-3); }
+.slug-copy { display: inline-flex; align-items: center; gap: 6px; max-width: 100%; padding: 0; border: 0; border-radius: 5px; background: transparent; color: var(--ink); font-size: 12.5px; text-align: left; overflow-wrap: anywhere; }
+.slug-copy svg { flex-shrink: 0; color: var(--ink-3); }
+.slug-copy:hover, .slug-copy:hover svg { color: var(--teal-ink); }
+.slug-copy:focus-visible { box-shadow: var(--focus-ring); }
+.dock .e-toc-inline { display: block; margin-top: 16px; border-radius: 12px; background: var(--surface-2); box-shadow: inset 0 0 0 1px var(--line); }
+.dock .e-toc-inline summary { display: flex; align-items: center; gap: 8px; min-height: 40px; padding: 0 14px; font-size: 13px; font-weight: 600; cursor: pointer; }
+.dock .e-toc-inline summary .mono { margin-left: auto; font-size: 11.5px; font-weight: 500; color: var(--ink-3); }
+.dock .e-toc-inline summary:focus-visible { box-shadow: var(--focus-ring); border-radius: 12px; }
+.dock .e-toc-inline ol { padding: 0 8px 10px; }
+.dock .e-toc-inline a { display: block; padding: 5px 8px; border-radius: 7px; color: var(--ink-2); font-size: 13px; }
+.dock .e-toc-inline a:hover { background: var(--row-hover); color: var(--ink); }
+.dock .e-toc-inline li.l3 a { padding-left: 22px; }
+.dock .e-props { grid-template-columns: minmax(0, 1fr) auto; }
+.dock .e-prop-kind { display: none; }
+.dock .edit-title { font-size: 22px; }
+.dock .e-edit-body :deep(.md-area) { min-height: 300px; }
 </style>

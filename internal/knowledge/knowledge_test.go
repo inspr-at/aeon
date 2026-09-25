@@ -392,6 +392,9 @@ func TestExcerpt(t *testing.T) {
 	if got := excerpt("tail of a sentence and then more words", "", nil, true); got != "…of a sentence and then more words" {
 		t.Fatalf("cut %q", got)
 	}
+	if got := excerpt("# ADR-001 · Aeon foundation\n\nStatus: accepted.", "ADR-001 · Aeon foundation (accepted)", nil, false); got != "Status: accepted." {
+		t.Fatalf("a heading that starts the title is dropped: %q", got)
+	}
 	if got := excerpt("Aeon is deployed by Pharos.", "Aeon", nil, false); got != "Aeon is deployed by Pharos." {
 		t.Fatalf("a sentence that starts with the title keeps it: %q", got)
 	}

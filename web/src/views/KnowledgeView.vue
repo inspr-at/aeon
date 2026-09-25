@@ -4,7 +4,7 @@ import { computed, nextTick, onBeforeUnmount, onMounted, ref, watch } from 'vue'
 import { useRoute, useRouter } from 'vue-router'
 import AppIcon from '../components/AppIcon.vue'
 import { brand, setPageTitle } from '../lib/brand'
-import { TYPES, countBy, entryPath, filterItems, highlightWords, isKnowledgeType, listKnowledge, sortItems, statusLabel, typeMeta, type KnowledgeItem, type KnowledgeStatus, type KnowledgeType } from '../lib/knowledge'
+import { TYPES, countBy, entryPath, filterItems, highlightWords, isKnowledgeType, kindToken, listKnowledge, sortItems, statusLabel, typeMeta, type KnowledgeItem, type KnowledgeStatus, type KnowledgeType } from '../lib/knowledge'
 import { absoluteTime, plural, relativeTime } from '../lib/work'
 import { useProjects } from '../stores/projects'
 
@@ -191,7 +191,7 @@ const listCommand = computed(() => `${brand.value.product.toLowerCase()} knowled
           <ul class="kp-rows">
             <li v-for="item in group.shown" :key="item.id">
               <RouterLink class="kp-row" :class="{ cursor: cursorId === item.id }" :to="itemLink(group, item)" :data-id="item.id" @focus="cursorId = item.id">
-                <span class="kp-kind-icon" :data-tip="typeMeta(item.type).label"><AppIcon :name="typeMeta(item.type).icon" :size="14" /></span>
+                <span class="kp-kind-icon" :data-tip="typeMeta(item.type).label" :style="{ '--kind': `var(${kindToken(item.type)})` }"><AppIcon :name="typeMeta(item.type).icon" :size="14" /></span>
                 <span class="kp-text">
                   <span class="kp-title"><template v-for="(part, i) in highlightWords(item.title, searchedFor)" :key="i"><mark v-if="part.match">{{ part.text }}</mark><template v-else>{{ part.text }}</template></template></span>
                   <span v-if="item.excerpt" class="kp-excerpt"><template v-for="(part, i) in highlightWords(item.excerpt, searchedFor)" :key="i"><mark v-if="part.match">{{ part.text }}</mark><template v-else>{{ part.text }}</template></template></span>
@@ -251,7 +251,8 @@ li + li .kp-row::before { content: ''; position: absolute; top: 0; left: 50px; r
 .kp-row.cursor { background: var(--row-selected); }
 .kp-row.cursor::before, li:has(.kp-row.cursor) + li .kp-row::before { opacity: 0; }
 .kp-row:focus-visible { box-shadow: var(--focus-ring); }
-.kp-kind-icon { display: grid; place-items: center; flex-shrink: 0; width: 28px; height: 28px; border-radius: 8px; background: var(--chip-teal-bg); box-shadow: inset 0 0 0 1px var(--chip-teal-line); color: var(--teal-ink); }
+/* The kind's hue, as in the project's Knowledge and its graph; the tile stays neutral. */
+.kp-kind-icon { display: grid; place-items: center; flex-shrink: 0; width: 28px; height: 28px; border-radius: 8px; background: var(--surface-raised); box-shadow: inset 0 0 0 1px var(--line-2); color: var(--kind, var(--teal-ink)); }
 .kp-text { display: grid; gap: 3px; flex: 1; min-width: 0; }
 .kp-title { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; font-size: 14px; font-weight: 600; }
 .kp-excerpt { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; font-size: 12.5px; color: var(--ink-2); }
