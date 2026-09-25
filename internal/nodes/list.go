@@ -732,8 +732,9 @@ func facetSQL(q listQuery) (string, []any) {
 	extra := ""
 	if want("tag") {
 		extra += `
-    UNION ALL SELECT 'tag',coalesce(tg.name,'none') FROM filtered f JOIN nodes n ON n.id=f.id
-        LEFT JOIN LATERAL (SELECT DISTINCT ON (lower(e.name)) e.name FROM ` + tagElems + ` e WHERE coalesce(e.name,'')<>'') tg ON true`
+    UNION ALL SELECT 'tag',coalesce(nullif(btrim(CASE jsonb_typeof(t) WHEN 'string' THEN t#>>'{}' ELSE t->>'name' END),''),'none')
+        FROM filtered f JOIN nodes n ON n.id=f.id
+        LEFT JOIN LATERAL jsonb_array_elements(CASE WHEN jsonb_typeof(n.fields->'tags')='array' THEN n.fields->'tags' ELSE '[]'::jsonb END) t ON true`
 	}
 	if want("cost_unit") {
 		extra += `

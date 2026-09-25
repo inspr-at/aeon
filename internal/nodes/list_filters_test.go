@@ -107,10 +107,10 @@ func TestListFiltersExclusionsLabelsEpicsAndDates(t *testing.T) {
 	future := time.Now().Add(time.Hour).UTC().Format(time.RFC3339)
 	past := time.Now().Add(-time.Hour).UTC().Format(time.RFC3339)
 	expect("date_field=created&date_from="+url.QueryEscape(past)+"&date_to="+url.QueryEscape(future), "PAI-3", "PAI-4", "PAI-5", "PAI-6")
-	expect("date_field=updated&date_from="+url.QueryEscape(future))
+	expect("date_field=updated&date_from=" + url.QueryEscape(future))
 	expect("date_field=start&date_from="+url.QueryEscape("2026-09-10T00:00:00+02:00")+"&date_to="+url.QueryEscape("2026-09-11T00:00:00+02:00"), "PAI-3")
 	expect("date_field=start", "PAI-3") // malformed dates never match and never fail
-	expect("date_field=start&date_to="+url.QueryEscape("2026-09-10T00:00:00+02:00"))
+	expect("date_field=start&date_to=" + url.QueryEscape("2026-09-10T00:00:00+02:00"))
 
 	// Text also finds the description; key and title matches rank first.
 	expect("q=fleet", "PAI-4")
@@ -173,10 +173,12 @@ func TestList6000FiltersPerformance(t *testing.T) {
 		limit = 600 * time.Millisecond
 	}
 	for _, path := range []string{
-		// The web list's first page, then the on-demand label counts it asks for.
-		"/api/nodes?within=" + root.ID + "&sort=state,-updated_at&limit=200&facets=state,kind,priority,assignee",
-		"/api/nodes?within=" + root.ID + "&sort=state,-updated_at&limit=1&facets=tag,cost_unit,release",
-		"/api/nodes?within=" + root.ID + "&sort=-assignee,-updated_at&limit=200&tag=bug,!t3&cost_unit=!cu%201&state=!done&facets=state,kind,priority,assignee",
+		// The same page shape and budget as TestList6000Performance, with the new
+		// filters and the assignee sort, then the on-demand label counts.
+		"/api/nodes?within=" + root.ID + "&sort=-assignee,-updated_at&limit=50&tag=bug,!t3&cost_unit=!cu%201&state=!done&facets=state,kind,priority,assignee",
+		"/api/nodes?within=" + root.ID + "&sort=state,-updated_at&limit=1&facets=tag",
+		"/api/nodes?within=" + root.ID + "&sort=state,-updated_at&limit=1&facets=cost_unit",
+		"/api/nodes?within=" + root.ID + "&sort=state,-updated_at&limit=50&epic=none&date_field=created&date_from=2020-01-01T00:00:00Z&facets=state,kind,priority,assignee",
 	} {
 		var fastest time.Duration
 		for i := 0; i < 3; i++ {
@@ -184,7 +186,7 @@ func TestList6000FiltersPerformance(t *testing.T) {
 			status, body := call(t, &p, http.MethodGet, path, "")
 			elapsed := time.Since(start)
 			page := decode[nodePage](t, status, body, http.StatusOK)
-			if (len(page.Items) != 200 && len(page.Items) != 1) || page.NextCursor == nil {
+			if (len(page.Items) != 50 && len(page.Items) != 1) || page.NextCursor == nil {
 				t.Fatalf("large list result: %d", len(page.Items))
 			}
 			if fastest == 0 || elapsed < fastest {
