@@ -27,7 +27,7 @@ export interface Row {
   created_at: string; updated_at: string; issued_at?: string; accepted_at?: string
 }
 export interface Version { quote_node_id: string; version: number; currency: string; title: string; content_sha256: string; created_by_principal_id: string; created_at: string; digest_mode: 'document-v1'; pricing_mode: 'cent-half-up-v1'; total: string; document: QuoteDoc; offer_no: string; validity_time_zone: string }
-export interface Link { id: string; public_tenant: string; quote_node_id: string; version: number; target_content_sha256: string; expires_at: string; revoked_at?: string; path?: string }
+export interface Link { id: string; public_tenant: string; quote_node_id: string; version: number; target_content_sha256: string; expires_at: string; revoked_at?: string; path?: string; copy_unavailable_reason?: 'key_not_configured' }
 export interface Job { quote_node_id: string; version: number; state: string; attempts: number; next_attempt_at: string; receipt_sha256?: string; renderer_version?: string; updated_at: string }
 
 function doc(title: string, customer: string, positions: [string, string, number][], offer: string, valid: string): QuoteDoc {
@@ -79,6 +79,8 @@ export interface QuoteEvent { id: number; node_id: string; type: string; before:
 export interface QuoteCall { path: string; method: string; body: unknown; query: URLSearchParams; headers: Record<string, string> }
 export interface QuoteMockOptions {
   listStatus?: number
+  // A host key permits re-copy on GET; without it only the POST shows the path.
+  linkKeyConfigured?: boolean
   // The next draft save meets a newer one from Mira (412), with her change applied first.
   conflictNext?: { quote: string; apply: (doc: QuoteDoc) => void }
   role?: 'admin' | 'member'
@@ -152,7 +154,7 @@ export async function mockQuotes(page: Page, world: QuoteWorld, options: QuoteMo
       world.versions.set(qid, list)
       Object.assign(r, { state: 'issued', classic_status: 'sent', current_version: n, revision: r.revision + 2, issued_at: new Date().toISOString() })
       const linkId = `link-auto-${world.counter.next++}`
-      world.links.set(`${qid}:${n}`, { id: linkId, public_tenant: 'sel-demo', quote_node_id: qid, version: n, target_content_sha256: DIGEST(n + 4), expires_at: stamp(30), path: `/offers/sel-demo/tok-${linkId}` })
+      world.links.set(`${qid}:${n}`, { id: linkId, public_tenant: 'sel-demo', quote_node_id: qid, version: n, target_content_sha256: DIGEST(n + 4), expires_at: stamp(30), ...(options.linkKeyConfigured === false ? { copy_unavailable_reason: 'key_not_configured' as const } : { path: `/offers/sel-demo/tok-${linkId}` }) })
       return route.fulfill({ json: projection(r) })
     }
     if (rest === 'draft/branch' && method === 'POST') {
@@ -201,10 +203,11 @@ export async function mockQuotes(page: Page, world: QuoteWorld, options: QuoteMo
         if (method === 'POST') {
           if (world.links.get(key) && !world.links.get(key)!.revoked_at && Date.parse(world.links.get(key)!.expires_at) > Date.now()) return route.fulfill({ status: 409, json: { error: 'link cannot be created' } })
           const linkId = `link-${world.counter.next++}`
-          const link: Link = { id: linkId, public_tenant: 'sel-demo', quote_node_id: qid, version: n, target_content_sha256: version.content_sha256, expires_at: String(body.expires_at), path: `/offers/sel-demo/tok-${linkId}` }
+          const path = `/offers/sel-demo/tok-${linkId}`
+          const link: Link = { id: linkId, public_tenant: 'sel-demo', quote_node_id: qid, version: n, target_content_sha256: version.content_sha256, expires_at: String(body.expires_at), ...(options.linkKeyConfigured === false ? { copy_unavailable_reason: 'key_not_configured' } : { path }) }
           world.links.set(key, link)
           log(qid, 'quote.public_link_created', null, { link_id: linkId, version: n })
-          return route.fulfill({ status: 201, json: { ...link, token: `tok-${link.id}` } })
+          return route.fulfill({ status: 201, json: { ...link, path, token: `tok-${link.id}` } })
         }
         const link = world.links.get(key)
         return link ? route.fulfill({ json: link }) : route.fulfill({ status: 404, json: { error: 'link not found' } })
