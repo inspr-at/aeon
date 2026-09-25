@@ -97,10 +97,13 @@ const target = (event: Event) => event.currentTarget as HTMLElement
 
 <style scoped>
 .props { margin: 0; }
-.props.row { display: flex; flex-wrap: wrap; gap: 6px; }
+/* The panel reserves this row's height (hours arrive late); the chips keep together at its top rather than spreading over it. */
+.props.row { display: flex; flex-wrap: wrap; align-content: flex-start; gap: 6px; }
 @media (max-width: 600px) { .props.row { gap: 12px; } }
 .props.row dt { position: absolute; width: 1px; height: 1px; overflow: hidden; clip-path: inset(50%); }
 .props.row dd { margin: 0; }
+/* A long epic title ends in an ellipsis inside the row; the chip never runs off the edge. */
+.props.row .prop, .props.row dd { min-width: 0; max-width: 100%; }
 .props.column { display: grid; gap: 2px; }
 .props.column .prop { display: grid; grid-template-columns: 92px minmax(0, 1fr); align-items: center; min-height: 34px; }
 .props.column dt { font: 500 10.5px/1 var(--mono); letter-spacing: .12em; text-transform: uppercase; color: var(--ink-3); font-variant-ligatures: none; }

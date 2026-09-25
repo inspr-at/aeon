@@ -24,7 +24,7 @@ function act(id: number, run: () => void) { dismiss(id); run() }
 .toast {
   display: flex; align-items: center; gap: 10px; min-height: 40px; padding: 6px 8px 6px 18px; border-radius: 999px; pointer-events: auto;
   background: var(--tip-bg); color: var(--tip-ink); font-size: 13.5px; box-shadow: 0 0 0 1px var(--glass-rim), 0 18px 36px -14px rgba(0, 0, 0, .45);
-  backdrop-filter: blur(12px); -webkit-backdrop-filter: blur(12px);
+  -webkit-backdrop-filter: blur(12px); backdrop-filter: blur(12px);
 }
 .toast.error svg { color: #f3b0a8; }
 .toast span { min-width: 0; }
@@ -37,5 +37,5 @@ function act(id: number, run: () => void) { dismiss(id); run() }
   .toast-enter-from, .toast-leave-to { opacity: 0; transform: translateY(8px); }
 }
 .toast-action + .toast-action { margin-left: -4px; }
-@media (max-width: 600px) { .toast-host { bottom: calc(var(--footer-h) + 10px); } .toast { font-size: 13px; } .toast.sticky { flex-wrap: wrap; justify-content: flex-end; border-radius: 20px; padding: 8px 8px 8px 16px; } .toast.sticky span { flex: 1 1 100%; } }
+@media (max-width: 600px) { .toast-host { bottom: calc(var(--footer-h) + 10px); } .toast { font-size: 13px; } .toast.sticky { flex-wrap: wrap; justify-content: flex-end; border-radius: 20px; padding: 8px 8px 8px 16px; } .toast.sticky span { flex: 1 1 100%; } .toast.sticky:has(> svg) span { flex-basis: calc(100% - 24px); } }
 </style>

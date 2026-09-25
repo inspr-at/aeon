@@ -12,6 +12,7 @@ import (
 	"errors"
 	"fmt"
 	"io"
+	"io/fs"
 	"net/http"
 	"os"
 	"path/filepath"
@@ -759,6 +760,12 @@ func (m *Module) profileAssetGet(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	f, e := (attachments.Store{}).Open(p.TenantID, asset.SHA256, "original")
+	if errors.Is(e, fs.ErrNotExist) {
+		// The asset is registered but its bytes are not in this store (a restored
+		// copy, or a store moved without its files): not found, not a server fault.
+		respond(w, 0, nil, failure{status: 404, message: "asset content is not stored"})
+		return
+	}
 	if e != nil {
 		respond(w, 0, nil, e)
 		return
