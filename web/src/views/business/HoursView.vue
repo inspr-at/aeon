@@ -640,7 +640,9 @@ tbody th.c-ticket { font-weight: 400; }
 .ticket-chip { flex-shrink: 0; display: inline-flex; align-items: center; height: 22px; padding: 0 8px; border-radius: 6px; background: var(--chip-teal-bg); box-shadow: inset 0 0 0 1px var(--chip-teal-line); color: var(--teal-ink); font: 600 11.5px/1 var(--mono); text-decoration: none; font-variant-ligatures: none; white-space: nowrap; }
 a.ticket-chip:hover { text-decoration: underline; }
 .ticket-chip:focus-visible { box-shadow: var(--focus-ring); }
-@media (max-width: 600px) { .ticket-chip { height: 44px; } }
+/* Phones: the chip keeps its look (a finger reaches 44 px through base.css); the
+   rows are tall enough that neighbouring chips' reach never overlaps. */
+@media (max-width: 600px) { .ticket-chip { height: 28px; } .week-grid tbody th, .week-grid tbody td { height: 48px; } }
 .ticket-chip.plain { background: var(--chip-bg); box-shadow: inset 0 0 0 1px var(--chip-line); color: var(--ink-2); }
 tfoot th, tfoot td { border-bottom: 0 !important; font-weight: 650; color: var(--ink); }
 tfoot th.c-ticket { font: 500 10px/1 var(--mono); letter-spacing: .12em; text-transform: uppercase; color: var(--ink-3); }

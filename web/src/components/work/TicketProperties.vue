@@ -84,13 +84,14 @@ const target = (event: Event) => event.currentTarget as HTMLElement
         <span v-else class="prop-static faint">No epic</span>
       </dd>
     </div>
-    <TicketHours :node-id="item.id" :kind="item.kind_slug" :layout="layout" />
     <div v-if="estimate" class="prop"><dt>Estimate</dt><dd><span class="prop-static"><span v-if="layout === 'row'" class="inline-label">Estimate</span><span class="mono">{{ estimate }}</span></span></dd></div>
     <div v-if="start" class="prop"><dt>Start</dt><dd><span class="prop-static"><span v-if="layout === 'row'" class="inline-label">Start</span>{{ start }}</span></dd></div>
     <div v-if="due" class="prop"><dt>Due</dt><dd><span class="prop-static"><span v-if="layout === 'row'" class="inline-label">Due</span>{{ due }}</span></dd></div>
     <div v-if="release" class="prop"><dt>Release</dt><dd><span class="prop-static"><span v-if="layout === 'row'" class="inline-label">Release</span><span class="mono">{{ release }}</span></span></dd></div>
     <div v-if="layout === 'column'" class="prop"><dt>Updated</dt><dd><time class="prop-static" :datetime="item.updated_at" :data-tip="absoluteTime(item.updated_at)">{{ relativeTime(item.updated_at, { now, long: true }) }}</time></dd></div>
     <div v-if="layout === 'column'" class="prop"><dt>Created</dt><dd><time class="prop-static" :datetime="item.created_at" :data-tip="absoluteTime(item.created_at)">{{ relativeTime(item.created_at, { now, long: true }) }}</time></dd></div>
+    <!-- Last: logged hours arrive after the ticket, and nothing moves when they do. -->
+    <TicketHours :node-id="item.id" :kind="item.kind_slug" :layout="layout" />
   </dl>
 </template>
 

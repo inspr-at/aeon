@@ -35,6 +35,11 @@ const currentAcceptance = computed(() => acceptance(current.value))
 const when = (iso: string | undefined) => iso ? new Intl.DateTimeFormat('en-GB', { day: 'numeric', month: 'short', year: 'numeric', hour: '2-digit', minute: '2-digit' }).format(new Date(iso)) : ''
 const channel = (n: AcceptanceNotice | null) => n?.channel === 'public' ? 'through the customer link' : n ? 'by a signed-in contact' : ''
 const validUntil = computed(() => props.frozen?.document?.valid_until ?? '')
+// The cards below the status land together once the versions and the customer link
+// are read: until then they keep their place out of sight under one loading state,
+// so no card pushes another down as its read arrives.
+const linkLoading = ref(false)
+const settled = computed(() => versions.value !== null && !linkLoading.value)
 
 async function load() {
   error.value = ''
@@ -87,9 +92,11 @@ const canAttach = computed(() => props.staff && !props.projection?.archived)
       </button>
     </section>
 
+    <div class="rest" :class="{ settling: !settled }" :aria-busy="!settled">
+    <div v-if="!settled" class="rest-loading" role="status" aria-label="Loading the quote’s details"><span class="skeleton" /><span class="skeleton short" /><span class="skeleton" /></div>
     <QuoteLinkCard
       v-if="projection && current > 0 && (status === 'issued' || status === 'expired' || status === 'accepted')"
-      :quote-id="quoteId" :version="current" :admin="admin" :acceptable="status === 'issued'" :accepted="status === 'accepted'" @changed="emit('changed')"
+      :quote-id="quoteId" :version="current" :admin="admin" :acceptable="status === 'issued'" :accepted="status === 'accepted'" @changed="emit('changed')" @loading="value => linkLoading = value"
     />
     <QuoteReceiptCard v-if="status === 'accepted' && current > 0" :quote-id="quoteId" :version="current" :admin="admin" />
 
@@ -139,12 +146,17 @@ const canAttach = computed(() => props.staff && !props.projection?.archived)
         <template v-if="projection?.project_ref"><dt>Project</dt><dd>{{ projection.project_ref }}</dd></template>
       </dl>
     </section>
+    </div>
     <AttachmentLightbox ref="lightbox" :items="attachments.items.value" :ticket-key="offerNo || 'Quote'" :can-write="canAttach" :set-caption="attachments.setCaption" />
   </div>
 </template>
 
 <style scoped>
 .details { display: grid; gap: 10px; }
+.rest { position: relative; display: grid; gap: 10px; }
+.settling > :not(.rest-loading) { visibility: hidden; }
+.rest-loading { position: absolute; inset: 0 0 auto; display: grid; gap: 10px; padding: 16px; border-radius: var(--radius); background: var(--surface-raised-2); box-shadow: inset 0 0 0 1px var(--line-2); }
+.rest-loading .short { width: 55%; }
 .status .btn { width: fit-content; }
 .count { font: 600 11.5px/1 var(--mono); color: var(--ink-3); font-variant-numeric: tabular-nums; }
 .versions { display: grid; gap: 4px; margin: 0; padding: 0; list-style: none; }

@@ -283,9 +283,16 @@ test('phones: the form or the preview, nothing cut', async ({ page }) => {
   await setup(page)
   await page.goto(`/settings/business/profiles/${PROFILE.steel}`)
   await expect(page.locator('.form-section').first()).toBeVisible()
+  // The section jumps are one row that scrolls sideways (QA3): what is past its edge
+  // is reached by scrolling, and choosing a section brings its pill into view.
+  const jumps = page.getByRole('navigation', { name: 'Profile sections' })
+  expect(await jumps.evaluate(el => getComputedStyle(el).overflowX)).toBe('auto')
+  await jumps.getByRole('button', { name: 'Labels' }).evaluate(el => el.scrollIntoView({ inline: 'nearest' }))
+  await jumps.getByRole('button', { name: 'Labels' }).click()
+  await expect(jumps.getByRole('button', { name: 'Labels' })).toBeInViewport({ ratio: 1 })
   const cut = () => page.evaluate(() => [...document.querySelectorAll<HTMLElement>('.profiles-page *')].filter(el => {
     const r = el.getBoundingClientRect(), c = getComputedStyle(el)
-    if (r.width <= 1 || r.height <= 1 || c.display === 'none' || el.closest('svg, .quote-document, .sr-only')) return false
+    if (r.width <= 1 || r.height <= 1 || c.display === 'none' || el.closest('svg, .quote-document, .sr-only, .jumps')) return false
     return r.left < -0.5 || r.right > innerWidth + 0.5
   }).map(el => `${el.tagName}.${el.className}`))
   expect(await cut()).toEqual([])

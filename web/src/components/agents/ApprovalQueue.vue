@@ -109,12 +109,14 @@ defineExpose({ begin, cancel, isOpen: () => !!open.value })
             <button type="button" class="who" @click.stop="emit('openAgent', approval.agent_principal_id)">
               <span v-if="asker(approval.agent_principal_id).harness" class="harness">{{ asker(approval.agent_principal_id).harness }}</span>{{ asker(approval.agent_principal_id).name }}
             </button>
-            <span class="asks">asks for</span>
-            <code class="scope">{{ approval.scope }}</code>
-            <span class="asks">on</span>
-            <RouterLink v-if="resource(approval).href" class="res-key" :to="resource(approval).href!" @click.stop>{{ resource(approval).key }}</RouterLink>
-            <span v-else class="res-label">{{ resource(approval).label }}</span>
-            <span v-if="resource(approval).title" class="res-title">{{ resource(approval).title }}</span>
+            <!-- Two phrases that wrap as wholes: "asks for scope" and "on KEY Title". -->
+            <span class="phrase"><span class="asks">asks for</span><code class="scope">{{ approval.scope }}</code></span>
+            <span class="phrase">
+              <span class="asks">on</span>
+              <RouterLink v-if="resource(approval).href" class="res-key" :to="resource(approval).href!" @click.stop>{{ resource(approval).key }}</RouterLink>
+              <span v-else class="res-label">{{ resource(approval).label }}</span>
+              <span v-if="resource(approval).title" class="res-title">{{ resource(approval).title }}</span>
+            </span>
           </p>
           <p v-if="approval.rationale" class="why">“{{ approval.rationale }}”</p>
           <form v-if="open?.id === approval.id" class="decision" @submit.prevent="submit(approval)" @click.stop>
@@ -230,16 +232,21 @@ defineExpose({ begin, cancel, isOpen: () => !!open.value })
 .expiry { display: inline-flex; align-items: center; gap: 4px; font-size: 12px; color: var(--ink-3); }
 .expiry.soon { color: var(--gold-ink); font-weight: 600; }
 .line2 { display: flex; align-items: center; flex-wrap: wrap; gap: 6px; font-size: 12.5px; color: var(--ink-2); }
-@media (max-width: 600px) { .line2 { row-gap: 28px; } }
-@media (max-width: 600px) { .who { z-index: 1; } }
+.phrase { display: inline-flex; align-items: center; flex-wrap: wrap; gap: 6px; min-width: 0; }
 .who { display: inline-flex; align-items: center; gap: 6px; height: 24px; padding: 0 8px 0 3px; border: 0; border-radius: 999px; background: var(--chip-bg); box-shadow: inset 0 0 0 1px var(--chip-line); color: var(--ink); font-size: 12.5px; font-weight: 600; }
 .who:hover { box-shadow: inset 0 0 0 1px var(--chip-teal-line); color: var(--teal-ink); }
 .who:focus-visible { box-shadow: var(--focus-ring); }
+/* Phones: who asks, what for and on what stack as three short lines; the asker and
+   the resource are finger-sized chips a line apart, so their reach never meets. */
+@media (max-width: 600px) {
+  .line2 { flex-direction: column; align-items: flex-start; row-gap: 6px; }
+  .who { z-index: 1; height: 32px; padding: 0 10px 0 4px; }
+}
 .harness { display: inline-flex; align-items: center; height: 16px; padding: 0 6px; border-radius: 999px; background: var(--surface-raised); font: 500 10px/1 var(--mono); letter-spacing: .04em; color: var(--ink-2); font-variant-ligatures: none; }
 .asks { color: var(--ink-3); }
 .scope { padding: 1px 6px; border-radius: 6px; background: var(--code-bg); font-size: 11.5px; color: var(--ink); }
 .res-key { display: inline-flex; align-items: center; font: 600 11.5px/1 var(--mono); color: var(--teal-ink); text-decoration: none; padding: 3px 7px; border-radius: 6px; background: var(--chip-teal-bg); box-shadow: inset 0 0 0 1px var(--chip-teal-line); font-variant-ligatures: none; }
-@media (max-width: 600px) { .res-key { z-index: 1; } }
+@media (max-width: 600px) { .res-key { z-index: 1; min-height: 28px; padding: 0 8px; } }
 .res-key:hover { text-decoration: underline; }
 .res-title { min-width: 0; max-width: 42ch; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; color: var(--ink-2); }
 .res-label { color: var(--ink); }

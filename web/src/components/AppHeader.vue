@@ -56,6 +56,10 @@ const pageTitle = computed(() => !activePlace.value && !route.path.startsWith('/
 // The three places, in order of use; the active one is where this page lives.
 // The breadcrumb continues from it: Projects / PHAROS Pharos / PHAROS-11.
 const places = computed(() => visiblePlaces({ signedIn: !!session.identity, business: business.placeOpen }))
+// The places and the trail appear together once it is known whether Business is one
+// of the places (read, or remembered from this browser's last visit), so the trail
+// never slides sideways when Business turns up a moment after the first paint.
+const navReady = computed(() => !session.identity || business.placeKnown)
 const activePlace = computed(() => placeOf(route.path))
 const PLACE_ROOT: Record<PlaceId, string> = { projects: '/', agents: '/agents', business: '/business' }
 const atPlaceRoot = computed(() => !!activePlace.value && (route.path === PLACE_ROOT[activePlace.value] || (activePlace.value === 'agents' && route.path.startsWith('/agents/'))))
@@ -162,7 +166,7 @@ onBeforeUnmount(() => { document.removeEventListener('pointerdown', outside); wi
       <span class="mark-backing"><img :src="mark" width="26" height="26" alt="" /></span>
       <span class="wordmark">{{ brand.product }}<sup>{{ brand.release_name }}</sup></span>
     </RouterLink>
-    <nav v-if="places.length && !fatal" class="places" aria-label="Places">
+    <nav v-if="places.length && !fatal && navReady" class="places" aria-label="Places">
       <RouterLink
         v-for="place in places" :key="place.id" :to="place.to" class="place" :class="{ active: activePlace === place.id }"
         :aria-current="activePlace === place.id ? (atPlaceRoot ? 'page' : 'true') : undefined" :aria-label="placeLabel(place.id)"
@@ -174,7 +178,7 @@ onBeforeUnmount(() => { document.removeEventListener('pointerdown', outside); wi
         <span v-if="place.id === 'agents' && agents.needsCount" class="needs-badge" aria-hidden="true">{{ agents.needsCount > 99 ? '99+' : agents.needsCount }}</span>
       </RouterLink>
     </nav>
-    <nav v-if="session.identity && !fatal && (projectKey || businessCrumbs.length || settingsSection || pageTitle)" class="crumbs" :class="{ lead: !activePlace }" aria-label="Breadcrumb">
+    <nav v-if="session.identity && !fatal && navReady && (projectKey || businessCrumbs.length || settingsSection || pageTitle)" class="crumbs" :class="{ lead: !activePlace }" aria-label="Breadcrumb">
       <template v-if="projectKey">
         <span class="sep" aria-hidden="true">/</span>
         <RouterLink class="crumb project-crumb" :to="`/p/${encodeURIComponent(project?.routeKey ?? projectKey)}`" :aria-current="fullTicket ? undefined : 'page'">

@@ -97,4 +97,10 @@ function gridKeys(event: KeyboardEvent) {
 .range.bad { color: var(--danger); }
 .compact .steps { display: none; }
 .compact .face { min-width: 60px; }
+/* Phones: a 40 px face with a finger's 44 px reach. */
+@media (max-width: 600px) {
+  .compact.zoom { padding: 0; background: transparent; }
+  .compact .face { position: relative; height: 40px; border-radius: 12px; background: var(--seg-bg); }
+  .compact .face::before { content: ''; position: absolute; top: 50%; left: 50%; width: max(100%, 44px); height: 44px; transform: translate(-50%, -50%); }
+}
 </style>

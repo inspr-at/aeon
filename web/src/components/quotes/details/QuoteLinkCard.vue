@@ -1,7 +1,7 @@
 <!-- SPDX-License-Identifier: AGPL-3.0-only -->
 <script setup lang="ts">
 import './details.css'
-import { computed, ref, watch } from 'vue'
+import { computed, onBeforeUnmount, ref, watch } from 'vue'
 import { quoteQr } from '../../../lib/quotes/qr'
 import { confirmAction } from '../../../lib/confirm'
 import { createLink, getLink, lifecycleError, linkUrl, revokeLink, type PublicLink } from '../../../lib/quotes/lifecycle'
@@ -14,7 +14,7 @@ import BizIcon from '../../business/BizIcon.vue'
 // The link opens this frozen version and nothing else, and it can accept it
 // until it ends, the quote is revised or someone revokes it.
 const props = defineProps<{ quoteId: string; version: number; admin: boolean; acceptable: boolean; accepted: boolean }>()
-const emit = defineEmits<{ changed: [] }>()
+const emit = defineEmits<{ changed: []; loading: [value: boolean] }>()
 const link = ref<PublicLink | null>(null)
 const loaded = ref(false)
 const error = ref('')
@@ -41,6 +41,9 @@ async function load() {
   finally { loaded.value = true }
 }
 watch(() => [props.quoteId, props.version], () => { fresh.value = ''; link.value = null; loaded.value = false; void load() }, { immediate: true })
+// The Details pane shows its cards together once this one has read its link.
+watch(loaded, value => emit('loading', !value), { immediate: true })
+onBeforeUnmount(() => emit('loading', false))
 
 async function create() {
   if (busy.value) return
