@@ -10,6 +10,7 @@
     "typecheck": "vue-tsc -b --noEmit",
     "prebuild": "node ../scripts/verify-release.mjs",
     "test": "playwright test -c playwright.ui.config.ts",
+    "audit:ui": "node ../scripts/ui-audit/run.mjs",
     "test:unit": "node --experimental-strip-types --test $(ls tests/*.test.ts | grep -v '\\.unit\\.test\\.ts$') && vitest run .unit.test.ts",
     "test:editor-unit": "vitest run tests/quote-editor.unit.test.ts",
     "e2e": "playwright test"
