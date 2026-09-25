@@ -279,6 +279,8 @@ defineExpose({ focusSearch, openFilterMenu, input })
    window) labels step back first, then the rarer quick filters, which stay in
    the Filter menu. */
 @container toolbar (max-width: 1500px) { .more-label { display: none; } .more-btn { padding: 0 9px; } .list-search { width: 208px; } }
+/* Four views: from 1420px down the open view keeps its label and the others show their icon (and tip). */
+@container toolbar (max-width: 1420px) { .view-seg button:not([aria-checked="true"]) .view-label { display: none; } .view-seg button:not([aria-checked="true"]) { padding: 0 8px; } }
 @container toolbar (max-width: 1300px) { .view-label { display: none; } .view-seg button { padding: 0 8px; } }
 @container toolbar (max-width: 1000px) { .list-search { width: 190px; } .count { display: none; } .new-btn { width: 32px; padding: 0; } .new-label { display: none; } .facet-btn[data-dim="type"]:not(.on) { display: none; } .display-label { display: none; } .display-btn { padding: 0 9px; } }
 @container toolbar (max-width: 920px) { .list-search { width: 150px; } .facet-btn { padding: 0 11px; } .facet-btn:not(.on) .facet-end { display: none; } }

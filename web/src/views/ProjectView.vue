@@ -61,7 +61,9 @@ const routeKey = computed(() => project.value?.routeKey ?? projectKey.value)
 // ---------- Columns: the person's order, visibility and widths for this project ----------
 const listPref = computed(() => projectId.value ? usePreference<ListPrefs>(`list:${projectId.value}`) : null)
 const listPrefs = computed(() => listPref.value?.value.value ?? null)
-const filters = computed(() => filtersFromQuery(route.query))
+// On the Knowledge tab the address's search and filters are the tab's own, not the ticket list's.
+const onKnowledge = () => route.matched.some(record => record.path.startsWith('/p/:projectKey/knowledge'))
+const filters = computed(() => filtersFromQuery(onKnowledge() ? {} : route.query))
 // A view (or a shared link) may carry its own column set; widths stay the person's.
 const tablePrefs = computed<ListPrefs | null>(() => {
   const cols = filters.value.cols
@@ -90,7 +92,7 @@ const now = ref(Date.now())
 type ViewMode = 'list' | 'outline' | 'journey' | 'knowledge'
 const modeOf = (view: unknown): ViewMode => view === 'outline' ? 'outline' : view === 'journey' ? 'journey' : 'list'
 // Knowledge has its own address: /p/KEY/knowledge, and /p/KEY/knowledge/<type>/<slug> for one entry.
-const knowledgeActive = computed(() => route.matched.some(record => record.path.startsWith('/p/:projectKey/knowledge')))
+const knowledgeActive = computed(onKnowledge)
 const knowledgeType = computed(() => isKnowledgeType(route.params.knowledgeType) ? route.params.knowledgeType : null)
 const knowledgeSlug = computed(() => typeof route.params.slug === 'string' ? route.params.slug : '')
 const knowledgeEntryOpen = computed(() => knowledgeActive.value && !!knowledgeType.value && !!knowledgeSlug.value)
@@ -261,7 +263,7 @@ const activeView = computed(() => filters.value.view ? views.value.items.find(vi
 const viewFilters = computed(() => activeView.value ? filtersFromView(activeView.value) : null)
 const customised = computed(() => hasFilters(filters.value) || filters.value.sort.length > 0 || filters.value.group !== 'none' || !!filters.value.cols || filters.value.showClosed)
 const viewDirty = computed(() => !!viewFilters.value && !sameListState(filters.value, viewFilters.value))
-const canSaveView = computed(() => !journeyActive.value && (activeView.value ? viewDirty.value : customised.value))
+const canSaveView = computed(() => !journeyActive.value && !knowledgeActive.value && (activeView.value ? viewDirty.value : customised.value))
 const defaultViewId = computed(() => listPrefs.value?.defaultView ?? null)
 function viewQuery(view: SavedView | null): Record<string, string> {
   return view ? filtersToQuery(filtersFromView(view)) : {}
@@ -290,7 +292,8 @@ watch(projectId, async id => {
   if (!id || resolvedFor === id) return
   resolvedFor = id
   const plain = () => Object.keys(route.query).every(key => key === 'view') && (route.query.view === undefined || route.query.view === 'outline')
-  if (!plain() || ticketKey.value) { entryResolved.value = true; void loadViews(id); return }
+  // Knowledge has no ticket views: its address stays as it is.
+  if (!plain() || ticketKey.value || knowledgeActive.value) { entryResolved.value = true; void loadViews(id); return }
   entryResolved.value = false
   const pref = usePreference<ListPrefs>(`list:${id}`)
   await Promise.race([Promise.all([loadViews(id), pref.ready]), new Promise(resolve => setTimeout(resolve, 1500))])
@@ -1013,7 +1016,7 @@ watch([project, panelItem, knowledgeActive, knowledgeEntryOpen], ([current, item
       </header>
 
       <ViewBar
-        v-if="!journeyActive" ref="viewBar" :views="views.items" :active-id="activeView?.id ?? null" :dirty="viewDirty" :default-id="defaultViewId" :can-save-new="canSaveView && !activeView"
+        v-if="!journeyActive && !knowledgeActive" ref="viewBar" :views="views.items" :active-id="activeView?.id ?? null" :dirty="viewDirty" :default-id="defaultViewId" :can-save-new="canSaveView && !activeView"
         :me="me?.id ?? null" :href-for="hrefFor" @open="id => openView(id)" @save="saveActive" @save-as="startSave" @reset="openView(activeView?.id ?? null, true)"
         @rename="startRename" @duplicate="duplicate" @set-default="setDefaultView" @share="share" @copy-link="copyViewLink" @remove="remove"
       />
