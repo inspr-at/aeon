@@ -407,6 +407,13 @@ func (m *Module) listNodes(ctx context.Context, tenantID string, q listQuery) (n
 	}
 	page := nodePage{Items: []listItem{}}
 	err := m.tx(ctx, tenantID, func(ctx context.Context, tx pgx.Tx) error {
+		if q.Within != nil || (q.ParentSet && q.Descendants) {
+			// A wide imported root can make Postgres choose a sequential scan
+			// for every recursive child lookup, including the leaf probes.
+			if _, err := tx.Exec(ctx, `SET LOCAL enable_seqscan=off`); err != nil {
+				return dbErr("list planner", err)
+			}
+		}
 		var anchor any
 		if mark != nil {
 			anchor = mark.ID
@@ -626,13 +633,31 @@ func listFilterSQL(q listQuery) (string, []any) {
 			conditions += "\n        AND " + value + " IS NOT NULL AND " + value + ">=coalesce(" + arg(day(q.DateFrom)) + "::date,'-infinity') AND " + value + "<coalesce(" + arg(day(q.DateTo)) + "::date,'infinity')"
 		}
 	}
+	from, scopeCondition := "nodes n", ""
+	if q.Within != nil || (q.ParentSet && q.Descendants) {
+		// Drive scoped lists from the tree. A membership subquery can rescan
+		// every scope ID for every candidate when the bulk-import statistics
+		// change, while a lateral ID lookup stays bounded per tree row.
+		from = `scope s CROSS JOIN LATERAL (
+            SELECT * FROM nodes WHERE tenant_id=current_setting('aeon.tenant_id')::uuid AND id=s.id OFFSET 0
+        ) n`
+		if q.Within != nil {
+			scopeCondition = ` AND n.id<>$7::uuid`
+		} else {
+			scopeCondition = ` AND n.id<>$9::uuid`
+		}
+	} else if q.ParentSet {
+		scopeCondition = ` AND n.parent_id IS NOT DISTINCT FROM $9::uuid`
+	}
 	return `WITH RECURSIVE scope(id) AS (
         SELECT id FROM nodes WHERE tenant_id=current_setting('aeon.tenant_id')::uuid AND deleted_at IS NULL AND id=coalesce($7::uuid, CASE WHEN $8::bool AND $10::bool THEN $9::uuid ELSE NULL::uuid END)
         UNION ALL SELECT c.id FROM scope s CROSS JOIN LATERAL (
-            SELECT id FROM nodes WHERE tenant_id=current_setting('aeon.tenant_id')::uuid AND parent_id=s.id AND deleted_at IS NULL OFFSET 0
+            SELECT id FROM nodes WHERE tenant_id=current_setting('aeon.tenant_id')::uuid AND parent_id=s.id AND deleted_at IS NULL
+            ORDER BY updated_at DESC OFFSET 0
         ) c
     )` + epicCTE + `, filtered AS (
-        SELECT n.id,assignee.id::text AS assignee_id FROM nodes n JOIN node_kinds k ON k.id=n.kind_id AND k.tenant_id=n.tenant_id ` + assigneeJoin + `
+        SELECT n.id,assignee.id::text AS assignee_id,n.state,k.slug AS kind_slug,
+            coalesce(nullif(n.fields->>'priority',''),'none') AS priority FROM ` + from + ` JOIN node_kinds k ON k.id=n.kind_id AND k.tenant_id=n.tenant_id ` + assigneeJoin + `
         WHERE n.deleted_at IS NULL
         AND ($1::uuid IS NULL OR n.kind_id=$1::uuid)
         AND (cardinality($2::text[])=0 OR k.slug=ANY($2::text[]) OR n.kind_id::text=ANY($2::text[]))
@@ -643,9 +668,7 @@ func listFilterSQL(q listQuery) (string, []any) {
         AND ($6::text='' OR n.key ILIKE '%'||$6::text||'%' OR n.title ILIKE '%'||$6::text||'%' OR n.body ILIKE '%'||$6::text||'%'
             OR EXISTS(SELECT 1 FROM node_key_aliases a WHERE a.tenant_id=n.tenant_id AND a.node_id=n.id
                 AND a.key ILIKE '%'||$6::text||'%'))
-        AND ($7::uuid IS NULL OR (n.id IN (SELECT id FROM scope) AND n.id<>$7::uuid))
-        AND ($7::uuid IS NOT NULL OR NOT $8::bool OR (CASE WHEN $10::bool THEN n.id IN (SELECT id FROM scope) AND n.id<>$9::uuid ELSE n.parent_id IS NOT DISTINCT FROM $9::uuid END))
-        AND (NOT $11::bool OR n.state NOT IN ('done','cancelled','archived','delivered','accepted'))` + conditions + `
+        AND (NOT $11::bool OR n.state NOT IN ('done','cancelled','archived','delivered','accepted'))` + scopeCondition + conditions + `
     )`, args
 }
 func listOrder(q listQuery) string {
@@ -753,9 +776,9 @@ func facetSQL(q listQuery) (string, []any) {
     UNION ALL SELECT 'release',coalesce(nullif(` + labelSQL("release") + `,''),'none') FROM filtered f JOIN nodes n ON n.id=f.id`
 	}
 	sql := prefix + `, facet_values AS (
-    SELECT 'state' AS name,n.state AS value FROM filtered f JOIN nodes n ON n.id=f.id
-    UNION ALL SELECT 'kind',k.slug FROM filtered f JOIN nodes n ON n.id=f.id JOIN node_kinds k ON k.id=n.kind_id
-    UNION ALL SELECT 'priority',coalesce(nullif(n.fields->>'priority',''),'none') FROM filtered f JOIN nodes n ON n.id=f.id
+    SELECT 'state' AS name,f.state AS value FROM filtered f
+    UNION ALL SELECT 'kind',f.kind_slug FROM filtered f
+    UNION ALL SELECT 'priority',f.priority FROM filtered f
     UNION ALL SELECT 'assignee',coalesce(f.assignee_id,'none') FROM filtered f` + extra + `
     ) SELECT name,value,count(*)::int FROM facet_values WHERE name=ANY(` + names + `::text[]) GROUP BY name,value`
 	return sql, args
@@ -974,10 +997,8 @@ func (m *Module) handleListProjects(w http.ResponseWriter, r *http.Request) {
                 FROM projects p JOIN nodes n ON n.id=p.id
                 UNION ALL
                 SELECT s.project_id,c.id,c.parent_id,c.state,c.updated_at,c.kind_id,s.depth+1
-                FROM subtree s CROSS JOIN LATERAL (
-                    SELECT id,parent_id,state,updated_at,kind_id FROM nodes
-                    WHERE tenant_id=current_setting('aeon.tenant_id')::uuid AND parent_id=s.node_id AND deleted_at IS NULL OFFSET 0
-                ) c
+                FROM subtree s JOIN nodes c ON c.tenant_id=current_setting('aeon.tenant_id')::uuid
+                    AND c.parent_id=s.node_id AND c.deleted_at IS NULL
             ), summary AS (
                 SELECT p.id,p.key,p.title,p.state,
                     count(*) FILTER (WHERE s.depth>0 AND k.slug IN ('ticket','task','epic') AND s.state IN ('new','backlog'))::int AS open,

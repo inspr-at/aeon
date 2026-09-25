@@ -205,6 +205,11 @@ func openApp(ctx context.Context, base *url.URL, dbName, role, password string) 
 	if err != nil {
 		return nil, fmt.Errorf("parse app url: %w", err)
 	}
+	// The app role must use the same JIT setting as db.Open. Otherwise list
+	// plans in tests compile expressions that production sessions do not.
+	if _, set := cfg.ConnConfig.RuntimeParams["jit"]; !set && !strings.Contains(cfg.ConnConfig.RuntimeParams["options"], "jit") {
+		cfg.ConnConfig.RuntimeParams["jit"] = "off"
+	}
 	cfg.MaxConns = 4
 	pool, err := pgxpool.NewWithConfig(ctx, cfg)
 	if err != nil {

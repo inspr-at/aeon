@@ -221,7 +221,21 @@ func (w PostgresWriter) Write(ctx context.Context, s Snapshot, tenantSlug string
 		}
 		return nil
 	})
-	return r, err
+	if err != nil {
+		return r, err
+	}
+	// Refresh planner statistics only after the import commits. Large imports
+	// otherwise leave list and project queries planning against pre-import row
+	// counts until autovacuum happens to analyze them.
+	if err := db.InTenant(ctx, w.Pool, tenantID, func(tx pgx.Tx) error {
+		_, err := tx.Exec(ctx, `ANALYZE nodes, node_kinds, node_relations, node_key_counters,
+            principals, identities, events, event_counters,
+            journey_projects, journey_releases, journey_tickets`)
+		return err
+	}); err != nil {
+		return r, fmt.Errorf("analyze imported tables: %w", err)
+	}
+	return r, nil
 }
 
 func importUsers(ctx context.Context, tx pgx.Tx, tenantID string, s Snapshot, conflicts *[]ImportConflict) (string, map[int64]string, error) {

@@ -33,6 +33,13 @@ func TestDatabasesAreIsolated(t *testing.T) {
 	if user != a.Role || super || bypass {
 		t.Fatalf("app role %s super=%v bypass=%v", user, super, bypass)
 	}
+	var jit string
+	if err := a.App.QueryRow(ctx, `SHOW jit`).Scan(&jit); err != nil {
+		t.Fatal(err)
+	}
+	if jit != "off" {
+		t.Fatalf("test app JIT is %s, want off like db.Open", jit)
+	}
 
 	var owner string
 	if err := a.Admin.QueryRow(ctx, `
