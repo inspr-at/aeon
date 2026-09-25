@@ -1,7 +1,7 @@
 <!-- SPDX-License-Identifier: AGPL-3.0-only -->
 <script setup lang="ts">
 import { computed, nextTick, onBeforeUnmount, onMounted, ref, watch } from 'vue'
-import { COLUMN_BY_ID, amountOf, clampWidth, dayText, numberOf, statusOf, titleOf, visibleColumns, STATUS_META, type ColumnId, type QuoteRow, type Sort } from '../../../lib/quotes/list'
+import { COLUMN_BY_ID, amountOf, clampWidth, dayText, numberOf, statusOf, titleOf, fitColumns, visibleColumns, STATUS_META, type ColumnId, type QuoteRow, type Sort } from '../../../lib/quotes/list'
 import { highlight } from '../../../lib/work'
 import AppIcon from '../../AppIcon.vue'
 import BizIcon from '../../business/BizIcon.vue'
@@ -40,8 +40,10 @@ watch(() => props.widths, () => { if (!resizing) live.value = {} })
 const sized = computed(() => ({ ...props.widths, ...live.value }))
 const ids = computed(() => visibleColumns(width.value, sized.value))
 const columns = computed(() => ids.value.map(id => COLUMN_BY_ID.get(id)!))
-const shown = (id: ColumnId) => clampWidth(id, sized.value[id])
-const titleWidth = computed(() => Math.max(COLUMN_BY_ID.get('title')!.min, Math.round(width.value - ids.value.filter(id => id !== 'title').reduce((sum, id) => sum + shown(id), 0))))
+// Beside a docked quote the table is narrow: the other columns give way before the title does.
+const fitted = computed(() => fitColumns(ids.value, width.value, sized.value))
+const shown = (id: ColumnId) => fitted.value[id] ?? clampWidth(id, sized.value[id])
+const titleWidth = computed(() => fitted.value.title!)
 const colWidth = (id: ColumnId) => id === 'title' ? null : shown(id)
 const currentWidth = (id: ColumnId) => id === 'title' ? titleWidth.value : shown(id)
 

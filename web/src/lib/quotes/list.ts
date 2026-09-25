@@ -195,6 +195,29 @@ export function clampWidth(id: ColumnId, width: number | undefined): number {
   const def = COLUMN_BY_ID.get(id)!
   return typeof width === 'number' && Number.isFinite(width) ? Math.max(def.min, Math.min(def.max, Math.round(width))) : def.width
 }
+// The title never shrinks below this, whatever the other columns were dragged to;
+// the number keeps room for its whole chip (A260924-13).
+export const TITLE_FLOOR = 150
+const FIT_FLOOR: Partial<Record<ColumnId, number>> = { number: 126 }
+// The widths the visible columns get in a table this wide: each its own (or its
+// dragged) width; when the title would drop below its minimum, the other columns
+// give width back down to their minimums, in order (the number first), and the
+// title takes what is left, never less than TITLE_FLOOR.
+export function fitColumns(ids: ColumnId[], tableWidth: number, widths: Partial<Record<ColumnId, number>> = {}): Record<string, number> {
+  const out: Record<string, number> = {}
+  const others = ids.filter(id => id !== 'title')
+  for (const id of others) out[id] = clampWidth(id, widths[id])
+  const used = () => others.reduce((sum, id) => sum + out[id]!, 0)
+  let excess = used() + COLUMN_BY_ID.get('title')!.min - tableWidth
+  for (const id of others) {
+    if (excess <= 0) break
+    const give = Math.min(excess, out[id]! - Math.max(FIT_FLOOR[id] ?? 0, COLUMN_BY_ID.get(id)!.min))
+    out[id]! -= give
+    excess -= give
+  }
+  out.title = Math.max(TITLE_FLOOR, Math.round(tableWidth - used()))
+  return out
+}
 export function visibleColumns(tableWidth: number, widths: Partial<Record<ColumnId, number>> = {}): ColumnId[] {
   let ids = COLUMNS.map(c => c.id)
   const total = () => ids.reduce((sum, id) => sum + (id === 'title' ? COLUMN_BY_ID.get('title')!.min : clampWidth(id, widths[id])), 0)

@@ -59,8 +59,8 @@ function keys(event: KeyboardEvent) {
     <BizIcon name="lock" :size="12" class="picker-chev" />
   </span>
   <FloatingPanel v-if="anchor" :anchor="anchor" :width="300" align="end" label="Document profile" @close="close">
+    <p class="menu-head" aria-hidden="true">How this quote looks</p>
     <div role="menu" aria-label="Document profile" class="profile-menu" @keydown="keys">
-      <p class="menu-head">How this quote looks</p>
       <button type="button" role="menuitemradio" class="menu-item" :aria-checked="!current" data-autofocus @click="choose('')">
         <span class="standard-mark big" aria-hidden="true"><BizIcon name="document" :size="14" /></span>
         <span class="item-text"><span class="item-name">Standard document</span><span class="item-meta">The built-in look</span></span>
@@ -96,7 +96,7 @@ function keys(event: KeyboardEvent) {
 .standard-mark.big { width: 22px; height: 30px; }
 .newer-dot { flex-shrink: 0; width: 7px; height: 7px; border-radius: 50%; background: var(--gold); box-shadow: 0 0 0 2px var(--surface-raised-2); }
 /* Narrow title bars: the sheet alone, with the newer-revision dot on its corner. */
-.compact .picker-name, .compact.picker .picker-chev { display: none; }
+.compact .picker-name, .compact .picker-chev { display: none; }
 .compact.picker, .compact.frozen-profile { position: relative; width: 32px; padding: 0; justify-content: center; }
 .compact .newer-dot { position: absolute; top: 4px; right: 4px; }
 .frozen-profile { max-width: 280px; }
