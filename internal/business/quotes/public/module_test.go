@@ -215,6 +215,48 @@ func (f *fixture) issued() (string, string, string) {
 	return id, digest, object(f.t, body)["path"].(string)
 }
 
+func TestPublicQuoteRoutesSendStrictHeaders(t *testing.T) {
+	f := newFixture(t)
+	for _, path := range []string{
+		"/api/public/quotes/not-a-tenant/not-a-token",
+		"/api/public/quotes/not-a-tenant/not-a-token/pdf",
+	} {
+		req := httptest.NewRequest(http.MethodGet, path, nil)
+		rec := httptest.NewRecorder()
+		f.mux.ServeHTTP(rec, req)
+		if rec.Code != http.StatusNotFound {
+			t.Fatalf("%s status %d %s", path, rec.Code, rec.Body.String())
+		}
+		assertPublicHeaders(t, rec)
+	}
+	req := httptest.NewRequest(http.MethodPost, "/api/public/quotes/not-a-tenant/not-a-token/accept", strings.NewReader(`{}`))
+	req.Header.Set("Content-Type", "application/json")
+	rec := httptest.NewRecorder()
+	f.mux.ServeHTTP(rec, req)
+	if rec.Code != http.StatusBadRequest {
+		t.Fatalf("accept status %d %s", rec.Code, rec.Body.String())
+	}
+	assertPublicHeaders(t, rec)
+	_, _, path := f.issued()
+	req = httptest.NewRequest(http.MethodGet, "/api/public/quotes/"+strings.TrimPrefix(path, "/offers/"), nil)
+	rec = httptest.NewRecorder()
+	f.mux.ServeHTTP(rec, req)
+	if rec.Code != http.StatusOK {
+		t.Fatalf("issued read %d %s", rec.Code, rec.Body.String())
+	}
+	assertPublicHeaders(t, rec)
+}
+
+func assertPublicHeaders(t *testing.T, rec *httptest.ResponseRecorder) {
+	t.Helper()
+	if got := rec.Header().Get("Content-Security-Policy"); got != "default-src 'none'; frame-ancestors 'none'" {
+		t.Fatalf("csp %q", got)
+	}
+	if rec.Header().Get("Cache-Control") != "no-store" || rec.Header().Get("Referrer-Policy") != "no-referrer" || rec.Header().Get("X-Robots-Tag") != "noindex, nofollow, noarchive" {
+		t.Fatalf("cache %q referrer %q robots %q", rec.Header().Get("Cache-Control"), rec.Header().Get("Referrer-Policy"), rec.Header().Get("X-Robots-Tag"))
+	}
+}
+
 func TestPublicLinkReadDoesNotRotateCapability(t *testing.T) {
 	f := newFixture(t)
 	id, _, path := f.issued()

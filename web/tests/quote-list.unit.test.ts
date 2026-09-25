@@ -118,10 +118,14 @@ describe('the customer page speaks the document’s language', () => {
     expect(formatDay('2026-09-21', 'de')).toBe('21.09.2026')
     expect(formatDay('2026-09-21', 'en')).toBe('21/09/2026')
     expect(formatMoney(556000, 'EUR', 'de')).toBe('5.560,00 EUR')
+    expect(formatMoney(-556000, 'EUR', 'de')).toBe('-5.560,00 EUR')
+    expect(formatMoney(0, 'EUR', 'en')).toBe('0.00 EUR')
     expect(formatMoney(123456789, 'EUR', 'en')).toBe('1,234,567.89 EUR')
     expect(formatMoment('2026-09-21T08:12:00Z', 'de')).toMatch(/^21\.09\.2026, \d{2}:12 Uhr$/)
-    // The paper groups German amounts the same way.
-    expect(money(556000, 'EUR')).toBe(formatMoney(556000, 'EUR', 'de'))
+    // The paper groups German amounts the same way, including a negative total and zero.
+    expect(money(556000, 'EUR')).toBe('5.560,00 EUR')
+    expect(money(-556000, 'EUR')).toBe('-5.560,00 EUR')
+    expect(money(0, 'EUR')).toBe('0,00 EUR')
   })
   it('has every string in both catalogs', () => {
     expect(Object.keys(COPY.de).sort()).toEqual(Object.keys(COPY.en).sort())
@@ -130,13 +134,14 @@ describe('the customer page speaks the document’s language', () => {
 })
 
 // CSP parity: default-src 'self'; img-src 'self' blob: data: on the app, stricter on
-// the public page. The new surfaces need no eval, inline handlers or other origins.
+// the public page. Quote surfaces, including the inspector, need no eval, inline
+// handlers or other origins. One scan owns that source rule.
 describe('CSP parity of the quote surfaces', () => {
   it('uses no eval, string handlers, innerHTML or other origins', () => {
-    const dirs = ['../src/components/quotes/details/', '../src/components/quotes/list/', '../src/components/quotes/collaboration/'].map(d => new URL(d, import.meta.url).pathname)
+    const dirs = ['../src/components/quotes/details/', '../src/components/quotes/list/', '../src/components/quotes/collaboration/', '../src/components/quotes/inspector/'].map(d => new URL(d, import.meta.url).pathname)
     const files = [
       ...dirs.flatMap(d => readdirSync(d).map(f => join(d, f))),
-      ...['../src/public/PublicQuoteView.vue', '../src/views/business/QuotesView.vue', '../src/components/business/QuoteWorkspace.vue', '../src/components/business/QuoteCreateDialog.vue', '../src/lib/quoteWorkspace.ts', '../src/lib/quotes/list.ts', '../src/lib/quotes/lifecycle.ts', '../src/lib/quotes/conflicts.ts', '../src/lib/quotes/publicCopy.ts'].map(f => new URL(f, import.meta.url).pathname),
+      ...['../src/public/PublicQuoteView.vue', '../src/views/business/QuotesView.vue', '../src/components/business/QuoteWorkspace.vue', '../src/components/business/QuoteCreateDialog.vue', '../src/components/quotes/QuoteTitleBar.vue', '../src/components/quotes/DatePicker.vue', '../src/lib/quoteWorkspace.ts', '../src/lib/quotes/list.ts', '../src/lib/quotes/lifecycle.ts', '../src/lib/quotes/conflicts.ts', '../src/lib/quotes/publicCopy.ts', '../src/lib/quotes/inspector.ts'].map(f => new URL(f, import.meta.url).pathname),
     ]
     for (const file of files) {
       const text = readFileSync(file, 'utf8')

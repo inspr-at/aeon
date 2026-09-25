@@ -78,7 +78,10 @@ describe('limits and labels', () => {
   })
   it('writes exact decimals and compares profiles whatever the key order', () => {
     expect([decimal(9.6), decimal(12), decimal(7.499), decimal(-2.5), decimal(-0.001)]).toEqual(['9.6', '12', '7.5', '-2.5', '0'])
-    expect(stable({ b: 1, a: [{ d: 2, c: undefined }] })).toBe(stable({ a: [{ d: 2 }], b: 1 }))
+    const canonical = '{"a":[{"d":2}],"b":1}'
+    expect(stable({ b: 1, a: [{ d: 2, c: undefined }] })).toBe(canonical)
+    expect(stable({ a: [{ d: 2 }], b: 1 })).toBe(canonical)
+    expect(stable({ a: [{ d: 3 }], b: 1 })).not.toBe(canonical)
   })
   it('prints dates in the document’s locale, English in the European order', () => {
     expect(localeDate('de-AT', '2026-09-21')).toBe('21.09.2026')
