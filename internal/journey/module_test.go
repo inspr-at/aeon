@@ -40,6 +40,9 @@ func TestJourneyActions(t *testing.T) {
 	if view.StageSource != "journey" || view.Stage != "inspire" || view.NextAction.Key != "continue_intake" || !view.NextAction.Available || view.Revision != 1 {
 		t.Fatalf("init %+v", view.NextAction)
 	}
+	if view.Imported {
+		t.Fatal("a project started here is not imported")
+	}
 	if n := f.events(t, "journey.initialized"); n != 0 {
 		t.Fatalf("read initialized a journey: %d events", n)
 	}

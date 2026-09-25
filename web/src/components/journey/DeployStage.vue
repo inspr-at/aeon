@@ -7,6 +7,7 @@ import AppIcon from '../AppIcon.vue'
 import GateApprovals from './GateApprovals.vue'
 import GateCard from './GateCard.vue'
 import HandoffList from './HandoffList.vue'
+import LaterCard from './LaterCard.vue'
 
 // Deploy: Pharos applies the release after your approval. Its deploy step has
 // gates of its own; launch admission among them comes from the projection's
@@ -49,7 +50,7 @@ const launchNote = computed(() => launchReady.value ? 'ready' : atDeploy.value ?
           </dd>
         </dl>
       </section>
-      <section class="j-card" aria-labelledby="deploy-handoffs">
+      <section v-if="handoffs.length || state !== 'later'" class="j-card" aria-labelledby="deploy-handoffs">
         <header class="j-card-head"><p id="deploy-handoffs" class="eyebrow">Handoffs · deploy and verify</p></header>
         <HandoffList :handoffs="handoffs" :now="ctx.now.value" empty="No deployment was handed to Pharos yet. After you approve the deployment, Pharos reports each attempt here." />
       </section>
@@ -73,10 +74,7 @@ const launchNote = computed(() => launchReady.value ? 'ready' : atDeploy.value ?
         <p v-if="!approval" class="j-note">An agent asks for the deployment gate; it appears here for you to approve.</p>
       </GateCard>
       <GateCard v-else-if="state === 'done' || deployed" eyebrow="Deployed" :title="ctx.releaseLabel.value" tone="record"><p>Pharos applied and verified the release.</p></GateCard>
-      <GateCard v-else eyebrow="Later" title="Not yet" tone="record">
-        <p>The host applies the release after your approval.</p>
-        <p v-if="!launchReady" class="j-note">Launch admission: {{ launch.reason || 'the release is not ready for deployment.' }}</p>
-      </GateCard>
+      <LaterCard v-else stage="deploy" :detail="ctx.release.value && !launchReady && launch.reason ? `Launch admission: ${launch.reason.charAt(0).toLowerCase()}${launch.reason.slice(1)}` : ''" />
     </div>
   </div>
 </template>

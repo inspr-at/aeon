@@ -1,8 +1,7 @@
 <!-- SPDX-License-Identifier: AGPL-3.0-only -->
 <script setup lang="ts">
-import { brand } from '../../lib/brand'
 import { computed, nextTick, ref } from 'vue'
-import { ACTION_LONG, gateApprovals, offeredApproval, PROFILES, type ActionKey, type Profile } from '../../lib/journey'
+import { ACTION_LONG, gateApprovals, isImported, offeredApproval, PROFILES, STAGE_LABEL, type ActionKey, type Profile } from '../../lib/journey'
 import { useJourneyContext } from '../../lib/journeyContext'
 import { toast } from '../../lib/toast'
 import { useJourney } from '../../stores/journey'
@@ -11,6 +10,8 @@ import MarkdownBody from '../MarkdownBody.vue'
 import GateApprovals from './GateApprovals.vue'
 import GateCard from './GateCard.vue'
 import HistoryFold from './HistoryFold.vue'
+import ImportedOrigin from './ImportedOrigin.vue'
+import LaterCard from './LaterCard.vue'
 
 // Shape: the brief Aithema drafted and the person accepted, the profile, and the
 // decision: go, reduce scope, park or drop. The decision needs the shape gate.
@@ -42,11 +43,32 @@ const noGate = computed(() => !approval.value)
 // Past Shape, the stage is history: one line, folded.
 const past = computed(() => ['done', 'skipped'].includes(state.value) && journey.value.stage !== 'shape')
 const summary = computed(() => state.value === 'skipped' ? 'Not needed on Personal: the conversation went straight to requirements.'
-  : journey.value.stage_source === 'derived' ? `Decided before the project came to ${brand.value.short_name}.` : `Decided${brief.value ? `: ${brief.value.title}` : ''}. The decision is recorded.`)
+  : `Decided${brief.value ? `: ${brief.value.title}` : ''}. The decision is recorded.`)
+// An imported project was decided before it came here: its description is the brief of record.
+const imported = computed(() => isImported(journey.value) && past.value && !brief.value)
 </script>
 
 <template>
-  <component :is="past ? HistoryFold : 'div'" v-bind="past ? { title: 'The brief and the decision', summary, label: 'Show the brief' } : {}">
+  <div v-if="imported" class="j-grid">
+    <div class="j-col">
+      <ImportedOrigin eyebrow="Brief · the project’s description" mode="brief" />
+      <section class="j-card" aria-labelledby="shape-profile">
+        <label class="profile"><span id="shape-profile" class="eyebrow">Profile</span>
+          <select class="field" :value="journey.profile" :disabled="!ctx.canAct.value || profileSaving" @change="setProfile(($event.target as HTMLSelectElement).value as Profile)">
+            <option v-for="(p, key) in PROFILES" :key="key" :value="key">{{ p.label }} · {{ p.line }}</option>
+          </select>
+        </label>
+        <p class="j-note">The profile sets the gates ahead: budget and scope on Professional, an independent reviewer on Enterprise.</p>
+      </section>
+    </div>
+    <div class="j-col">
+      <GateCard eyebrow="Decided" title="Go, before it came here" tone="record">
+        <p>The decision to build this project was made in Paimos, so no gate was recorded here. A parked or dropped project would show its reason on this card.</p>
+        <button type="button" class="btn sm go" @click="ctx.view(journey.stage)">Go to {{ STAGE_LABEL[journey.stage] }}<AppIcon name="arrow" :size="13" /></button>
+      </GateCard>
+    </div>
+  </div>
+  <component :is="past ? HistoryFold : 'div'" v-else v-bind="past ? { title: 'The brief and the decision', summary, label: 'Show the brief' } : {}">
   <div v-if="state === 'skipped'" class="j-grid one">
     <section class="j-card">
       <h3>Not needed on Personal</h3>
@@ -101,7 +123,7 @@ const summary = computed(() => state.value === 'skipped' ? 'Not needed on Person
         <p>The decision is recorded. <button type="button" class="linkish" @click="ctx.view('requirements')">Requirements <AppIcon name="arrow" :size="12" /></button></p>
         <GateApprovals v-if="approvals.length" gate="shape" :approvals="approvals" on="the project" :can-decide="false" :now="ctx.now.value" :me="ctx.me.value" />
       </GateCard>
-      <GateCard v-else eyebrow="Later" title="Not yet" tone="record"><p>{{ journey.stage === 'inspire' ? 'The brief comes first: once it is confirmed, the decision is made here.' : 'The brief and the decision.' }}</p></GateCard>
+      <LaterCard v-else stage="shape" :detail="journey.stage === 'inspire' ? 'Once the brief is confirmed, the decision is made here.' : ''" />
     </div>
   </div>
   </component>
@@ -109,6 +131,7 @@ const summary = computed(() => state.value === 'skipped' ? 'Not needed on Person
 
 <style scoped>
 .profile { display: grid; gap: 6px; margin-top: 6px; }
+.go { justify-self: start; }
 .profile .field { height: 36px; }
 .decide { display: grid; gap: 6px; }
 .decide-btn { justify-content: flex-start; gap: 8px; width: 100%; height: 40px; }

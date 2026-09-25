@@ -1,8 +1,7 @@
 <!-- SPDX-License-Identifier: AGPL-3.0-only -->
 <script setup lang="ts">
-import { brand } from '../../lib/brand'
 import { computed, ref } from 'vue'
-import { acceptDraft, ACTION_LONG, type IntakeDraft } from '../../lib/journey'
+import { acceptDraft, ACTION_LONG, isImported, STAGE_LABEL, type IntakeDraft } from '../../lib/journey'
 import { useJourneyContext } from '../../lib/journeyContext'
 import { toast } from '../../lib/toast'
 import { absoluteTime, plural, relativeTime } from '../../lib/work'
@@ -11,6 +10,7 @@ import AppIcon from '../AppIcon.vue'
 import MarkdownBody from '../MarkdownBody.vue'
 import GateCard from './GateCard.vue'
 import HistoryFold from './HistoryFold.vue'
+import ImportedOrigin from './ImportedOrigin.vue'
 import SourcesCard from './SourcesCard.vue'
 
 // Inspire: what Aithema recorded (conversation and sources) and the drafts it
@@ -26,11 +26,14 @@ const next = computed(() => ctx.journey.value.next_action)
 const accepting = ref<string | null>(null)
 const sourceLabel = (id: string) => intake.value.sources.find(s => s.id === id)?.label ?? 'source'
 // Once the journey is past Inspire, this stage is history: one line, folded.
+const recorded = computed(() => intake.value.sources.length > 0 || intake.value.drafts.length > 0)
 const summary = computed(() => {
   const sources = intake.value.sources.length, accepted = intake.value.drafts.filter(d => d.status === 'accepted').length
-  if (sources || intake.value.drafts.length) return `${plural(sources, 'source')} recorded · ${plural(accepted, 'draft')} accepted.`
-  return ctx.journey.value.stage_source === 'derived' ? `Nothing was recorded here: the project came to ${brand.value.short_name} with its history.` : 'No conversation or sources were recorded.'
+  if (recorded.value) return `${plural(sources, 'source')} recorded · ${plural(accepted, 'draft')} accepted.`
+  return 'No conversation or sources were recorded.'
 })
+// An imported project started in Paimos: what it brought stands where the conversation would.
+const imported = computed(() => isImported(ctx.journey.value) && !here.value)
 async function accept(draft: IntakeDraft) {
   accepting.value = draft.id
   try {
@@ -42,7 +45,21 @@ async function accept(draft: IntakeDraft) {
 </script>
 
 <template>
-  <component :is="here ? 'div' : HistoryFold" v-bind="here ? {} : { title: 'Conversation and sources', summary, label: 'Show the sources' }">
+  <div v-if="imported" class="j-grid">
+    <div class="j-col">
+      <ImportedOrigin />
+      <HistoryFold v-if="recorded" title="Conversation and sources" :summary="summary" label="Show the sources">
+        <SourcesCard ref="sources" :intake="intake" :status="ctx.data.intake.status.value" :error="ctx.data.intake.error.value" :now="ctx.now.value" @retry="ctx.data.loadIntake(true)" />
+      </HistoryFold>
+    </div>
+    <div class="j-col">
+      <GateCard eyebrow="Imported" title="Started in Paimos" tone="record">
+        <p>This project came with its history, so there is no conversation here. Its description stands in for the brief, and its epics and tickets for the agreed work.</p>
+        <button type="button" class="btn sm go" @click="ctx.view(ctx.journey.value.stage)">Go to {{ STAGE_LABEL[ctx.journey.value.stage] }}<AppIcon name="arrow" :size="13" /></button>
+      </GateCard>
+    </div>
+  </div>
+  <component :is="here ? 'div' : HistoryFold" v-else v-bind="here ? {} : { title: 'Conversation and sources', summary, label: 'Show the sources' }">
   <div class="j-grid">
     <div class="j-col">
       <SourcesCard ref="sources" :intake="intake" :status="ctx.data.intake.status.value" :error="ctx.data.intake.error.value" :now="ctx.now.value" @retry="ctx.data.loadIntake(true)" />
@@ -93,6 +110,7 @@ async function accept(draft: IntakeDraft) {
 .draft.rejected { opacity: .7; }
 .cites { display: flex; flex-wrap: wrap; gap: 6px; }
 .draft-foot { display: flex; align-items: center; justify-content: space-between; gap: 8px; font-size: 12px; color: var(--ink-3); }
+.go { justify-self: start; }
 .linkish { display: inline-flex; align-items: center; gap: 4px; padding: 0; border: 0; background: transparent; color: var(--teal-ink); font-weight: 600; cursor: pointer; }
 .linkish:focus-visible { border-radius: 4px; box-shadow: var(--focus-ring); }
 </style>

@@ -9,6 +9,7 @@ import AppIcon from '../AppIcon.vue'
 import StatusIcon from '../work/StatusIcon.vue'
 import GateApprovals from './GateApprovals.vue'
 import GateCard from './GateCard.vue'
+import LaterCard from './LaterCard.vue'
 import ReleaseList from './ReleaseList.vue'
 import ReleaseTickets from './ReleaseTickets.vue'
 
@@ -46,6 +47,11 @@ const here = computed(() => journey.value.stage === 'build')
 const approvals = computed(() => gateApprovals(ctx.approvals.value, 'candidate', journey.value.current_release_id))
 const approval = computed(() => offeredApproval(ctx.approvals.value, journey.value, 'candidate', ctx.now.value))
 const releases = computed(() => ctx.data.releases.value)
+const stageState = computed(() => journey.value.stages.find(s => s.key === 'build')?.state ?? 'later')
+// Not reached and nothing to show yet: the stage says so once, with the way to where the journey is.
+const bare = computed(() => stageState.value === 'later' && !ctx.release.value && !releases.value.length)
+const openTickets = computed(() => ctx.data.work.value.value.filter(i => i.kind_slug === 'ticket' && !statusMeta(i.state).closed).length)
+const backlogLine = computed(() => openTickets.value ? `${plural(openTickets.value, 'open ticket')} wait in the backlog; release 1 is chosen from them.` : '')
 const left = computed(() => counts.value.open + counts.value.progress + counts.value.qa)
 const rejecting = ref(false)
 const reason = ref('')
@@ -58,11 +64,12 @@ async function reject() {
 </script>
 
 <template>
-  <div class="j-grid">
+  <div v-if="bare" class="j-grid one narrow"><LaterCard stage="build" :detail="backlogLine" /></div>
+  <div v-else class="j-grid">
     <div class="j-col">
       <section class="j-card" aria-labelledby="build-release">
         <header class="j-card-head">
-          <p id="build-release" class="eyebrow">{{ ctx.release.value ? `${ctx.releaseLabel.value} · ${here ? 'in progress' : 'tickets'}` : 'The release' }}</p>
+          <p id="build-release" class="eyebrow">{{ ctx.release.value ? `${ctx.releaseLabel.value} · ${here ? (tickets.length && !left ? 'every ticket done' : 'in progress') : 'tickets'}` : 'The release' }}</p>
           <span v-if="tickets.length" class="j-count">{{ counts.done }} of {{ plural(scope, 'ticket') }} done</span>
           <button type="button" class="btn sm" :disabled="!tickets.length" aria-keyshortcuts="w" @click="ctx.walk()"><AppIcon name="expand" :size="13" />Full screen</button>
         </header>
@@ -95,7 +102,7 @@ async function reject() {
         <ul class="j-checks">
           <li v-if="left"><AppIcon name="clock" :size="13" class="warn" /><span><b>{{ plural(left, 'ticket') }}</b> still open{{ counts.qa ? ` · ${counts.qa} in QA` : '' }}{{ counts.progress ? ` · ${counts.progress} in progress` : '' }}</span></li>
           <li v-else-if="tickets.length"><AppIcon name="check" :size="13" class="ok" /><span>Every ticket of {{ ctx.releaseLabel.value }} is done</span></li>
-          <li v-if="!next.available && next.reason && !marking"><AppIcon name="info" :size="13" class="info" /><span>{{ next.reason }}</span></li>
+          <li v-if="!next.available && next.reason && !marking && !building"><AppIcon name="info" :size="13" class="info" /><span>{{ next.reason }}</span></li>
           <li v-if="marking"><AppIcon :name="buildApproval ? 'shield' : 'info'" :size="13" :class="buildApproval ? 'warn' : 'info'" /><span>{{ buildApproval ? 'The build gate is requested: approve it to mark the candidate' : 'Marking the candidate needs the build gate, which an agent asks for' }}</span></li>
           <li v-else><AppIcon :name="approvals.some(a => a.decision === null) ? 'shield' : 'info'" :size="13" :class="approvals.some(a => a.decision === null) ? 'warn' : 'info'" /><span>{{ approvals.some(a => a.decision === null) ? 'The candidate gate is requested' : 'The candidate gate is asked for when the build is ready' }}</span></li>
         </ul>
@@ -106,7 +113,7 @@ async function reject() {
         :action="{ label: ctx.next.value.label, disabled: ctx.next.value.disabled, busy: ctx.next.value.busy, tip: ctx.next.value.tip }" @act="ctx.runNext()"
       >
         <p>{{ ACTION_LONG.mark_candidate }}</p>
-        <p v-if="!next.available && next.reason" class="j-note">{{ next.reason }}</p>
+        <p v-if="!next.available && next.reason && buildApproval" class="j-note">{{ next.reason }}</p>
         <GateApprovals gate="build" :approvals="buildApprovals" :on="ctx.releaseLabel.value" :can-decide="ctx.canAct.value" :now="ctx.now.value" :me="ctx.me.value" />
         <p v-if="!buildApproval" class="j-note">An agent asks for the build gate on {{ ctx.releaseLabel.value }}; it appears here for you to approve.</p>
       </GateCard>
@@ -129,7 +136,7 @@ async function reject() {
       <GateCard v-else-if="!building && journey.stages.find(s => s.key === 'build')?.state === 'done'" eyebrow="Done" :title="`${ctx.releaseLabel.value} candidate`" tone="record">
         <p>The candidate is approved. <button type="button" class="linkish" @click="ctx.view('deploy')">Deploy <AppIcon name="arrow" :size="12" /></button></p>
       </GateCard>
-      <GateCard v-else-if="!here" eyebrow="Later" title="Not yet" tone="record"><p>Agents build the release; you approve the candidate.</p></GateCard>
+      <LaterCard v-else-if="!here" stage="build" />
     </div>
   </div>
 </template>
