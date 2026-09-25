@@ -66,21 +66,22 @@ type documentPosition struct {
 	Currency       string `json:"currency"`
 }
 type quoteDocument struct {
-	SchemaVersion        int                `json:"schema_version"`
-	MinimumWriterVersion int                `json:"minimum_writer_version"`
-	Title                string             `json:"title"`
-	Subtitle             string             `json:"subtitle"`
-	ProjectRef           string             `json:"project_ref"`
-	OfferDate            string             `json:"offer_date"`
-	ValidUntil           string             `json:"valid_until"`
-	Currency             string             `json:"currency"`
-	Sender               json.RawMessage    `json:"sender"`
-	Recipient            json.RawMessage    `json:"recipient"`
-	Legal                json.RawMessage    `json:"legal"`
-	Layout               json.RawMessage    `json:"layout"`
-	Sections             []documentSection  `json:"sections"`
-	Positions            []documentPosition `json:"positions"`
-	NetTotalCents        int64              `json:"net_total_cents"`
+	SchemaVersion        int                      `json:"schema_version"`
+	MinimumWriterVersion int                      `json:"minimum_writer_version"`
+	Title                string                   `json:"title"`
+	Subtitle             string                   `json:"subtitle"`
+	ProjectRef           string                   `json:"project_ref"`
+	OfferDate            string                   `json:"offer_date"`
+	ValidUntil           string                   `json:"valid_until"`
+	Currency             string                   `json:"currency"`
+	Sender               json.RawMessage          `json:"sender"`
+	Recipient            json.RawMessage          `json:"recipient"`
+	Legal                json.RawMessage          `json:"legal"`
+	Layout               json.RawMessage          `json:"layout"`
+	Profile              *documentProfileSnapshot `json:"profile,omitempty"`
+	Sections             []documentSection        `json:"sections"`
+	Positions            []documentPosition       `json:"positions"`
+	NetTotalCents        int64                    `json:"net_total_cents"`
 }
 
 func newID() (string, error) {
@@ -118,6 +119,9 @@ func decodeDocument(raw []byte) (quoteDocument, error) {
 	if err := validateSnapshotFields(d.Layout, layoutFields); err != nil {
 		return d, err
 	}
+	if d.Profile != nil && (!uuidRe.MatchString(d.Profile.ID) || d.Profile.Revision < 1 || d.Profile.Definition.Schema != "inspr.document-profile.v1") {
+		return d, bad("invalid document profile snapshot")
+	}
 	return d, nil
 }
 
@@ -140,7 +144,7 @@ func documentMinimumWriterVersion(d quoteDocument) int {
 
 var senderFields = map[string]bool{"company": true, "street": true, "postal_code": true, "city": true, "country": true, "register_no": true, "register_court": true, "email": true, "phone": true, "website": true, "uid": true, "bank_name": true, "iban": true, "bic": true, "contact_person": true, "logo_file_id": true, "logo_sha256": true}
 var recipientFields = map[string]bool{"name": true, "address": true, "contact": true, "country": true, "customer_no": true, "email": true, "contact_node_id": true}
-var legalFields = map[string]bool{"intro": true, "accept_text": true, "vat_note": true}
+var legalFields = map[string]bool{"intro": true, "accept_text": true, "vat_note": true, "discount_note": true, "payment_terms": true}
 var layoutFields = map[string]bool{"logo_width_mm": true, "logo_offset_mm": true, "logo_file_id": true, "logo_sha256": true, "page_style": true}
 
 func validateSnapshotFields(raw json.RawMessage, allowed map[string]bool) error {

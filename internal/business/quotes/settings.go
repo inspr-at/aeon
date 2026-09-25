@@ -24,6 +24,7 @@ type quoteSettings struct {
 	Layout                  json.RawMessage `json:"layout"`
 	SMTPConfirmationEnabled bool            `json:"smtp_confirmation_enabled"`
 	SMTPConfigured          bool            `json:"smtp_configured"`
+	DefaultProfileID        string          `json:"default_profile_id,omitempty"`
 }
 
 var timeZoneRe = regexp.MustCompile(`^[A-Za-z_]+(?:/[A-Za-z0-9_+\-]+)*$`)
@@ -36,6 +37,7 @@ type settingsWrite struct {
 	Defaults                json.RawMessage `json:"defaults"`
 	Layout                  json.RawMessage `json:"layout"`
 	SMTPConfirmationEnabled bool            `json:"smtp_confirmation_enabled"`
+	DefaultProfileID        string          `json:"default_profile_id,omitempty"`
 }
 
 func jsonObject(b json.RawMessage) bool {
@@ -86,7 +88,7 @@ func validateDefaults(raw json.RawMessage) error {
 }
 func readSettings(ctx context.Context, tx pgx.Tx) (quoteSettings, error) {
 	var s quoteSettings
-	err := tx.QueryRow(ctx, `SELECT revision,numbering_time_zone,default_currency,sender,defaults,layout,smtp_confirmation_enabled,smtp_configured FROM quote_settings`).Scan(&s.Revision, &s.NumberingTimeZone, &s.DefaultCurrency, &s.Sender, &s.Defaults, &s.Layout, &s.SMTPConfirmationEnabled, &s.SMTPConfigured)
+	err := tx.QueryRow(ctx, `SELECT revision,numbering_time_zone,default_currency,sender,defaults,layout,smtp_confirmation_enabled,smtp_configured,coalesce(default_profile_id::text,'') FROM quote_settings`).Scan(&s.Revision, &s.NumberingTimeZone, &s.DefaultCurrency, &s.Sender, &s.Defaults, &s.Layout, &s.SMTPConfirmationEnabled, &s.SMTPConfigured, &s.DefaultProfileID)
 	if errors.Is(err, pgx.ErrNoRows) {
 		return quoteSettings{Sender: json.RawMessage(`{}`), Defaults: json.RawMessage(`{}`), Layout: json.RawMessage(`{}`)}, nil
 	}
@@ -123,6 +125,10 @@ func (m *Module) settingsPatch(w http.ResponseWriter, r *http.Request) {
 	}
 	if in.ExpectedRevision < 0 || !jsonObject(in.Sender) || !jsonObject(in.Defaults) || !jsonObject(in.Layout) {
 		respond(w, 0, nil, bad("invalid quote settings"))
+		return
+	}
+	if in.DefaultProfileID != "" && !uuidRe.MatchString(in.DefaultProfileID) {
+		respond(w, 0, nil, bad("invalid default profile"))
 		return
 	}
 	if !currencyRe.MatchString(in.DefaultCurrency) {
@@ -163,10 +169,15 @@ func (m *Module) settingsPatch(w http.ResponseWriter, r *http.Request) {
 		if current.Revision != in.ExpectedRevision {
 			return conflict("settings revision is stale")
 		}
+		if in.DefaultProfileID != "" {
+			if _, err := readProfileSnapshot(r.Context(), tx, in.DefaultProfileID); err != nil {
+				return err
+			}
+		}
 		if current.Revision == 0 {
-			_, err = tx.Exec(r.Context(), `INSERT INTO quote_settings(tenant_id,revision,numbering_time_zone,default_currency,sender,defaults,layout,updated_by_principal_id) VALUES($1::uuid,1,$2,$3,$4::jsonb,$5::jsonb,$6::jsonb,$7::uuid)`, p.TenantID, in.NumberingTimeZone, in.DefaultCurrency, string(in.Sender), string(in.Defaults), string(in.Layout), p.ID)
+			_, err = tx.Exec(r.Context(), `INSERT INTO quote_settings(tenant_id,revision,numbering_time_zone,default_currency,sender,defaults,layout,updated_by_principal_id,default_profile_id) VALUES($1::uuid,1,$2,$3,$4::jsonb,$5::jsonb,$6::jsonb,$7::uuid,NULLIF($8,'')::uuid)`, p.TenantID, in.NumberingTimeZone, in.DefaultCurrency, string(in.Sender), string(in.Defaults), string(in.Layout), p.ID, in.DefaultProfileID)
 		} else {
-			_, err = tx.Exec(r.Context(), `UPDATE quote_settings SET revision=revision+1,numbering_time_zone=$1,default_currency=$8,sender=$2::jsonb,defaults=$3::jsonb,layout=$4::jsonb,smtp_confirmation_enabled=$7,updated_at=now(),updated_by_principal_id=$5::uuid WHERE tenant_id=$6::uuid`, in.NumberingTimeZone, string(in.Sender), string(in.Defaults), string(in.Layout), p.ID, p.TenantID, in.SMTPConfirmationEnabled, in.DefaultCurrency)
+			_, err = tx.Exec(r.Context(), `UPDATE quote_settings SET revision=revision+1,numbering_time_zone=$1,default_currency=$8,sender=$2::jsonb,defaults=$3::jsonb,layout=$4::jsonb,smtp_confirmation_enabled=$7,updated_at=now(),updated_by_principal_id=$5::uuid,default_profile_id=NULLIF($9,'')::uuid WHERE tenant_id=$6::uuid`, in.NumberingTimeZone, string(in.Sender), string(in.Defaults), string(in.Layout), p.ID, p.TenantID, in.SMTPConfirmationEnabled, in.DefaultCurrency, in.DefaultProfileID)
 		}
 		if err != nil {
 			return err

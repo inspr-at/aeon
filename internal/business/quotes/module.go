@@ -53,6 +53,15 @@ func (m *Module) Mount(mux *http.ServeMux) {
 	mux.HandleFunc("GET /api/quotes/{quoteId}", m.get)
 	mux.HandleFunc("GET /api/quotes/settings", m.settingsGet)
 	mux.HandleFunc("PATCH /api/quotes/settings", m.settingsPatch)
+	mux.HandleFunc("GET /api/quote-profiles", m.profileList)
+	mux.HandleFunc("POST /api/quote-profiles", m.profileWrite)
+	mux.HandleFunc("GET /api/quote-profiles/{profileId}", m.profileGet)
+	mux.HandleFunc("PATCH /api/quote-profiles/{profileId}", m.profileWrite)
+	mux.HandleFunc("DELETE /api/quote-profiles/{profileId}", m.profileArchive)
+	mux.HandleFunc("POST /api/quote-profiles/{profileId}/undo", m.profileUndo)
+	mux.HandleFunc("POST /api/quote-profiles/assets", m.profileAssetUpload)
+	mux.HandleFunc("GET /api/quote-profiles/assets/{assetId}", m.profileAssetGet)
+	mux.HandleFunc("PUT /api/quotes/{quoteId}/profile", m.selectProfile)
 	mux.HandleFunc("GET /api/quotes/{quoteId}/draft", m.draftGet)
 	mux.HandleFunc("PATCH /api/quotes/{quoteId}/draft", m.draftPatch)
 	mux.HandleFunc("POST /api/quotes/{quoteId}/draft/branch", m.branchDraft)
@@ -262,6 +271,7 @@ type createWrite struct {
 	Title             string `json:"title"`
 	ProjectNodeID     string `json:"project_node_id"`
 	CustomerOrgNodeID string `json:"customer_org_node_id"`
+	ProfileID         string `json:"profile_id,omitempty"`
 }
 
 func readQuote(ctx context.Context, tx pgx.Tx, id string, lock bool) (quote, error) {
@@ -464,7 +474,7 @@ func (m *Module) create(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	in.Title = strings.TrimSpace(in.Title)
-	if in.Title == "" || len(in.Title) > 512 || (in.ProjectNodeID != "" && !uuidRe.MatchString(in.ProjectNodeID)) || !uuidRe.MatchString(in.CustomerOrgNodeID) {
+	if in.Title == "" || len(in.Title) > 512 || (in.ProjectNodeID != "" && !uuidRe.MatchString(in.ProjectNodeID)) || !uuidRe.MatchString(in.CustomerOrgNodeID) || (in.ProfileID != "" && !uuidRe.MatchString(in.ProfileID)) {
 		respond(w, 0, nil, bad("invalid quote"))
 		return
 	}
@@ -514,6 +524,14 @@ func (m *Module) create(w http.ResponseWriter, r *http.Request) {
 		}
 		if settings.Revision > 0 {
 			doc, err := makeDocument(r.Context(), tx, settings, in.CustomerOrgNodeID, in.Title, customerNo, day)
+			if err != nil {
+				return err
+			}
+			profileID := in.ProfileID
+			if profileID == "" {
+				profileID = settings.DefaultProfileID
+			}
+			doc.Profile, err = readProfileSnapshot(r.Context(), tx, profileID)
 			if err != nil {
 				return err
 			}

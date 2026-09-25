@@ -426,7 +426,11 @@ func (m *Module) ProcessNext(ctx context.Context, tenantID string) (bool, error)
 	if err != nil {
 		return true, m.markFailed(ctx, tenantID, j, "snapshot unavailable")
 	}
-	pdf, renderErr := quotepdf.Render(ctx, m.assets, quotepdf.Payload{Document: document, OfferNo: offerNo, Accepted: &quotepdf.Stamp{Name: name, Company: company, At: acceptedAt.UTC().Format(time.RFC3339), Digest: originalDigest}})
+	profileAssets, renderErr := quotepdf.LoadProfileAssets(ctx, m.pool, m.store, tenantID, document)
+	if renderErr != nil {
+		return true, m.markFailed(ctx, tenantID, j, "profile assets unavailable")
+	}
+	pdf, renderErr := quotepdf.Render(ctx, m.assets, quotepdf.Payload{Document: document, OfferNo: offerNo, ProfileAssets: profileAssets, Accepted: &quotepdf.Stamp{Name: name, Company: company, At: acceptedAt.UTC().Format(time.RFC3339), Digest: originalDigest}})
 	if renderErr != nil {
 		return true, m.markFailed(ctx, tenantID, j, "PDF render failed")
 	}

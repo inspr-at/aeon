@@ -28,7 +28,7 @@ export interface ConfirmationJob {
 }
 export interface AcceptanceNotice { quote_node_id: string; version: number; channel: 'authenticated' | 'public'; accepted_at: string; confirmation_state: string }
 export interface Readiness { renderer_available: boolean; smtp_enabled: boolean; smtp_configured: boolean; email_delivery: string }
-export interface SettingsState { revision: number; sender: Record<string, unknown>; numbering_time_zone: string; default_currency: string }
+export interface SettingsState { revision: number; sender: Record<string, unknown>; numbering_time_zone: string; default_currency: string; default_profile_id?: string }
 
 const seg = (value: string) => encodeURIComponent(value)
 const quote = (id: string) => `/quotes/${seg(id)}`
@@ -48,7 +48,7 @@ export function lifecycleError(e: unknown, fallback: string): string {
 }
 
 export const getQuote = (id: string) => send<QuoteProjection>(quote(id))
-export const createQuote = (body: { title: string; customer_org_node_id: string; project_node_id?: string }) => send<QuoteProjection>('/quotes', 'POST', body)
+export const createQuote = (body: { title: string; customer_org_node_id: string; project_node_id?: string; profile_id?: string }) => send<QuoteProjection>('/quotes', 'POST', body)
 export const getSettings = () => send<SettingsState>('/quotes/settings')
 export const finalizeQuote = (id: string, pre: { expected_quote_revision: number; expected_draft_revision: number; expected_document_sha256: string }) =>
   send<QuoteProjection>(`${quote(id)}/finalize`, 'POST', pre)

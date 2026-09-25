@@ -31,7 +31,8 @@ import { fitWholeBlocks, type PaginationResult, type PagePlan } from '../../../l
 import { MARK_DEFAULT_MM } from '../../../lib/quotes/inspector'
 import { contentUrl } from '../../../lib/attachments'
 import { quoteQr } from '../../../lib/quotes/qr'
-import type { QuoteDocumentData, DocumentSettings, ListMode, MarkName, NumberingOptions, OffsetPatch, QuoteMarker, QuoteSection, SectionSettingsPatch, TextSelection } from '../../../lib/quotes/types'
+import { loadProfileFonts, pageNumber, profileAssetUrl, profileStyle } from '../../../lib/quotes/profile'
+import type { QuoteDocumentData, DocumentSettings, ListMode, MarkName, NumberingOptions, OffsetPatch, QuoteMarker, QuoteSection, SectionNumberingStyle, SectionSettingsPatch, TextSelection } from '../../../lib/quotes/types'
 const props = withDefaults(defineProps<{ document: QuoteDocumentData; offerNo?: string; editable?: boolean; accepted?: { name: string; company?: string; at: string; digest: string } | null; editor?: QuoteEditor | null; publicLink?: string; draftPreview?: boolean }>(), { editable: false, offerNo: '', editor: null, publicLink: '', draftPreview: false })
 const emit = defineEmits<{ 'update:document': [document: QuoteDocumentData]; change: [document: QuoteDocumentData]; 'render-state': [state: PaginationResult]; overflow: [message: string | null]; mark: [page: number] }>()
 // P7: a workspace may lend its editor (and so its undo history) to this view, so
@@ -66,6 +67,11 @@ let resize: ResizeObserver | null = null
 let scheduled = false
 let generation = 0
 const sections = computed(() => state.value.sections)
+const profile = computed(() => state.value.profile)
+const paperStyle = computed(() => profileStyle(profile.value))
+const footerNumber = (page: number) => pageNumber(profile.value, page, pages.value.length)
+let fontsReady: Promise<void> = Promise.resolve()
+watch(profile, value => { fontsReady = loadProfileFonts(value); schedule() }, { immediate: true })
 const publicQr = computed(() => props.publicLink ? quoteQr(props.publicLink) : null)
 const previewQr = computed(() => props.draftPreview && !props.publicLink ? quoteQr('DRAFT PREVIEW - NO CUSTOMER LINK') : null)
 const finalQr = computed(() => publicQr.value ?? previewQr.value)
@@ -78,7 +84,7 @@ async function measure() {
   await nextTick()
   const root = measureRoot.value, probe = heightProbe.value
   if (!root || !probe) return
-  await document.fonts.ready
+  try { await fontsReady; await document.fonts.ready } catch { renderState.value = { ready: false, overflow: 'Document profile font could not be loaded', pages: pages.value }; emit('overflow', renderState.value.overflow); return }
   if (current !== generation) return
   const rect = (selector: string) => root.querySelector<HTMLElement>(selector)?.getBoundingClientRect().height ?? 0
   const available = probe.getBoundingClientRect().height
@@ -105,7 +111,8 @@ onBeforeUnmount(() => { resize?.disconnect(); window.removeEventListener('resize
 // ---------- The footer mark (P4, F08.03): the company's mark on every page ----------
 // Sized 18..96 mm and moved -6..10 mm, in tenths, for the whole document; clicking
 // the mark on any page selects that page's mark and asks for its settings.
-const markFile = computed(() => state.value.layout.logo_file_id || state.value.sender.logo_file_id || '')
+const markFile = computed(() => profile.value?.definition.footer.asset_id || state.value.layout.logo_file_id || state.value.sender.logo_file_id || '')
+const markSrc = computed(() => profile.value?.definition.footer.asset_id ? profileAssetUrl(markFile.value) : contentUrl(markFile.value, 'original'))
 const markWidth = computed(() => { const n = Number(state.value.layout.logo_width_mm); return Number.isFinite(n) && n >= 18 && n <= 96 ? n : MARK_DEFAULT_MM })
 const markOffset = computed(() => { const n = Number(state.value.layout.logo_offset_mm); return Number.isFinite(n) && n >= -6 && n <= 10 ? n : 0 })
 const markPage = ref<number | null>(null)
@@ -116,7 +123,7 @@ function selectMark(pageIndex: number) { markPage.value = pageIndex; editor.sele
 // ---------- Section chrome (P4): handle, context menu, drag to reorder, Alt+Up/Down ----------
 const actions = sectionActions(editor, touch)
 const currentSection = computed(() => { void version.value; return editor.selection.text?.sectionId ?? editor.selection.sectionId ?? null })
-const labelOf = (section: QuoteSection) => sectionLabel(sectionIndex(section.id) + 1, section.numbering_style)
+const labelOf = (section: QuoteSection) => sectionLabel(sectionIndex(section.id) + 1, section.numbering_style ?? profile.value?.definition.sections.numbering as SectionNumberingStyle | undefined)
 const spacing = (section: QuoteSection) => ({ paddingTop: section.spacing_before_mm ? `${section.spacing_before_mm}mm` : undefined, paddingBottom: section.spacing_after_mm ? `${section.spacing_after_mm}mm` : undefined })
 const menu = ref<{ id: string; anchor: HTMLElement } | null>(null)
 const dragId = ref<string | null>(null)
@@ -213,9 +220,10 @@ defineExpose({
 })
 </script>
 <template>
-  <div class="quote-document" :data-quote-ready="renderState.ready" :data-quote-overflow="renderState.overflow ?? undefined" :data-page-count="pages.length">
+  <div class="quote-document" :class="profile?.definition.layout_variant" :style="paperStyle" :data-quote-ready="renderState.ready" :data-quote-overflow="renderState.overflow ?? undefined" :data-page-count="pages.length">
     <div v-if="renderState.overflow" class="quote-overflow" role="alert">{{ renderState.overflow }}</div>
     <article v-for="(page, pageIndex) in pages" :key="pageIndex" class="quote-page" :data-page="pageIndex + 1">
+      <header v-if="profile?.definition.layout_variant === 'classic-v1'" class="quote-page-header"><span>{{ profile.definition.labels.quote || 'ANGEBOT' }} {{ offerNo }}</span><span>{{ state.offer_date }}</span></header>
       <div class="quote-page-content">
         <QuoteCover v-if="page.kind === 'cover'" :document="state" :editor="editor" :offer-no="offerNo" :editable="editable" />
         <div
@@ -230,24 +238,25 @@ defineExpose({
           <div class="quote-section-heading" @contextmenu="headingMenu($event, id)"><span v-if="labelOf(byId(id))" class="quote-section-number">{{ labelOf(byId(id)) }}</span><QuoteText tag="h2" :model-value="byId(id).heading" :label="`Heading section ${sectionIndex(id) + 1}`" :editable="editable" @focus="editor.select({ sectionId: id })" @update:model-value="editor.editSection(id, { heading: $event })" /></div>
           <QuoteProse :editor="editor" :section-id="id" :body="byId(id).body" :nodes="byId(id).nodes" :section-number="sectionIndex(id) + 1" :editable="editable" @move-section="moveSection(id, $event)" />
         </div>
-        <QuotePositions v-if="page.kind === 'positions' && (page.positionIds.length || pageIndex === pages.findIndex(p => p.kind === 'positions'))" :positions="state.positions" :indices="page.positionIds" :editor="editor" :editable="editable" />
+        <QuotePositions v-if="page.kind === 'positions' && (page.positionIds.length || pageIndex === pages.findIndex(p => p.kind === 'positions'))" :positions="state.positions" :indices="page.positionIds" :editor="editor" :editable="editable" :profile="profile" :continuation="pageIndex > pages.findIndex(p => p.kind === 'positions')" />
         <QuoteAcceptance v-if="page.acceptance" :document="state" :editor="editor" :editable="editable" :accepted="accepted" />
       </div>
       <footer class="quote-page-footer">
         <span class="quote-footer-start">
+          <span v-if="profile?.definition.layout_variant === 'classic-v1'">{{ offerNo }}</span>
           <button
-            v-if="markFile && editable" type="button" class="quote-mark" :class="{ selected: markPage === pageIndex, missing: markMissing }" :style="{ width: `${markWidth}mm`, transform: `translateY(${markOffset}mm)` }"
+            v-if="markFile && editable" type="button" class="quote-mark" :class="{ selected: markPage === pageIndex, missing: markMissing }" :style="{ width: profile ? `${profile.definition.footer.width_mm}mm` : `${markWidth}mm`, transform: profile ? `translateY(${profile.definition.footer.offset_mm}mm)` : `translateY(${markOffset}mm)` }"
             :aria-label="`Company mark on page ${pageIndex + 1}`" :aria-pressed="markPage === pageIndex" data-tip="Size and position of the mark" @click="selectMark(pageIndex)"
-          ><img v-if="!markMissing" :src="contentUrl(markFile, 'original')" alt="" draggable="false" @error="markMissing = true" /><span v-else class="quote-mark-empty">Mark</span></button>
-          <span v-else-if="markFile && !markMissing" class="quote-mark" :style="{ width: `${markWidth}mm`, transform: `translateY(${markOffset}mm)` }"><img :src="contentUrl(markFile, 'original')" alt="" @error="markMissing = true" /></span>
-          <span>{{ state.sender.company }}</span>
+          ><img v-if="!markMissing" :src="markSrc" alt="" draggable="false" @error="markMissing = true" /><span v-else class="quote-mark-empty">Mark</span></button>
+          <span v-else-if="markFile && !markMissing" class="quote-mark" :style="{ width: profile ? `${profile.definition.footer.width_mm}mm` : `${markWidth}mm`, transform: profile ? `translateY(${profile.definition.footer.offset_mm}mm)` : `translateY(${markOffset}mm)` }"><img :src="markSrc" alt="" @error="markMissing = true" /></span>
+          <span v-if="profile?.definition.layout_variant !== 'classic-v1'">{{ state.sender.company }}</span>
         </span>
         <span class="quote-footer-end">
           <span v-if="finalQr && pageIndex === pages.length - 1" class="quote-qr-wrap">
             <svg class="quote-final-qr" :viewBox="`-2 -2 ${finalQr.size + 4} ${finalQr.size + 4}`" role="img" :aria-label="publicQr ? 'QR code of the customer link' : 'Draft preview QR code; no customer link'" shape-rendering="crispEdges"><rect x="-2" y="-2" :width="finalQr.size + 4" :height="finalQr.size + 4" fill="#fff" /><path :d="finalQr.path" fill="#000" /></svg>
             <span v-if="previewQr" class="quote-qr-note">Draft preview</span>
           </span>
-          <span>{{ offerNo }} · {{ pageIndex + 1 }} / {{ pages.length }}</span>
+          <span>{{ profile ? footerNumber(pageIndex + 1) : `${offerNo} · ${pageIndex + 1} / ${pages.length}` }}</span>
         </span>
       </footer>
     </article>
@@ -255,7 +264,7 @@ defineExpose({
       <div ref="heightProbe" class="quote-height-probe"></div>
       <div data-measure-cover><QuoteCover :document="state" :editor="editor" :offer-no="offerNo" /></div>
       <div v-for="(section, index) in sections" :key="section.id" :data-measure-section="section.id" class="quote-section" :style="spacing(section)"><div class="quote-section-heading"><span v-if="labelOf(section)" class="quote-section-number">{{ labelOf(section) }}</span><h2>{{ section.heading }}</h2></div><QuoteProse :editor="editor" :section-id="section.id" :body="section.body" :nodes="section.nodes" :section-number="index + 1" /></div>
-      <div v-for="position in state.positions" :key="position.id" :data-measure-position="position.id"><QuotePositions :positions="state.positions" :indices="[position.id]" :editor="editor" /></div>
+      <div v-for="position in state.positions" :key="position.id" :data-measure-position="position.id"><QuotePositions :positions="state.positions" :indices="[position.id]" :editor="editor" :profile="profile" /></div>
       <div data-measure-acceptance><QuoteAcceptance :document="state" :editor="editor" :accepted="accepted" /></div>
     </div>
     <SectionMenu
@@ -274,6 +283,19 @@ defineExpose({
   --danger: #b24a44; --danger-bg: rgba(178, 74, 68, .08); --danger-line: rgba(178, 74, 68, .3); --aqua: #a4e5df; --focus-ring: 0 0 0 2px #a4e5df, 0 0 18px rgba(164, 229, 223, .8);
   --quote-paper: #fffefa; --quote-ink: var(--ink); color-scheme: light; color: var(--quote-ink); font-family: var(--font); font-size: 9pt;
 }
+.quote-document[class] { font-family: var(--quote-body-font, var(--font)); }
+.quote-document.classic-v1 { font-size: var(--quote-body-size); line-height: 1.5; font-variant-numeric: tabular-nums; }
+.quote-document.classic-v1 .quote-page { padding: var(--quote-top) var(--quote-right) var(--quote-bottom) var(--quote-left); color: var(--ink); }
+.quote-document.classic-v1 .quote-page-content { height: var(--quote-content-height); }
+.quote-document.classic-v1 .quote-page-header { display: flex; justify-content: space-between; gap: 8mm; border-bottom: 1px solid var(--line); padding-bottom: 5px; color: var(--ink-3); font-size: 7.5pt; font-weight: 600; letter-spacing: .14em; text-transform: uppercase; }
+.quote-document.classic-v1 .quote-page-footer { left: var(--quote-left); right: var(--quote-right); bottom: var(--quote-bottom); display: grid; grid-template-columns: 1fr auto 1fr; padding-top: 7px; font-size: var(--quote-footer-size); letter-spacing: .14em; text-transform: uppercase; color: var(--ink-3); border-color: var(--line); }
+.quote-document.classic-v1 .quote-footer-start { gap: 0; }
+.quote-document.classic-v1 .quote-footer-start > .quote-mark { position: absolute; left: 50%; transform: translateX(-50%) translateY(var(--quote-footer-offset)) !important; }
+.quote-document.classic-v1 .quote-footer-end { grid-column: 3; justify-content: flex-end; }
+.quote-document.classic-v1 .quote-section-heading { font-family: var(--quote-display-font, var(--quote-body-font, var(--font))); font-size: var(--quote-section-size); font-weight: 400; letter-spacing: .14em; text-transform: var(--quote-heading-transform); color: var(--teal); }
+.quote-document.classic-v1 .quote-section-number { color: inherit; }
+.quote-document.classic-v1 .quote-measure { padding: var(--quote-top) var(--quote-right) var(--quote-bottom) var(--quote-left); }
+.quote-document.classic-v1 .quote-height-probe { height: var(--quote-content-height); }
 .quote-page { position: relative; box-sizing: border-box; width: 210mm; height: 297mm; padding: 20mm 21mm 20mm; margin: 0 auto 12mm; background: var(--quote-paper); box-shadow: var(--shadow); overflow: hidden; }
 .quote-page-content { height: 245mm; }
 .quote-page-footer { position: absolute; bottom: 12mm; left: 21mm; right: 21mm; border-top: 1px solid var(--line-2); padding-top: 3mm; display: flex; justify-content: space-between; align-items: center; gap: 10mm; font-size: 7pt; color: var(--ink-2); }
@@ -302,5 +324,5 @@ button.quote-mark.selected { box-shadow: 0 0 0 1.5px var(--teal); }
 .quote-section.drop-after::after { bottom: -3mm; }
 .quote-overflow { max-width: 210mm; margin: 0 auto 4mm; background: var(--danger-bg); border: 1px solid var(--danger-line); border-radius: 8px; padding: 3mm; }
 .quote-measure { position: absolute; left: -10000px; top: 0; width: 210mm; padding: 20mm 21mm; box-sizing: border-box; visibility: hidden; background: var(--quote-paper); }.quote-height-probe { height: 245mm; position: absolute; pointer-events: none; }
-@media print { .quote-page { margin: 0; box-shadow: none; break-after: page; background: white; color: #203c3d; } .quote-document { color: #203c3d; } .quote-section-handle,.quote-overflow,.quote-measure,.quote-mark.missing { display: none !important; } button.quote-mark { box-shadow: none !important; } @page { size: A4; margin: 0; } }
+@media print { .quote-page { margin: 0; box-shadow: none; break-after: page; background: var(--quote-paper); color: var(--ink); } .quote-document { color: var(--ink); } .quote-section-handle,.quote-overflow,.quote-measure,.quote-mark.missing { display: none !important; } button.quote-mark { box-shadow: none !important; } @page { size: A4; margin: 0; } }
 </style>

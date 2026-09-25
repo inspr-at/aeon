@@ -459,7 +459,16 @@ func (m *Module) pdf(w http.ResponseWriter, r *http.Request) {
 	if m.publicBaseURL != "" {
 		publicURL = m.publicBaseURL + "/offers/" + r.PathValue("publicTenant") + "/" + r.PathValue("token")
 	}
-	bytes, err := quotepdf.Render(r.Context(), m.assets, quotepdf.Payload{Document: out.Document, OfferNo: out.OfferNo, PublicURL: publicURL})
+	store := attachments.Store{}
+	if m.store != nil {
+		store = *m.store
+	}
+	profileAssets, err := quotepdf.LoadProfileAssets(r.Context(), m.pool, store, out.tenantID, out.Document)
+	if err != nil {
+		fail(w, 503, "quote PDF unavailable")
+		return
+	}
+	bytes, err := quotepdf.Render(r.Context(), m.assets, quotepdf.Payload{Document: out.Document, OfferNo: out.OfferNo, PublicURL: publicURL, ProfileAssets: profileAssets})
 	if err != nil {
 		fail(w, 503, "quote PDF unavailable")
 		return
