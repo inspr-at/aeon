@@ -22,7 +22,26 @@ const columns = computed(() => {
   })
   return widest
 })
-const rowStyle = (node: TextNode) => node.kind === 'item' ? { paddingLeft: `${(node.depth ?? 0) * INDENT_EM + (columns.value.get(node.depth ?? 0) ?? 1.5)}em` } : undefined
+const outlineWidths = computed(() => {
+  const widest = new Map<number, number>()
+  shown.value.forEach((node, index) => {
+    if (node.kind !== 'item' || node.numbering !== 'outline' || node.marker !== 'decimal') return
+    const depth = node.depth ?? 0
+    widest.set(depth, Math.max(widest.get(depth) ?? 0, [...(markers.value[index] ?? '')].length))
+  })
+  return widest
+})
+const rowStyle = (node: TextNode) => {
+  if (node.kind !== 'item') return undefined
+  const depth = node.depth ?? 0
+  const style: Record<string, string> = { paddingLeft: `${depth * INDENT_EM + (columns.value.get(depth) ?? 1.5)}em` }
+  if (node.numbering === 'outline' && node.marker === 'decimal') {
+    const prefix = Array.from({ length: depth }, (_, level) => outlineWidths.value.get(level) ?? 0).reduce((a, b) => a + b, 0)
+    style['--outline-col'] = `${Math.max(outlineWidths.value.get(depth) ?? 0, 1)}ch`
+    style['--outline-indent'] = `calc(${prefix}ch + ${depth} * 0.4em)`
+  }
+  return style
+}
 const markerStyle = (node: TextNode) => ({ left: `${(node.depth ?? 0) * INDENT_EM}em`, transform: `translate(${node.marker_x_mm ?? '0'}mm, ${node.marker_y_mm ?? '0'}mm)` })
 const composing = ref(false)
 let pending: TextPoint | null = null
@@ -145,7 +164,7 @@ function compositionEnd() {
 </script>
 <template>
   <div ref="root" class="quote-prose" :contenteditable="editable ? 'true' : undefined" role="textbox" :aria-label="`Section ${sectionNumber} text`" aria-multiline="true" spellcheck="true" @focus="select()" @keyup="select()" @mouseup="select()" @beforeinput="beforeInput" @input="input" @paste="paste" @keydown="keydown" @compositionstart="composing = true" @compositionend="compositionEnd">
-    <div v-for="(node, index) in shown" :key="node.id" class="quote-prose-row" :data-node-id="node.id" :class="{ item: node.kind === 'item' }" :style="rowStyle(node)">
+    <div v-for="(node, index) in shown" :key="node.id" class="quote-prose-row" :data-node-id="node.id" :data-marker="node.marker || undefined" :data-numbering="node.numbering || undefined" :class="{ item: node.kind === 'item', spaced: index > 0 }" :style="rowStyle(node)">
       <span v-if="node.kind === 'item'" class="quote-marker" contenteditable="false" aria-hidden="true" :style="markerStyle(node)">{{ markers[index] }}</span>
       <span class="quote-prose-text" :data-text-id="node.id" :style="node.text_start_mm ? { marginLeft: `${node.text_start_mm}mm` } : undefined"><template v-for="(run, part) in markRuns(node)" :key="part"><strong v-if="run.bold && run.italic"><em>{{ run.text }}</em></strong><strong v-else-if="run.bold">{{ run.text }}</strong><em v-else-if="run.italic">{{ run.text }}</em><template v-else>{{ run.text }}</template></template></span>
     </div>
@@ -159,4 +178,13 @@ function compositionEnd() {
 .quote-prose-text { display: inline; }
 /* The caret shows where you are; the block gets only a faint ring for keyboard focus. */
 .quote-prose:focus-visible { outline: 1px solid rgba(14, 111, 108, .3); outline-offset: 2mm; box-shadow: none; border-radius: 1px; }
+:global(.quote-document.classic-v1 .quote-prose-row.spaced:not(.item)) { padding-top: .55em; }
+:global(.quote-document.classic-v1 .quote-prose-row.spaced.item) { padding-top: .16em; }
+:global(.quote-document.classic-v1 .quote-prose-row.spaced.item[data-marker="decimal"]) { padding-top: .22em; }
+:global(.quote-document.classic-v1 .quote-prose-row.item) { display: grid; grid-template-columns: 1.15em minmax(0, 1fr); column-gap: .35em; margin-left: 0; padding-left: 0 !important; }
+:global(.quote-document.classic-v1 .quote-prose-row.item[data-marker="decimal"]) { grid-template-columns: 1.9em minmax(0, 1fr); column-gap: .4em; }
+:global(.quote-document.classic-v1 .quote-prose-row.item[data-numbering="outline"]) { grid-template-columns: minmax(var(--outline-col, max-content), max-content) minmax(0, 1fr); margin-left: var(--outline-indent, 0); }
+:global(.quote-document.classic-v1 .quote-prose-row.item .quote-marker) { position: static; min-width: 0; }
+:global(.quote-document.classic-v1 .quote-prose-row.item[data-marker="decimal"] .quote-marker) { text-align: end; }
+:global(.quote-document.classic-v1 .quote-prose-row .quote-prose-text) { display: block; min-height: 1.2em; }
 </style>

@@ -60,6 +60,15 @@ type Document struct {
 	Sections             []Section         `json:"sections"`
 	Positions            []Position        `json:"positions"`
 	NetTotalCents        int64             `json:"net_total_cents"`
+	Profile              *ProfileSnapshot  `json:"profile,omitempty"`
+}
+
+// ProfileSnapshot freezes the tenant's selected document profile into each
+// imported source revision, including issued versions.
+type ProfileSnapshot struct {
+	ID         string          `json:"id"`
+	Revision   int             `json:"revision"`
+	Definition json.RawMessage `json:"definition"`
 }
 type Section struct {
 	ID      string           `json:"id"`

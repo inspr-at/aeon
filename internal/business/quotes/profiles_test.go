@@ -4,6 +4,7 @@ package quotes
 import (
 	"bytes"
 	"context"
+	"encoding/binary"
 	"encoding/json"
 	"image"
 	"image/color"
@@ -207,5 +208,31 @@ func TestProfileRevisionsAssetsAndTenantIsolation(t *testing.T) {
 	status, _ = call("example-one", "POST", "/api/quote-profiles/assets", []byte(`<svg><script>bad</script></svg>`))
 	if status != 400 {
 		t.Fatalf("unsafe SVG accepted: %d", status)
+	}
+	svg := []byte(`<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 12 4"><circle cx="2" cy="2" r="2" fill="#287f78"/></svg>`)
+	status, body = call("example-one", "POST", "/api/quote-profiles/assets", svg)
+	if status != 201 || json.Unmarshal(body, &asset) != nil {
+		t.Fatalf("safe brand asset upload %d", status)
+	}
+	brandID := asset.ID
+	font := make([]byte, 48)
+	copy(font, "wOF2")
+	binary.BigEndian.PutUint32(font[8:12], uint32(len(font)))
+	binary.BigEndian.PutUint16(font[12:14], 1)
+	status, body = call("example-one", "POST", "/api/quote-profiles/assets", font)
+	if status != 201 || json.Unmarshal(body, &asset) != nil || asset.ContentType != "font/woff2" {
+		t.Fatalf("profile font upload %d", status)
+	}
+	status, body = call("example-one", "GET", "/api/quote-profiles/assets/"+asset.ID, nil)
+	if status != 200 || !bytes.Equal(body, font) {
+		t.Fatalf("profile font roundtrip %d", status)
+	}
+	definition.Cover["brand_asset_id"] = brandID
+	definition.Footer.DotsAssetID = brandID
+	definition.Fonts = []profileFont{{Role: "body", Family: "Synthetic", Weight: 400, Style: "normal", AssetID: asset.ID}}
+	input, _ = json.Marshal(profileWrite{ExpectedRevision: restored.Revision, Name: restored.Name, Definition: definition})
+	status, body = call("example-one", "PATCH", "/api/quote-profiles/"+first.ID, input)
+	if status != 200 || json.Unmarshal(body, &restored) != nil || restored.Definition.Cover["brand_asset_id"] != brandID {
+		t.Fatalf("brand and font profile revision %d", status)
 	}
 }

@@ -4,13 +4,17 @@ package quotes
 import (
 	"bytes"
 	"context"
+	"crypto/sha256"
 	"encoding/binary"
+	"encoding/hex"
 	"encoding/json"
 	"encoding/xml"
 	"errors"
 	"fmt"
 	"io"
 	"net/http"
+	"os"
+	"path/filepath"
 	"regexp"
 	"strconv"
 	"strings"
@@ -63,6 +67,7 @@ type profileAcceptance struct {
 }
 type profileFooter struct {
 	AssetID          string `json:"asset_id,omitempty"`
+	DotsAssetID      string `json:"dots_asset_id,omitempty"`
 	WidthMM          string `json:"width_mm"`
 	OffsetMM         string `json:"offset_mm"`
 	PageNumberFormat string `json:"page_number_format"`
@@ -166,6 +171,12 @@ func validateProfile(ctx context.Context, tx pgx.Tx, d profileDefinition) error 
 		return bad("invalid document profile layout")
 	}
 	for key, value := range d.Cover {
+		if key == "brand_asset_id" {
+			if err := validateProfileImageAsset(ctx, tx, value, "cover brand"); err != nil {
+				return err
+			}
+			continue
+		}
 		if !map[string]bool{"top_mm": true, "title_gap_mm": true, "columns_gap_mm": true, "columns_padding_mm": true}[key] || !validProfileDecimal(value, 100) {
 			return bad("invalid cover geometry")
 		}
@@ -218,17 +229,26 @@ func validateProfile(ctx context.Context, tx pgx.Tx, d profileDefinition) error 
 			return bad("profile font asset has wrong type")
 		}
 	}
-	if d.Footer.AssetID != "" {
-		if !uuidRe.MatchString(d.Footer.AssetID) {
-			return bad("invalid footer asset")
+	for _, asset := range []struct{ id, label string }{{d.Footer.AssetID, "footer"}, {d.Footer.DotsAssetID, "footer dots"}} {
+		if asset.id != "" {
+			if err := validateProfileImageAsset(ctx, tx, asset.id, asset.label); err != nil {
+				return err
+			}
 		}
-		var kind string
-		if err := tx.QueryRow(ctx, `SELECT content_type FROM quote_document_profile_assets WHERE id=$1::uuid`, d.Footer.AssetID).Scan(&kind); err != nil {
-			return bad("footer asset missing")
-		}
-		if kind != "image/png" && kind != "image/svg+xml" {
-			return bad("footer asset has wrong type")
-		}
+	}
+	return nil
+}
+
+func validateProfileImageAsset(ctx context.Context, tx pgx.Tx, id, label string) error {
+	if !uuidRe.MatchString(id) {
+		return bad("invalid " + label + " asset")
+	}
+	var kind string
+	if err := tx.QueryRow(ctx, `SELECT content_type FROM quote_document_profile_assets WHERE id=$1::uuid`, id).Scan(&kind); err != nil {
+		return bad(label + " asset missing")
+	}
+	if kind != "image/png" && kind != "image/svg+xml" {
+		return bad(label + " asset has wrong type")
 	}
 	return nil
 }
@@ -615,6 +635,52 @@ func safeProfileSVG(raw []byte) bool {
 		}
 	}
 }
+
+// Profile fonts and safe SVGs have their own strict validator above. The
+// general attachment upload deliberately does not accept those media types.
+// Keep the same tenant/hash file layout so Store.Open can serve the asset.
+func putProfileAsset(ctx context.Context, tenantID string, raw []byte, kind string) (attachments.Prepared, error) {
+	if kind == "image/png" {
+		return (attachments.Store{}).Put(ctx, tenantID, bytes.NewReader(raw))
+	}
+	hash := sha256.Sum256(raw)
+	digest := hex.EncodeToString(hash[:])
+	root := os.Getenv("AEON_FILES_DIR")
+	if root == "" {
+		root = "./data/files"
+	}
+	directory := filepath.Join(root, tenantID, digest[:2], digest[2:4])
+	if err := os.MkdirAll(directory, 0700); err != nil {
+		return attachments.Prepared{}, err
+	}
+	if err := ctx.Err(); err != nil {
+		return attachments.Prepared{}, err
+	}
+	tmp, err := os.CreateTemp(directory, "profile-*")
+	if err != nil {
+		return attachments.Prepared{}, err
+	}
+	defer os.Remove(tmp.Name())
+	if _, err := tmp.Write(raw); err != nil {
+		_ = tmp.Close()
+		return attachments.Prepared{}, err
+	}
+	if err := tmp.Sync(); err != nil {
+		_ = tmp.Close()
+		return attachments.Prepared{}, err
+	}
+	if err := tmp.Close(); err != nil {
+		return attachments.Prepared{}, err
+	}
+	if err := ctx.Err(); err != nil {
+		return attachments.Prepared{}, err
+	}
+	if err := os.Rename(tmp.Name(), filepath.Join(directory, digest)); err != nil {
+		return attachments.Prepared{}, err
+	}
+	return attachments.Prepared{SHA256: digest, ContentType: kind, Size: int64(len(raw))}, nil
+}
+
 func (m *Module) profileAssetUpload(w http.ResponseWriter, r *http.Request) {
 	p, e := caller(r)
 	if e != nil {
@@ -635,7 +701,7 @@ func (m *Module) profileAssetUpload(w http.ResponseWriter, r *http.Request) {
 		respond(w, 0, nil, bad("expected TTF, OTF, WOFF2, PNG or safe SVG"))
 		return
 	}
-	prepared, e := (attachments.Store{}).Put(r.Context(), p.TenantID, bytes.NewReader(raw))
+	prepared, e := putProfileAsset(r.Context(), p.TenantID, raw, kind)
 	if e != nil {
 		respond(w, 0, nil, bad("asset storage rejected file"))
 		return

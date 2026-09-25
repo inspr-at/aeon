@@ -28,6 +28,23 @@ test('a frozen classic profile prints its font and geometry under the production
   expect(await page.evaluate(() => Array.from(document.fonts).some(face => face.family.includes('QuoteProfile') && face.status === 'loaded'))).toBe(true)
 })
 
+test('classic-v1 keeps synthetic terms and positions on their planned sheets', async ({ page }) => {
+  const definition = defaultProfile()
+  definition.labels.terms = 'TERMS'
+  definition.labels.positions = 'ITEMS'
+  definition.footer.page_number_format = 'PAGE {page} OF {total}'
+  const document = { ...structuredClone(fixture), profile: { id: '22222222-2222-4222-8222-222222222222', revision: 1, definition } }
+  await page.route('**/payload', route => route.fulfill({ json: { document, offer_no: 'S-001' } }))
+  await page.goto('/quote-print.html')
+  await expect(page.locator('html')).toHaveAttribute('data-pdf-ready', 'true')
+  await expect(page.locator('.quote-page')).toHaveCount(2)
+  await expect(page.locator('.quote-page').first().locator('.quote-group-heading')).toContainText('I. TERMS')
+  await expect(page.locator('.quote-page').last().locator('.quote-group-heading')).toContainText('II. ITEMS')
+  await expect(page.locator('.quote-page').last().locator('.quote-positions tbody')).toHaveCount(1)
+  await expect(page.locator('.quote-page').last().locator('.quote-acceptance')).toBeVisible()
+  await expect(page.locator('.quote-page-footer').last()).toContainText('PAGE 2 OF 2')
+})
+
 test('Business settings saves a synthetic profile and selects it for new quotes', async ({ page }) => {
   await mockWork(page, fixtures())
   await mockBusiness(page, businessData())

@@ -118,6 +118,20 @@ func Import(ctx context.Context, pool *pgxpool.Pool, tenantID, actorID, instance
 			return errors.New("actor must be a tenant admin")
 		}
 		actor := tenant.Principal{TenantID: tenantID, ID: actorID, Kind: tenant.Person}
+		var profile *ProfileSnapshot
+		var selected ProfileSnapshot
+		profileErr := tx.QueryRow(ctx, `
+			SELECT p.id::text,r.revision,r.definition
+			FROM quote_settings s
+			JOIN quote_document_profiles p ON p.tenant_id=s.tenant_id AND p.id=s.default_profile_id
+			JOIN quote_document_profile_revisions r ON r.tenant_id=p.tenant_id AND r.profile_id=p.id AND r.revision=p.current_revision
+			WHERE s.tenant_id=$1::uuid AND p.archived_at IS NULL`, tenantID).Scan(&selected.ID, &selected.Revision, &selected.Definition)
+		if profileErr != nil && !errors.Is(profileErr, pgx.ErrNoRows) {
+			return profileErr
+		}
+		if profileErr == nil {
+			profile = &selected
+		}
 		orgIDs := map[int64]string{}
 		contactIDs := map[int64]string{}
 		for _, c := range b.Customers {
@@ -236,6 +250,7 @@ func Import(ctx context.Context, pool *pgxpool.Pool, tenantID, actorID, instance
 			if err != nil {
 				return err
 			}
+			doc.Profile = profile
 			id, action, err := upsertNode(ctx, tx, actor, instance, rc, "quote")
 			if err != nil {
 				return err

@@ -55,7 +55,7 @@ export interface QuoteProfileDefinition {
   totals: { vat: 'note' | 'line' | 'hidden'; discount: 'line' | 'hidden'; net_label: string }
   payment_terms: { position: 'sections' | 'after-totals'; heading: string }
   acceptance: { signature_columns: 1 | 2; gap_mm: string; lead_mm: string }
-  footer: { asset_id?: string; width_mm: string; offset_mm: string; page_number_format: string }
+  footer: { asset_id?: string; dots_asset_id?: string; width_mm: string; offset_mm: string; page_number_format: string }
   labels: Record<string, string>
 }
 export interface QuoteProfileSnapshot { id: string; revision: number; definition: QuoteProfileDefinition }

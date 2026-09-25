@@ -27,7 +27,7 @@ import { QuoteEditor } from '../../../lib/quotes/editor'
 import { collectTextNodes, pointInTextNodes } from '../../../lib/quotes/caret'
 import { sectionLabel } from '../../../lib/quotes/inspector'
 import { sectionActions } from '../../../lib/quotes/sectionActions'
-import { fitWholeBlocks, type PaginationResult, type PagePlan } from '../../../lib/quotes/layout'
+import { fitClassicBlocks, fitWholeBlocks, type PaginationResult, type PagePlan } from '../../../lib/quotes/layout'
 import { MARK_DEFAULT_MM } from '../../../lib/quotes/inspector'
 import { contentUrl } from '../../../lib/attachments'
 import { quoteQr } from '../../../lib/quotes/qr'
@@ -68,8 +68,13 @@ let scheduled = false
 let generation = 0
 const sections = computed(() => state.value.sections)
 const profile = computed(() => state.value.profile)
+const classic = computed(() => profile.value?.definition.layout_variant === 'classic-v1')
 const paperStyle = computed(() => profileStyle(profile.value))
 const footerNumber = (page: number) => pageNumber(profile.value, page, pages.value.length)
+const printedDate = computed(() => state.value.offer_date ? new Intl.DateTimeFormat(profile.value?.definition.locale || 'de-AT', { day: '2-digit', month: '2-digit', year: 'numeric', timeZone: 'UTC' }).format(new Date(`${state.value.offer_date}T00:00:00Z`)) : '')
+const groupLabel = (kind: 'terms' | 'positions') => kind === 'terms'
+  ? (profile.value?.definition.labels.terms || 'Bedingungen')
+  : (profile.value?.definition.labels.positions || 'Leistungen')
 let fontsReady: Promise<void> = Promise.resolve()
 watch(profile, value => { fontsReady = loadProfileFonts(value); schedule() }, { immediate: true })
 const publicQr = computed(() => props.publicLink ? quoteQr(props.publicLink) : null)
@@ -87,13 +92,18 @@ async function measure() {
   try { await fontsReady; await document.fonts.ready } catch { renderState.value = { ready: false, overflow: 'Document profile font could not be loaded', pages: pages.value }; emit('overflow', renderState.value.overflow); return }
   if (current !== generation) return
   const rect = (selector: string) => root.querySelector<HTMLElement>(selector)?.getBoundingClientRect().height ?? 0
-  const available = probe.getBoundingClientRect().height
+  const available = probe.getBoundingClientRect().height - (classic.value ? 12 : 0)
   if (available <= 0) return
   const cover = rect('[data-measure-cover]')
   const sectionHeights = state.value.sections.map(section => ({ id: section.id, px: rect(`[data-measure-section="${section.id}"]`) }))
   const positionHeights = state.value.positions.map(position => ({ id: position.id, px: rect(`[data-measure-position="${position.id}"] tbody`) }))
   const breaks = new Set(state.value.sections.filter(section => section.page_break_before).map(section => section.id))
-  const next = fitWholeBlocks(cover, sectionHeights, positionHeights, rect('[data-measure-acceptance]'), available, undefined, breaks)
+  const next = classic.value
+    ? fitClassicBlocks(cover, sectionHeights, positionHeights, rect('[data-measure-acceptance]'), available, {
+        terms: rect('[data-measure-terms-heading]'), positions: rect('[data-measure-positions-heading]'),
+        table: rect('.quote-positions thead') + 12, continuation: rect('[data-measure-continuation]'),
+      })
+    : fitWholeBlocks(cover, sectionHeights, positionHeights, rect('[data-measure-acceptance]'), available, undefined, breaks)
   pages.value = next.pages
   renderState.value = next
   emit('render-state', next)
@@ -123,7 +133,7 @@ function selectMark(pageIndex: number) { markPage.value = pageIndex; editor.sele
 // ---------- Section chrome (P4): handle, context menu, drag to reorder, Alt+Up/Down ----------
 const actions = sectionActions(editor, touch)
 const currentSection = computed(() => { void version.value; return editor.selection.text?.sectionId ?? editor.selection.sectionId ?? null })
-const labelOf = (section: QuoteSection) => sectionLabel(sectionIndex(section.id) + 1, section.numbering_style ?? profile.value?.definition.sections.numbering as SectionNumberingStyle | undefined)
+const labelOf = (section: QuoteSection) => classic.value ? String(sectionIndex(section.id) + 1) : sectionLabel(sectionIndex(section.id) + 1, section.numbering_style ?? profile.value?.definition.sections.numbering as SectionNumberingStyle | undefined)
 const spacing = (section: QuoteSection) => ({ paddingTop: section.spacing_before_mm ? `${section.spacing_before_mm}mm` : undefined, paddingBottom: section.spacing_after_mm ? `${section.spacing_after_mm}mm` : undefined })
 const menu = ref<{ id: string; anchor: HTMLElement } | null>(null)
 const dragId = ref<string | null>(null)
@@ -220,12 +230,14 @@ defineExpose({
 })
 </script>
 <template>
-  <div class="quote-document" :class="profile?.definition.layout_variant" :style="paperStyle" :data-quote-ready="renderState.ready" :data-quote-overflow="renderState.overflow ?? undefined" :data-page-count="pages.length">
+  <div class="quote-document" :class="[profile?.definition.layout_variant, { 'has-brand-dots': !!profile?.definition.footer.dots_asset_id }]" :style="paperStyle" :data-quote-ready="renderState.ready" :data-quote-overflow="renderState.overflow ?? undefined" :data-page-count="pages.length">
     <div v-if="renderState.overflow" class="quote-overflow" role="alert">{{ renderState.overflow }}</div>
     <article v-for="(page, pageIndex) in pages" :key="pageIndex" class="quote-page" :data-page="pageIndex + 1">
-      <header v-if="profile?.definition.layout_variant === 'classic-v1'" class="quote-page-header"><span>{{ profile.definition.labels.quote || 'ANGEBOT' }} {{ offerNo }}</span><span>{{ state.offer_date }}</span></header>
+      <header v-if="classic" class="quote-page-header"><span>{{ profile?.definition.labels.quote || 'ANGEBOT' }} {{ offerNo }}</span><span>{{ printedDate }}</span></header>
       <div class="quote-page-content">
+        <div v-if="classic && pageIndex > 0 && !page.heading" class="quote-continuation"></div>
         <QuoteCover v-if="page.kind === 'cover'" :document="state" :editor="editor" :offer-no="offerNo" :editable="editable" />
+        <h2 v-if="classic && page.heading" class="quote-group-heading"><span>{{ page.heading === 'terms' ? 'I.' : sections.length ? 'II.' : 'I.' }} {{ groupLabel(page.heading) }}</span><img v-if="profile?.definition.cover.brand_asset_id" class="quote-heading-dots" :src="profileAssetUrl(profile.definition.cover.brand_asset_id)" alt="" /></h2>
         <div
           v-for="id in page.sectionIds.filter(exists)" :key="id" class="quote-section" :data-section-id="id" :style="spacing(byId(id))"
           :class="{ current: editable && currentSection === id, lifted: dragId === id, 'drop-before': dropTarget?.id === id && dropTarget.before, 'drop-after': dropTarget?.id === id && !dropTarget.before }"
@@ -244,6 +256,7 @@ defineExpose({
       <footer class="quote-page-footer">
         <span class="quote-footer-start">
           <span v-if="profile?.definition.layout_variant === 'classic-v1'">{{ offerNo }}</span>
+          <img v-if="profile?.definition.footer.dots_asset_id" class="quote-footer-dots" :src="profileAssetUrl(profile.definition.footer.dots_asset_id)" alt="" />
           <button
             v-if="markFile && editable" type="button" class="quote-mark" :class="{ selected: markPage === pageIndex, missing: markMissing }" :style="{ width: profile ? `${profile.definition.footer.width_mm}mm` : `${markWidth}mm`, transform: profile ? `translateY(${profile.definition.footer.offset_mm}mm)` : `translateY(${markOffset}mm)` }"
             :aria-label="`Company mark on page ${pageIndex + 1}`" :aria-pressed="markPage === pageIndex" data-tip="Size and position of the mark" @click="selectMark(pageIndex)"
@@ -263,6 +276,9 @@ defineExpose({
     <div ref="measureRoot" class="quote-measure" aria-hidden="true" inert>
       <div ref="heightProbe" class="quote-height-probe"></div>
       <div data-measure-cover><QuoteCover :document="state" :editor="editor" :offer-no="offerNo" /></div>
+      <div data-measure-continuation class="quote-continuation"></div>
+      <h2 data-measure-terms-heading class="quote-group-heading">I. {{ groupLabel('terms') }}</h2>
+      <h2 data-measure-positions-heading class="quote-group-heading">II. {{ groupLabel('positions') }}</h2>
       <div v-for="(section, index) in sections" :key="section.id" :data-measure-section="section.id" class="quote-section" :style="spacing(section)"><div class="quote-section-heading"><span v-if="labelOf(section)" class="quote-section-number">{{ labelOf(section) }}</span><h2>{{ section.heading }}</h2></div><QuoteProse :editor="editor" :section-id="section.id" :body="section.body" :nodes="section.nodes" :section-number="index + 1" /></div>
       <div v-for="position in state.positions" :key="position.id" :data-measure-position="position.id"><QuotePositions :positions="state.positions" :indices="[position.id]" :editor="editor" :profile="profile" /></div>
       <div data-measure-acceptance><QuoteAcceptance :document="state" :editor="editor" :accepted="accepted" /></div>
@@ -287,13 +303,24 @@ defineExpose({
 .quote-document.classic-v1 { font-size: var(--quote-body-size); line-height: 1.5; font-variant-numeric: tabular-nums; }
 .quote-document.classic-v1 .quote-page { padding: var(--quote-top) var(--quote-right) var(--quote-bottom) var(--quote-left); color: var(--ink); }
 .quote-document.classic-v1 .quote-page-content { height: var(--quote-content-height); }
+.quote-document.classic-v1 .quote-continuation { height: 6mm; }
+.quote-document.classic-v1 .quote-group-heading { display: flex; align-items: center; justify-content: space-between; margin: 0; padding: 6mm 0 4.2mm; font-family: var(--quote-display-font, var(--quote-body-font, var(--font))); font-size: var(--quote-section-size); font-weight: 400; letter-spacing: .14em; line-height: 1.2; text-transform: uppercase; color: var(--teal); }
+.quote-document.classic-v1 .quote-heading-dots { display: block; width: 11.25mm; height: 2.5mm; }
 .quote-document.classic-v1 .quote-page-header { display: flex; justify-content: space-between; gap: 8mm; border-bottom: 1px solid var(--line); padding-bottom: 5px; color: var(--ink-3); font-size: 7.5pt; font-weight: 600; letter-spacing: .14em; text-transform: uppercase; }
 .quote-document.classic-v1 .quote-page-footer { left: var(--quote-left); right: var(--quote-right); bottom: var(--quote-bottom); display: grid; grid-template-columns: 1fr auto 1fr; padding-top: 7px; font-size: var(--quote-footer-size); letter-spacing: .14em; text-transform: uppercase; color: var(--ink-3); border-color: var(--line); }
 .quote-document.classic-v1 .quote-footer-start { gap: 0; }
 .quote-document.classic-v1 .quote-footer-start > .quote-mark { position: absolute; left: 50%; transform: translateX(-50%) translateY(var(--quote-footer-offset)) !important; }
+.quote-document.classic-v1 .quote-footer-dots { position: absolute; left: calc(50% - 16.5mm); width: 7.2mm; height: 1.6mm; }
+.quote-document.classic-v1.has-brand-dots .quote-footer-start > .quote-mark { left: calc(50% + 5.4mm); width: 25mm !important; }
 .quote-document.classic-v1 .quote-footer-end { grid-column: 3; justify-content: flex-end; }
-.quote-document.classic-v1 .quote-section-heading { font-family: var(--quote-display-font, var(--quote-body-font, var(--font))); font-size: var(--quote-section-size); font-weight: 400; letter-spacing: .14em; text-transform: var(--quote-heading-transform); color: var(--teal); }
-.quote-document.classic-v1 .quote-section-number { color: inherit; }
+.quote-document.classic-v1 .quote-section { display: grid; grid-template-columns: 9mm minmax(0, 1fr); column-gap: 2mm; align-items: baseline; margin-top: 0; }
+.quote-document.classic-v1 .quote-section + .quote-section { margin-top: 4.2mm; }
+.quote-document.classic-v1 .quote-section-heading { display: contents; }
+.quote-document.classic-v1 .quote-section-number { grid-column: 1; color: var(--teal); font-size: 10pt; font-weight: 700; }
+.quote-document.classic-v1 .quote-section-heading h2 { grid-column: 2; margin: 0; color: var(--teal); font-size: 10.5pt; font-weight: 700; }
+.quote-document.classic-v1 .quote-section .quote-prose { grid-column: 2; margin-top: 1px; color: #333c3c; font-size: 9.6pt; line-height: 1.5; white-space: pre-line; }
+.quote-document.classic-v1 .quote-section .quote-prose-row { line-height: 1.5; min-height: 0; }
+.quote-document.classic-v1 .quote-section .quote-marker { color: var(--teal); font-weight: 700; }
 .quote-document.classic-v1 .quote-measure { padding: var(--quote-top) var(--quote-right) var(--quote-bottom) var(--quote-left); }
 .quote-document.classic-v1 .quote-height-probe { height: var(--quote-content-height); }
 .quote-page { position: relative; box-sizing: border-box; width: 210mm; height: 297mm; padding: 20mm 21mm 20mm; margin: 0 auto 12mm; background: var(--quote-paper); box-shadow: var(--shadow); overflow: hidden; }

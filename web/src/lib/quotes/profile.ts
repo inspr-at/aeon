@@ -48,7 +48,8 @@ export function profileMoney(cents: number, currency: string, profile: QuoteProf
   const [whole, fraction] = decimalCents(cents).split('.')
   const mark = profile?.definition.locale === 'en' ? ',' : '.'
   const decimal = profile?.definition.locale === 'en' ? '.' : ','
-  return `${whole!.replace(/\B(?=(\d{3})+(?!\d))/g, mark)}${decimal}${fraction} ${currency}`
+  const amount = `${whole!.replace(/\B(?=(\d{3})+(?!\d))/g, mark)}${decimal}${fraction}`
+  return profile?.definition.layout_variant === 'classic-v1' && currency === 'EUR' ? `€ ${amount}` : `${amount} ${currency}`
 }
 
 export function profileStyle(profile: QuoteProfileSnapshot | null | undefined): Record<string, string> {
