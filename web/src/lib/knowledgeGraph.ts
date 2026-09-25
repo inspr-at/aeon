@@ -18,11 +18,11 @@ export const graphEntry = (node: GraphNode) => node.kind === 'knowledge' ? `${no
 export const graphTypeLabel = (node: GraphNode) => node.kind === 'ticket' ? 'Ticket' : typeMeta(node.type).label
 export const graphRadius = (node: GraphNode) => 8 * Math.sqrt(node.degree + 1)
 
-// Palette tokens already used by Aeon's type/status icons. Resolve at render
-// time, including theme changes; no baked-in light-mode colours or remote assets.
+// The kinds' palette tokens (tokens.css --kind-*), the same hues as the list's
+// type icons. Resolved at render time, including theme changes.
 export const graphTypeTokens: Record<GraphNode['type'], string> = {
-  runbook: '--teal', guideline: '--ok', memory: '--gold-ink',
-  'external-system': '--ink-2', 'related-project': '--st-new', ticket: '--st-backlog',
+  runbook: '--kind-runbook', guideline: '--kind-guideline', memory: '--kind-memory',
+  'external-system': '--kind-external-system', 'related-project': '--kind-related-project', ticket: '--kind-ticket',
 }
 export interface GraphPalette { background: string; ink: string; muted: string; dark: boolean; colors: Record<string, string>; font: string }
 export function graphPalette(): GraphPalette {

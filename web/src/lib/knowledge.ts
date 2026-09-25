@@ -36,6 +36,8 @@ export const TYPES: readonly TypeMeta[] = [
   { type: 'external-system', label: 'External system', plural: 'External systems', icon: 'server', hint: 'Services the work touches: consoles, APIs, vaults.' },
   { type: 'related-project', label: 'Related project', plural: 'Related projects', icon: 'folders', hint: 'Projects this one depends on or feeds.' },
 ]
+// Each kind's hue (tokens.css --kind-*): list icons, graph bubbles and the legend agree.
+export const kindToken = (type: KnowledgeType | 'ticket') => `--kind-${type}`
 export function typeMeta(type: string): TypeMeta {
   return TYPES.find(t => t.type === type || t.type === type.replace(/_/g, '-')) ?? TYPES[0]
 }
