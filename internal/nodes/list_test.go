@@ -7,6 +7,7 @@ import (
 	"github.com/inspr-at/aeon/internal/db"
 	"github.com/jackc/pgx/v5"
 	"net/http"
+	"net/http/httptest"
 	"net/url"
 	"os"
 	"strings"
@@ -135,6 +136,7 @@ func TestPolishedNodeList(t *testing.T) {
 		t.Fatalf("cross tenant within: %#v", page.Items)
 	}
 }
+
 // Every row names its nearest epic: a ticket its own, a task its ticket's.
 func TestListNearestEpic(t *testing.T) {
 	p := newPrincipal(t, "nearest-epic")
@@ -238,5 +240,40 @@ func TestList6000Performance(t *testing.T) {
 	t.Logf("6000-node projects: %s", time.Since(start))
 	if len(projects.Items) != 1 || projects.Items[0].Total != 6000 {
 		t.Fatalf("large project: %#v", projects.Items)
+	}
+	if os.Getenv("AEON_PERF") == "1" {
+		query, err := parseListQuery(httptest.NewRequest(http.MethodGet, path, nil))
+		if err != nil {
+			t.Fatal(err)
+		}
+		listQuerySQL, listArgs := listSQL(query, nil)
+		facetQuerySQL, facetArgs := facetSQL(query)
+		for _, plan := range []struct {
+			name string
+			sql  string
+			args []any
+		}{
+			{"node_list", listQuerySQL, listArgs},
+			{"node_facets", facetQuerySQL, facetArgs},
+		} {
+			err := db.InTenant(t.Context(), appPool, p.TenantID, func(tx pgx.Tx) error {
+				rows, err := tx.Query(t.Context(), "EXPLAIN (ANALYZE, BUFFERS) "+plan.sql, plan.args...)
+				if err != nil {
+					return err
+				}
+				defer rows.Close()
+				for rows.Next() {
+					var line string
+					if err := rows.Scan(&line); err != nil {
+						return err
+					}
+					t.Logf("PLAN %s %s", plan.name, line)
+				}
+				return rows.Err()
+			})
+			if err != nil {
+				t.Fatal(err)
+			}
+		}
 	}
 }

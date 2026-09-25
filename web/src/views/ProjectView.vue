@@ -1,7 +1,7 @@
 <!-- SPDX-License-Identifier: AGPL-3.0-only -->
 <script setup lang="ts">
 import { setPageTitle } from '../lib/brand'
-import { computed, nextTick, onBeforeUnmount, onMounted, ref, watch } from 'vue'
+import { computed, defineAsyncComponent, nextTick, onBeforeUnmount, onMounted, ref, watch } from 'vue'
 import { onBeforeRouteLeave, onBeforeRouteUpdate, useRoute, useRouter } from 'vue-router'
 import { createNode, listNodes, type ListItem } from '../lib/api'
 import { canWrite } from '../lib/activity'
@@ -28,9 +28,10 @@ import StatusMenu from '../components/work/StatusMenu.vue'
 import TicketTable from '../components/work/TicketTable.vue'
 import TicketWorkspace from '../components/work/TicketWorkspace.vue'
 import JourneyChip from '../components/journey/JourneyChip.vue'
-import JourneyView from '../components/journey/JourneyView.vue'
 import type { Stage } from '../lib/journey'
 import type { QuickDraft } from '../components/work/QuickCreateRow.vue'
+
+const JourneyView = defineAsyncComponent(() => import('../components/journey/JourneyView.vue'))
 
 const route = useRoute()
 const router = useRouter()

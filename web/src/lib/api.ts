@@ -152,5 +152,6 @@ export const deleteComment = (nodeId: string, commentId: string) => json<void>(`
 export type RelationType = 'blocks' | 'relates' | 'implements' | 'cites' | 'duplicates' | 'customer_of' | 'contact_for'
 export interface Relation { id: string; source_node_id: string; target_node_id: string; type: RelationType; created_at: string }
 export const getRelations = (nodeId: string) => json<{ items: Relation[]; next_cursor: string | null }>(`/relations${query({ node_id: nodeId, limit: 100 })}`)
-
+export interface NodePreview { id: string; key: string; title: string; state: string }
+export const lookupNodes = (ids: string[]) => json<{ items: NodePreview[] }>(`/nodes/lookup${query({ ids })}`)
 
