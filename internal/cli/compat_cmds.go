@@ -54,6 +54,9 @@ func (rt *runtime) resolveModel(role, author, harness string) error {
 	if role == "review-gate" && author == "" {
 		return usagef("review-gate requires --author-family")
 	}
+	if author != "" && author != "openai" && author != "anthropic" && author != "xai" && author != "cursor" {
+		return usagef("unknown author family %q", author)
+	}
 	harness = strings.TrimSpace(harness)
 	if harness != "" && !modelHarnesses[harness] {
 		return usagef("unsupported harness %q", harness)
@@ -69,6 +72,9 @@ func (rt *runtime) resolveModel(role, author, harness string) error {
 	if err := rt.do(http.MethodGet, "/api/models/resolve?"+q.Encode(), nil, &result); err != nil {
 		return err
 	}
+	if role == "review-gate" && result.Profile != nil && result.Profile.Family == author {
+		return rt.fail(fmt.Errorf("invalid review resolution: selected author family"), "")
+	}
 	var profiles []modelProfile
 	if err := rt.do(http.MethodGet, "/api/models", nil, &profiles); err != nil {
 		return err
@@ -81,19 +87,18 @@ func (rt *runtime) resolveModel(role, author, harness string) error {
 		ladder := make([]map[string]any, 0, len(result.Ladder))
 		for _, step := range result.Ladder {
 			ladder = append(ladder, map[string]any{
-				"profile_id":   step.ProfileID,
-				"slug":         slugByID[step.ProfileID],
+				"profile_id":   slugByID[step.ProfileID],
 				"selected":     step.Selected,
 				"skip_reasons": step.SkipReasons,
 			})
 		}
 		out := map[string]any{
 			"role":             result.Role,
-			"command":          result.CommandTemplate,
+			"command_template": result.CommandTemplate,
 			"ladder":           ladder,
 			"owner_required":   result.OwnerRequired,
-			"source":           result.Source,
-			"command_template": result.CommandTemplate,
+			"source":           "instance",
+			"stale":            false,
 		}
 		if result.Profile != nil {
 			out["profile"] = map[string]any{

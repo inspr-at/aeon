@@ -12,8 +12,10 @@ import (
 	"fmt"
 	"io"
 	"net/http"
+	"net/url"
 	"os"
 	"path/filepath"
+	"strconv"
 	"strings"
 	"time"
 
@@ -84,7 +86,7 @@ func (rt *runtime) harnessDo(method, path, lease string, body, dest any) error {
 	hc := &http.Client{Timeout: 30 * time.Second, CheckRedirect: func(*http.Request, []*http.Request) error { return errors.New("harness request redirect refused") }}
 	res, err := hc.Do(req)
 	if err != nil {
-		return rt.fail(err, "")
+		return rt.fail(err, lease)
 	}
 	defer res.Body.Close()
 	raw, err := io.ReadAll(io.LimitReader(res.Body, 1<<20))
@@ -99,7 +101,7 @@ func (rt *runtime) harnessDo(method, path, lease string, body, dest any) error {
 		if v.Error == "" {
 			v.Error = http.StatusText(res.StatusCode)
 		}
-		return rt.fail(&client.StatusError{Status: res.StatusCode, Message: v.Error}, "")
+		return rt.fail(&client.StatusError{Status: res.StatusCode, Message: v.Error}, lease)
 	}
 	if dest != nil && len(bytes.TrimSpace(raw)) > 0 {
 		if err = json.Unmarshal(raw, dest); err != nil {
@@ -134,8 +136,42 @@ func harnessPath(projectID, sessionID string) string {
 	return path
 }
 
+func (rt *runtime) harnessTicket(projectID, key string, classicID int) (*string, error) {
+	if key != "" && classicID != 0 {
+		return nil, usagef("--ticket and --ticket-id cannot be combined")
+	}
+	if classicID < 0 {
+		return nil, usagef("--ticket-id must be positive")
+	}
+	if key != "" {
+		n, err := rt.nodeByKey(key)
+		if err != nil {
+			return nil, err
+		}
+		return &n.ID, nil
+	}
+	if classicID == 0 {
+		return nil, nil
+	}
+	nodes, err := rt.walkNodes(url.Values{"parent_id": {projectID}, "include_descendants": {"true"}}, nil)
+	if err != nil {
+		return nil, err
+	}
+	for _, n := range nodes {
+		classic, _ := fieldMap(n.Fields)["classic"].(map[string]any)
+		if id, ok := classic["id"].(float64); ok && id == float64(classicID) {
+			return &n.ID, nil
+		}
+		if id, ok := classic["id"].(string); ok && id == strconv.Itoa(classicID) {
+			return &n.ID, nil
+		}
+	}
+	return nil, rt.fail(fmt.Errorf("classic ticket id %d not found in project", classicID), "")
+}
+
 func (rt *runtime) harnessRegister() *Command {
 	var project, agent, harness, host, refFile, leaseFile, management, role, parent, ticket, shape, runID, orderID string
+	var ticketIDFlag int
 	var caps []string
 	return &Command{Name: "register", Short: "Register one public harness generation", Use: "harness register --project KEY --agent NAME --harness KIND --host HOST --harness-session-file PATH --worker-lease-file PATH", addFlags: func(fs *flagSet) {
 		fs.string(&project, "project", 'p', "project key")
@@ -148,6 +184,7 @@ func (rt *runtime) harnessRegister() *Command {
 		fs.string(&role, "role", 0, "worker or coordinator")
 		fs.string(&parent, "parent-session", 0, "parent public session UUID")
 		fs.string(&ticket, "ticket", 0, "ticket node key")
+		fs.int(&ticketIDFlag, "ticket-id", "classic numeric ticket id")
 		fs.string(&shape, "work-shape", 0, "ship or scout")
 		fs.string(&runID, "run-id", 0, "Aeon agent run UUID")
 		fs.string(&orderID, "work-order-id", 0, "Aeon work order UUID")
@@ -194,12 +231,11 @@ func (rt *runtime) harnessRegister() *Command {
 			}
 			parentID = &parent
 		}
-		if ticket != "" {
-			n, e := rt.nodeByKey(ticket)
-			if e != nil {
-				return e
-			}
-			ticketID = &n.ID
+		ticketID, err = rt.harnessTicket(projectID, ticket, ticketIDFlag)
+		if err != nil {
+			return err
+		}
+		if ticketID != nil {
 			if shape != "ship" && shape != "scout" {
 				return usagef("--work-shape must be ship or scout")
 			}
@@ -254,13 +290,14 @@ func (rt *runtime) harnessRead(kind string) *Command {
 }
 func (rt *runtime) harnessBind() *Command {
 	var project, session, parent, ticket, shape string
-	var revision int
+	var revision, ticketIDFlag int
 	return &Command{Name: "bind", Short: "Compare-and-set hierarchy and ticket binding", Use: "harness bind --project KEY --session UUID --revision N --parent-session UUID --ticket KEY --work-shape ship|scout", addFlags: func(fs *flagSet) {
 		fs.string(&project, "project", 'p', "project key")
 		fs.string(&session, "session", 0, "public session UUID")
 		fs.int(&revision, "revision", "current revision")
 		fs.string(&parent, "parent-session", 0, "parent session or empty")
 		fs.string(&ticket, "ticket", 0, "ticket key or empty")
+		fs.int(&ticketIDFlag, "ticket-id", "classic numeric ticket id")
 		fs.string(&shape, "work-shape", 0, "ship, scout or unknown")
 	}, run: func([]string) error {
 		id, err := rt.harnessProject(project)
@@ -277,12 +314,11 @@ func (rt *runtime) harnessBind() *Command {
 			}
 			parentID = &parent
 		}
-		if ticket != "" {
-			n, e := rt.nodeByKey(ticket)
-			if e != nil {
-				return e
-			}
-			ticketID = &n.ID
+		ticketID, err = rt.harnessTicket(id, ticket, ticketIDFlag)
+		if err != nil {
+			return err
+		}
+		if ticketID != nil {
 			if shape != "ship" && shape != "scout" {
 				return usagef("bound ticket needs ship or scout")
 			}
@@ -298,7 +334,7 @@ func (rt *runtime) harnessBind() *Command {
 	}}
 }
 func (rt *runtime) harnessWorker(kind string) *Command {
-	var project, session, agent, leaseFile, phase, activity, deliveryID, level, reason string
+	var project, session, agent, leaseFile, phase, activity, activityKind, deliveryID, level, reason string
 	var sequence, cursor int
 	return &Command{Name: kind, Short: "Act as the attributed harness worker", Use: "harness " + kind + " --project KEY --session UUID --agent NAME --worker-lease-file PATH", addFlags: func(fs *flagSet) {
 		fs.string(&project, "project", 'p', "project key")
@@ -309,6 +345,7 @@ func (rt *runtime) harnessWorker(kind string) *Command {
 		case "heartbeat":
 			fs.string(&phase, "phase", 0, "starting, working, yielded or stopping")
 			fs.string(&activity, "activity", 0, "unknown, busy or idle")
+			fs.string(&activityKind, "activity-kind", 0, "classic content-free adapter event kind")
 			fs.int(&sequence, "activity-sequence", "monotonic sequence")
 		case "complete-delivery":
 			fs.string(&deliveryID, "delivery-id", 0, "leased delivery UUID")
@@ -344,6 +381,19 @@ func (rt *runtime) harnessWorker(kind string) *Command {
 		case "heartbeat":
 			if phase == "" {
 				phase = "working"
+			}
+			if activityKind != "" {
+				if sequence <= 0 {
+					return usagef("--activity-kind requires positive --activity-sequence")
+				}
+				switch activityKind {
+				case "session_started", "turn_started", "tool_started", "control_applied":
+					activity = "busy"
+				case "turn_completed":
+					activity = "idle"
+				default:
+					return usagef("unknown activity kind %q", activityKind)
+				}
 			}
 			body = map[string]any{"phase": phase, "activity": activity, "activity_sequence": sequence}
 		case "complete-delivery":

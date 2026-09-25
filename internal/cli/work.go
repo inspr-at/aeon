@@ -9,6 +9,7 @@ import (
 	"net/url"
 	"strconv"
 	"strings"
+	"time"
 )
 
 // issueView is the classic issue text/JSON shape. Aeon stores the issue as a
@@ -170,7 +171,47 @@ func (rt *runtime) getIssue(ref string) error {
 	if !issueKinds[kinds.slug(n.KindID)] {
 		return rt.fail(fmt.Errorf("issue %q not found", ref), "")
 	}
-	return rt.printIssue(rt.viewIssue(n, kinds))
+	view := rt.viewIssue(n, kinds)
+	comments, err := rt.issueComments(n.ID)
+	if err != nil {
+		return err
+	}
+	view.Comments = append(view.Comments, comments...)
+	return rt.printIssue(view)
+}
+
+func (rt *runtime) issueComments(nodeID string) ([]string, error) {
+	var comments []string
+	cursor := ""
+	for page := 0; page < 50; page++ {
+		path := "/api/nodes/" + url.PathEscape(nodeID) + "/activity?limit=200"
+		if cursor != "" {
+			path += "&cursor=" + url.QueryEscape(cursor)
+		}
+		var result struct {
+			Items []struct {
+				Type string `json:"type"`
+				Body string `json:"body_markdown"`
+			} `json:"items"`
+			NextCursor *string `json:"next_cursor"`
+		}
+		if err := rt.do(http.MethodGet, path, nil, &result); err != nil {
+			return nil, err
+		}
+		for _, item := range result.Items {
+			if item.Type == "comment" {
+				comments = append(comments, item.Body)
+			}
+		}
+		if result.NextCursor == nil || *result.NextCursor == "" {
+			return comments, nil
+		}
+		if *result.NextCursor == cursor {
+			return nil, rt.fail(fmt.Errorf("activity cursor did not advance"), "")
+		}
+		cursor = *result.NextCursor
+	}
+	return nil, rt.fail(fmt.Errorf("issue activity exceeds 10000 entries"), "")
 }
 
 func (rt *runtime) createIssue(in issueInput) error {
@@ -408,14 +449,12 @@ func (rt *runtime) commentIssue(ref, body string) error {
 	if !issueKinds[kinds.slug(n.KindID)] {
 		return rt.fail(fmt.Errorf("issue %q not found", ref), "")
 	}
-	fields := fieldMap(n.Fields)
-	comments, _ := fields["comments"].([]any)
-	fields["comments"] = append(comments, map[string]any{"body": body})
-	if err := rt.do(http.MethodPatch, "/api/nodes/"+url.PathEscape(n.ID), map[string]any{"fields": fields}, &n); err != nil {
+	var comment map[string]any
+	if err := rt.do(http.MethodPost, "/api/nodes/"+url.PathEscape(n.ID)+"/comments", map[string]any{"body_markdown": body}, &comment); err != nil {
 		return err
 	}
 	if rt.jsonOut {
-		return rt.printJSON(rt.viewIssue(n, kinds))
+		return rt.printJSON(comment)
 	}
 	fmt.Fprintf(rt.stdout, "✓ commented on %s\n", n.Key)
 	return nil
@@ -437,13 +476,19 @@ func validKeyPrefix(s string) bool {
 }
 
 type knowledgeView struct {
-	Type   string `json:"type"`
-	Slug   string `json:"slug"`
-	Title  string `json:"title"`
-	Status string `json:"status"`
-	Body   string `json:"body,omitempty"`
-	Key    string `json:"key"`
-	ID     string `json:"id"`
+	ID               string         `json:"id"`
+	ProjectID        string         `json:"project_id"`
+	Type             string         `json:"type"`
+	Slug             string         `json:"slug"`
+	Title            string         `json:"title"`
+	Body             string         `json:"body"`
+	Status           string         `json:"status"`
+	Metadata         map[string]any `json:"metadata"`
+	CreatedAt        string         `json:"created_at"`
+	UpdatedAt        string         `json:"updated_at"`
+	ReferenceCount   int64          `json:"reference_count"`
+	LastReferencedAt string         `json:"last_referenced_at,omitempty"`
+	Key              string         `json:"-"`
 }
 
 func knowledgeSupported(typ string) bool {
@@ -460,14 +505,26 @@ func (rt *runtime) rejectKnowledgeKind(typ string) error {
 
 func viewKnowledge(n apiNode, kinds kindTable) knowledgeView {
 	fields := fieldMap(n.Fields)
+	metadata, _ := fields["metadata"].(map[string]any)
+	if metadata == nil {
+		metadata = map[string]any{}
+	}
+	projectID := ""
+	if n.ParentID != nil {
+		projectID = *n.ParentID
+	}
 	return knowledgeView{
-		Type:   knowledgeCLIType(kinds.slug(n.KindID)),
-		Slug:   fieldString(fields, "slug"),
-		Title:  n.Title,
-		Status: n.State,
-		Body:   n.Body,
-		Key:    n.Key,
-		ID:     n.ID,
+		ID:        n.ID,
+		ProjectID: projectID,
+		Type:      knowledgeCLIType(kinds.slug(n.KindID)),
+		Slug:      fieldString(fields, "slug"),
+		Title:     n.Title,
+		Status:    n.State,
+		Body:      n.Body,
+		Metadata:  metadata,
+		CreatedAt: n.CreatedAt.UTC().Format(time.RFC3339Nano),
+		UpdatedAt: n.UpdatedAt.UTC().Format(time.RFC3339Nano),
+		Key:       n.Key,
 	}
 }
 
@@ -475,9 +532,14 @@ func (rt *runtime) printKnowledge(v knowledgeView) error {
 	if rt.jsonOut {
 		return rt.printJSON(v)
 	}
-	fmt.Fprintf(rt.stdout, "%s/%s (%s)\n", v.Type, v.Slug, v.Key)
+	fmt.Fprintf(rt.stdout, "%s/%s (#%s)\n", v.Type, v.Slug, v.ID)
 	fmt.Fprintf(rt.stdout, "  title:  %s\n", v.Title)
 	fmt.Fprintf(rt.stdout, "  status: %s\n", v.Status)
+	if len(v.Metadata) > 0 {
+		if raw, err := json.MarshalIndent(v.Metadata, "  ", "  "); err == nil {
+			fmt.Fprintf(rt.stdout, "  metadata: %s\n", raw)
+		}
+	}
 	if strings.TrimSpace(v.Body) != "" {
 		fmt.Fprintln(rt.stdout, "  body:")
 		for _, line := range strings.Split(v.Body, "\n") {
@@ -489,9 +551,6 @@ func (rt *runtime) printKnowledge(v knowledgeView) error {
 
 func (rt *runtime) knowledgeNodes(project, typ string) (kindTable, []apiNode, error) {
 	if err := rt.rejectKnowledgeKind(typ); err != nil && typ != "" {
-		return kindTable{}, nil, err
-	}
-	if err := rt.ensureKnowledgeKinds(); err != nil {
 		return kindTable{}, nil, err
 	}
 	proj, err := rt.projectNode(project)
@@ -512,7 +571,7 @@ func (rt *runtime) knowledgeNodes(project, typ string) (kindTable, []apiNode, er
 		want = slug
 		k, ok := kinds.bySlug[slug]
 		if !ok {
-			return kindTable{}, nil, rt.fail(fmt.Errorf("node kind %q is not configured", slug), "")
+			return kinds, nil, nil
 		}
 		q.Set("kind_id", k.ID)
 	}
@@ -544,7 +603,10 @@ func (rt *runtime) listKnowledge(project, typ string) error {
 		items = append(items, viewKnowledge(n, kinds))
 	}
 	if rt.jsonOut {
-		return rt.printJSON(map[string]any{"entries": items})
+		if items == nil {
+			items = []knowledgeView{}
+		}
+		return rt.printJSON(items)
 	}
 	if len(items) == 0 {
 		fmt.Fprintln(rt.stdout, "(no entries)")
@@ -574,9 +636,6 @@ func (rt *runtime) createKnowledge(project, typ, slug, title, body, status strin
 	if err := rt.rejectKnowledgeKind(typ); err != nil {
 		return err
 	}
-	if err := rt.ensureKnowledgeKinds(); err != nil {
-		return err
-	}
 	proj, err := rt.projectNode(project)
 	if err != nil {
 		return err
@@ -584,6 +643,9 @@ func (rt *runtime) createKnowledge(project, typ, slug, title, body, status strin
 	kindSlug, ok := knowledgeKindSlug(typ)
 	if !ok {
 		return rt.rejectKnowledgeKind(typ)
+	}
+	if err := rt.ensureKnowledgeKind(kindSlug); err != nil {
+		return err
 	}
 	kind, err := rt.kind(kindSlug)
 	if err != nil {
@@ -730,77 +792,6 @@ func (rt *runtime) searchIssues(query, project, typ string, limit int) error {
 	if page.NextCursor != nil && *page.NextCursor != "" {
 		fmt.Fprintln(rt.stdout, "\n(more issues available; raise --limit or use --json for has_more)")
 	}
-	return nil
-}
-
-func (rt *runtime) onboard(project, agent, format string) error {
-	format = strings.TrimSpace(strings.ToLower(format))
-	if format == "" {
-		format = "md"
-	}
-	if format != "md" && format != "html" {
-		return usagef("--format must be md or html")
-	}
-	proj, err := rt.projectNode(project)
-	if err != nil {
-		return err
-	}
-	kinds, err := rt.loadKinds()
-	if err != nil {
-		return err
-	}
-	children, err := rt.walkNodes(url.Values{"parent_id": {proj.ID}, "include_descendants": {"true"}}, nil)
-	if err != nil {
-		return err
-	}
-	var issues, knowledge []apiNode
-	for _, n := range children {
-		slug := kinds.slug(n.KindID)
-		switch {
-		case issueKinds[slug]:
-			issues = append(issues, n)
-		case knowledgeSupported(slug):
-			knowledge = append(knowledge, n)
-		}
-	}
-	ref := strings.TrimSpace(project)
-	if stored := fieldString(fieldMap(proj.Fields), "project_key"); stored != "" {
-		ref = stored
-	}
-	agent = strings.TrimSpace(agent)
-	if agent == "" {
-		agent = "agent"
-	}
-	if format == "html" {
-		fmt.Fprintf(rt.stdout, "<h1>Welcome to %s</h1>\n", htmlEscape(proj.Title))
-		if line := firstLine(proj.Body); line != "" {
-			fmt.Fprintf(rt.stdout, "<blockquote>%s</blockquote>\n", htmlEscape(line))
-		}
-		fmt.Fprintf(rt.stdout, "<p>CLI quickstart: %s session start --project %s --agent %s</p>\n", rt.program, htmlEscape(ref), htmlEscape(agent))
-		return nil
-	}
-	fmt.Fprintf(rt.stdout, "# Welcome to %s\n\n", proj.Title)
-	if line := firstLine(proj.Body); line != "" {
-		fmt.Fprintf(rt.stdout, "> %s\n\n", line)
-	}
-	if len(issues) > 0 {
-		fmt.Fprintln(rt.stdout, "## Open work")
-		fmt.Fprintln(rt.stdout)
-		for _, n := range issues {
-			fmt.Fprintf(rt.stdout, "- **%s** %s\n", n.Key, n.Title)
-		}
-		fmt.Fprintln(rt.stdout)
-	}
-	if len(knowledge) > 0 {
-		fmt.Fprintln(rt.stdout, "## Knowledge")
-		fmt.Fprintln(rt.stdout)
-		for _, n := range knowledge {
-			view := viewKnowledge(n, kinds)
-			fmt.Fprintf(rt.stdout, "- **%s** (`%s/%s`)\n", view.Title, view.Type, view.Slug)
-		}
-		fmt.Fprintln(rt.stdout)
-	}
-	fmt.Fprintf(rt.stdout, "- CLI quickstart: `%s session start --project %s --agent %s`\n", rt.program, ref, agent)
 	return nil
 }
 

@@ -12,19 +12,22 @@ import (
 	"net/url"
 	"os"
 	"strings"
+	"time"
 
 	"github.com/inspr-at/aeon/internal/client"
 )
 
 type apiNode struct {
-	ID       string          `json:"id"`
-	Key      string          `json:"key"`
-	KindID   string          `json:"kind_id"`
-	Title    string          `json:"title"`
-	Body     string          `json:"body"`
-	Fields   json.RawMessage `json:"fields"`
-	State    string          `json:"state"`
-	ParentID *string         `json:"parent_id"`
+	ID        string          `json:"id"`
+	Key       string          `json:"key"`
+	KindID    string          `json:"kind_id"`
+	Title     string          `json:"title"`
+	Body      string          `json:"body"`
+	Fields    json.RawMessage `json:"fields"`
+	State     string          `json:"state"`
+	ParentID  *string         `json:"parent_id"`
+	CreatedAt time.Time       `json:"created_at"`
+	UpdatedAt time.Time       `json:"updated_at"`
 }
 
 type nodePage struct {

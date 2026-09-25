@@ -22,6 +22,7 @@ import (
 
 	"github.com/jackc/pgx/v5"
 
+	"github.com/inspr-at/aeon/internal/activity"
 	"github.com/inspr-at/aeon/internal/auth"
 	"github.com/inspr-at/aeon/internal/db"
 	"github.com/inspr-at/aeon/internal/dbtest"
@@ -80,6 +81,7 @@ func TestCompatEndToEnd(t *testing.T) {
 		Modules: []httpapi.Module{
 			authMod,
 			nodes.New(opened.App, nodes.SQLWriter{}),
+			activity.New(opened.App),
 			search.New(opened.App, nil),
 			modelregistry.New(opened.App),
 			inbox.New(opened.App),
@@ -366,6 +368,7 @@ func TestCompatEndToEnd(t *testing.T) {
 
 	assertEvent(t, opened, worker.TenantID, "node.created")
 	assertEvent(t, opened, worker.TenantID, "node.updated")
+	assertEvent(t, opened, worker.TenantID, "comment.created")
 	assertEvent(t, opened, worker.TenantID, "inbox.sent")
 	assertEvent(t, opened, worker.TenantID, "inbox.acked")
 	assertEvent(t, opened, worker.TenantID, "inbox.target_created")
