@@ -52,6 +52,8 @@ func (m *Module) Mount(mux *http.ServeMux) {
 	mux.HandleFunc("DELETE /api/nodes/{nodeId}", m.handleDeleteNode)
 	mux.HandleFunc("POST /api/nodes/{nodeId}/move", m.handleMoveNode)
 	mux.HandleFunc("POST /api/nodes/{nodeId}/project-move", m.handleProjectMove)
+	mux.HandleFunc("PATCH /api/tags/{tagId}", m.handleUpdateTag)
+	mux.HandleFunc("DELETE /api/tags/{tagId}", m.handleDeleteTag)
 }
 
 func (m *Module) tx(ctx context.Context, tenantID string, fn func(context.Context, pgx.Tx) error) error {
