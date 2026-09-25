@@ -177,6 +177,28 @@ export function countBy<T extends KnowledgeItem>(items: T[]) {
 export function entryPath(routeKey: string, type: KnowledgeType, slug: string, heading = ''): string {
   return `/p/${encodeURIComponent(routeKey)}/knowledge/${type}/${encodeURIComponent(slug)}${heading ? `#${heading}` : ''}`
 }
+// ---------- The docked preview (U25) ----------
+// From this width the list keeps at least 560px beside a reading pane of 560px
+// (page gutter 28px, gap 22px, window margin 10px); below it an entry opens on
+// its own page, as before.
+export const DOCK_MIN_WIDTH = 1200
+export const DOCK_MEDIA = `(min-width: ${DOCK_MIN_WIDTH}px)`
+// The list keeps this much of the window beside the pane (560px plus the margins).
+export const DOCK_LIST_RESERVE = 620
+// The pane's entry in the list's address: ?entry=<type>/<slug>.
+export function entryParam(type: KnowledgeType, slug: string): string { return `${type}/${slug}` }
+export function parseEntryParam(value: unknown): { type: KnowledgeType; slug: string } | null {
+  if (typeof value !== 'string') return null
+  const at = value.indexOf('/')
+  if (at <= 0) return null
+  const type = value.slice(0, at), slug = value.slice(at + 1)
+  return isKnowledgeType(type) && slug ? { type, slug } : null
+}
+export function dockPath(routeKey: string, type: KnowledgeType, slug: string): string {
+  // Written like the router writes it (the slash stays readable).
+  return `/p/${encodeURIComponent(routeKey)}/knowledge?entry=${type}/${encodeURIComponent(slug)}`
+}
+
 // How an agent reads the entry. The command is the product's CLI in its classic mode.
 export function cliCommand(product: string, routeKey: string, type: KnowledgeType, slug: string): string {
   return `${product.toLowerCase()} knowledge get ${type} ${slug} --project ${routeKey}`

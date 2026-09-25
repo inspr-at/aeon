@@ -3,7 +3,7 @@
 import { computed, nextTick, onBeforeUnmount, onMounted, ref, watch } from 'vue'
 import { useRouter } from 'vue-router'
 import { brand } from '../../lib/brand'
-import { SORTS, TYPES, entryPath, highlightWords, statusLabel, type KnowledgeEntry, type KnowledgeItem, type KnowledgeStatus, type KnowledgeType, type SortBy } from '../../lib/knowledge'
+import { SORTS, TYPES, entryParam, entryPath, highlightWords, statusLabel, type KnowledgeEntry, type KnowledgeItem, type KnowledgeStatus, type KnowledgeType, type SortBy } from '../../lib/knowledge'
 import { STATUS_VIEWS, type KnowledgeFilters, type KnowledgeState, type StatusView } from '../../lib/useKnowledge'
 import { toast } from '../../lib/toast'
 import { absoluteTime, plural, relativeTime } from '../../lib/work'
@@ -20,6 +20,9 @@ const props = defineProps<{
   state: KnowledgeState; filters: KnowledgeFilters; canWrite: boolean; now: number
   // An entry page is open over the tab: its keys belong to the entry.
   paused: boolean
+  // Wide screens open an entry docked beside the list (U25); openEntry is the one docked now.
+  dock?: boolean
+  openEntry?: { type: KnowledgeType; slug: string } | null
 }>()
 const emit = defineEmits<{ update: [patch: Partial<KnowledgeFilters>] }>()
 const router = useRouter()
@@ -54,7 +57,15 @@ const statusCount = (view: StatusView) => {
   return (statuses.length ? statuses : all).reduce((sum, status) => sum + (counts[status] ?? 0), 0)
 }
 
-function link(item: KnowledgeItem) { return { path: entryPath(props.project.routeKey, item.type, item.slug), query: filtersQuery() } }
+// Wide: the entry docks beside the list (?entry=); otherwise it opens its own page.
+function link(item: KnowledgeItem) {
+  if (props.dock) return { path: `/p/${encodeURIComponent(props.project.routeKey)}/knowledge`, query: { ...filtersQuery(), entry: entryParam(item.type, item.slug) } }
+  return { path: entryPath(props.project.routeKey, item.type, item.slug), query: filtersQuery() }
+}
+const isOpen = (item: KnowledgeItem) => !!props.openEntry && props.openEntry.type === item.type && props.openEntry.slug === item.slug
+const openItem = computed(() => props.state.sequence.value.find(isOpen) ?? null)
+// The docked entry is the cursor too, so j and k go on from it (also after a reload).
+watch(() => openItem.value?.id, id => { if (id && id !== cursorId.value) reveal(id) }, { immediate: true })
 // The list's own place (search, kind, status, sort) travels with an opened entry, so
 // back returns to the same list and next/previous follow its order.
 function filtersQuery() {
@@ -98,8 +109,14 @@ function move(step: number) {
   const next = index === -1 ? (step >= 0 ? 0 : rows.length - 1) : Math.max(0, Math.min(rows.length - 1, index + step))
   cursorId.value = rows[next].id
   void nextTick(() => { const el = rowEl(rows[next].id); el?.focus({ preventScroll: true }); el?.scrollIntoView({ block: 'nearest' }) })
+  // A docked entry follows the selection.
+  if (props.openEntry && !isOpen(rows[next])) void router.replace(link(rows[next]))
 }
-async function open(item: KnowledgeItem | undefined) { if (item) await router.push(link(item)) }
+// With an entry docked, another one replaces it (back leaves the pane, not each step).
+async function open(item: KnowledgeItem | undefined) {
+  if (!item) return
+  if (props.openEntry) await router.replace(link(item)); else await router.push(link(item))
+}
 function typing(target: EventTarget | null) {
   return target instanceof HTMLElement && (target.isContentEditable || ['INPUT', 'TEXTAREA', 'SELECT'].includes(target.tagName))
 }
@@ -130,10 +147,10 @@ async function copyCommand() {
   try { await navigator.clipboard.writeText(listCommand.value); toast('Copied the command') } catch { toast('The command could not be copied', { tone: 'error' }) }
 }
 // The row the entry page was on is the cursor when the tab shows again.
-function reveal(id: string) {
+function reveal(id: string, focus = false) {
   if (!props.state.sequence.value.some(item => item.id === id)) return
   cursorId.value = id
-  void nextTick(() => rowEl(id)?.scrollIntoView({ block: 'nearest' }))
+  void nextTick(() => { const el = rowEl(id); if (focus) el?.focus({ preventScroll: true }); el?.scrollIntoView({ block: 'nearest' }) })
 }
 onMounted(() => window.addEventListener('keydown', keydown))
 onBeforeUnmount(() => { window.removeEventListener('keydown', keydown); clearTimeout(timer); phoneQuery.removeEventListener('change', onPhone) })
@@ -167,6 +184,7 @@ const who = (item: KnowledgeItem) => item.imported ? 'imported' : item.updated_b
     </button>
   </Teleport>
 
+  <div class="k-frame">
   <div class="k-layout">
     <nav class="k-rail" aria-label="Kinds of knowledge">
       <div class="k-kinds">
@@ -243,7 +261,10 @@ const who = (item: KnowledgeItem) => item.imported ? 'imported' : item.updated_b
           </header>
           <ul class="k-rows">
             <li v-for="item in group.items" :key="item.id">
-              <RouterLink :to="link(item)" class="k-row" :class="{ cursor: cursorId === item.id, archived: item.status === 'archived' }" :data-id="item.id" @focus="cursorId = item.id">
+              <RouterLink
+                :to="link(item)" :replace="!!openEntry" class="k-row" :class="{ cursor: cursorId === item.id, open: isOpen(item), archived: item.status === 'archived' }"
+                :aria-current="isOpen(item) ? 'true' : undefined" :data-id="item.id" @focus="cursorId = item.id"
+              >
                 <span class="k-text">
                   <span class="k-title"><template v-for="(part, i) in highlightWords(item.title, q)" :key="i"><mark v-if="part.match">{{ part.text }}</mark><template v-else>{{ part.text }}</template></template></span>
                   <span v-if="item.excerpt" class="k-excerpt"><template v-for="(part, i) in highlightWords(item.excerpt, q)" :key="i"><mark v-if="part.match">{{ part.text }}</mark><template v-else>{{ part.text }}</template></template></span>
@@ -263,9 +284,10 @@ const who = (item: KnowledgeItem) => item.imported ? 'imported' : item.updated_b
       </template>
 
       <p v-if="state.loaded.value && state.items.value.length" class="k-hint">
-        <kbd class="keycap">j</kbd><kbd class="keycap">k</kbd> move · <kbd class="keycap"><AppIcon name="enter" /></kbd> open · <kbd class="keycap">/</kbd> search<template v-if="canWrite"> · <kbd class="keycap">n</kbd> new entry</template>
+        <kbd class="keycap">j</kbd><kbd class="keycap">k</kbd> move · <kbd class="keycap"><AppIcon name="enter" /></kbd> {{ dock ? 'preview' : 'open' }}<template v-if="openEntry"> · <kbd class="keycap">esc</kbd> close</template> · <kbd class="keycap">/</kbd> search<template v-if="canWrite"> · <kbd class="keycap">n</kbd> new entry</template>
       </p>
     </div>
+  </div>
   </div>
 
   <FloatingPanel v-if="menu?.kind === 'status'" :anchor="menu.anchor" :width="236" label="Status" @close="closeMenu">
@@ -321,6 +343,9 @@ const who = (item: KnowledgeItem) => item.imported ? 'imported' : item.updated_b
 .k-menu-count { margin-left: auto; font-size: 11.5px; font-weight: 400; color: var(--ink-3); }
 
 /* ---------- Layout: the kinds rail beside the grouped list ---------- */
+/* The frame is a container: with an entry docked beside it the list is narrower
+   than the window says, so the rail and the rows fold by the frame's own width. */
+.k-frame { container: kframe / inline-size; }
 .k-layout { display: grid; grid-template-columns: 232px minmax(0, 1fr); gap: 28px; align-items: start; padding-top: 6px; }
 .k-rail { position: sticky; top: calc(var(--toolbar-h, 52px) + 12px); display: grid; gap: 18px; }
 .k-kinds { display: grid; gap: 2px; }
@@ -343,7 +368,7 @@ const who = (item: KnowledgeItem) => item.imported ? 'imported' : item.updated_b
 .k-command .tok { white-space: nowrap; }
 
 /* ---------- Groups and rows ---------- */
-.k-list { display: grid; gap: 18px; min-width: 0; }
+.k-list { display: grid; gap: 18px; min-width: 0; container: klist / inline-size; }
 .k-list.stale .k-group { opacity: .62; }
 @media (prefers-reduced-motion: no-preference) { .k-group { transition: opacity .12s ease; } }
 .k-group { overflow: clip; }
@@ -363,6 +388,10 @@ li + li .k-row { position: relative; }
 li + li .k-row::before { content: ''; position: absolute; top: 0; left: 12px; right: 10px; height: 1px; background: var(--line); }
 @media (hover: hover) { .k-row:hover { background: var(--row-hover); } .k-row:hover::before, li:hover + li .k-row::before { opacity: 0; } }
 .k-row.cursor { background: var(--row-selected); }
+/* The entry docked beside the list: the same tint, and a hairline ring in the row's shape (no edge accents). */
+.k-row.open { background: var(--row-selected); box-shadow: inset 0 0 0 1px var(--chip-teal-line); }
+.k-row.open::before, li:has(.k-row.open) + li .k-row::before { opacity: 0; }
+.k-row.open:focus-visible { box-shadow: inset 0 0 0 1px var(--chip-teal-line), var(--focus-ring); }
 .k-row.cursor::before, li:has(.k-row.cursor) + li .k-row::before { opacity: 0; }
 .k-row:focus-visible { box-shadow: var(--focus-ring); }
 .k-text { display: grid; gap: 3px; flex: 1; min-width: 0; }
@@ -408,6 +437,27 @@ li + li .k-row::before { content: ''; position: absolute; top: 0; left: 12px; ri
 /* ---------- Narrower pages ---------- */
 @container toolbar (max-width: 1180px) { .k-search { width: 220px; } .k-sort-label { display: none; } .k-sort-btn { padding: 0 9px; } }
 @container toolbar (max-width: 1000px) { .k-count { display: none; } .k-new { width: 32px; padding: 0; } .k-new-label { display: none; } .k-menu-dim { display: none; } }
+/* Docked beside an entry (U25) the list is narrower than the window says: the
+   frame and the list fold by their own width (selectors carry .k-frame / .k-list
+   so they win over the window-width rules below). The rail becomes the row of
+   kind chips, and narrow rows put their slug and time under the words. */
+@container kframe (max-width: 999px) { .k-frame .k-group-hint { display: none; } }
+@container kframe (max-width: 819px) {
+  .k-frame .k-layout { grid-template-columns: minmax(0, 1fr); gap: 14px; }
+  .k-frame .k-rail { position: static; }
+  .k-frame .k-kinds { display: flex; gap: 6px; overflow-x: auto; margin: 0 0 0 calc(-1 * var(--gutter)); padding: 2px 0 4px var(--gutter); scrollbar-width: none; }
+  .k-frame .k-kinds::-webkit-scrollbar { display: none; }
+  .k-frame .k-kind { flex-shrink: 0; height: 34px; padding: 0 12px 0 5px; border-radius: 999px; background: var(--chip-bg); box-shadow: inset 0 0 0 1px var(--chip-line); }
+  .k-frame .k-kind[aria-current="true"] { background: var(--row-selected); box-shadow: inset 0 0 0 1px var(--chip-teal-line); }
+  .k-frame .k-kind-icon { width: 24px; height: 24px; border-radius: 999px; background: transparent; box-shadow: none; }
+  .k-frame .k-agents { display: none; }
+}
+@container klist (max-width: 640px) {
+  .k-list .k-row { flex-direction: column; align-items: stretch; gap: 5px; min-height: 0; padding: 10px 10px 10px 12px; }
+  .k-list .k-meta { gap: 12px; }
+  .k-list .k-slug { flex: 1; max-width: none; }
+  .k-list .k-time { width: auto; }
+}
 @media (max-width: 1280px) { .k-layout { grid-template-columns: 208px minmax(0, 1fr); gap: 22px; } .k-group-hint { display: none; } }
 @media (max-width: 1100px) {
   .k-layout { grid-template-columns: minmax(0, 1fr); gap: 14px; }

@@ -3,7 +3,7 @@
 import { computed, nextTick, onBeforeUnmount, ref, watch } from 'vue'
 import { useRoute, useRouter } from 'vue-router'
 import { listNodes, searchNodes, type ListItem, type WorkNode } from '../lib/api'
-import { entryPath, listKnowledge, typeMeta, type KnowledgeItem } from '../lib/knowledge'
+import { DOCK_MEDIA, dockPath, entryPath, listKnowledge, typeMeta, type KnowledgeItem } from '../lib/knowledge'
 import { visibleSections } from '../lib/settings'
 import { run } from '../lib/commands'
 import { actionResults, assemble, keyPrefixOf, keyQuery, knowledgeResults, projectResults, recentResults, ticketResults, viewResults, type ActionResult, type Group, type Result, type TicketResult } from '../lib/palette'
@@ -174,7 +174,8 @@ function close() { controller?.abort(); dialog.value?.close(); opener?.focus({ p
 function hrefOf(result: Result): string | null {
   if (result.type === 'project') return `/p/${encodeURIComponent(result.key)}`
   if (result.type === 'ticket' && result.projectKey) return `/p/${encodeURIComponent(result.projectKey)}/${encodeURIComponent(result.key)}`
-  if (result.type === 'knowledge' && result.projectKey) return entryPath(result.projectKey, result.kind, result.slug)
+  // Wide screens show the entry docked beside its project's list; narrower ones its own page.
+  if (result.type === 'knowledge' && result.projectKey) return window.matchMedia(DOCK_MEDIA).matches ? dockPath(result.projectKey, result.kind, result.slug) : entryPath(result.projectKey, result.kind, result.slug)
   return null
 }
 async function resolveTicket(result: TicketResult): Promise<string | null> {
