@@ -302,6 +302,8 @@ td.c-title { position: relative; }
 @media (hover: hover) { .row:hover .row-actions { visibility: visible; } }
 .row.cursor td.c-title .cell, td.c-title:focus-within .cell { -webkit-mask-image: linear-gradient(to left, transparent 88px, #000 116px); mask-image: linear-gradient(to left, transparent 88px, #000 116px); }
 @media (hover: hover) { .row:hover td.c-title .cell { -webkit-mask-image: linear-gradient(to left, transparent 88px, #000 116px); mask-image: linear-gradient(to left, transparent 88px, #000 116px); } }
+.row.cursor td.c-title .cell, td.c-title:focus-within .cell { padding-right: 88px; }
+@media (hover: hover) { .row:hover td.c-title .cell { padding-right: 88px; } }
 .title-link { flex: 0 1 auto; min-width: 0; overflow: hidden; text-overflow: ellipsis; color: var(--ink); font-weight: 600; text-decoration: none; }
 .ref { flex: 0 0 auto; color: var(--ink-3); font-size: 12.5px; }
 .archived-chip { flex: 0 0 auto; height: 18px; padding: 0 7px; border-radius: 999px; background: var(--surface-2); box-shadow: inset 0 0 0 1px var(--line-2); color: var(--ink-2); font: 600 10px/18px var(--mono); letter-spacing: .06em; text-transform: uppercase; font-variant-ligatures: none; }

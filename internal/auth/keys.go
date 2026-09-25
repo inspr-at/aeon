@@ -123,7 +123,7 @@ func (m *Module) requireAdmin(w http.ResponseWriter, r *http.Request) (tenant.Pr
 		writeUnauthorized(w)
 		return tenant.Principal{}, false
 	}
-	if !isAdmin(p) {
+	if p.Kind != tenant.Person || !isAdmin(p) {
 		writeForbidden(w)
 		return tenant.Principal{}, false
 	}

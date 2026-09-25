@@ -274,17 +274,40 @@ func (m *module) listCustomers(w http.ResponseWriter, r *http.Request) {
 		NextOffset *int       `json:"next_offset"`
 	}{Items: []Customer{}}
 	err := m.run(r, p, fence.PermViewsProvide, func(tx pgx.Tx) error {
-		rows, e := tx.Query(r.Context(), `SELECT n.id::text FROM nodes n JOIN node_kinds k ON k.tenant_id=n.tenant_id AND k.id=n.kind_id LEFT JOIN crm_organisation_profiles o ON o.tenant_id=n.tenant_id AND o.organisation_node_id=n.id WHERE k.slug='organisation' AND n.deleted_at IS NULL AND ($4='all' OR (o.archived_at IS NOT NULL)=($4='true')) AND ($1='' OR n.title ILIKE '%'||$1||'%' OR n.fields->>'legal_name' ILIKE '%'||$1||'%' OR EXISTS(SELECT 1 FROM crm_customer_numbers x WHERE x.tenant_id=n.tenant_id AND x.organisation_node_id=n.id AND x.customer_no ILIKE '%'||$1||'%')) ORDER BY n.title,n.id LIMIT $2 OFFSET $3`, q, limit+1, offset, archived)
+		rows, e := tx.Query(r.Context(), `SELECT n.id::text,n.key,n.title,n.fields,o.revision,x.customer_no,o.primary_contact_node_id::text,o.archived_at IS NOT NULL
+			FROM nodes n
+			LEFT JOIN crm_organisation_profiles o ON o.tenant_id=n.tenant_id AND o.organisation_node_id=n.id
+			LEFT JOIN crm_customer_numbers x ON x.tenant_id=n.tenant_id AND x.organisation_node_id=n.id
+			WHERE n.tenant_id=current_setting('aeon.tenant_id')::uuid
+			AND n.kind_id=(SELECT id FROM node_kinds WHERE tenant_id=current_setting('aeon.tenant_id')::uuid AND slug='organisation')
+			AND n.deleted_at IS NULL AND ($4='all' OR (o.archived_at IS NOT NULL)=($4='true'))
+			AND ($1='' OR n.title ILIKE '%'||$1||'%' OR n.fields->>'legal_name' ILIKE '%'||$1||'%'
+				OR x.customer_no ILIKE '%'||$1||'%')
+			ORDER BY n.title,n.id LIMIT $2 OFFSET $3`, q, limit+1, offset, archived)
 		if e != nil {
 			return e
 		}
-		var ids []string
 		for rows.Next() {
-			var id string
-			if e = rows.Scan(&id); e != nil {
+			var c Customer
+			var fields []byte
+			var revision *int64
+			if e = rows.Scan(&c.ID, &c.Key, &c.Name, &fields, &revision, &c.CustomerNo, &c.PrimaryContactNodeID, &c.Archived); e != nil {
 				break
 			}
-			ids = append(ids, id)
+			if len(out.Items) == limit {
+				n := offset + limit
+				out.NextOffset = &n
+				break
+			}
+			if revision == nil {
+				e = errNotFound
+				break
+			}
+			c.Revision = *revision
+			if e = json.Unmarshal(fields, &c.CustomerFields); e != nil {
+				break
+			}
+			out.Items = append(out.Items, c)
 		}
 		if e == nil {
 			e = rows.Err()
@@ -292,18 +315,6 @@ func (m *module) listCustomers(w http.ResponseWriter, r *http.Request) {
 		rows.Close()
 		if e != nil {
 			return e
-		}
-		if len(ids) > limit {
-			n := offset + limit
-			out.NextOffset = &n
-			ids = ids[:limit]
-		}
-		for _, id := range ids {
-			c, e := customer(r.Context(), tx, id, false)
-			if e != nil {
-				return e
-			}
-			out.Items = append(out.Items, c)
 		}
 		return nil
 	})

@@ -1,6 +1,6 @@
 // SPDX-License-Identifier: AGPL-3.0-only
 import { ref, watch, type Ref } from 'vue'
-import { APIError, createNode, deleteNode, getKinds, getNode, getRelations, listNodes, moveNode, updateNode, type Kind, type ListItem, type ListParent, type NodePatch, type Relation, type WorkNode } from './api'
+import { APIError, createNode, deleteNode, getKinds, getNode, getRelations, listNodes, lookupNodes, moveNode, updateNode, type Kind, type ListItem, type ListParent, type NodePatch, type Relation, type WorkNode } from './api'
 import { toast } from './toast'
 import { statusMeta } from './work'
 
@@ -119,7 +119,13 @@ export function useTicket(item: Ref<ListItem | null>, context: {
     try {
       const page = await getRelations(target.id)
       const items = page.items.filter(relation => relation.type !== ('parent' as never))
-      const resolved = await Promise.all(items.map(async relation => {
+      const ids = [...new Set(items.map(relation => relation.source_node_id === target.id ? relation.target_node_id : relation.source_node_id))]
+      let previews = new Map<string, { id: string; key: string; title: string; state: string }>()
+      if (ids.length) {
+        try { previews = new Map((await lookupNodes(ids)).items.map(node => [node.id, node])) }
+        catch { /* Preserve unavailable chips when previews cannot be loaded. */ }
+      }
+      const resolved = items.map(relation => {
         const outgoing = relation.source_node_id === target.id
         const otherId = outgoing ? relation.target_node_id : relation.source_node_id
         const label = relation.type === 'blocks' ? (outgoing ? 'Blocks' : 'Blocked by')
@@ -127,11 +133,8 @@ export function useTicket(item: Ref<ListItem | null>, context: {
           : relation.type === 'implements' ? (outgoing ? 'Implements' : 'Implemented by')
           : relation.type === 'cites' ? (outgoing ? 'Cites' : 'Cited by')
           : 'Relates to'
-        try {
-          const node = await getNode(otherId)
-          return { relation, label, node: { id: node.id, key: node.key, title: node.title, state: node.state } }
-        } catch { return { relation, label, node: null } }
-      }))
+        return { relation, label, node: previews.get(otherId) ?? null }
+      })
       if (item.value?.id === target.id) related.value = resolved
     } catch { /* relations are optional context */ }
   }

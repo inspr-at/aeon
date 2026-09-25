@@ -133,8 +133,9 @@ import urllib.request
 u = os.environ['SMOKE_BASE']
 with urllib.request.urlopen(u + '/') as response:
     assert response.status == 200
-    assert response.headers['Content-Security-Policy'] == "default-src 'self'; img-src 'self' blob: data:"
+    assert response.headers['Content-Security-Policy'] == "default-src 'self'; img-src 'self' blob: data:; object-src 'none'; base-uri 'self'; form-action 'self'; frame-ancestors 'none'"
     assert response.headers['X-Content-Type-Options'] == 'nosniff'
+    assert response.headers['X-Frame-Options'] == 'DENY'
     assert response.headers['Referrer-Policy'] == 'no-referrer'
     assert b'<html' in response.read().lower()
 print('prod: embedded web and security headers OK')

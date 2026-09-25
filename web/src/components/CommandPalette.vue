@@ -400,7 +400,7 @@ const iconOf = (result: Result): BizIconName => result.type === 'action' ? resul
   .item { min-height: 44px; }
   .desc { display: none; }
   .foot { display: none; }
-  .input-row { padding-right: 76px; }
+  .input-row { padding-right: 84px; }
   .cancel { display: grid; place-items: center; position: absolute; top: 6px; right: 6px; height: 44px; padding: 0 12px; border: 0; border-radius: 10px; background: transparent; color: var(--teal-ink); font-weight: 600; font-size: 14.5px; }
   .cancel:focus-visible { box-shadow: var(--focus-ring); }
   /* Two lines on a phone: key, kind and project above; the title gets the full width. */

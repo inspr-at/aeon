@@ -4,6 +4,7 @@ package crm
 import (
 	"context"
 	"encoding/json"
+	"errors"
 	"net/http"
 	"net/http/httptest"
 	"strings"
@@ -107,6 +108,20 @@ func TestHTTPProviderContractAndImport(t *testing.T) {
 	expect(t, request(f.handler, f.admin, "POST", "/api/crm/organisations/"+imported.ID+"/sync", ""), 409)
 	undoEvent(t, f, eventOf(t, f, "crm.provider_config_changed"), 201)
 	expect(t, request(f.handler, f.admin, "POST", "/api/crm/organisations/"+imported.ID+"/sync", ""), 200)
+}
+
+func TestProviderResolverErrorDoesNotExposeKeyMaterial(t *testing.T) {
+	marker := "synthetic-credential-must-stay-private"
+	provider, err := NewHTTPProvider("https://example.invalid", nil, func(context.Context, string) (string, error) {
+		return "", errors.New(marker)
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	_, err = provider.Search(t.Context(), "secret://test/crm", "Customer")
+	if err == nil || strings.Contains(err.Error(), marker) {
+		t.Fatalf("resolver error was not sanitized: %v", err)
+	}
 }
 func TestProviderRejectsTenantEndpointAndRedirect(t *testing.T) {
 	if _, e := NewHTTPProvider("http://127.0.0.1", nil, func(context.Context, string) (string, error) { return "", nil }); e == nil {

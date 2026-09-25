@@ -269,6 +269,9 @@ func (m *Module) authenticateSession(ctx context.Context, raw []byte) (tenant.Pr
 	id := sessionID(raw)
 	var tenantID, principalID string
 	err := m.inTenant(ctx, m.pool, tenantbootstrap.LookupTenantID, func(tx pgx.Tx) error {
+		if _, err := tx.Exec(ctx, `SELECT set_config('aeon.session_id',$1,true)`, id); err != nil {
+			return err
+		}
 		return tx.QueryRow(ctx, `UPDATE sessions
 			SET last_seen_at = now(), expires_at = now() + interval '30 days'
 			WHERE id = $1 AND expires_at > now()
@@ -299,6 +302,9 @@ func (m *Module) authenticateSession(ctx context.Context, raw []byte) (tenant.Pr
 
 func (m *Module) deleteSession(ctx context.Context, raw []byte) error {
 	return m.inTenant(ctx, m.pool, tenantbootstrap.LookupTenantID, func(tx pgx.Tx) error {
+		if _, err := tx.Exec(ctx, `SELECT set_config('aeon.session_id',$1,true)`, sessionID(raw)); err != nil {
+			return err
+		}
 		_, err := tx.Exec(ctx, `DELETE FROM sessions WHERE id = $1`, sessionID(raw))
 		return err
 	})
@@ -355,6 +361,7 @@ func (m *Module) authenticateAgent(ctx context.Context, prefix, secret string) (
 	var p tenant.Principal
 	err := m.inTenant(ctx, m.pool, tenantID, func(tx pgx.Tx) error {
 		var principalID, gotTenant string
+		var scopes pgtype.FlatArray[string]
 		err := tx.QueryRow(ctx, `
 			UPDATE agent_keys k
 			SET last_used_at = now()
@@ -365,8 +372,8 @@ func (m *Module) authenticateAgent(ctx context.Context, prefix, secret string) (
 			    SELECT 1 FROM principals p
 			    WHERE p.id = k.principal_id AND p.kind = 'agent'
 			  )
-			RETURNING k.principal_id::text, k.tenant_id::text
-		`, prefix, hashSecret(secret)).Scan(&principalID, &gotTenant)
+			RETURNING k.principal_id::text, k.tenant_id::text, k.scopes
+		`, prefix, hashSecret(secret)).Scan(&principalID, &gotTenant, &scopes)
 		if err != nil {
 			return err
 		}
@@ -377,6 +384,7 @@ func (m *Module) authenticateAgent(ctx context.Context, prefix, secret string) (
 			SELECT id::text, tenant_id::text, kind, name, roles
 			FROM principals WHERE id = $1::uuid
 		`, principalID))
+		p.Scopes = []string(scopes)
 		return err
 	})
 	if errors.Is(err, pgx.ErrNoRows) {

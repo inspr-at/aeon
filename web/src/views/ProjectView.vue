@@ -1,7 +1,7 @@
 <!-- SPDX-License-Identifier: AGPL-3.0-only -->
 <script setup lang="ts">
 import { setPageTitle } from '../lib/brand'
-import { computed, nextTick, onBeforeUnmount, onMounted, ref, watch } from 'vue'
+import { computed, defineAsyncComponent, nextTick, onBeforeUnmount, onMounted, ref, watch } from 'vue'
 import { onBeforeRouteLeave, onBeforeRouteUpdate, useRoute, useRouter } from 'vue-router'
 import { createNode, listNodes, type ListItem } from '../lib/api'
 import { canWrite } from '../lib/activity'
@@ -28,13 +28,17 @@ import StatusMenu from '../components/work/StatusMenu.vue'
 import TicketTable from '../components/work/TicketTable.vue'
 import TicketWorkspace from '../components/work/TicketWorkspace.vue'
 import JourneyChip from '../components/journey/JourneyChip.vue'
-import JourneyView from '../components/journey/JourneyView.vue'
-import KnowledgeEntryPage from '../components/knowledge/KnowledgeEntryPage.vue'
-import KnowledgeTab from '../components/knowledge/KnowledgeTab.vue'
+import type KnowledgeEntryPageType from '../components/knowledge/KnowledgeEntryPage.vue'
+import type KnowledgeTabType from '../components/knowledge/KnowledgeTab.vue'
 import { isKnowledgeType } from '../lib/knowledge'
 import { filtersFromQuery as knowledgeFiltersFrom, filtersToQuery as knowledgeQuery, useKnowledge, type KnowledgeFilters } from '../lib/useKnowledge'
 import type { Stage } from '../lib/journey'
 import type { QuickDraft } from '../components/work/QuickCreateRow.vue'
+
+const JourneyView = defineAsyncComponent(() => import('../components/journey/JourneyView.vue'))
+// Knowledge loads with its tab, not with every project page.
+const KnowledgeTab = defineAsyncComponent(() => import('../components/knowledge/KnowledgeTab.vue'))
+const KnowledgeEntryPage = defineAsyncComponent(() => import('../components/knowledge/KnowledgeEntryPage.vue'))
 
 const route = useRoute()
 const router = useRouter()
@@ -69,8 +73,8 @@ const knowledgeEntryOpen = computed(() => knowledgeActive.value && !!knowledgeTy
 const knowledgeFilters = computed(() => knowledgeFiltersFrom(route.query))
 const knowledgeListQuery = computed(() => knowledgeQuery(knowledgeFilters.value))
 const knowledge = useKnowledge(projectId, knowledgeFilters, knowledgeActive)
-const knowledgeTab = ref<InstanceType<typeof KnowledgeTab>>()
-const knowledgeEntry = ref<InstanceType<typeof KnowledgeEntryPage>>()
+const knowledgeTab = ref<InstanceType<typeof KnowledgeTabType>>()
+const knowledgeEntry = ref<InstanceType<typeof KnowledgeEntryPageType>>()
 const fullViewQuery = computed(() => !!ticketKey.value && route.query.view === 'full')
 const lastListMode = ref<ViewMode>(modeOf(route.query.view))
 watch(() => route.query.view, view => { if (view !== 'full' && !knowledgeActive.value) lastListMode.value = modeOf(view) })
@@ -636,7 +640,7 @@ watch([project, panelItem, knowledgeActive, knowledgeEntryOpen], ([current, item
             <span v-else-if="project.archived" class="chip state-chip">Archived</span>
           </div>
           <p class="description" :data-tip="project.description.length > 120 ? project.description : undefined">{{ project.description || 'No description yet.' }}</p>
-          <JourneyChip :project-id="project.id" :active="journeyActive" @go="journeyActive ? journeyStageTo(journeyStage as Stage ?? 'inspire') : setView('journey')" />
+          <div :class="{ 'journey-chip-slot': journeyActive }"><JourneyChip :project-id="project.id" :active="journeyActive" @go="journeyActive ? journeyStageTo(journeyStage as Stage ?? 'inspire') : setView('journey')" /></div>
         </div>
         <div v-if="counts" class="head-stats" :aria-label="`${counts.open} open, ${counts.progress} in progress, ${counts.done} done of ${counts.total}`">
           <div class="stat-line">
@@ -649,6 +653,9 @@ watch([project, panelItem, knowledgeActive, knowledgeEntryOpen], ([current, item
             <span class="mono pct">{{ counts.percent }}%</span>
           </div>
           <p class="activity">Active <time :datetime="project.last_activity" :data-tip="absoluteTime(project.last_activity)">{{ relativeTime(project.last_activity, { now, long: true }) }}</time></p>
+        </div>
+        <div v-else class="head-stats head-stats-skeleton" aria-hidden="true">
+          <span class="skeleton stat-placeholder" /><span class="skeleton progress-placeholder" /><span class="skeleton activity-placeholder" />
         </div>
       </header>
 
@@ -739,12 +746,17 @@ watch([project, panelItem, knowledgeActive, knowledgeEntryOpen], ([current, item
 .project-page { width: 100%; margin: 0; padding: 22px var(--gutter) 12px; }
 .project-head { display: flex; align-items: flex-end; justify-content: space-between; gap: 32px; padding: 4px 0 14px; }
 .head-main { min-width: 0; flex: 1; }
+.journey-chip-slot { min-height: 40px; }
 .title-line { display: flex; align-items: center; gap: 12px; min-width: 0; }
 .key-badge.big { height: 26px; padding: 0 10px; font-size: 12px; border-radius: 7px; }
 .title-line h1 { font-size: 30px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 .state-chip { height: 20px; font-size: 10px; text-transform: uppercase; letter-spacing: .08em; }
 .description { margin-top: 6px; max-width: 820px; font-size: 13.5px; color: var(--ink-2); overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 .head-stats { display: grid; justify-items: end; gap: 7px; flex-shrink: 0; }
+.head-stats-skeleton { width: 280px; }
+.stat-placeholder { width: 100%; height: 19px; }
+.progress-placeholder { width: 100%; height: 12px; }
+.activity-placeholder { width: 42%; height: 18px; }
 .stat-line { display: flex; gap: 16px; font-size: 12.5px; color: var(--ink-2); }
 .stat { display: inline-flex; align-items: center; gap: 6px; white-space: nowrap; }
 .stat b { font: 600 13px/1 var(--mono); color: var(--ink); font-variant-numeric: tabular-nums; font-variant-ligatures: none; }
@@ -780,6 +792,7 @@ watch([project, panelItem, knowledgeActive, knowledgeEntryOpen], ([current, item
 @media (max-width: 900px) {
   .project-head { flex-direction: column; align-items: stretch; gap: 12px; }
   .head-stats { justify-items: start; }
+  .head-stats-skeleton { width: 100%; min-height: 103px; }
   .progress-line { width: 100%; }
 }
 @media (max-width: 720px) {

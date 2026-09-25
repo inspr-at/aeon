@@ -26,6 +26,7 @@ function path(key: string) {
 <style scoped>
 .tickets { display: flex; flex-wrap: wrap; gap: 6px; margin: 0; padding: 0; list-style: none; }
 .ticket-link { height: 24px; transition: box-shadow .15s ease, transform .15s ease; }
+@media (max-width: 600px) { .ticket-link { height: 44px; } }
 @media (hover: hover) { .ticket-link:hover { box-shadow: inset 0 0 0 1px var(--teal), 0 4px 10px -6px rgba(14, 111, 108, .5); } }
 .ticket-link:focus-visible { box-shadow: var(--focus-ring); }
 .plain { height: 24px; background: var(--surface-2); box-shadow: inset 0 0 0 1px var(--line); color: var(--ink-2); }

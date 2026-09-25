@@ -70,7 +70,8 @@ func (h *HTTPProvider) callMethod(ctx context.Context, ref, method, path string,
 	}
 	token, e := h.resolve(ctx, ref)
 	if e != nil {
-		return e
+		// Resolver errors may contain credential-store details or key material.
+		return errors.New("provider secret is unavailable")
 	}
 	if token == "" || strings.ContainsAny(token, "\r\n\t ") {
 		return errors.New("provider secret is unavailable")
@@ -99,7 +100,8 @@ func (h *HTTPProvider) callMethod(ctx context.Context, ref, method, path string,
 	}
 	resp, e := h.client.Do(req)
 	if e != nil {
-		return e
+		// Transport errors can quote the outbound URL or Authorization header.
+		return errors.New("provider request failed")
 	}
 	defer resp.Body.Close()
 	if resp.StatusCode != 200 {

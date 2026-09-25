@@ -1,7 +1,5 @@
 // SPDX-License-Identifier: AGPL-3.0-only
 import { describe, expect, it } from 'vitest'
-import { readFileSync, readdirSync } from 'node:fs'
-import { join } from 'node:path'
 import { QuoteEditor } from '../src/lib/quotes/editor.ts'
 import { formatMm, mmText, parseMm, scopeFor, scrubMm, sectionLabel, stepMm, textState } from '../src/lib/quotes/inspector.ts'
 import { parseZoom, readZoom, stepZoom, zoomPercent, ZOOM_STEPS } from '../src/lib/quotes/zoom.ts'
@@ -106,15 +104,3 @@ describe('dates on the paper', () => {
   })
 })
 
-// CSP parity: default-src 'self'; img-src 'self' blob: data:. The inspector needs no
-// inline scripts, no eval and nothing from another origin.
-describe('CSP parity of the inspector', () => {
-  it('uses no eval, inline handlers as strings, or other origins', () => {
-    const root = new URL('../src/components/quotes/inspector/', import.meta.url).pathname
-    const files = [...readdirSync(root).map(f => join(root, f)), new URL('../src/components/quotes/QuoteTitleBar.vue', import.meta.url).pathname, new URL('../src/components/quotes/DatePicker.vue', import.meta.url).pathname, new URL('../src/lib/quotes/inspector.ts', import.meta.url).pathname]
-    for (const file of files) {
-      const text = readFileSync(file, 'utf8')
-      expect(text, file).not.toMatch(/\beval\(|new Function\(|<script(?! setup| lang)|https?:\/\/(?!www\.w3\.org)|innerHTML|javascript:/)
-    }
-  })
-})

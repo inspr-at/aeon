@@ -229,21 +229,22 @@ watch(sessionId, id => { if (id) cursor.value = `s:${id}` }, { immediate: true }
         />
         <p v-if="agents.approvalsState === 'error'" class="inline-error" role="alert"><AppIcon name="alert" :size="14" />Permission requests could not be loaded: {{ agents.approvalsError }} <button type="button" class="btn sm" @click="agents.refreshApprovals()">Try again</button></p>
         <SessionList
+          v-if="agents.loaded"
           :groups="agents.grouped" :now="agents.now" :cursor="cursor" :selected="sessionId" :state="agents.sessionsState" :error="agents.sessionsError"
           :loaded="agents.loaded" :controls="agents.controls" :can-control="writable"
           @open="openSession" @control="control" @focus-row="id => cursor = id" @retry="agents.loadAll()"
         />
-        <p v-if="agents.sessions.length || agents.pending.length" class="hint" aria-hidden="true">
+        <p v-if="agents.loaded && (agents.sessions.length || agents.pending.length)" class="hint" aria-hidden="true">
           <kbd class="keycap">j</kbd><kbd class="keycap">k</kbd> move · <kbd class="keycap"><AppIcon name="enter" /></kbd> open · <kbd class="keycap">a</kbd> approve · <kbd class="keycap">d</kbd> deny
         </p>
       </div>
-      <aside class="side-col" aria-label="Accounts">
+      <aside v-if="agents.loaded" class="side-col" aria-label="Accounts">
         <AccountsCard :accounts="agents.accounts" :state="agents.accountsState" :now="agents.now" :admin="agents.accountsState === 'ready'" :set="setAccount" />
       </aside>
     </div>
 
     <SessionPanel
-      v-if="sessionId" :view="selected" :loading="!agents.loaded" :now="agents.now" :can-write="writable" :control-block="controlBlock"
+      v-if="sessionId && agents.loaded" :view="selected" :loading="false" :now="agents.now" :can-write="writable" :control-block="controlBlock"
       @close="closePanel" @control="control" @review="review"
     />
   </section>

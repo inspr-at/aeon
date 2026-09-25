@@ -124,6 +124,7 @@ function saveCaption(item: Attachment) { if (editing.value !== item.id) return; 
 .add-btn { display: inline-flex; align-items: center; gap: 5px; height: 26px; margin-left: auto; padding: 0 10px; border: 0; border-radius: 999px; background: transparent; box-shadow: inset 0 0 0 1px var(--line); color: var(--ink-2); font-size: 12px; font-weight: 600; }
 .add-btn:hover { color: var(--teal-ink); box-shadow: inset 0 0 0 1px var(--glass-rim); background: var(--row-hover); }
 .add-btn:focus-visible { box-shadow: var(--focus-ring); }
+@media (max-width: 600px) { .add-btn { height: 44px; } }
 .note { font-size: 12.5px; color: var(--ink-3); }
 .note.error { display: flex; align-items: center; gap: 6px; color: var(--danger); }
 .link { padding: 0; border: 0; background: none; color: var(--teal-ink); font-size: 12px; font-weight: 600; cursor: pointer; }
@@ -132,6 +133,7 @@ function saveCaption(item: Attachment) { if (editing.value !== item.id) return; 
 .empty:hover { color: var(--teal-ink); border-color: var(--chip-teal-line); background: var(--row-hover); }
 .empty:focus-visible { box-shadow: var(--focus-ring); }
 .list { display: flex; gap: 10px; margin: 0; padding: 2px 2px 6px; list-style: none; overflow-x: auto; scrollbar-width: thin; }
+.strip .list { min-height: 118px; }
 .item { position: relative; flex-shrink: 0; display: grid; gap: 5px; }
 .tile {
   position: relative; display: grid; place-items: center; width: 132px; height: 88px; padding: 0; border: 0; border-radius: 10px; overflow: hidden; cursor: zoom-in;

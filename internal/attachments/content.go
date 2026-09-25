@@ -76,7 +76,7 @@ func (m *Module) content(w http.ResponseWriter, r *http.Request) {
 		contentType = "image/png"
 	}
 	disposition := "attachment"
-	if strings.HasPrefix(contentType, "image/") || contentType == "application/pdf" {
+	if strings.HasPrefix(contentType, "image/") {
 		disposition = "inline"
 	}
 	w.Header().Set("ETag", etag)

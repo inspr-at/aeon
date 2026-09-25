@@ -284,7 +284,7 @@ watch(() => business.open.crm, on => { if (on) void store.load(true) })
 .keys-hint { width: fit-content; max-width: 100%; align-items: center; margin: 10px 0 0 auto; font-size: 12px; color: var(--ink-3); }
 .keys-hint > span { display: inline-flex; align-items: center; gap: 4px; }
 @media (max-width: 720px) {
-  .toolbar { gap: 8px; }
+  .toolbar { gap: 20px 8px; }
   .list-search { flex: 1 1 100%; width: auto; }
   .list-search .field { height: 44px; font-size: 16px; }
   .slash { display: none; }
