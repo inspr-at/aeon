@@ -143,6 +143,14 @@ func profileHundredths(v string) int {
 	return whole*100 + fraction
 }
 func validateProfile(ctx context.Context, tx pgx.Tx, d profileDefinition) error {
+	return validateProfileWithAssets(d, func(id string) (string, error) {
+		var kind string
+		err := tx.QueryRow(ctx, `SELECT content_type FROM quote_document_profile_assets WHERE id=$1::uuid`, id).Scan(&kind)
+		return kind, err
+	})
+}
+
+func validateProfileWithAssets(d profileDefinition, assetType func(string) (string, error)) error {
 	if d.Schema != "inspr.document-profile.v1" || (d.LayoutVariant != "standard" && d.LayoutVariant != "classic-v1") || (d.Locale != "de-AT" && d.Locale != "en") {
 		return bad("invalid document profile schema, layout or locale")
 	}
@@ -172,7 +180,7 @@ func validateProfile(ctx context.Context, tx pgx.Tx, d profileDefinition) error 
 	}
 	for key, value := range d.Cover {
 		if key == "brand_asset_id" {
-			if err := validateProfileImageAsset(ctx, tx, value, "cover brand"); err != nil {
+			if err := validateProfileImageAsset(assetType, value, "cover brand"); err != nil {
 				return err
 			}
 			continue
@@ -222,7 +230,8 @@ func validateProfile(ctx context.Context, tx pgx.Tx, d profileDefinition) error 
 			return bad("invalid profile font")
 		}
 		var kind string
-		if err := tx.QueryRow(ctx, `SELECT content_type FROM quote_document_profile_assets WHERE id=$1::uuid`, f.AssetID).Scan(&kind); err != nil {
+		kind, err := assetType(f.AssetID)
+		if err != nil {
 			return bad("profile font asset missing")
 		}
 		if kind != "font/ttf" && kind != "font/otf" && kind != "font/woff2" {
@@ -231,7 +240,7 @@ func validateProfile(ctx context.Context, tx pgx.Tx, d profileDefinition) error 
 	}
 	for _, asset := range []struct{ id, label string }{{d.Footer.AssetID, "footer"}, {d.Footer.DotsAssetID, "footer dots"}} {
 		if asset.id != "" {
-			if err := validateProfileImageAsset(ctx, tx, asset.id, asset.label); err != nil {
+			if err := validateProfileImageAsset(assetType, asset.id, asset.label); err != nil {
 				return err
 			}
 		}
@@ -239,12 +248,13 @@ func validateProfile(ctx context.Context, tx pgx.Tx, d profileDefinition) error 
 	return nil
 }
 
-func validateProfileImageAsset(ctx context.Context, tx pgx.Tx, id, label string) error {
+func validateProfileImageAsset(assetType func(string) (string, error), id, label string) error {
 	if !uuidRe.MatchString(id) {
 		return bad("invalid " + label + " asset")
 	}
 	var kind string
-	if err := tx.QueryRow(ctx, `SELECT content_type FROM quote_document_profile_assets WHERE id=$1::uuid`, id).Scan(&kind); err != nil {
+	kind, err := assetType(id)
+	if err != nil {
 		return bad(label + " asset missing")
 	}
 	if kind != "image/png" && kind != "image/svg+xml" {
@@ -639,13 +649,16 @@ func safeProfileSVG(raw []byte) bool {
 // Profile fonts and safe SVGs have their own strict validator above. The
 // general attachment upload deliberately does not accept those media types.
 // Keep the same tenant/hash file layout so Store.Open can serve the asset.
-func putProfileAsset(ctx context.Context, tenantID string, raw []byte, kind string) (attachments.Prepared, error) {
+func putProfileAsset(ctx context.Context, tenantID string, raw []byte, kind, filesDir string) (attachments.Prepared, error) {
 	if kind == "image/png" {
-		return (attachments.Store{}).Put(ctx, tenantID, bytes.NewReader(raw))
+		return (attachments.Store{FilesDir: filesDir}).Put(ctx, tenantID, bytes.NewReader(raw))
 	}
 	hash := sha256.Sum256(raw)
 	digest := hex.EncodeToString(hash[:])
-	root := os.Getenv("AEON_FILES_DIR")
+	root := filesDir
+	if root == "" {
+		root = os.Getenv("AEON_FILES_DIR")
+	}
 	if root == "" {
 		root = "./data/files"
 	}
@@ -701,7 +714,7 @@ func (m *Module) profileAssetUpload(w http.ResponseWriter, r *http.Request) {
 		respond(w, 0, nil, bad("expected TTF, OTF, WOFF2, PNG or safe SVG"))
 		return
 	}
-	prepared, e := putProfileAsset(r.Context(), p.TenantID, raw, kind)
+	prepared, e := putProfileAsset(r.Context(), p.TenantID, raw, kind, "")
 	if e != nil {
 		respond(w, 0, nil, bad("asset storage rejected file"))
 		return
