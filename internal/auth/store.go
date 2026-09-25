@@ -21,8 +21,9 @@ import (
 )
 
 var (
-	errNotMember = errors.New("not a member")
-	errNotFound  = errors.New("not found")
+	errNotMember        = errors.New("not a member")
+	errNotFound         = errors.New("not found")
+	errServicePrincipal = errors.New("agent keys cannot be issued for service principals")
 )
 
 func scanPrincipal(row pgx.Row) (tenant.Principal, error) {
@@ -371,6 +372,7 @@ func (m *Module) authenticateAgent(ctx context.Context, prefix, secret string) (
 			  AND EXISTS (
 			    SELECT 1 FROM principals p
 			    WHERE p.id = k.principal_id AND p.kind = 'agent'
+			      AND NOT (p.roles && ARRAY['system','importer','operator','embedding','quote_public_service','quote_confirmation_service']::text[])
 			  )
 			RETURNING k.principal_id::text, k.tenant_id::text, k.scopes
 		`, prefix, hashSecret(secret)).Scan(&principalID, &gotTenant, &scopes)
@@ -419,13 +421,34 @@ func (m *Module) createAgentKey(ctx context.Context, p tenant.Principal, name st
 	var rec keyRecord
 	err := m.inTenant(ctx, m.pool, p.TenantID, func(tx pgx.Tx) error {
 		var principalID string
-		err := tx.QueryRow(ctx, `
-			SELECT id::text FROM principals
-			WHERE kind = 'agent' AND name = $1
-			ORDER BY created_at
-			LIMIT 1
-		`, name).Scan(&principalID)
-		if errors.Is(err, pgx.ErrNoRows) {
+		rows, err := tx.Query(ctx, `
+			SELECT id::text,kind,roles && ARRAY['system','importer','operator','embedding','quote_public_service','quote_confirmation_service']::text[]
+			FROM principals WHERE name=$1 ORDER BY created_at,id FOR UPDATE`, name)
+		if err != nil {
+			return err
+		}
+		service := false
+		for rows.Next() {
+			var id, kind string
+			var reserved bool
+			if err := rows.Scan(&id, &kind, &reserved); err != nil {
+				rows.Close()
+				return err
+			}
+			service = service || reserved
+			if kind == string(tenant.Agent) && principalID == "" {
+				principalID = id
+			}
+		}
+		err = rows.Err()
+		rows.Close()
+		if err != nil {
+			return err
+		}
+		if service {
+			return errServicePrincipal
+		}
+		if principalID == "" {
 			err = tx.QueryRow(ctx, `
 				INSERT INTO principals (tenant_id, kind, name, roles)
 				VALUES ($1::uuid, 'agent', $2, '{}')

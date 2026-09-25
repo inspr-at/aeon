@@ -11,6 +11,7 @@ import (
 
 	"github.com/inspr-at/aeon/internal/db"
 	"github.com/inspr-at/aeon/internal/httpapi"
+	"github.com/inspr-at/aeon/internal/tenant"
 )
 
 // Module serves /api/kinds, /api/nodes and atomic /api/tags mutations.
@@ -36,10 +37,10 @@ func New(pool *pgxpool.Pool, events Writer) httpapi.Module {
 // server mux expects.
 func (m *Module) Mount(mux *http.ServeMux) {
 	mux.HandleFunc("GET /api/kinds", m.handleListKinds)
-	mux.HandleFunc("POST /api/kinds", m.handleCreateKind)
+	mux.HandleFunc("POST /api/kinds", adminOnly(m.handleCreateKind))
 	mux.HandleFunc("GET /api/kinds/{kindId}", m.handleGetKind)
-	mux.HandleFunc("PATCH /api/kinds/{kindId}", m.handleUpdateKind)
-	mux.HandleFunc("DELETE /api/kinds/{kindId}", m.handleDeleteKind)
+	mux.HandleFunc("PATCH /api/kinds/{kindId}", adminOnly(m.handleUpdateKind))
+	mux.HandleFunc("DELETE /api/kinds/{kindId}", adminOnly(m.handleDeleteKind))
 
 	mux.HandleFunc("GET /api/nodes", m.handleListNodes)
 	mux.HandleFunc("GET /api/projects", m.handleListProjects)
@@ -54,7 +55,21 @@ func (m *Module) Mount(mux *http.ServeMux) {
 	mux.HandleFunc("POST /api/nodes/{nodeId}/move", m.handleMoveNode)
 	mux.HandleFunc("POST /api/nodes/{nodeId}/project-move", m.handleProjectMove)
 	mux.HandleFunc("PATCH /api/tags/{tagId}", m.handleUpdateTag)
-	mux.HandleFunc("DELETE /api/tags/{tagId}", m.handleDeleteTag)
+	mux.HandleFunc("DELETE /api/tags/{tagId}", adminOnly(m.handleDeleteTag))
+}
+
+func adminOnly(next http.HandlerFunc) http.HandlerFunc {
+	return func(w http.ResponseWriter, r *http.Request) {
+		p, ok := requirePrincipal(w, r)
+		if !ok {
+			return
+		}
+		if !tenant.IsAdmin(p) {
+			writeError(w, http.StatusForbidden, "admin required")
+			return
+		}
+		next(w, r)
+	}
 }
 
 func (m *Module) tx(ctx context.Context, tenantID string, fn func(context.Context, pgx.Tx) error) error {

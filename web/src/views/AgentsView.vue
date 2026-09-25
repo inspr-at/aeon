@@ -4,7 +4,7 @@ import { computed, nextTick, onBeforeUnmount, onMounted, ref, watch } from 'vue'
 import { useRoute, useRouter } from 'vue-router'
 import { canWrite } from '../lib/activity'
 import { message, subscribeAgents, type AgentAccount, type Approval, type SessionControl } from '../lib/agents'
-import { controlBlocked, decidedApprovals, type Resource } from '../lib/agentState'
+import { controlBlocked, decidedApprovals, riskFor, type Resource } from '../lib/agentState'
 import { confirmAction } from '../lib/confirm'
 import { toast } from '../lib/toast'
 import { useAgents, type HeldRequest, type SessionView } from '../stores/agents'
@@ -33,6 +33,8 @@ const sessionId = computed(() => typeof route.params.sessionId === 'string' ? ro
 const selected = computed(() => agents.views.find(v => v.session.id === sessionId.value))
 const roles = computed(() => session.identity?.principal.roles ?? [])
 const writable = computed(() => canWrite(roles.value))
+const canDecide = computed(() => writable.value && session.identity?.principal.kind === 'person' && roles.value.some(role => ['admin', 'super_admin', 'member'].includes(role)))
+const canDecideApproval = (approval: Approval) => canDecide.value && (riskFor(approval) !== 'high' || roles.value.includes('admin') || roles.value.includes('super_admin'))
 const history = computed(() => decidedApprovals(agents.approvals, agents.now))
 const counts = computed(() => ({ working: agents.grouped.working.length, idle: agents.grouped.idle.length }))
 const summary = computed(() => {
@@ -224,7 +226,7 @@ watch(sessionId, id => { if (id) cursor.value = `s:${id}` }, { immediate: true }
       <div class="main-col">
         <ApprovalQueue
           ref="queue" :pending="agents.pending" :held="agents.held" :history="history" :now="agents.now" :loaded="agents.loaded"
-          :cursor="cursor" :can-decide="writable" :asker="agents.askerName" :resource="resource" :decide="decide" :revoke="agents.revoke" :resolve="resolveHeld"
+          :cursor="cursor" :can-decide="canDecide" :can-decide-approval="canDecideApproval" :asker="agents.askerName" :resource="resource" :decide="decide" :revoke="agents.revoke" :resolve="resolveHeld"
           @focus-row="id => cursor = id" @open-agent="openAgent"
         />
         <p v-if="agents.approvalsState === 'error'" class="inline-error" role="alert"><AppIcon name="alert" :size="14" />Permission requests could not be loaded: {{ agents.approvalsError }} <button type="button" class="btn sm" @click="agents.refreshApprovals()">Try again</button></p>
