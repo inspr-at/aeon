@@ -13,7 +13,7 @@ import (
 	"github.com/inspr-at/aeon/internal/httpapi"
 )
 
-// Module serves /api/kinds and /api/nodes.
+// Module serves /api/kinds, /api/nodes and atomic /api/tags mutations.
 type Module struct {
 	pool   *pgxpool.Pool
 	events Writer
@@ -21,7 +21,7 @@ type Module struct {
 
 var _ httpapi.Module = (*Module)(nil)
 
-// New returns the httpapi.Module for /api/kinds and /api/nodes.
+// New returns the httpapi.Module for kinds, nodes and tag assignment mutations.
 // The coordinator mounts it on the server; this package does not edit cmd/aeon.
 // events records each mutation inside the tenant transaction. A nil events
 // value selects SQLWriter until internal/events exposes its writer.

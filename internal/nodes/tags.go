@@ -140,6 +140,10 @@ func (m *Module) updateTag(ctx context.Context, p tenant.Principal, id string, p
 				if err := m.rewriteTagAssignments(ctx, tx, p, id, before.Title, &name); err != nil {
 					return err
 				}
+				fields, err = rewriteTagFields(fields, before.Title, &name)
+				if err != nil {
+					return err
+				}
 			}
 		}
 		if patch.Description != nil {
@@ -223,33 +227,7 @@ func (m *Module) rewriteTagAssignments(ctx context.Context, tx pgx.Tx, p tenant.
 		if err != nil {
 			return err
 		}
-		var fields map[string]json.RawMessage
-		if err := json.Unmarshal(before.Fields, &fields); err != nil {
-			return err
-		}
-		var tags []string
-		if err := json.Unmarshal(fields["tags"], &tags); err != nil {
-			return conflict("invalid tag assignments")
-		}
-		changed := make([]string, 0, len(tags))
-		seenReplacement := false
-		for _, tag := range tags {
-			if tag == oldName {
-				if newName == nil {
-					continue
-				}
-				tag = *newName
-			}
-			if newName != nil && tag == *newName {
-				if seenReplacement {
-					continue
-				}
-				seenReplacement = true
-			}
-			changed = append(changed, tag)
-		}
-		fields["tags"], _ = json.Marshal(changed)
-		raw, err := json.Marshal(fields)
+		raw, err := rewriteTagFields(before.Fields, oldName, newName)
 		if err != nil {
 			return err
 		}
@@ -264,4 +242,38 @@ func (m *Module) rewriteTagAssignments(ctx context.Context, tx pgx.Tx, p tenant.
 		}
 	}
 	return nil
+}
+
+func rewriteTagFields(raw json.RawMessage, oldName string, newName *string) (json.RawMessage, error) {
+	var fields map[string]json.RawMessage
+	if err := json.Unmarshal(raw, &fields); err != nil {
+		return nil, err
+	}
+	value, ok := fields["tags"]
+	if !ok {
+		return raw, nil
+	}
+	var tags []string
+	if err := json.Unmarshal(value, &tags); err != nil {
+		return nil, conflict("invalid tag assignments")
+	}
+	changed := make([]string, 0, len(tags))
+	seenReplacement := false
+	for _, tag := range tags {
+		if tag == oldName {
+			if newName == nil {
+				continue
+			}
+			tag = *newName
+		}
+		if newName != nil && tag == *newName {
+			if seenReplacement {
+				continue
+			}
+			seenReplacement = true
+		}
+		changed = append(changed, tag)
+	}
+	fields["tags"], _ = json.Marshal(changed)
+	return json.Marshal(fields)
 }

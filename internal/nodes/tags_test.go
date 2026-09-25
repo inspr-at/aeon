@@ -48,10 +48,12 @@ func nodeTags(t *testing.T, p tenant.Principal, id string) []string {
 func TestTagAssignmentMutationIsAtomicAndTenantScoped(t *testing.T) {
 	p := newPrincipal(t, "tags_a")
 	tag := createTestTag(t, p, "Old")
+	status, body := call(t, &p, http.MethodPatch, "/api/nodes/"+tag.ID, `{"fields":{"color":"blue","tags":["Old"]}}`)
+	decode[nodeJSON](t, status, body, http.StatusOK)
 	a := createTaggedNode(t, p, []string{"Old", "keep"})
 	b := createTaggedNode(t, p, []string{"keep", "Old"})
 	other := createTaggedNode(t, p, []string{"keep"})
-	status, _ := call(t, &p, http.MethodPatch, "/api/nodes/"+tag.ID, `{"title":"bypass"}`)
+	status, _ = call(t, &p, http.MethodPatch, "/api/nodes/"+tag.ID, `{"title":"bypass"}`)
 	if status != http.StatusBadRequest {
 		t.Fatalf("generic tag rename status %d", status)
 	}
@@ -65,10 +67,16 @@ func TestTagAssignmentMutationIsAtomicAndTenantScoped(t *testing.T) {
 	before := len(tenantEvents(t, p.TenantID))
 	foreignBefore := len(tenantEvents(t, foreign.TenantID))
 
-	status, body := call(t, &p, http.MethodPatch, "/api/tags/"+tag.ID, `{"name":"New","color":"green","description":"renamed"}`)
+	status, body = call(t, &p, http.MethodPatch, "/api/tags/"+tag.ID, `{"name":"New","color":"green","description":"renamed"}`)
 	updated := decode[nodeJSON](t, status, body, http.StatusOK)
 	if updated.Title != "New" || updated.Body != "renamed" {
 		t.Fatalf("tag: %+v", updated)
+	}
+	var ownFields struct {
+		Tags []string `json:"tags"`
+	}
+	if err := json.Unmarshal(updated.Fields, &ownFields); err != nil || !reflect.DeepEqual(ownFields.Tags, []string{"New"}) {
+		t.Fatalf("tag's own assignment: %s: %v", updated.Fields, err)
 	}
 	for _, id := range []string{a.ID, b.ID} {
 		if got := nodeTags(t, p, id); !reflect.DeepEqual(got, []string{"New", "keep"}) && !reflect.DeepEqual(got, []string{"keep", "New"}) {
