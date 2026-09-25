@@ -68,7 +68,8 @@ func (fs *flagSet) strings(dest *[]string, name string, usage string) {
 }
 
 func (fs *flagSet) lookup(name string) *flagDef {
-	for _, f := range fs.flags {
+	for i := len(fs.flags) - 1; i >= 0; i-- {
+		f := fs.flags[i]
 		if f.name == name || (len(name) == 1 && f.short == name[0]) {
 			return f
 		}

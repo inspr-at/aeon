@@ -565,7 +565,11 @@ test('gate states: a digest mismatch or missing permissions close Customers and 
 
 test('at 390 the meta line wraps without a separator at the start or end of a line; the internal key stays hidden', async ({ page }) => {
   await page.setViewportSize({ width: 390, height: 844 })
-  await setup(page)
+  const { data } = await setup(page)
+  // Long enough to wrap whatever the platform's scrollbars take: overlay scrollbars
+  // (macOS without a mouse) leave 15px more than classic ones, and "Food" alone
+  // fitted on one line there.
+  data.customers.find(c => c.id === HOFER)!.industry = 'Bakery and confectionery'
   await page.goto(`/business/customers/${HOFER}`)
   const line = page.locator('.summary .dot-list')
   await expect(line.locator('> *')).toHaveCount(3)

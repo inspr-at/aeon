@@ -53,10 +53,13 @@ export const getQuoteSettings = () => read<QuoteSettings>('/quotes/settings')
 // PATCH /api/quotes/settings (admins) replaces the whole settings record; texts
 // and layout travel along unchanged until the quote editor edits them.
 export async function saveQuoteSettings(current: QuoteSettings, change: { sender: Record<string, string>; default_currency: string; numbering_time_zone: string; default_profile_id?: string }): Promise<QuoteSettings> {
+  // The default document profile rides along unchanged unless this change sets it;
+  // the server reads a missing one as "none", so an empty choice is left out.
+  const profile = change.default_profile_id ?? current.default_profile_id ?? ''
   const body = {
     expected_revision: current.revision, numbering_time_zone: change.numbering_time_zone, default_currency: change.default_currency,
     sender: change.sender, defaults: current.defaults ?? {}, layout: current.layout ?? {}, smtp_confirmation_enabled: false,
-    default_profile_id: change.default_profile_id ?? current.default_profile_id ?? '',
+    ...(profile ? { default_profile_id: profile } : {}),
   }
   const response = await api('/quotes/settings', { method: 'PATCH', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(body) })
   if (!response.ok) {

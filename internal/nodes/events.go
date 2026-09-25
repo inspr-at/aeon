@@ -14,6 +14,7 @@ const (
 	evNodeCreated = "node.created"
 	evNodeUpdated = "node.updated"
 	evNodeMoved   = "node.moved"
+	evNodeProjectMoved = "node.project_moved"
 	evNodeDeleted = "node.deleted"
 	evKindCreated = "kind.created"
 	evKindUpdated = "kind.updated"
