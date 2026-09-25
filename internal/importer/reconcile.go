@@ -101,6 +101,17 @@ func checksum(value any) (string, error) {
 	return hex.EncodeToString(h[:]), nil
 }
 
+// A classic relation's identity is its type and endpoints. The API may add
+// timestamps or display fields after import without changing the link. Keep
+// checking the native projection separately in relationPresent.
+func relationChecksum(record Record) (string, error) {
+	return checksum(Record{
+		"type":      stringField(record, "type"),
+		"source_id": record["source_id"],
+		"target_id": record["target_id"],
+	})
+}
+
 func recordChecksum(record Record, project bool, title, body, state string, fields Record) (string, error) {
 	classic := Record{}
 	for key, value := range record {
@@ -285,7 +296,12 @@ func ReconcileWithOptions(ctx context.Context, source *HTTPSource, pool *pgxpool
 				if err != nil {
 					return ReconcileReport{}, err
 				}
-				hash, err := checksum(record)
+				var hash string
+				if group.name == "relations" {
+					hash, err = relationChecksum(record)
+				} else {
+					hash, err = checksum(record)
+				}
 				if err != nil {
 					return ReconcileReport{}, err
 				}
@@ -399,6 +415,24 @@ func addSourcePeople(set reconcileSet, pid, iid int64, issue Record, fields ...s
 	}
 }
 
+func targetPersonID(classicID int64, principal string, users map[string]map[string]bool, known map[string]bool) string {
+	id := strconv.FormatInt(classicID, 10)
+	if users[principal][id] {
+		return id
+	}
+	if len(users[principal]) == 1 {
+		for other := range users[principal] {
+			return other
+		}
+	}
+	// Deleted source users may be absent from /users and have no Aeon
+	// projection. The retained classic ID still detects later reassignment.
+	if principal == "" && !known[id] {
+		return id
+	}
+	return "projection-missing"
+}
+
 type targetNode struct {
 	ID, Key, Kind, Title, Body, State, ParentID string
 	Fields                                      []byte
@@ -503,18 +537,26 @@ func readReconcileTarget(ctx context.Context, tx pgx.Tx, tenantID, sourceID, sel
 	links.Close()
 	// A linked principal has a different UUID from its classic identity row.
 	// Compare the resolved Aeon assignment to its canonical classic user ID.
-	userByPrincipal := map[string]string{}
-	users, err := tx.Query(ctx, `SELECT coalesce(p.linked_to,p.id)::text,i.subject FROM principals p JOIN identities i ON i.id=p.identity_id WHERE p.tenant_id=$1 AND i.issuer='paimos-classic' AND starts_with(i.subject,$2)`, tenantID, sourceID+":")
+	userByPrincipal := map[string]map[string]bool{}
+	knownClassicUsers := map[string]bool{}
+	users, err := tx.Query(ctx, `SELECT p.id::text,coalesce(p.linked_to,p.id)::text,i.subject FROM principals p JOIN identities i ON i.id=p.identity_id WHERE p.tenant_id=$1 AND i.issuer='paimos-classic' AND starts_with(i.subject,$2)`, tenantID, sourceID+":")
 	if err != nil {
 		return err
 	}
 	for users.Next() {
-		var principal, subject string
-		if err := users.Scan(&principal, &subject); err != nil {
+		var alias, principal, subject string
+		if err := users.Scan(&alias, &principal, &subject); err != nil {
 			users.Close()
 			return err
 		}
-		userByPrincipal[principal] = strings.TrimPrefix(subject, sourceID+":")
+		classicID := strings.TrimPrefix(subject, sourceID+":")
+		knownClassicUsers[classicID] = true
+		for _, id := range []string{alias, principal} {
+			if userByPrincipal[id] == nil {
+				userByPrincipal[id] = map[string]bool{}
+			}
+			userByPrincipal[id][classicID] = true
+		}
 	}
 	if err := users.Err(); err != nil {
 		users.Close()
@@ -534,13 +576,13 @@ func readReconcileTarget(ctx context.Context, tx pgx.Tx, tenantID, sourceID, sel
 			prefix = "project"
 		}
 		for sourceField, targetField := range links {
-			if _, exists := classic[sourceField]; !exists {
+			classicID, exists := intField(Record(classic), sourceField)
+			if !exists {
 				continue
 			}
 			principal := stringField(fields, targetField)
-			if principal != "" {
-				target.put(n.Project, "people_links", fmt.Sprintf("%s:%d:%s", prefix, n.ClassicID, sourceField), userByPrincipal[principal])
-			}
+			resolved := targetPersonID(classicID, principal, userByPrincipal, knownClassicUsers)
+			target.put(n.Project, "people_links", fmt.Sprintf("%s:%d:%s", prefix, n.ClassicID, sourceField), resolved)
 		}
 	}
 	query := `SELECT e.node_id::text,e.type,e.after FROM events e WHERE e.tenant_id=$1 AND e.type IN ('import.comment','import.relation') AND e.after->>'classic_ref' LIKE $2 ORDER BY e.id`
@@ -572,7 +614,12 @@ func readReconcileTarget(ctx context.Context, tx pgx.Tx, tenantID, sourceID, sel
 			eventsRows.Close()
 			return err
 		}
-		hash, err := checksum(payload.Record)
+		var hash string
+		if category == "relations" {
+			hash, err = relationChecksum(payload.Record)
+		} else {
+			hash, err = checksum(payload.Record)
+		}
 		if err != nil {
 			eventsRows.Close()
 			return err
