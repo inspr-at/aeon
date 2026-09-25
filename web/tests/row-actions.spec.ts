@@ -116,21 +116,31 @@ test('an issued quote is kept: archive instead of delete, revise, and its custom
   await expect(menu(page)).toBeVisible()
   const panel = (await page.locator('.floating').boundingBox())!
   expect(Math.abs(panel.x - (box.x + box.width / 2))).toBeLessThan(2)
-  await expect(items(page).filter({ hasText: 'Create customer link' })).toBeVisible()
+  await expect(items(page).filter({ hasText: 'Create customer link in Details' })).toBeVisible()
   expect(await labels(page)).not.toContain('Delete draft')
   expect(await labels(page)).toContain('Revise as version 2…')
   expect(await labels(page)).toContain('Archive')
 
-  await items(page).filter({ hasText: 'Create customer link' }).click()
-  await expect(toast(page)).toContainText(/^Created a customer link for A\d+-11, open until .+, and copied it\./)
-  expect(await clipboard(page)).toMatch(/\/offers\/sel-demo\/tok-link-\d+$/)
-  expect(calls.some(c => c.method === 'POST' && c.path.endsWith('/versions/1/public-link'))).toBe(true)
+  await items(page).filter({ hasText: 'Create customer link in Details' }).click()
+  await expect(toast(page)).toContainText(/^Create the customer link for A\d+-11 in Details so you can save it\.$/)
+  expect(calls.some(c => c.method === 'POST' && c.path.endsWith('/versions/1/public-link'))).toBe(false)
+  const dock = page.locator('.quote-dock')
+  await expect(dock).toBeVisible()
+  await dock.getByRole('button', { name: 'Details' }).click()
+  const card = dock.locator('section.d-card', { has: page.getByRole('heading', { name: 'Customer link' }) })
+  await card.getByRole('button', { name: 'Create link' }).click()
+  await expect.poll(() => calls.some(c => c.method === 'POST' && c.path.endsWith('/versions/1/public-link'))).toBe(true)
+  const url = await card.getByRole('textbox', { name: 'Customer link' }).inputValue()
+  expect(url).toMatch(/\/offers\/sel-demo\/tok-link-\d+$/)
+  await card.getByRole('button', { name: 'Copy', exact: true }).click()
+  expect(await clipboard(page)).toBe(url)
 
   // Now the menu copies it.
   await row.locator('td.c-customer').click({ button: 'right' })
   await expect(items(page).filter({ hasText: 'Copy customer link' })).toBeVisible()
   await items(page).filter({ hasText: 'Copy customer link' }).click()
   await expect(toast(page)).toContainText(/^Copied the customer link of A\d+-11\./)
+  expect(await clipboard(page)).toBe(url)
 
   // Archive: gone from the list, back with Undo.
   await row.locator('td.c-customer').click({ button: 'right' })

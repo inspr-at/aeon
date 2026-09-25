@@ -183,7 +183,7 @@ test('the customer link: an end date, a stable copy and exact QR; revoking asks 
   await full(page, Q.issued)
   const card = details(page).locator('section', { has: page.getByRole('heading', { name: 'Customer link' }) })
   await expect(card).toContainText('Whoever has it can read the quote and accept it')
-  await expect(card).toContainText('verifier and admin-only copy are stored separately')
+  await expect(card).toContainText('The verifier is stored separately from any encrypted admin-only copy.')
   await card.getByLabel('Link ends after').selectOption('14')
   await card.getByRole('button', { name: 'Create link' }).click()
   await expect.poll(() => calls.some(c => c.method === 'POST' && c.path.endsWith('/public-link'))).toBe(true)
@@ -201,7 +201,7 @@ test('the customer link: an end date, a stable copy and exact QR; revoking asks 
   expect(encoded).toBe(await url.inputValue())
   await card.getByRole('button', { name: 'Copy' }).click()
   await expect(card.getByRole('button', { name: 'Copied' })).toBeVisible()
-  expect(await page.evaluate(() => navigator.clipboard.readText())).toMatch(/\/offers\/sel-demo\/tok-link-\d+$/)
+  expect(await page.evaluate(() => navigator.clipboard.readText())).toBe(originalUrl)
   await expect(card.getByText('Active', { exact: true })).toBeVisible()
 
   await page.reload()
@@ -211,6 +211,28 @@ test('the customer link: an end date, a stable copy and exact QR; revoking asks 
   await page.getByRole('dialog', { name: 'Revoke the customer link?' }).getByRole('button', { name: 'Revoke link' }).click()
   await expect(card.getByText(/^Revoked on/)).toBeVisible()
   await expect(card.getByRole('button', { name: 'Create a new link' })).toBeVisible()
+})
+
+test('without a customer-link key, the new link is shown once and cannot be copied again', async ({ page, context }) => {
+  await context.grantPermissions(['clipboard-read', 'clipboard-write'])
+  const { calls } = await setup(page, { linkKeyConfigured: false })
+  await full(page, Q.issued)
+  const card = details(page).locator('section', { has: page.getByRole('heading', { name: 'Customer link' }) })
+  await card.getByRole('button', { name: 'Create link' }).click()
+  const url = card.getByRole('textbox', { name: 'Customer link' })
+  await expect(url).toHaveValue(/\/offers\/sel-demo\/tok-link-\d+$/)
+  const shownOnce = await url.inputValue()
+  await expect(card).toContainText('Copy or save this link now. It cannot be copied or shown as a QR code after you leave this page.')
+  await card.getByRole('button', { name: 'Copy' }).click()
+  expect(await page.evaluate(() => navigator.clipboard.readText())).toBe(shownOnce)
+  await expect.poll(() => calls.some(c => c.method === 'POST' && c.path.endsWith('/public-link'))).toBe(true)
+
+  await page.reload()
+  await expect(card.getByText('This server has no customer-link key. This link cannot be copied or shown as a QR code again. Revoke it to create a new one.')).toBeVisible()
+  await expect(card.getByRole('textbox', { name: 'Customer link' })).toHaveCount(0)
+  await expect(card.getByRole('button', { name: 'Copy' })).toHaveCount(0)
+  await expect(card.getByRole('button', { name: 'QR code' })).toHaveCount(0)
+  await expect(card.getByRole('button', { name: 'Revoke link' })).toBeVisible()
 })
 
 test('an accepted quote shows its acceptance, the receipt as fixed evidence and its versions', async ({ page }) => {
