@@ -117,7 +117,11 @@ start_app() {
     if ! docker exec "$app" id -u >/dev/null 2>&1; then break; fi
     sleep 1
   done
-  if (( healthy == 0 )); then echo "$mode image health failed" >&2; exit 1; fi
+  if (( healthy == 0 )); then
+    echo "$mode image health failed; last container log lines:" >&2
+    docker logs --tail 40 "$app" >&2 2>&1 || true
+    exit 1
+  fi
   [[ "$(docker exec "$app" id -u)" == 65532 ]] || { echo 'runtime UID is not 65532' >&2; exit 1; }
   [[ "$(docker exec "$app" id -g)" == 65532 ]] || { echo 'runtime GID is not 65532' >&2; exit 1; }
   [[ "$(docker exec "$app" stat -c '%u:%g:%a' /data/files)" == 65532:65532:750 ]] || {
