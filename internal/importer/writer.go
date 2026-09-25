@@ -40,7 +40,7 @@ func (w PostgresWriter) Write(ctx context.Context, s Snapshot, tenantSlug string
 		if _, err := tx.Exec(ctx, `SELECT pg_advisory_xact_lock(hashtextextended($1,42))`, tenantID+":"+s.SourceID); err != nil {
 			return err
 		}
-		actor, users, err := importUsers(ctx, tx, tenantID, s)
+		actor, users, err := importUsers(ctx, tx, tenantID, s, &r.Conflicts)
 		if err != nil {
 			return err
 		}
@@ -81,7 +81,7 @@ func (w PostgresWriter) Write(ctx context.Context, s Snapshot, tenantSlug string
 				return err
 			}
 			key := "PRJ-" + strconv.FormatInt(pid, 10)
-			id, created, updated, err := upsertNode(ctx, tx, tenantID, s.SourceID, kind, key, stringField(p.Record, "name"), stringField(p.Record, "description"), stringField(p.Record, "status"), "", p.Record, principalRefs(p.Record, users, "product_owner"), actor, true)
+			id, created, updated, err := upsertNode(ctx, tx, tenantID, s.SourceID, kind, key, stringField(p.Record, "name"), stringField(p.Record, "description"), stringField(p.Record, "status"), "", p.Record, principalRefs(p.Record, users, "product_owner"), actor, true, &r.Conflicts)
 			if err != nil {
 				return fmt.Errorf("project %d: %w", pid, err)
 			}
@@ -109,7 +109,7 @@ func (w PostgresWriter) Write(ctx context.Context, s Snapshot, tenantSlug string
 			if err != nil {
 				return err
 			}
-			id, created, updated, err := upsertNode(ctx, tx, tenantID, s.SourceID, kind, key, stringField(item, "title"), issueBody(item), stringField(item, "status"), "", item, principalRefs(item, users, "assignee_id", "created_by", "accepted_by", "deleted_by"), actor, false)
+			id, created, updated, err := upsertNode(ctx, tx, tenantID, s.SourceID, kind, key, stringField(item, "title"), issueBody(item), stringField(item, "status"), "", item, principalRefs(item, users, "assignee_id", "created_by", "accepted_by", "deleted_by"), actor, false, &r.Conflicts)
 			if err != nil {
 				return fmt.Errorf("orphan issue %d: %w", iid, err)
 			}
@@ -137,7 +137,7 @@ func (w PostgresWriter) Write(ctx context.Context, s Snapshot, tenantSlug string
 				if err != nil {
 					return err
 				}
-				id, created, updated, err := upsertNode(ctx, tx, tenantID, s.SourceID, kind, key, stringField(item, "title"), issueBody(item), stringField(item, "status"), projectIDs[pid], item, principalRefs(item, users, "assignee_id", "created_by", "accepted_by", "deleted_by"), actor, false)
+				id, created, updated, err := upsertNode(ctx, tx, tenantID, s.SourceID, kind, key, stringField(item, "title"), issueBody(item), stringField(item, "status"), projectIDs[pid], item, principalRefs(item, users, "assignee_id", "created_by", "accepted_by", "deleted_by"), actor, false, &r.Conflicts)
 				if err != nil {
 					return fmt.Errorf("issue %s: %w", key, err)
 				}
@@ -162,6 +162,14 @@ func (w PostgresWriter) Write(ctx context.Context, s Snapshot, tenantSlug string
 			if parentID == "" {
 				continue
 			}
+			diverged, err := importNodeDiverged(ctx, tx, tenantID, issueIDs[iid])
+			if err != nil {
+				return err
+			}
+			if diverged {
+				r.Conflicts = appendConflict(r.Conflicts, ImportConflict{ClassicID: iid, Key: stringField(item, "issue_key"), Reason: "Aeon node changed since last import"})
+				continue
+			}
 			if _, err := setParent(ctx, tx, tenantID, actor, issueIDs[iid], parentID); err != nil {
 				return fmt.Errorf("parent for %d: %w", iid, err)
 			}
@@ -178,6 +186,16 @@ func (w PostgresWriter) Write(ctx context.Context, s Snapshot, tenantSlug string
 				ref, err := importEvent(ctx, tx, tenantID, actor, nodeID, "import.relation", s.SourceID, rel, "id", typ+":"+strconv.FormatInt(sourceID, 10)+":"+strconv.FormatInt(targetID, 10))
 				if err != nil {
 					return err
+				}
+				if typ == "parent" && issueIDs[targetID] != "" {
+					diverged, err := importNodeDiverged(ctx, tx, tenantID, issueIDs[targetID])
+					if err != nil {
+						return err
+					}
+					if diverged {
+						r.Conflicts = appendConflict(r.Conflicts, ImportConflict{ClassicID: targetID, Key: stringField(issueRows[targetID], "issue_key"), Reason: "Aeon node changed since last import"})
+						continue
+					}
 				}
 				wrote, err := applyClassicRelation(ctx, tx, tenantID, actor, classicRelation{
 					Type:         typ,
@@ -206,7 +224,7 @@ func (w PostgresWriter) Write(ctx context.Context, s Snapshot, tenantSlug string
 	return r, err
 }
 
-func importUsers(ctx context.Context, tx pgx.Tx, tenantID string, s Snapshot) (string, map[int64]string, error) {
+func importUsers(ctx context.Context, tx pgx.Tx, tenantID string, s Snapshot, conflicts *[]ImportConflict) (string, map[int64]string, error) {
 	users, err := storedUserRefs(ctx, tx, tenantID, s.SourceID)
 	if err != nil {
 		return "", nil, err
@@ -232,6 +250,34 @@ func importUsers(ctx context.Context, tx pgx.Tx, tenantID string, s Snapshot) (s
 			WHERE i.issuer='paimos-classic' AND i.subject=$2`, tenantID, subject).Scan(&before)
 		if err != nil && !errors.Is(err, pgx.ErrNoRows) {
 			return "", nil, err
+		}
+		if len(before) != 0 {
+			var existing struct {
+				Principal struct {
+					ID string `json:"id"`
+				} `json:"principal"`
+			}
+			if err := json.Unmarshal(before, &existing); err != nil {
+				return "", nil, err
+			}
+			if existing.Principal.ID != "" {
+				var previous []byte
+				err = tx.QueryRow(ctx, `SELECT after FROM events WHERE tenant_id=$1
+			 AND type IN ('import.user_created','import.user_updated')
+			 AND after->'principal'->>'id'=$2
+			 ORDER BY id DESC LIMIT 1`, tenantID, existing.Principal.ID).Scan(&previous)
+				if err != nil && !errors.Is(err, pgx.ErrNoRows) {
+					return "", nil, err
+				}
+				diverged, err := userImportDiverged(before, previous)
+				if err != nil {
+					return "", nil, err
+				}
+				if diverged {
+					*conflicts = appendConflict(*conflicts, ImportConflict{ClassicID: id, Key: "user:" + strconv.FormatInt(id, 10), Reason: "Aeon principal changed since last import"})
+					continue
+				}
+			}
 		}
 		createdAt := parseClassicTime(stringField(u, "created_at"))
 		if err := tx.QueryRow(ctx, `INSERT INTO identities(issuer,subject,email,display_name,created_at) VALUES('paimos-classic',$1,$2,$3,coalesce($4::timestamptz,now())) ON CONFLICT(issuer,subject) DO UPDATE SET email=coalesce(EXCLUDED.email,identities.email),display_name=EXCLUDED.display_name RETURNING id`, subject, nullString(stringField(u, "email")), name, createdAt).Scan(&identityID); err != nil {
@@ -287,6 +333,30 @@ func importUsers(ctx context.Context, tx pgx.Tx, tenantID string, s Snapshot) (s
 	return actor, users, nil
 }
 
+func userImportDiverged(current, imported []byte) (bool, error) {
+	if len(imported) == 0 {
+		return true, nil
+	}
+	var have, baseline map[string]map[string]any
+	if err := json.Unmarshal(current, &have); err != nil {
+		return false, err
+	}
+	if err := json.Unmarshal(imported, &baseline); err != nil {
+		return false, err
+	}
+	for section, fields := range map[string][]string{
+		"identity":  {"email", "display_name"},
+		"principal": {"name", "email", "roles"},
+	} {
+		for _, field := range fields {
+			if !reflect.DeepEqual(have[section][field], baseline[section][field]) {
+				return true, nil
+			}
+		}
+	}
+	return false, nil
+}
+
 func ensureImportActor(ctx context.Context, tx pgx.Tx, tenantID string) (string, error) {
 	var actor string
 	err := tx.QueryRow(ctx, `SELECT id FROM principals WHERE tenant_id=$1 AND kind='agent' AND name='Classic Paimos importer' ORDER BY created_at LIMIT 1`, tenantID).Scan(&actor)
@@ -301,7 +371,7 @@ func ensureImportActor(ctx context.Context, tx pgx.Tx, tenantID string) (string,
 	return actor, err
 }
 
-func upsertNode(ctx context.Context, tx pgx.Tx, tenantID, sourceID, kindID, key, title, body, state, parentID string, original, refs Record, actor string, project bool) (string, bool, bool, error) {
+func upsertNode(ctx context.Context, tx pgx.Tx, tenantID, sourceID, kindID, key, title, body, state, parentID string, original, refs Record, actor string, project bool, conflicts *[]ImportConflict) (string, bool, bool, error) {
 	if title == "" {
 		return "", false, false, errors.New("title is empty")
 	}
@@ -320,7 +390,7 @@ func upsertNode(ctx context.Context, tx pgx.Tx, tenantID, sourceID, kindID, key,
 	}
 	if !created {
 		var old map[string]any
-		if err := json.Unmarshal(oldFields, &old); err != nil {
+		if err := decodeExactJSON(oldFields, &old); err != nil {
 			return "", false, false, err
 		}
 		classic, _ := old["classic"].(map[string]any)
@@ -329,13 +399,22 @@ func upsertNode(ctx context.Context, tx pgx.Tx, tenantID, sourceID, kindID, key,
 		}
 		var now any
 		var prior any
-		if err := json.Unmarshal(bodyJSON, &now); err != nil {
+		if err := decodeExactJSON(bodyJSON, &now); err != nil {
 			return "", false, false, err
 		}
-		if err := json.Unmarshal(oldFields, &prior); err != nil {
+		if err := decodeExactJSON(oldFields, &prior); err != nil {
 			return "", false, false, err
 		}
 		if oldTitle == title && oldBody == body && oldState == state && reflect.DeepEqual(prior, now) {
+			return id, false, false, nil
+		}
+		diverged, err := importNodeDiverged(ctx, tx, tenantID, id)
+		if err != nil {
+			return "", false, false, err
+		}
+		if diverged {
+			classicID, _ := intField(original, "id")
+			*conflicts = appendConflict(*conflicts, ImportConflict{ClassicID: classicID, Key: key, Reason: "Aeon node changed since last import"})
 			return id, false, false, nil
 		}
 		_, err = tx.Exec(ctx, `UPDATE nodes SET title=$3,body=$4,state=$5,fields=$6::jsonb,updated_at=coalesce($7::timestamptz,now()) WHERE tenant_id=$1 AND id=$2`, tenantID, id, title, body, state, string(bodyJSON), parseClassicTime(stringField(original, "updated_at")))
@@ -359,6 +438,44 @@ func upsertNode(ctx context.Context, tx pgx.Tx, tenantID, sourceID, kindID, key,
 		Before: rawSnapshot(beforeJSON), After: json.RawMessage(afterJSON),
 	})
 	return id, created, !created, err
+}
+
+func appendConflict(existing []ImportConflict, next ImportConflict) []ImportConflict {
+	for _, item := range existing {
+		if item.Key == next.Key && item.Reason == next.Reason {
+			return existing
+		}
+	}
+	return append(existing, next)
+}
+
+// The last importer event is the write baseline. Compare only fields an import
+// can change; timestamps and sibling position are owned by other workflows.
+func importNodeDiverged(ctx context.Context, tx pgx.Tx, tenantID, nodeID string) (bool, error) {
+	var current, imported []byte
+	if err := tx.QueryRow(ctx, `SELECT to_jsonb(n) FROM nodes n WHERE tenant_id=$1 AND id=$2`, tenantID, nodeID).Scan(&current); err != nil {
+		return false, err
+	}
+	err := tx.QueryRow(ctx, `SELECT after FROM events WHERE tenant_id=$1 AND node_id=$2 AND type IN ('import.node_created','import.node_updated','import.parent_changed') ORDER BY id DESC LIMIT 1`, tenantID, nodeID).Scan(&imported)
+	if errors.Is(err, pgx.ErrNoRows) {
+		return true, nil
+	}
+	if err != nil {
+		return false, err
+	}
+	var have, baseline map[string]any
+	if err := json.Unmarshal(current, &have); err != nil {
+		return false, err
+	}
+	if err := json.Unmarshal(imported, &baseline); err != nil {
+		return false, err
+	}
+	for _, field := range []string{"title", "body", "fields", "kind_id", "parent_id", "deleted_at"} {
+		if !reflect.DeepEqual(have[field], baseline[field]) {
+			return true, nil
+		}
+	}
+	return canonicalState(fmt.Sprint(have["state"])) != canonicalState(fmt.Sprint(baseline["state"])), nil
 }
 
 func rawSnapshot(b []byte) any {

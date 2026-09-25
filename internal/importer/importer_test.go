@@ -37,6 +37,7 @@ func fakeClassic(t *testing.T) (*HTTPSource, func()) {
 		"/api/issues/11/comments":        `[{"id":30,"issue_id":11,"body":"comment","visibility":"internal","created_at":"2026-01-01 12:00:00"}]`,
 		"/api/issues/11/history":         `[{"id":40,"issue_id":11,"snapshot":{"status":"open"},"changed_at":"2026-01-01 12:00:00"}]`,
 		"/api/issues/11/attachments":     `[{"id":50,"issue_id":11,"object_key":"private/object","filename":"a.txt","size_bytes":4,"created_at":"2026-01-01 12:00:00"}]`,
+		"/api/attachments/50":            `data`,
 	}
 	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		if r.Method != "GET" {

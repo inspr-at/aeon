@@ -122,4 +122,29 @@
 // required. Old imports that retained only a username cannot reconstruct a full
 // name: a fresh user snapshot with a display name is needed. No live source is
 // contacted by the backfill. Migration 0531 normalizes existing states atomically.
+//
+// CB3 cutover verification (AEON-117): the coordinator wires the CLI verbs;
+// this package does not edit cmd/aeon. For `aeon import reconcile --source-url
+// URL --api-key-file FILE --tenant SLUG`, construct an HTTPSource, configure
+// its GET request cap/delay, open the target pool, and call
+// Reconcile(ctx, source, pool, attachments.Store{FilesDir: cfg.FilesDir}, slug,
+// projectKey). JSON-encode ReconcileReport and print Summary as the short text
+// result. Reconcile reads classic projects, issues, comments, relations,
+// attachment bytes, knowledge and user links; it reads actual Aeon attachment
+// bytes through Store.Open. Per-project categories include counts, aggregate
+// checksums, and missing/extra/changed classic IDs. A skipped source record
+// fails reconciliation rather than producing a false clean result. It never
+// writes either system and classic requests are GET only.
+//
+// `aeon import paimos` can invoke Importer.RunDelta for the final delta. It
+// scans a complete classic GET snapshot because several classic record types
+// lack trustworthy update timestamps; writer provenance comparisons apply
+// only new or changed records. Import events are append-only, repeated runs
+// are idempotent, and an Aeon edit after the prior import is reported in
+// Report.Conflicts instead of being overwritten. A conflict needs operator
+// resolution before cutover; the importer does not silently pick a winner.
+// RunDeltaSnapshot returns that source snapshot. Call ImportAttachmentDelta
+// with it, the same tenant/actor IDs and Store to refresh changed classic
+// bytes and copy new files. Its report separately lists attachment conflicts. Existing
+// ImportAttachments retains its original skip-existing behavior.
 package importer
