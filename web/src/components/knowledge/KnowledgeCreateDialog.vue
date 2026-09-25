@@ -183,7 +183,7 @@ h2 { font-size: 18px; }
   .kind { min-height: 48px; }
   .kind-label { width: auto; flex: 1; }
   .kind-hint { display: none; }
-  .slug-box { height: 44px; }
+  .slug-box { height: 48px; }
   .slug-input, .slug-prefix { font-size: 16px; }
   .create-foot { flex-wrap: wrap; }
   .create-foot .f-hint { display: none; }

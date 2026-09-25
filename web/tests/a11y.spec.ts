@@ -6,6 +6,7 @@ import { fixtures, me, mockWork } from './work-fixtures'
 import { agentData, mockAgents } from './agents-fixtures'
 import { businessData, mira, mockBusiness, type BusinessMockOptions } from './business-fixtures'
 import { journeyWorld, mockJourney, type JourneyStart, type WorldOptions } from './journey-fixtures'
+import { knowledgeWorld, mockKnowledge } from './knowledge-fixtures'
 
 const world = {
   me: me.id,
@@ -20,6 +21,7 @@ const world = {
 async function signedIn(page: Page, empty = false) {
   await mockWork(page, fixtures())
   await mockAgents(page, agentData({ ...world, empty }))
+  await mockKnowledge(page, knowledgeWorld())
 }
 function business(options: BusinessMockOptions = {}) {
   return async (page: Page) => {
@@ -109,6 +111,9 @@ const screens: [string, (page: Page) => Promise<void>, string, (page: Page) => P
     await page.getByRole('button', { name: 'Add rate' }).nth(1).click()
     await expect(page.getByRole('combobox', { name: 'Unit' })).toBeFocused()
   }],
+  ['knowledge tab', signedIn, '/p/PHAROS/knowledge', async page => { await expect(page.locator('.k-row').first()).toBeVisible() }],
+  ['knowledge entry', signedIn, '/p/PHAROS/knowledge/runbook/deploy-release', async page => { await expect(page.locator('.e-body')).toBeVisible() }],
+  ['knowledge across projects', signedIn, '/knowledge?q=deploy', async page => { await expect(page.locator('.kp-row').first()).toBeVisible() }],
   ['agents approve', signedIn, '/agents', async page => {
     await expect(page.locator('.agents-page .row').first()).toBeVisible()
     await page.keyboard.press('j'); await page.keyboard.press('a')

@@ -115,8 +115,8 @@ const RESERVED_MEMORY = new Set(['references', 'stale', 'proposed', 'needs-revie
 export function slugProblem(type: KnowledgeType, slug: string): string {
   if (!slug) return 'A slug is needed; agents find the entry by it.'
   if (slug.length > SLUG_MAX) return `At most ${SLUG_MAX} characters.`
+  if (/[^a-z0-9_-]/.test(slug)) return 'Use lower-case letters, digits, - and _ only.'
   if (!/^[a-z]/.test(slug)) return 'Start with a letter.'
-  if (!SLUG.test(slug)) return 'Use lower-case letters, digits, - and _ only.'
   if (type === 'memory' && RESERVED_MEMORY.has(slug)) return `“${slug}” is reserved for memory.`
   return ''
 }

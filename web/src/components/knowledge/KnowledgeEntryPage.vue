@@ -85,9 +85,9 @@ watch(entry, current => { if (current) setPageTitle(`${current.title} · ${props
 
 // ---------- Position in the list: previous, next and the rail ----------
 const sequence = computed(() => props.state.sequence.value)
+// By the address, so j and k keep going while the next entry is still loading.
 const position = computed(() => {
-  const id = entry.value?.id
-  const index = id ? sequence.value.findIndex(item => item.id === id) : -1
+  const index = sequence.value.findIndex(item => item.type === props.type && item.slug === props.slug)
   return index === -1 ? null : { index, count: sequence.value.length }
 })
 function go(step: number) {
@@ -283,16 +283,24 @@ async function undo(eventId: number) {
     toast(restored.slug !== current.slug ? `Undone. It is ${restored.slug} again.` : 'Undone')
   } catch (e) { toast(e instanceof Error ? e.message : 'Undo did not work.', { tone: 'error' }) }
 }
-// A newer version arrived: keep writing on top of it, or take it.
+// A newer version arrived: keep writing on top of it, or take it. Keeping merges:
+// what you changed stays yours, everything you left alone becomes theirs.
 function keepMine() {
   const theirs = conflict.value
   if (!theirs) return
+  const next = snapshot(theirs)
+  if (draft.title === base.title) draft.title = next.title
+  if (draft.slug === base.slug) draft.slug = next.slug
+  if (draft.status === base.status) draft.status = next.status
+  if (draft.body === base.body) draft.body = next.body
+  for (const key of Object.keys(next.details)) if ((draft.details[key] ?? '') === (base.details[key] ?? '')) draft.details[key] = next.details[key]
   entry.value = theirs
   props.state.upsert(theirs)
-  base = snapshot(theirs)
+  base = next
   stamp.value = theirs.updated_at
   conflict.value = null; comparing.value = false
-  toast('Your draft stays. Saving now replaces their version.')
+  toast('Your changes stay on top of their version. Save when you are ready.')
+  void nextTick(growTitle)
 }
 function useTheirs() {
   const theirs = conflict.value
@@ -497,13 +505,13 @@ const whoUpdated = computed(() => entry.value?.imported ? 'imported' : entry.val
           <span class="conflict-icon"><AppIcon name="history" :size="16" /></span>
           <div class="conflict-text">
             <p class="conflict-title">{{ conflict.updated_by?.name ?? 'Someone' }} saved a newer version {{ relativeTime(conflict.updated_at, { now, long: true }) }}</p>
-            <p class="conflict-sub">They changed the {{ conflictFields.length ? listWords(conflictFields) : 'details' }}. Your draft is kept; choose what to do with it.</p>
+            <p class="conflict-sub">They changed the {{ conflictFields.length ? listWords(conflictFields) : 'details' }}. Your draft is kept. Keep your changes on top of theirs, or take their version.</p>
           </div>
         </div>
         <div class="conflict-actions">
           <button type="button" class="btn sm" :aria-pressed="comparing" @click="comparing = !comparing"><AppIcon name="compare" :size="13" />{{ comparing ? 'Hide the comparison' : 'Compare the text' }}</button>
           <button type="button" class="btn sm" @click="useTheirs">Use their version</button>
-          <button type="button" class="btn sm primary" @click="keepMine">Keep my draft</button>
+          <button type="button" class="btn sm primary" @click="keepMine">Keep my changes</button>
         </div>
         <figure v-if="comparing" class="conflict-diff">
           <figcaption class="diff-caption"><span>Their text</span><AppIcon name="arrow" :size="12" /><span>your draft</span></figcaption>
@@ -598,9 +606,9 @@ const whoUpdated = computed(() => entry.value?.imported ? 'imported' : entry.val
           <span v-if="minutes >= 2">{{ minutes }} min read</span>
           <span class="mono e-key">{{ entry.key }}</span>
         </p>
-        <p v-if="entry.status === 'archived'" class="e-note" role="note"><AppIcon name="archive" :size="14" />Archived: kept for the record, and agents skip it.<button v-if="writable" type="button" class="inline-link" @click="setArchived(false)">Make it active</button></p>
+        <p v-if="entry.status === 'archived'" class="e-note" role="note"><AppIcon name="archive" :size="14" /><span class="note-text">Archived: kept for the record, and agents skip it.</span><button v-if="writable" type="button" class="inline-link" @click="setArchived(false)">Make it active</button></p>
         <p v-else-if="entry.status === 'proposed'" class="e-note proposed" role="note">
-          <AppIcon name="sparkle" :size="14" />Proposed{{ entry.author ? ` by ${entry.author.name}` : '' }}: a draft waiting for a person to confirm it.
+          <AppIcon name="sparkle" :size="14" /><span class="note-text">Proposed{{ entry.author ? ` by ${entry.author.name}` : '' }}: a draft waiting for a person to confirm it.</span>
           <span v-if="writable" class="note-actions"><button type="button" class="inline-link" @click="startEdit('body')">Edit first</button><button type="button" class="btn sm" @click="confirmProposed"><AppIcon name="check" :size="13" />Confirm</button></span>
         </p>
         <aside v-if="rule" class="e-rule" aria-label="The rule"><span class="rule-label">The rule</span><p>{{ rule }}</p></aside>
@@ -737,6 +745,7 @@ const whoUpdated = computed(() => entry.value?.imported ? 'imported' : entry.val
 .e-note svg { color: var(--ink-3); flex-shrink: 0; }
 .e-note.proposed { background: var(--gold-wash); box-shadow: inset 0 0 0 1px rgba(214, 155, 49, .35); color: var(--ink); }
 .e-note.proposed svg { color: var(--gold-ink); }
+.note-text { flex: 1 1 220px; min-width: 0; }
 .note-actions { display: inline-flex; align-items: center; gap: 12px; margin-left: auto; }
 .note-actions .inline-link { margin-left: 0; }
 .inline-link { margin-left: auto; padding: 0; border: 0; background: transparent; color: var(--teal-ink); font-size: 12.5px; font-weight: 600; text-decoration: underline; text-underline-offset: 2px; }
@@ -893,6 +902,8 @@ a.link-row:focus-visible { box-shadow: var(--focus-ring); }
   .edit-btn { height: 40px; }
   .e-title { font-size: 27px; }
   .e-body { font-size: 15px; }
+  /* On a phone, code wraps instead of hiding half a command off screen. */
+  .e-body :deep(pre) { white-space: pre-wrap; overflow-wrap: anywhere; }
   .edit-title { font-size: 22px; }
   .e-props { grid-template-columns: minmax(0, 1fr); }
   .e-prop-slug { grid-row: auto; }
@@ -900,7 +911,13 @@ a.link-row:focus-visible { box-shadow: var(--focus-ring); }
   .status-seg button { height: 38px; }
   .conflict-actions { margin-left: 0; }
   .conflict-actions .btn { flex: 1 1 auto; }
-  .slug-box, .kind-static { height: 44px; }
+  .slug-box { height: 48px; }
+  .kind-static { height: 44px; }
+  .kind-chip { height: 44px; margin-left: 0; padding: 0 12px; background: transparent; box-shadow: none; }
+  .kind-chip > svg:first-child { display: none; }
+  .kind-chip .kind-slug { display: inline-block; max-width: 100%; height: 28px; padding: 0 9px; border-radius: 8px; line-height: 28px; background: var(--chip-teal-bg); box-shadow: inset 0 0 0 1px var(--chip-teal-line); }
+  .kind-chip:hover { box-shadow: none; }
+  .kind-chip:focus-visible { box-shadow: var(--focus-ring); }
   .slug-input, .slug-prefix { font-size: 16px; }
 }
 @media (max-width: 600px) { .nav { display: none; } }

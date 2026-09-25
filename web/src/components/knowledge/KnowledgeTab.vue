@@ -427,6 +427,7 @@ li + li .k-row::before { content: ''; position: absolute; top: 0; left: 12px; ri
 }
 @media (max-width: 600px) {
   .k-kinds { margin: 0 -12px; padding: 2px 12px 4px; }
+  .k-kind { height: 44px; }
   .k-search { flex: 1; width: auto; }
   .k-search .slash { display: none; }
   .k-search .field { height: 44px; font-size: 16px; }

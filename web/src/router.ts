@@ -24,6 +24,8 @@ export const router = createRouter({
       path: '/p/:projectKey', component: () => import('./views/ProjectView.vue'), meta: { title: 'Project' },
       children: [
         { path: 'knowledge', component: RouteMarker, meta: { title: 'Knowledge' } },
+        // One kind: the tab filtered to it.
+        { path: 'knowledge/:knowledgeType', redirect: to => ({ path: `/p/${encodeURIComponent(String(to.params.projectKey))}/knowledge`, query: isKnowledgeType(to.params.knowledgeType) ? { type: to.params.knowledgeType } : {} }) },
         { path: 'knowledge/:knowledgeType/:slug', component: RouteMarker, meta: { title: 'Knowledge' },
           beforeEnter: to => isKnowledgeType(to.params.knowledgeType) ? true : { path: `/p/${encodeURIComponent(String(to.params.projectKey))}/knowledge`, replace: true } },
         { path: ':ticketKey?', component: RouteMarker },

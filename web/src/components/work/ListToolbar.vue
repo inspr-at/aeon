@@ -240,7 +240,7 @@ defineExpose({ focusSearch, input })
 @container toolbar (max-width: 1180px) { .view-label { display: none; } .view-seg button { padding: 0 8px; } }
 @container toolbar (max-width: 1000px) { .list-search { width: 190px; } .count { display: none; } .new-btn { width: 32px; padding: 0; } .new-label { display: none; } }
 @container toolbar (max-width: 920px) { .list-search { width: 150px; } .facet-btn { padding: 0 11px; } .facet-btn:not(.on) .facet-end { display: none; } }
-@container toolbar (max-width: 820px) { .list-search { width: 112px; } .list-search .field { padding-right: 10px; } .facet-btn { padding: 0 10px; } .facet-btn:not(.on) .facet-end { display: none; } .view-seg button { padding: 0 7px; } }
+@container toolbar (max-width: 820px) { .list-search { width: 104px; } .list-search .field { padding-right: 10px; } .facet-btn { padding: 0 10px; } .facet-btn:not(.on) .facet-end { display: none; } .view-seg button { padding: 0 6px; } .toolbar { column-gap: 8px; } }
 @container toolbar (max-width: 900px) { .display-label { display: none; } .display-btn { padding: 0 9px; } }
 /* Narrowest docked width: a labelled pill replaces the switch and its longer label. */
 .closed-pill { display: none; gap: 6px; padding: 0 11px 0 9px; color: var(--ink-2); }

@@ -191,11 +191,11 @@ onBeforeUnmount(() => { document.removeEventListener('pointerdown', outside); wi
         </template>
         <template v-else-if="projectKnowledge">
           <span class="sep" aria-hidden="true">/</span>
-          <RouterLink v-if="knowledgeSlug" class="crumb" :to="`/p/${encodeURIComponent(project?.routeKey ?? projectKey)}/knowledge`">Knowledge</RouterLink>
+          <RouterLink v-if="knowledgeSlug" class="crumb fixed-crumb" :to="`/p/${encodeURIComponent(project?.routeKey ?? projectKey)}/knowledge`">Knowledge</RouterLink>
           <span v-else class="crumb current" aria-current="page">Knowledge</span>
           <template v-if="knowledgeSlug">
             <span class="sep" aria-hidden="true">/</span>
-            <span class="crumb current mono-crumb" aria-current="page">{{ knowledgeSlug }}</span>
+            <span class="crumb current mono-crumb slug-crumb" aria-current="page" :data-tip="knowledgeSlug.length > 28 ? knowledgeSlug : undefined">{{ knowledgeSlug }}</span>
           </template>
         </template>
       </template>
@@ -301,7 +301,9 @@ onBeforeUnmount(() => { document.removeEventListener('pointerdown', outside); wi
    clip, the page you are on stays whole. */
 @media (max-width: 1180px) { .crumbs:has(> .crumb ~ .crumb ~ .crumb) .settings-crumb .crumb-label { position: absolute; width: 1px; height: 1px; overflow: hidden; clip-path: inset(50%); white-space: nowrap; } }
 .crumbs > .crumb:not(.current) { flex-shrink: 1; overflow: hidden; }
-.crumbs > .crumb.current, .crumbs > .sep { flex-shrink: 0; }
+.crumbs > .crumb.current, .crumbs > .sep, .crumbs > .crumb.fixed-crumb { flex-shrink: 0; }
+/* A long knowledge slug gives way first, with an ellipsis and the full slug as a tip. */
+.crumbs > .crumb.slug-crumb { display: block; flex-shrink: 1; min-width: 48px; overflow: hidden; text-overflow: ellipsis; line-height: 30px; }
 .crumb.current:hover { background: transparent; }
 .crumb-name { overflow: hidden; text-overflow: ellipsis; color: var(--ink); }
 .crumb-short { display: none; }

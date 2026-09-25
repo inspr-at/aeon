@@ -74,6 +74,13 @@ markdown.renderer.rules.link_open = (tokens, index, options, rawEnv, self) => {
   return self.renderToken(tokens, index, options)
 }
 
+// Code blocks and tables scroll sideways when wide; keyboard users can reach and scroll them.
+const renderFence = markdown.renderer.rules.fence!
+markdown.renderer.rules.fence = (tokens, index, options, env, self) => renderFence(tokens, index, options, env, self).replace(/^<pre>/, '<pre tabindex="0">')
+const renderCodeBlock = markdown.renderer.rules.code_block!
+markdown.renderer.rules.code_block = (tokens, index, options, env, self) => renderCodeBlock(tokens, index, options, env, self).replace(/^<pre>/, '<pre tabindex="0">')
+markdown.renderer.rules.table_open = (tokens, index, options, _env, self) => { tokens[index].attrSet('tabindex', '0'); return self.renderToken(tokens, index, options) }
+
 const result = computed(() => {
   const env: AnchorEnv = { anchors: !!props.anchors }
   const html = markdown.render(props.body, env as Parameters<typeof markdown.render>[1])
@@ -131,6 +138,7 @@ function click(event: MouseEvent) {
 .markdown-body :deep(.md-attachment) { display: block; max-width: 100%; margin: .4em 0 1em; padding: 0; border: 0; border-radius: 10px; overflow: hidden; background: var(--surface-sunken, var(--code-bg)); box-shadow: inset 0 0 0 1px var(--line), 0 10px 26px -18px rgba(16, 35, 39, .5); cursor: zoom-in; }
 .markdown-body :deep(.md-attachment img) { display: block; max-width: 100%; height: auto; }
 .markdown-body :deep(.md-attachment:focus-visible) { box-shadow: var(--focus-ring); }
+.markdown-body :deep(pre:focus-visible), .markdown-body :deep(table:focus-visible) { box-shadow: var(--focus-ring); }
 /* Anchored headings: the link sits after the words, quiet until the heading is hovered or it has focus. */
 .anchored :deep(.md-heading) { scroll-margin-top: 72px; }
 .anchored :deep(.md-anchor) { display: inline-grid; place-items: center; width: 24px; height: 24px; margin-left: 4px; vertical-align: -5px; border-radius: 6px; color: var(--ink-3); text-decoration: none; opacity: 0; }

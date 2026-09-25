@@ -286,7 +286,7 @@ li + li .kp-row::before { content: ''; position: absolute; top: 0; left: 50px; r
   .kp-lead code { white-space: normal; overflow-wrap: anywhere; }
   .kp-kinds { flex-wrap: nowrap; overflow-x: auto; margin: 0 -12px; padding: 2px 12px 4px; scrollbar-width: none; }
   .kp-kinds::-webkit-scrollbar { display: none; }
-  .kp-kind { flex-shrink: 0; height: 36px; }
+  .kp-kind { flex-shrink: 0; height: 44px; }
   .kp-archived { flex-shrink: 0; margin-left: 6px; }
   .kp-row { flex-wrap: wrap; align-items: flex-start; gap: 6px 12px; padding: 11px 10px; }
   .kp-text { flex: 1 1 calc(100% - 42px); }

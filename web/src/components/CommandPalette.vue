@@ -81,7 +81,8 @@ const actions = computed<ActionResult[]>(() => {
   out.push({ type: 'action', id: 'shortcuts', label: 'Keyboard shortcuts', icon: 'keyboard', keys: ['?'] })
   // Knowledge in every project: a search when something is typed, the page otherwise.
   const typed = query.value
-  if (typed.length >= 2 && !keyQuery(typed)) out.push({ type: 'action', id: 'search-knowledge', label: `Search all knowledge for “${typed}”`, hint: 'Every project', icon: 'book' })
+  // Only when knowledge matched: an empty search keeps its honest "Nothing matches".
+  if (typed.length >= 2 && !keyQuery(typed) && knowledgeHits.value.length) out.push({ type: 'action', id: 'search-knowledge', label: `Search all knowledge for “${typed}”`, hint: 'Every project', icon: 'book' })
   else if (route.path !== '/knowledge') out.push({ type: 'action', id: 'search-knowledge', label: 'Search all knowledge', hint: 'Runbooks, guidelines and memory in every project', icon: 'book', searchOnly: !!here })
   return out
 })
@@ -367,6 +368,7 @@ const iconOf = (result: Result): BizIconName => result.type === 'action' ? resul
 .title { flex: 0 1 auto; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 .desc { flex: 1 1 0; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; font-size: 12.5px; color: var(--ink-3); }
 .item.ticket .title, .item.knowledge .title { flex: 1 1 auto; }
+.item.knowledge:has(.desc) .title { flex: 0 1 auto; }
 .knowledge-mark { display: grid; place-items: center; flex-shrink: 0; width: 22px; height: 22px; border-radius: 7px; background: var(--chip-teal-bg); box-shadow: inset 0 0 0 1px var(--chip-teal-line); color: var(--teal-ink); }
 .slug { flex-shrink: 1; min-width: 0; max-width: 220px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; font: 500 11px/1 var(--mono); color: var(--ink-3); font-variant-ligatures: none; }
 .archived-chip { flex-shrink: 0; height: 18px; padding: 0 7px; border-radius: 999px; background: var(--chip-bg); box-shadow: inset 0 0 0 1px var(--chip-line); color: var(--ink-2); font: 600 9.5px/18px var(--mono); letter-spacing: .08em; text-transform: uppercase; font-variant-ligatures: none; }
