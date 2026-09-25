@@ -7,6 +7,7 @@ import (
 	"crypto/sha256"
 	"encoding/hex"
 	"encoding/json"
+	"fmt"
 	"net/http"
 	"regexp"
 	"strconv"
@@ -83,6 +84,29 @@ type listQuery struct {
 	FacetNames  []string  `json:"facets"`
 	Limit       int       `json:"limit"`
 	Cursor      string    `json:"-"`
+	// A "!" before a value excludes it: within a dimension the plain values
+	// are alternatives (OR) and every excluded value must not match (AND NOT);
+	// dimensions combine with AND. "none" stands for an empty value.
+	StatesNot     []string `json:"states_not,omitempty"`
+	PrioritiesNot []string `json:"priorities_not,omitempty"`
+	AssigneesNot  []string `json:"assignees_not,omitempty"`
+	// Tags, cost units and releases match by name or label, case-insensitively.
+	Tags         []string `json:"tags,omitempty"`
+	TagsNot      []string `json:"tags_not,omitempty"`
+	CostUnits    []string `json:"cost_units,omitempty"`
+	CostUnitsNot []string `json:"cost_units_not,omitempty"`
+	Releases     []string `json:"releases,omitempty"`
+	ReleasesNot  []string `json:"releases_not,omitempty"`
+	// Epics match everything below an epic (its subtree, not the epic itself);
+	// "none" is work under no epic.
+	Epics    []string `json:"epics,omitempty"`
+	EpicsNot []string `json:"epics_not,omitempty"`
+	// One date field with an inclusive start and exclusive end instant. Dates
+	// kept in fields (start, end, accepted) compare by the calendar day of the
+	// bounds in their own offset, which is the caller's local day.
+	DateField string     `json:"date_field,omitempty"`
+	DateFrom  *time.Time `json:"date_from,omitempty"`
+	DateTo    *time.Time `json:"date_to,omitempty"`
 }
 type listCursor struct {
 	Hash string `json:"hash"`
@@ -96,8 +120,11 @@ type treeQuery struct {
 	Cursor   string
 }
 
-var validSort = map[string]bool{"key": true, "title": true, "state": true, "priority": true, "kind": true, "updated_at": true, "created_at": true, "position": true}
-var validFacet = map[string]bool{"state": true, "kind": true, "priority": true, "assignee": true}
+var validSort = map[string]bool{"key": true, "title": true, "state": true, "priority": true, "kind": true, "updated_at": true, "created_at": true, "position": true, "assignee": true}
+var validFacet = map[string]bool{"state": true, "kind": true, "priority": true, "assignee": true, "tag": true, "cost_unit": true, "release": true}
+
+// dateFieldKeys maps date_field to the fields key of dates kept in node fields.
+var dateFieldKeys = map[string]string{"start": "start_date", "end": "end_date", "accepted": "accepted_at"}
 var slugOrID = regexp.MustCompile(`^[a-z][a-z0-9_]*$`)
 
 func (m *Module) handleListNodes(w http.ResponseWriter, r *http.Request) {
@@ -193,21 +220,39 @@ func parseListQuery(r *http.Request) (listQuery, error) {
 			return out, badRequest("invalid kind")
 		}
 	}
-	if out.States, err = queryList(r, "state"); err != nil {
+	if out.States, out.StatesNot, err = negatedList(r, "state", nil); err != nil {
 		return out, err
 	}
-	if out.Priorities, err = queryList(r, "priority"); err != nil {
+	if out.Priorities, out.PrioritiesNot, err = negatedList(r, "priority", nil); err != nil {
 		return out, err
 	}
-	if out.Assignees, err = queryList(r, "assignee"); err != nil {
-		return out, err
-	}
-	for _, a := range out.Assignees {
-		if a != "none" {
-			if _, ok := parseUUID(a); !ok {
-				return out, badRequest("invalid assignee")
-			}
+	personOrNone := func(v string) (string, bool) {
+		if v == "none" {
+			return v, true
 		}
+		return parseUUID(v)
+	}
+	if out.Assignees, out.AssigneesNot, err = negatedList(r, "assignee", personOrNone); err != nil {
+		return out, err
+	}
+	label := func(v string) (string, bool) {
+		v = strings.ToLower(strings.TrimSpace(v))
+		return v, v != "" && len(v) <= 200
+	}
+	if out.Tags, out.TagsNot, err = negatedList(r, "tag", label); err != nil {
+		return out, err
+	}
+	if out.CostUnits, out.CostUnitsNot, err = negatedList(r, "cost_unit", label); err != nil {
+		return out, err
+	}
+	if out.Releases, out.ReleasesNot, err = negatedList(r, "release", label); err != nil {
+		return out, err
+	}
+	if out.Epics, out.EpicsNot, err = negatedList(r, "epic", personOrNone); err != nil {
+		return out, err
+	}
+	if err = parseDateFilter(r, &out); err != nil {
+		return out, err
 	}
 	if out.FacetNames, err = queryList(r, "facets"); err != nil {
 		return out, err
@@ -275,6 +320,66 @@ func parseListQuery(r *http.Request) (listQuery, error) {
 	out.Cursor = v.Get("cursor")
 	return out, nil
 }
+
+// negatedList reads a list parameter whose values may carry a leading "!"
+// (excluded). check normalises and validates each value (nil keeps it).
+func negatedList(r *http.Request, name string, check func(string) (string, bool)) (in, out []string, err error) {
+	values, err := queryList(r, name)
+	if err != nil || values == nil {
+		return nil, nil, err
+	}
+	for _, v := range values {
+		negated := strings.HasPrefix(v, "!")
+		v = strings.TrimPrefix(v, "!")
+		if check != nil {
+			var ok bool
+			if v, ok = check(v); !ok {
+				return nil, nil, badRequest("invalid " + name)
+			}
+		}
+		if v == "" {
+			return nil, nil, badRequest("invalid " + name)
+		}
+		if negated {
+			out = append(out, v)
+		} else {
+			in = append(in, v)
+		}
+	}
+	return in, out, nil
+}
+
+func parseDateFilter(r *http.Request, out *listQuery) error {
+	v := r.URL.Query()
+	field := v.Get("date_field")
+	if field == "" {
+		if v.Has("date_from") || v.Has("date_to") {
+			return badRequest("date_from and date_to need date_field")
+		}
+		return nil
+	}
+	switch field {
+	case "created", "updated", "start", "end", "accepted":
+	default:
+		return badRequest("invalid date_field")
+	}
+	out.DateField = field
+	for name, dst := range map[string]**time.Time{"date_from": &out.DateFrom, "date_to": &out.DateTo} {
+		if !v.Has(name) {
+			continue
+		}
+		at, err := time.Parse(time.RFC3339, v.Get(name))
+		if err != nil {
+			return badRequest("invalid " + name)
+		}
+		*dst = &at
+	}
+	if out.DateFrom != nil && out.DateTo != nil && !out.DateTo.After(*out.DateFrom) {
+		return badRequest("date_to must be after date_from")
+	}
+	return nil
+}
+
 func listFingerprint(q listQuery) string {
 	q.Cursor = ""
 	raw, _ := json.Marshal(q)
@@ -396,6 +501,22 @@ const assigneeJoin = ` LEFT JOIN LATERAL (
     ) LIMIT 1
 ) assignee ON true `
 
+// Label and tag expressions over a node n. Native fields win, also an
+// explicit null; imported work falls back to its classic copy.
+func labelSQL(field string) string {
+	value := func(path string) string {
+		return `CASE jsonb_typeof(` + path + `) WHEN 'object' THEN coalesce(` + path + `->>'label',` + path + `->>'name') WHEN 'string' THEN ` + path + `#>>'{}' END`
+	}
+	return `btrim(coalesce(CASE WHEN n.fields ? '` + field + `' THEN ` + value(`(n.fields->'`+field+`')`) + ` ELSE ` + value(`(n.fields->'classic'->'`+field+`')`) + ` END,''))`
+}
+
+// tagElems lists a node's tag names (string or {"name": ...} elements).
+const tagElems = `(SELECT btrim(CASE jsonb_typeof(t) WHEN 'string' THEN t#>>'{}' ELSE t->>'name' END) AS name
+    FROM jsonb_array_elements(CASE WHEN jsonb_typeof(n.fields->'tags')='array' THEN n.fields->'tags' ELSE '[]'::jsonb END) t)`
+
+// lower-cased tag names of n, without blanks.
+const tagNamesSQL = `(SELECT coalesce(array_agg(lower(e.name)),ARRAY[]::text[]) FROM ` + tagElems + ` e WHERE coalesce(e.name,'')<>'')`
+
 func listFilterSQL(q listQuery) (string, []any) {
 	// One tenant transaction supplies RLS to every table in the CTE.
 	array := func(values []string) []string {
@@ -405,12 +526,104 @@ func listFilterSQL(q listQuery) (string, []any) {
 		return values
 	}
 	args := []any{q.KindID, array(q.Kinds), array(q.States), array(q.Priorities), array(q.Assignees), q.Q, q.Within, q.ParentSet, q.ParentID, q.Descendants, q.HideClosed}
+	arg := func(v any) string {
+		args = append(args, v)
+		return fmt.Sprintf("$%d", len(args))
+	}
+	// Optional filters join the query only when set, so an unfiltered list
+	// plans exactly as before.
+	conditions := ""
+	add := func(values []string, match func([]string) string) {
+		if len(values) > 0 {
+			conditions += "\n        AND " + match(values)
+		}
+	}
+	not := func(match func([]string) string) func([]string) string {
+		return func(values []string) string { return "NOT (" + match(values) + ")" }
+	}
+	add(q.StatesNot, func(v []string) string { return `NOT (n.state=ANY(` + arg(v) + `::text[]))` })
+	add(q.PrioritiesNot, func(v []string) string {
+		return `NOT (coalesce(nullif(n.fields->>'priority',''),'none')=ANY(` + arg(v) + `::text[]))`
+	})
+	add(q.AssigneesNot, func(v []string) string {
+		p := arg(v)
+		return `NOT (coalesce(assignee.id::text,'none')=ANY(` + p + `::text[])
+            OR coalesce(assignee.id IN (SELECT coalesce(linked_to,id) FROM principals WHERE id::text=ANY(` + p + `::text[])),false))`
+	})
+	tagMatch := func(values []string) string {
+		p := arg(values)
+		return `(SELECT names && ` + p + `::text[] OR ('none'=ANY(` + p + `::text[]) AND cardinality(names)=0) FROM (SELECT ` + tagNamesSQL + ` AS names) tn)`
+	}
+	add(q.Tags, tagMatch)
+	add(q.TagsNot, not(tagMatch))
+	labelMatch := func(field string) func([]string) string {
+		return func(values []string) string {
+			return `coalesce(nullif(lower(` + labelSQL(field) + `),''),'none')=ANY(` + arg(values) + `::text[])`
+		}
+	}
+	add(q.CostUnits, labelMatch("cost_unit"))
+	add(q.CostUnitsNot, not(labelMatch("cost_unit")))
+	add(q.Releases, labelMatch("release"))
+	add(q.ReleasesNot, not(labelMatch("release")))
+	// Epic subtrees: members of the named epics, or of every epic when "none"
+	// is asked for. The walk only runs when an epic filter is set.
+	epicCTE := ""
+	if len(q.Epics)+len(q.EpicsNot) > 0 {
+		ids, all := []string{}, false
+		for _, v := range append(append([]string{}, q.Epics...), q.EpicsNot...) {
+			if v == "none" {
+				all = true
+			} else {
+				ids = append(ids, v)
+			}
+		}
+		epicCTE = `, epic_members(id, epic_id) AS (
+        SELECT c.id, e.id FROM nodes e JOIN node_kinds ek ON ek.id=e.kind_id AND ek.tenant_id=e.tenant_id AND ek.slug='epic'
+        CROSS JOIN LATERAL (SELECT id FROM nodes WHERE tenant_id=e.tenant_id AND parent_id=e.id AND deleted_at IS NULL OFFSET 0) c
+        WHERE e.tenant_id=current_setting('aeon.tenant_id')::uuid AND e.deleted_at IS NULL
+          AND (` + arg(all) + `::bool OR e.id::text=ANY(` + arg(ids) + `::text[]))
+          AND ($7::uuid IS NULL OR e.id IN (SELECT id FROM scope))
+        UNION ALL SELECT c.id, m.epic_id FROM epic_members m CROSS JOIN LATERAL (
+            SELECT id FROM nodes WHERE tenant_id=current_setting('aeon.tenant_id')::uuid AND parent_id=m.id AND deleted_at IS NULL OFFSET 0
+        ) c
+    )`
+		epicMatch := func(values []string) string {
+			p := arg(values)
+			return `(n.id IN (SELECT id FROM epic_members WHERE epic_id::text=ANY(` + p + `::text[]))
+            OR ('none'=ANY(` + p + `::text[]) AND k.slug<>'epic' AND n.id NOT IN (SELECT id FROM epic_members)))`
+		}
+		add(q.Epics, epicMatch)
+		add(q.EpicsNot, not(epicMatch))
+	}
+	if q.DateField != "" {
+		var from, to any
+		if q.DateFrom != nil {
+			from = *q.DateFrom
+		}
+		if q.DateTo != nil {
+			to = *q.DateTo
+		}
+		switch q.DateField {
+		case "created", "updated":
+			column := "n." + q.DateField + "_at"
+			conditions += "\n        AND " + column + ">=coalesce(" + arg(from) + "::timestamptz,'-infinity') AND " + column + "<coalesce(" + arg(to) + "::timestamptz,'infinity')"
+		default:
+			day := func(t *time.Time) any {
+				if t == nil {
+					return nil
+				}
+				return t.Format("2006-01-02")
+			}
+			value := `aeon_field_date(n.fields->>'` + dateFieldKeys[q.DateField] + `')`
+			conditions += "\n        AND " + value + " IS NOT NULL AND " + value + ">=coalesce(" + arg(day(q.DateFrom)) + "::date,'-infinity') AND " + value + "<coalesce(" + arg(day(q.DateTo)) + "::date,'infinity')"
+		}
+	}
 	return `WITH RECURSIVE scope(id) AS (
         SELECT id FROM nodes WHERE tenant_id=current_setting('aeon.tenant_id')::uuid AND deleted_at IS NULL AND id=coalesce($7::uuid, CASE WHEN $8::bool AND $10::bool THEN $9::uuid ELSE NULL::uuid END)
         UNION ALL SELECT c.id FROM scope s CROSS JOIN LATERAL (
             SELECT id FROM nodes WHERE tenant_id=current_setting('aeon.tenant_id')::uuid AND parent_id=s.id AND deleted_at IS NULL OFFSET 0
         ) c
-    ), filtered AS (
+    )` + epicCTE + `, filtered AS (
         SELECT n.id,assignee.id::text AS assignee_id FROM nodes n JOIN node_kinds k ON k.id=n.kind_id AND k.tenant_id=n.tenant_id ` + assigneeJoin + `
         WHERE n.deleted_at IS NULL
         AND ($1::uuid IS NULL OR n.kind_id=$1::uuid)
@@ -419,18 +632,19 @@ func listFilterSQL(q listQuery) (string, []any) {
         AND (cardinality($4::text[])=0 OR coalesce(nullif(n.fields->>'priority',''),'none')=ANY($4::text[]))
         AND (cardinality($5::text[])=0 OR coalesce(assignee.id::text,'none')=ANY($5::text[])
             OR assignee.id IN (SELECT coalesce(linked_to,id) FROM principals WHERE id::text=ANY($5::text[])))
-        AND ($6::text='' OR n.key ILIKE '%'||$6::text||'%' OR n.title ILIKE '%'||$6::text||'%'
+        AND ($6::text='' OR n.key ILIKE '%'||$6::text||'%' OR n.title ILIKE '%'||$6::text||'%' OR n.body ILIKE '%'||$6::text||'%'
             OR EXISTS(SELECT 1 FROM node_key_aliases a WHERE a.tenant_id=n.tenant_id AND a.node_id=n.id
                 AND a.key ILIKE '%'||$6::text||'%'))
         AND ($7::uuid IS NULL OR (n.id IN (SELECT id FROM scope) AND n.id<>$7::uuid))
         AND ($7::uuid IS NOT NULL OR NOT $8::bool OR (CASE WHEN $10::bool THEN n.id IN (SELECT id FROM scope) AND n.id<>$9::uuid ELSE n.parent_id IS NOT DISTINCT FROM $9::uuid END))
-        AND (NOT $11::bool OR n.state NOT IN ('done','cancelled','archived','delivered','accepted'))
+        AND (NOT $11::bool OR n.state NOT IN ('done','cancelled','archived','delivered','accepted'))` + conditions + `
     )`, args
 }
 func listOrder(q listQuery) string {
 	parts := []string{}
 	if q.Q != "" {
-		parts = append(parts, "CASE WHEN n.key ILIKE $6::text||'%' THEN 0 ELSE 1 END ASC")
+		// Key prefixes lead, then title matches, then matches in the description only.
+		parts = append(parts, "CASE WHEN n.key ILIKE $6::text||'%' THEN 0 WHEN n.body ILIKE '%'||$6::text||'%' AND n.title NOT ILIKE '%'||$6::text||'%' AND n.key NOT ILIKE '%'||$6::text||'%' THEN 2 ELSE 1 END ASC")
 	}
 	for _, key := range q.Sort {
 		dir := "ASC"
@@ -446,17 +660,33 @@ func listOrder(q listQuery) string {
 			parts = append(parts, `CASE coalesce(nullif(n.fields->>'priority',''),'none') WHEN 'high' THEN 0 WHEN 'medium' THEN 1 WHEN 'low' THEN 2 WHEN 'none' THEN 3 ELSE 4 END `+dir, `coalesce(n.fields->>'priority','') `+dir)
 		case "kind":
 			parts = append(parts, "k.slug "+dir)
+		case "assignee":
+			// Unassigned work comes last in both directions.
+			parts = append(parts, "ap.name IS NULL ASC", "lower(ap.name) "+dir, "ap.id "+dir)
 		default:
 			parts = append(parts, "n."+key.Name+" "+dir)
 		}
 	}
 	return strings.Join(append(parts, "n.id ASC"), ",")
 }
+func sortsBy(q listQuery, name string) bool {
+	for _, key := range q.Sort {
+		if key.Name == name {
+			return true
+		}
+	}
+	return false
+}
 func listSQL(q listQuery, anchor any) (string, []any) {
 	prefix, args := listFilterSQL(q)
 	args = append(args, anchor, q.Limit+1)
-	sql := prefix + `, ordered AS (SELECT n.id,row_number() OVER (ORDER BY ` + listOrder(q) + `) AS rn FROM filtered f JOIN nodes n ON n.id=f.id JOIN node_kinds k ON k.id=n.kind_id),
-    selected AS (SELECT id,rn FROM ordered WHERE rn>coalesce((SELECT rn FROM ordered WHERE id=$12::uuid),0) ORDER BY rn LIMIT $13)
+	anchorArg, limitArg := fmt.Sprintf("$%d", len(args)-1), fmt.Sprintf("$%d", len(args))
+	people := ""
+	if sortsBy(q, "assignee") {
+		people = ` LEFT JOIN principals ap ON ap.tenant_id=n.tenant_id AND ap.id=f.assignee_id::uuid`
+	}
+	sql := prefix + `, ordered AS (SELECT n.id,row_number() OVER (ORDER BY ` + listOrder(q) + `) AS rn FROM filtered f JOIN nodes n ON n.id=f.id JOIN node_kinds k ON k.id=n.kind_id` + people + `),
+    selected AS (SELECT id,rn FROM ordered WHERE rn>coalesce((SELECT rn FROM ordered WHERE id=` + anchorArg + `::uuid),0) ORDER BY rn LIMIT ` + limitArg + `)
     SELECT ` + nodeCols + `,k.slug,k.label,nullif(n.fields->>'priority',''),assignee.id::text,assignee.name,
            par.id::text,par.key,par.title,pk.slug,
            (SELECT count(*)::int FROM nodes c WHERE c.parent_id=n.id AND c.deleted_at IS NULL),
@@ -487,13 +717,40 @@ func listSQL(q listQuery, anchor any) (string, []any) {
 }
 func facetSQL(q listQuery) (string, []any) {
 	prefix, args := listFilterSQL(q)
+	args = append(args, q.FacetNames)
+	names := fmt.Sprintf("$%d", len(args))
+	want := func(name string) bool {
+		for _, f := range q.FacetNames {
+			if f == name {
+				return true
+			}
+		}
+		return false
+	}
+	// Tag, cost unit and release counts read fields per row; they are only part
+	// of the query when asked for.
+	extra := ""
+	if want("tag") {
+		extra += `
+    UNION ALL SELECT 'tag',coalesce(nullif(btrim(CASE jsonb_typeof(t) WHEN 'string' THEN t#>>'{}' ELSE t->>'name' END),''),'none')
+        FROM filtered f JOIN nodes n ON n.id=f.id
+        LEFT JOIN LATERAL jsonb_array_elements(CASE WHEN jsonb_typeof(n.fields->'tags')='array' THEN n.fields->'tags' ELSE '[]'::jsonb END) t ON true`
+	}
+	if want("cost_unit") {
+		extra += `
+    UNION ALL SELECT 'cost_unit',coalesce(nullif(` + labelSQL("cost_unit") + `,''),'none') FROM filtered f JOIN nodes n ON n.id=f.id`
+	}
+	if want("release") {
+		extra += `
+    UNION ALL SELECT 'release',coalesce(nullif(` + labelSQL("release") + `,''),'none') FROM filtered f JOIN nodes n ON n.id=f.id`
+	}
 	sql := prefix + `, facet_values AS (
     SELECT 'state' AS name,n.state AS value FROM filtered f JOIN nodes n ON n.id=f.id
     UNION ALL SELECT 'kind',k.slug FROM filtered f JOIN nodes n ON n.id=f.id JOIN node_kinds k ON k.id=n.kind_id
     UNION ALL SELECT 'priority',coalesce(nullif(n.fields->>'priority',''),'none') FROM filtered f JOIN nodes n ON n.id=f.id
-    UNION ALL SELECT 'assignee',coalesce(f.assignee_id,'none') FROM filtered f
-    ) SELECT name,value,count(*)::int FROM facet_values WHERE name=ANY($12::text[]) GROUP BY name,value`
-	return sql, append(args, q.FacetNames)
+    UNION ALL SELECT 'assignee',coalesce(f.assignee_id,'none') FROM filtered f` + extra + `
+    ) SELECT name,value,count(*)::int FROM facet_values WHERE name=ANY(` + names + `::text[]) GROUP BY name,value`
+	return sql, args
 }
 
 func parseTreeQuery(r *http.Request) (treeQuery, error) {

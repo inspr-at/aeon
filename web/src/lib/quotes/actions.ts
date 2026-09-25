@@ -9,7 +9,7 @@ import { statusOf, type QuoteRow } from './list'
 
 export type QuoteActionId = 'open' | 'openPage' | 'copyNumber' | 'link' | 'duplicate' | 'pdf' | 'issue' | 'revise' | 'archive' | 'restore' | 'delete'
 // The customer link of the current version, once the menu has asked for it.
-export type LinkState = 'loading' | 'none' | 'copy' | 'hidden' | 'ended' | 'error'
+export type LinkState = 'loading' | 'none' | 'copy' | 'hidden' | 'unavailable' | 'ended' | 'error'
 // `narrow`: a phone, where a quote opens on its own page (there is no room beside the list).
 export interface QuoteActionContext { admin: boolean; staff: boolean; link: LinkState; busy?: QuoteActionId | null; narrow?: boolean }
 
@@ -32,9 +32,10 @@ export function quoteActions(row: QuoteRow, ctx: QuoteActionContext): (RowAction
     const link = { id: 'link' as const, icon: 'link' as const, group: 1 }
     switch (ctx.link) {
       case 'copy': add({ ...link, label: 'Copy customer link' }); break
-      case 'none': if (status !== 'accepted') add({ ...link, label: 'Create customer link' }); break
+      case 'none': if (status !== 'accepted') add({ ...link, label: 'Create customer link in Details' }); break
       case 'ended': add({ ...link, label: 'Copy customer link', reason: 'Its link has ended. Revoke it in Details to create a new one.' }); break
       case 'hidden': add({ ...link, label: 'Copy customer link', reason: 'This older link cannot be copied again. Revoke it in Details to create a new one.' }); break
+      case 'unavailable': add({ ...link, label: 'Copy customer link', reason: 'This server has no customer-link key, so this link was shown only once. Revoke it in Details to create a new one.' }); break
       case 'error': add({ ...link, label: 'Customer link', reason: 'The link could not be read. Try again in a moment.' }); break
       default: add({ ...link, label: 'Customer link', busy: true })
     }

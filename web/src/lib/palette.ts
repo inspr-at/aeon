@@ -12,7 +12,7 @@ export interface ProjectResult { type: 'project'; id: string; key: string; title
 export interface ActionResult { type: 'action'; id: string; label: string; hint?: string; icon: string; keys?: string[]; searchOnly?: boolean }
 export interface KnowledgeResult { type: 'knowledge'; id: string; kind: KnowledgeType; slug: string; title: string; excerpt: string; archived: boolean; projectKey: string | null }
 export type Result = TicketResult | ProjectResult | ActionResult | KnowledgeResult
-export interface Group { id: 'recent' | 'tickets' | 'knowledge' | 'projects' | 'actions'; label: string; items: Result[] }
+export interface Group { id: 'recent' | 'tickets' | 'knowledge' | 'views' | 'projects' | 'actions'; label: string; items: Result[] }
 export interface PaletteProject { id: string; routeKey: string; title: string; description: string; archived: boolean }
 
 const KEY = /^([a-z][a-z0-9]{1,9})-(\d*)$/i
@@ -67,6 +67,18 @@ export function actionResults(q: string, actions: ActionResult[]): ActionResult[
   return needle ? actions.filter(action => matchesAll(`${action.label} ${action.hint ?? ''}`, needle)) : actions.filter(action => !action.searchOnly)
 }
 
+// A project's saved views, found by name; all of them in the empty palette.
+export function viewResults(q: string, views: { id: string; name: string; shared: boolean; mine: boolean; isDefault: boolean }[], limit = 6): ActionResult[] {
+  const needle = q.trim()
+  return views
+    .filter(view => !needle || matchesAll(`${view.name} view`, needle))
+    .slice(0, limit)
+    .map(view => ({
+      type: 'action', id: `view:${view.id}`, label: view.name, icon: 'bookmark',
+      hint: [view.mine ? (view.shared ? 'Your view, shared' : 'Your view') : 'Shared view', view.isDefault ? 'opens first' : ''].filter(Boolean).join(' · '),
+    }))
+}
+
 export function recentResults(recents: Recent[], scopeKey: string | null): Result[] {
   return recents
     .filter(recent => !scopeKey || (recent.type === 'ticket' ? recent.projectKey === scopeKey : recent.key === scopeKey))
@@ -86,11 +98,13 @@ export function knowledgeResults(items: KnowledgeItem[], routeKeyOf: (projectId:
 }
 
 // Group order: a bare project key puts Projects first; otherwise Tickets lead, then Knowledge.
-export function assemble(q: string, parts: { recent: Result[]; tickets: TicketResult[]; knowledge?: KnowledgeResult[]; projects: ProjectResult[]; actions: ActionResult[] }): Group[] {
+export function assemble(q: string, parts: { recent: Result[]; tickets: TicketResult[]; knowledge?: KnowledgeResult[]; projects: ProjectResult[]; actions: ActionResult[]; views?: ActionResult[] }): Group[] {
   const needle = q.trim()
+  const views = parts.views ?? []
   if (!needle) {
     return [
       { id: 'recent', label: 'Recent', items: parts.recent },
+      { id: 'views', label: 'Views', items: views },
       { id: 'actions', label: 'Actions', items: parts.actions },
     ].filter(group => group.items.length) as Group[]
   }
@@ -98,9 +112,10 @@ export function assemble(q: string, parts: { recent: Result[]; tickets: TicketRe
   const groups: Group[] = [
     { id: 'tickets', label: 'Tickets', items: parts.tickets },
     { id: 'knowledge', label: 'Knowledge', items: parts.knowledge ?? [] },
+    { id: 'views', label: 'Views', items: views },
     { id: 'projects', label: 'Projects', items: parts.projects },
     { id: 'actions', label: 'Actions', items: parts.actions },
   ]
-  if (projectFirst) groups.unshift(groups.splice(2, 1)[0])
+  if (projectFirst) groups.unshift(groups.splice(groups.findIndex(group => group.id === 'projects'), 1)[0])
   return groups.filter(group => group.items.length)
 }

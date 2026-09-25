@@ -1,65 +1,247 @@
 // SPDX-License-Identifier: AGPL-3.0-only
 // The ticket list's view state lives in the URL query so reloads, deep links
-// and browser history keep it. These helpers translate between the query, the
-// list API parameters and the grouped rows; they are pure for unit tests.
+// and browser history keep it, and a saved view is that same state with a name.
+// These helpers translate between the query, the list API parameters, saved
+// views and the grouped rows; they are pure for unit tests.
+//
+// Filter values may carry a leading "!" (excluded). Within one filter the plain
+// values are alternatives and every excluded value must not match; filters
+// combine with AND. That is classic Paimos's model, and the list API's.
 import type { Facets, ListItem, ListQuery } from './api.ts'
-import { DEFAULT_SORT, KINDS, PRIORITIES, normaliseState, parseSort, serializeSort, statusMeta, statusOptions, type SortKey } from './work.ts'
+import { COLUMN_BY_ID, PINNED, type ColumnId } from './columns.ts'
+import { DEFAULT_SORT, KINDS, PRIORITIES, kindLabel, normaliseState, parseSort, priorityLabel, serializeSort, statusMeta, statusOptions, type SortKey } from './work.ts'
 
-export type Dimension = 'status' | 'priority' | 'assignee' | 'type'
-export type GroupBy = 'none' | 'status' | 'epic'
-export interface FacetOption { value: string; label: string; count?: number }
+export type Dimension = 'status' | 'priority' | 'assignee' | 'type' | 'tag' | 'epic' | 'cost' | 'release'
+export type GroupBy = 'none' | 'status' | 'assignee' | 'priority' | 'type' | 'epic' | 'tag'
+export type DateField = 'updated' | 'created' | 'start' | 'end' | 'accepted'
+export type DatePreset = 'today' | '7d' | '30d' | '90d' | 'month' | 'year'
+// A date filter: one field, and a relative preset (kept relative in saved views)
+// or a custom range of calendar days (inclusive, either end open).
+export interface DateFilter { field: DateField; preset: DatePreset | null; from: string | null; to: string | null }
+export interface FacetOption { value: string; label: string; count?: number; hint?: string; color?: string }
 export interface ListFilters {
   q: string
   status: string[]
   priority: string[]
   assignee: string[]
   type: string[]
+  tag: string[]
+  epic: string[]
+  cost: string[]
+  release: string[]
+  date: DateFilter | null
   showClosed: boolean
   sort: SortKey[]
   group: GroupBy
+  // An explicit column set (free columns in order; Key and Title always lead).
+  cols: ColumnId[] | null
+  // The saved view the state came from.
+  view: string | null
 }
-export const DIMENSIONS: { key: Dimension; title: string; facet: 'state' | 'priority' | 'assignee' | 'kind' }[] = [
-  { key: 'status', title: 'Status', facet: 'state' },
-  { key: 'priority', title: 'Priority', facet: 'priority' },
-  { key: 'assignee', title: 'Assignee', facet: 'assignee' },
-  { key: 'type', title: 'Type', facet: 'kind' },
+export interface DimensionDef { key: Dimension; title: string; facet: string | null; primary: boolean; none: string }
+export const DIMENSIONS: DimensionDef[] = [
+  { key: 'status', title: 'Status', facet: 'state', primary: true, none: '' },
+  { key: 'priority', title: 'Priority', facet: 'priority', primary: true, none: 'No priority' },
+  { key: 'assignee', title: 'Assignee', facet: 'assignee', primary: true, none: 'Unassigned' },
+  { key: 'type', title: 'Type', facet: 'kind', primary: true, none: '' },
+  { key: 'tag', title: 'Labels', facet: 'tag', primary: false, none: 'No labels' },
+  { key: 'epic', title: 'Epic', facet: null, primary: false, none: 'No epic' },
+  { key: 'cost', title: 'Cost unit', facet: 'cost_unit', primary: false, none: 'No cost unit' },
+  { key: 'release', title: 'Release', facet: 'release', primary: false, none: 'No release' },
 ]
+export const DIMENSION_BY_KEY = new Map(DIMENSIONS.map(d => [d.key, d]))
+export const DIMENSION_KEYS = DIMENSIONS.map(d => d.key)
+// The counts every page carries; the others are asked for when a menu opens.
+export const LIST_FACETS = ['state', 'priority', 'assignee', 'kind']
 export const WORK_KINDS = ['ticket', 'task', 'epic']
 export const PAGE_SIZE = 200
+export const GROUPS: { value: GroupBy; label: string }[] = [
+  { value: 'none', label: 'None' }, { value: 'status', label: 'Status' }, { value: 'assignee', label: 'Assignee' }, { value: 'priority', label: 'Priority' },
+  { value: 'type', label: 'Type' }, { value: 'epic', label: 'Epic' }, { value: 'tag', label: 'Label' },
+]
+export const DATE_FIELDS: { value: DateField; label: string }[] = [
+  { value: 'updated', label: 'Updated' }, { value: 'created', label: 'Created' }, { value: 'start', label: 'Start' }, { value: 'end', label: 'End' }, { value: 'accepted', label: 'Accepted' },
+]
+export const DATE_PRESETS: { value: DatePreset; label: string }[] = [
+  { value: 'today', label: 'Today' }, { value: '7d', label: 'Last 7 days' }, { value: '30d', label: 'Last 30 days' },
+  { value: '90d', label: 'Last 90 days' }, { value: 'month', label: 'This month' }, { value: 'year', label: 'This year' },
+]
 
+// ---------- Values: included and excluded ----------
+export const isExcluded = (value: string) => value.startsWith('!')
+export const bare = (value: string) => value.replace(/^!/, '')
+export function included(values: string[]): string[] { return values.filter(v => !isExcluded(v)) }
+export function excluded(values: string[]): string[] { return values.filter(isExcluded).map(bare) }
+export type ValueState = 'in' | 'out' | null
+export function valueState(values: string[], value: string): ValueState {
+  return values.includes(value) ? 'in' : values.includes(`!${value}`) ? 'out' : null
+}
+// Include (or stop including) a value; an excluded value becomes included.
+export function toggleIn(values: string[], value: string): string[] {
+  const rest = values.filter(v => bare(v) !== value)
+  return valueState(values, value) === 'in' ? rest : [...rest, value]
+}
+export function toggleOut(values: string[], value: string): string[] {
+  const rest = values.filter(v => bare(v) !== value)
+  return valueState(values, value) === 'out' ? rest : [...rest, `!${value}`]
+}
+
+// ---------- URL ----------
 function list(value: unknown): string[] {
   const raw = Array.isArray(value) ? value.join(',') : typeof value === 'string' ? value : ''
-  return [...new Set(raw.split(',').map(part => part.trim()).filter(Boolean))]
+  return [...new Set(raw.split(',').map(part => part.trim()).filter(part => part && part !== '!'))]
 }
+const DATE_RE = /^\d{4}-\d{2}-\d{2}$/
+export function parseDate(raw: unknown): DateFilter | null {
+  if (typeof raw !== 'string') return null
+  const [field, rest = ''] = raw.split(':')
+  if (!DATE_FIELDS.some(d => d.value === field)) return null
+  const preset = DATE_PRESETS.find(p => p.value === rest)?.value ?? null
+  if (preset) return { field: field as DateField, preset, from: null, to: null }
+  const [from = '', to = ''] = rest.split('..')
+  return { field: field as DateField, preset: null, from: DATE_RE.test(from) ? from : null, to: DATE_RE.test(to) ? to : null }
+}
+export function serializeDate(date: DateFilter): string {
+  if (date.preset) return `${date.field}:${date.preset}`
+  if (!date.from && !date.to) return date.field
+  return `${date.field}:${date.from ?? ''}..${date.to ?? ''}`
+}
+function parseCols(raw: unknown): ColumnId[] | null {
+  if (typeof raw !== 'string') return null
+  const ids = list(raw).filter((id): id is ColumnId => COLUMN_BY_ID.has(id as ColumnId) && !PINNED.includes(id as ColumnId))
+  return ids.length ? ids : null
+}
+const VIEW_ID = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i
 export function filtersFromQuery(query: Record<string, unknown>): ListFilters {
-  const group = query.group === 'status' || query.group === 'epic' ? query.group : 'none'
+  const group = GROUPS.find(g => g.value === query.group)?.value ?? 'none'
   return {
     q: typeof query.q === 'string' ? query.q : '',
     status: list(query.status),
     priority: list(query.priority),
     assignee: list(query.assignee),
-    type: list(query.type).filter(kind => WORK_KINDS.includes(kind)),
+    type: list(query.type).filter(kind => WORK_KINDS.includes(bare(kind))),
+    tag: list(query.tag),
+    epic: list(query.epic).filter(value => /^[\w-]{1,64}$/.test(bare(value))),
+    cost: list(query.cost),
+    release: list(query.release),
+    date: parseDate(query.date),
     showClosed: query.closed === '1',
     sort: parseSort(typeof query.sort === 'string' ? query.sort : ''),
     group,
+    cols: parseCols(query.cols),
+    view: typeof query.v === 'string' && VIEW_ID.test(query.v) ? query.v : null,
   }
 }
 export function filtersToQuery(filters: ListFilters): Record<string, string> {
   const out: Record<string, string> = {}
   if (filters.q.trim()) out.q = filters.q.trim()
-  for (const key of ['status', 'priority', 'assignee', 'type'] as const) if (filters[key].length) out[key] = filters[key].join(',')
+  for (const key of DIMENSION_KEYS) if (filters[key].length) out[key] = filters[key].join(',')
+  if (filters.date) out.date = serializeDate(filters.date)
   if (filters.showClosed) out.closed = '1'
   if (filters.sort.length) out.sort = serializeSort(filters.sort)
   if (filters.group !== 'none') out.group = filters.group
+  if (filters.cols?.length) out.cols = filters.cols.join(',')
+  if (filters.view) out.v = filters.view
   return out
 }
+export const EMPTY_FILTERS: ListFilters = filtersFromQuery({})
+
 export function activeDimensions(filters: ListFilters): Dimension[] {
-  return DIMENSIONS.map(d => d.key).filter(key => filters[key].length > 0)
+  return DIMENSION_KEYS.filter(key => filters[key].length > 0)
 }
 export function hasFilters(filters: ListFilters): boolean {
-  return !!filters.q.trim() || activeDimensions(filters).length > 0
+  return !!filters.q.trim() || activeDimensions(filters).length > 0 || !!filters.date
+}
+// Everything a person can clear with "Clear all": search, filters and the date.
+export function clearedFilters(): Partial<ListFilters> {
+  return { q: '', status: [], priority: [], assignee: [], type: [], tag: [], epic: [], cost: [], release: [], date: null }
 }
 
+// ---------- Saved views: the same state, without the view marker ----------
+export interface ViewShape { filters: Record<string, string>; sort_keys: string[]; group_by: GroupBy; columns: ColumnId[] }
+export function viewShape(filters: ListFilters): ViewShape {
+  const { sort, group: _group, cols: _cols, v: _v, ...rest } = filtersToQuery(filters)
+  return { filters: rest, sort_keys: sort ? sort.split(',') : [], group_by: filters.group, columns: filters.cols ?? [] }
+}
+export function filtersFromView(view: { id: string; filters: Record<string, unknown>; sort_keys: string[]; group_by: string; columns: string[] }): ListFilters {
+  const query: Record<string, unknown> = {}
+  for (const [key, value] of Object.entries(view.filters ?? {})) if (typeof value === 'string') query[key] = value
+  query.sort = view.sort_keys.join(',')
+  query.group = view.group_by
+  query.cols = view.columns.join(',')
+  query.v = view.id
+  return filtersFromQuery(query)
+}
+// The list looks as the view says (a view with changes shows a dot and Save).
+export function sameListState(a: ListFilters, b: ListFilters): boolean {
+  const x = filtersToQuery({ ...a, view: null }), y = filtersToQuery({ ...b, view: null })
+  const keys = new Set([...Object.keys(x), ...Object.keys(y)])
+  return [...keys].every(key => normalValues(key, x[key]) === normalValues(key, y[key]))
+}
+// Filter values are sets: their order does not make a change.
+function normalValues(key: string, value: string | undefined): string {
+  if (value === undefined) return ''
+  return (DIMENSION_KEYS as string[]).includes(key) ? value.split(',').sort().join(',') : value
+}
+// A name for a new view from what it filters ("Backlog · High · Labels").
+export function suggestName(filters: ListFilters, labels: (dimension: Dimension, value: string) => string): string {
+  const parts: string[] = []
+  for (const key of DIMENSION_KEYS) {
+    const values = filters[key]
+    if (!values.length) continue
+    parts.push(values.length <= 2 ? values.map(v => (isExcluded(v) ? 'not ' : '') + labels(key, bare(v))).join(', ') : DIMENSION_BY_KEY.get(key)!.title)
+  }
+  if (filters.date) parts.push(`${fieldLabel(filters.date.field)} ${dateLabel(filters.date)}`)
+  if (filters.q.trim()) parts.push(`“${filters.q.trim()}”`)
+  if (!parts.length && filters.group !== 'none') parts.push(`By ${GROUPS.find(g => g.value === filters.group)!.label.toLowerCase()}`)
+  const name = parts.slice(0, 3).join(' · ')
+  return name ? (name[0].toUpperCase() + name.slice(1)).slice(0, 80) : 'My view'
+}
+
+// ---------- Dates ----------
+const pad = (n: number) => String(n).padStart(2, '0')
+function dayOf(iso: string): Date { const [y, m, d] = iso.split('-').map(Number); return new Date(y, m - 1, d) }
+function addDays(date: Date, days: number): Date { return new Date(date.getFullYear(), date.getMonth(), date.getDate() + days) }
+// Local midnight as RFC 3339 with the offset, so the server compares the person's days.
+export function localInstant(date: Date): string {
+  const offset = -date.getTimezoneOffset()
+  const sign = offset >= 0 ? '+' : '-'
+  const abs = Math.abs(offset)
+  return `${date.getFullYear()}-${pad(date.getMonth() + 1)}-${pad(date.getDate())}T00:00:00${sign}${pad(Math.floor(abs / 60))}:${pad(abs % 60)}`
+}
+export function isoDay(date: Date): string { return `${date.getFullYear()}-${pad(date.getMonth() + 1)}-${pad(date.getDate())}` }
+export function dateBounds(date: DateFilter | null, now = new Date()): { from: string | null; to: string | null } | null {
+  if (!date) return null
+  const today = new Date(now.getFullYear(), now.getMonth(), now.getDate())
+  const range = (from: Date | null, to: Date | null) => ({ from: from ? localInstant(from) : null, to: to ? localInstant(to) : null })
+  switch (date.preset) {
+    case 'today': return range(today, addDays(today, 1))
+    case '7d': return range(addDays(today, -6), addDays(today, 1))
+    case '30d': return range(addDays(today, -29), addDays(today, 1))
+    case '90d': return range(addDays(today, -89), addDays(today, 1))
+    case 'month': return range(new Date(today.getFullYear(), today.getMonth(), 1), new Date(today.getFullYear(), today.getMonth() + 1, 1))
+    case 'year': return range(new Date(today.getFullYear(), 0, 1), new Date(today.getFullYear() + 1, 0, 1))
+  }
+  return range(date.from ? dayOf(date.from) : null, date.to ? addDays(dayOf(date.to), 1) : null)
+}
+const MONTHS = ['Jan', 'Feb', 'Mar', 'Apr', 'May', 'Jun', 'Jul', 'Aug', 'Sep', 'Oct', 'Nov', 'Dec']
+export function shortDate(date: Date, now = new Date()): string {
+  return `${date.getDate()} ${MONTHS[date.getMonth()]}${date.getFullYear() === now.getFullYear() ? '' : ` ${date.getFullYear()}`}`
+}
+function shortDay(iso: string, now: Date): string {
+  const d = dayOf(iso)
+  return `${d.getDate()} ${MONTHS[d.getMonth()]}${d.getFullYear() === now.getFullYear() ? '' : ` ${d.getFullYear()}`}`
+}
+export function fieldLabel(field: DateField): string { return DATE_FIELDS.find(f => f.value === field)!.label }
+export function dateLabel(date: DateFilter, now = new Date()): string {
+  if (date.preset) return DATE_PRESETS.find(p => p.value === date.preset)!.label.toLowerCase()
+  if (date.from && date.to) return date.from === date.to ? `on ${shortDay(date.from, now)}` : `${shortDay(date.from, now)} – ${shortDay(date.to, now)}`
+  if (date.from) return `since ${shortDay(date.from, now)}`
+  if (date.to) return `until ${shortDay(date.to, now)}`
+  return 'is set'
+}
+
+// ---------- The list API ----------
 // The server matches states exactly; imported data spells in-progress with a hyphen.
 function stateSpellings(states: string[]): string[] {
   const out = new Set<string>()
@@ -70,23 +252,41 @@ function stateSpellings(states: string[]): string[] {
   }
   return [...out]
 }
+// The work kinds to ask for; excluding every kind asks for a kind that does not exist.
+function kindsFor(values: string[]): string[] {
+  const wanted = included(values).filter(kind => WORK_KINDS.includes(kind))
+  const not = new Set(excluded(values))
+  const kinds = (wanted.length ? wanted : WORK_KINDS).filter(kind => !not.has(kind))
+  return kinds.length ? kinds : ['none']
+}
+const GROUP_SORT: Partial<Record<GroupBy, SortKey['field']>> = { status: 'state', priority: 'priority', type: 'kind', assignee: 'assignee' }
 export function effectiveSort(filters: ListFilters): SortKey[] {
   const keys = filters.sort.length ? [...filters.sort] : [...DEFAULT_SORT]
-  if (filters.group === 'status' && keys[0]?.field !== 'state') {
-    const index = keys.findIndex(key => key.field === 'state')
-    keys.unshift(index >= 0 ? keys.splice(index, 1)[0] : { field: 'state', desc: false })
+  // Grouping sorts by its key first, so groups stay together across pages.
+  const lead = GROUP_SORT[filters.group]
+  if (lead && keys[0]?.field !== lead) {
+    const index = keys.findIndex(key => key.field === lead)
+    keys.unshift(index >= 0 ? keys.splice(index, 1)[0] : { field: lead, desc: false })
   }
   if (!keys.some(key => key.field === 'updated_at')) keys.push({ field: 'updated_at', desc: true })
   return keys
 }
-export function apiParams(within: string, filters: ListFilters, options: { omit?: Dimension; facets?: string[]; limit?: number; cursor?: string } = {}): ListQuery {
+export function apiParams(within: string, filters: ListFilters, options: { omit?: Dimension; facets?: string[]; limit?: number; cursor?: string; now?: Date } = {}): ListQuery {
   const { omit } = options
+  const take = (dimension: Dimension) => omit === dimension ? [] : filters[dimension]
+  const status = take('status')
+  const bounds = dateBounds(filters.date, options.now)
   return {
     within,
-    kind: omit !== 'type' && filters.type.length ? filters.type : WORK_KINDS,
-    state: omit === 'status' ? [] : stateSpellings(filters.status),
-    priority: omit === 'priority' ? [] : filters.priority,
-    assignee: omit === 'assignee' ? [] : filters.assignee,
+    kind: omit === 'type' ? WORK_KINDS : kindsFor(filters.type),
+    state: [...stateSpellings(included(status)), ...stateSpellings(excluded(status)).map(s => `!${s}`)],
+    priority: take('priority'),
+    assignee: take('assignee'),
+    tag: take('tag'),
+    epic: take('epic'),
+    cost_unit: take('cost'),
+    release: take('release'),
+    ...(filters.date ? { date_field: filters.date.field, date_from: bounds?.from ?? undefined, date_to: bounds?.to ?? undefined } : {}),
     q: filters.q.trim(),
     hide_closed: !filters.showClosed,
     facets: options.facets,
@@ -101,7 +301,27 @@ export function totalFrom(facets: Facets | undefined): number | null {
   return kinds ? Object.values(kinds).reduce((sum, count) => sum + count, 0) : null
 }
 
-export function facetOptions(dimension: Dimension, counts: Record<string, number> = {}, selected: string[] = [], names: Map<string, string> = new Map(), me?: string): FacetOption[] {
+// ---------- Facet options ----------
+export interface EpicOption { id: string; key: string; title: string; state?: string }
+export interface OptionContext { names?: Map<string, string>; me?: string; colors?: Map<string, string>; epics?: EpicOption[] }
+// Labels (tags, cost units, releases) are counted by spelling; one label is one option.
+function labelOptions(dimension: Dimension, counts: Record<string, number>, selected: string[], colors: Map<string, string> = new Map()): FacetOption[] {
+  const byName = new Map<string, FacetOption>()
+  for (const [value, count] of Object.entries(counts)) {
+    if (value === 'none') continue
+    const key = value.toLowerCase()
+    const existing = byName.get(key)
+    if (existing) existing.count = (existing.count ?? 0) + count
+    else byName.set(key, { value, label: value, count, color: colors.get(key) })
+  }
+  for (const value of selected.map(bare)) {
+    if (value !== 'none' && !byName.has(value.toLowerCase())) byName.set(value.toLowerCase(), { value, label: value, count: 0, color: colors.get(value.toLowerCase()) })
+  }
+  const options = [...byName.values()].sort((a, b) => (b.count ?? 0) - (a.count ?? 0) || a.label.localeCompare(b.label))
+  return [{ value: 'none', label: DIMENSION_BY_KEY.get(dimension)!.none, count: counts.none ?? 0 }, ...options]
+}
+export function facetOptions(dimension: Dimension, counts: Record<string, number> = {}, selectedValues: string[] = [], names: Map<string, string> = new Map(), me?: string, context: OptionContext = {}): FacetOption[] {
+  const selected = selectedValues.map(bare)
   if (dimension === 'status') {
     const byKey = new Map<string, FacetOption>()
     const seen = new Set<string>()
@@ -130,6 +350,16 @@ export function facetOptions(dimension: Dimension, counts: Record<string, number
       .map(option => ({ ...option, count: counts[option.value] ?? 0 }))
   }
   if (dimension === 'type') return KINDS.map(kind => ({ value: kind.value, label: kind.label, count: counts[kind.value] ?? 0 }))
+  if (dimension === 'tag' || dimension === 'cost' || dimension === 'release') return labelOptions(dimension, counts, selectedValues, context.colors)
+  if (dimension === 'epic') {
+    const epics = context.epics ?? []
+    const known = new Set(epics.map(e => e.id))
+    return [
+      { value: 'none', label: 'No epic' },
+      ...epics.map(e => ({ value: e.id, label: e.title, hint: e.key })),
+      ...selected.filter(id => id !== 'none' && !known.has(id)).map(id => ({ value: id, label: names.get(id) ?? 'Epic', hint: '' })),
+    ]
+  }
   const ids = [...new Set([...Object.keys(counts), ...selected])].filter(id => id !== 'none')
   ids.sort((a, b) => (a === me ? -1 : b === me ? 1 : (counts[b] ?? 0) - (counts[a] ?? 0)))
   return [
@@ -137,7 +367,20 @@ export function facetOptions(dimension: Dimension, counts: Record<string, number
     ...ids.map(id => ({ value: id, label: names.get(id) ?? 'Unknown person', count: counts[id] ?? 0 })),
   ]
 }
+// The words a chip or a view name uses for one value.
+export function valueLabel(dimension: Dimension, value: string, context: OptionContext = {}): string {
+  if (value === 'none' && DIMENSION_BY_KEY.get(dimension)!.none) return DIMENSION_BY_KEY.get(dimension)!.none
+  switch (dimension) {
+    case 'status': return statusMeta(value).label
+    case 'priority': return priorityLabel(value)
+    case 'type': return kindLabel(value)
+    case 'assignee': return value === context.me ? 'Me' : context.names?.get(value) ?? 'Someone'
+    case 'epic': return context.epics?.find(e => e.id === value)?.title ?? context.names?.get(value) ?? 'An epic'
+    default: return value
+  }
+}
 
+// ---------- Rows and groups ----------
 // Client-side ordering with the same keys as the list API, for siblings in the Outline
 // that come from different requests (matches and their ancestors).
 const PRIORITY_RANK: Record<string, number> = { high: 0, medium: 1, low: 2 }
@@ -147,13 +390,17 @@ export function compareRows(keys: SortKey[]): (a: ListItem, b: ListItem) => numb
       case 'state': return statusMeta(row.state).order
       case 'priority': return PRIORITY_RANK[row.priority ?? ''] ?? 3
       case 'updated_at': return Date.parse(row.updated_at) || 0
-      case 'key': { const [prefix, number] = row.key.split('-'); return `${prefix}-${number.padStart(9, '0')}` }
+      case 'created_at': return Date.parse(row.created_at) || 0
+      case 'key': { const [prefix, number = ''] = row.key.split('-'); return `${prefix}-${number.padStart(9, '0')}` }
       case 'title': return row.title.toLowerCase()
       case 'kind': return row.kind_slug
+      case 'assignee': return row.assignee?.name.toLowerCase() ?? ''
     }
   }
   return (a, b) => {
     for (const key of keys) {
+      // Unassigned work comes last in both directions, as on the server.
+      if (key.field === 'assignee' && !a.assignee !== !b.assignee) return a.assignee ? -1 : 1
       const x = value(a, key.field), y = value(b, key.field)
       if (x !== y) return (x < y ? -1 : 1) * (key.desc ? -1 : 1)
     }
@@ -172,6 +419,7 @@ export function orderByStatus(rows: ListItem[], desc = false): ListItem[] {
 export interface EpicRef { id: string; key: string; title: string }
 export function epicOf(row: ListItem, byId: Map<string, ListItem>): EpicRef | null {
   if (row.kind_slug === 'epic') return { id: row.id, key: row.key, title: row.title }
+  if (row.epic !== undefined) return row.epic
   let parent = row.parent
   for (let depth = 0; parent && depth < 8; depth++) {
     if (parent.kind_slug === 'epic') return { id: parent.id, key: parent.key, title: parent.title }
@@ -181,8 +429,27 @@ export function epicOf(row: ListItem, byId: Map<string, ListItem>): EpicRef | nu
   return null
 }
 
-export interface RowGroup { key: string; label: string; state?: string; epic?: EpicRef; rows: ListItem[]; total: number }
-export function groupRows(rows: ListItem[], group: GroupBy, stateCounts: Record<string, number> = {}): RowGroup[] {
+// The tags of a row as the table shows them (classic imports keep them in fields).
+export function rowTags(row: ListItem): { name: string; color: string }[] {
+  const value = row.fields?.tags
+  if (!Array.isArray(value)) return []
+  return value.flatMap(tag => {
+    if (typeof tag === 'string') return tag.trim() ? [{ name: tag.trim(), color: '' }] : []
+    if (tag && typeof tag === 'object' && typeof (tag as { name?: unknown }).name === 'string') {
+      const { name, color } = tag as { name: string; color?: unknown }
+      return name.trim() ? [{ name: name.trim(), color: typeof color === 'string' ? color : '' }] : []
+    }
+    return []
+  })
+}
+
+export interface RowGroup {
+  key: string; label: string; rows: ListItem[]; total: number
+  state?: string; epic?: EpicRef; person?: { id: string; name: string }; priority?: string; kind?: string; tag?: { name: string; color: string }
+}
+// Counts are the list API's facet for the grouped dimension (state, assignee,
+// priority, kind or tag), so a group shows its whole size while pages load.
+export function groupRows(rows: ListItem[], group: GroupBy, counts: Record<string, number> = {}, options: { me?: string } = {}): RowGroup[] {
   if (group === 'none') return [{ key: 'all', label: '', rows, total: rows.length }]
   if (group === 'status') {
     const groups = new Map<string, RowGroup>()
@@ -193,7 +460,7 @@ export function groupRows(rows: ListItem[], group: GroupBy, stateCounts: Record<
       groups.get(key)!.rows.push(row)
     }
     for (const entry of groups.values()) {
-      const counted = Object.entries(stateCounts).filter(([state]) => {
+      const counted = Object.entries(counts).filter(([state]) => {
         const meta = statusMeta(state)
         return (meta.key === 'other' ? normaliseState(state) : meta.key) === entry.key
       }).reduce((sum, [, count]) => sum + count, 0)
@@ -201,16 +468,59 @@ export function groupRows(rows: ListItem[], group: GroupBy, stateCounts: Record<
     }
     return [...groups.values()].sort((a, b) => statusMeta(a.state!).order - statusMeta(b.state!).order)
   }
-  const byId = new Map(rows.map(row => [row.id, row]))
-  const groups = new Map<string, RowGroup>()
-  const none: RowGroup = { key: 'none', label: 'No epic', rows: [], total: 0 }
-  for (const row of rows) {
-    const epic = epicOf(row, byId)
-    if (!epic) { none.rows.push(row); continue }
-    if (!groups.has(epic.id)) groups.set(epic.id, { key: epic.id, label: epic.title, epic, rows: [], total: 0 })
-    if (row.kind_slug !== 'epic') groups.get(epic.id)!.rows.push(row)
+  if (group === 'epic') {
+    const byId = new Map(rows.map(row => [row.id, row]))
+    const groups = new Map<string, RowGroup>()
+    const none: RowGroup = { key: 'none', label: 'No epic', rows: [], total: 0 }
+    for (const row of rows) {
+      const epic = epicOf(row, byId)
+      if (!epic) { none.rows.push(row); continue }
+      if (!groups.has(epic.id)) groups.set(epic.id, { key: epic.id, label: epic.title, epic, rows: [], total: 0 })
+      if (row.kind_slug !== 'epic') groups.get(epic.id)!.rows.push(row)
+    }
+    const out = [...groups.values(), ...(none.rows.length ? [none] : [])]
+    for (const entry of out) entry.total = entry.rows.length
+    return out
   }
-  const out = [...groups.values(), ...(none.rows.length ? [none] : [])]
-  for (const entry of out) entry.total = entry.rows.length
-  return out
+  const groups = new Map<string, RowGroup>()
+  const put = (key: string, make: () => Omit<RowGroup, 'rows' | 'total'>, row: ListItem) => {
+    if (!groups.has(key)) groups.set(key, { ...make(), rows: [], total: 0 })
+    groups.get(key)!.rows.push(row)
+  }
+  for (const row of rows) {
+    if (group === 'assignee') {
+      const person = row.assignee
+      if (person) put(person.id, () => ({ key: person.id, label: person.name, person }), row)
+      else put('none', () => ({ key: 'none', label: 'Unassigned' }), row)
+    } else if (group === 'priority') {
+      const value = row.priority && row.priority !== 'none' ? row.priority : 'none'
+      put(value, () => ({ key: value, label: priorityLabel(value), priority: value }), row)
+    } else if (group === 'type') {
+      put(row.kind_slug, () => ({ key: row.kind_slug, label: kindLabel(row.kind_slug), kind: row.kind_slug }), row)
+    } else {
+      // A ticket with several labels shows under each of them.
+      const tags = rowTags(row)
+      if (!tags.length) put('none', () => ({ key: 'none', label: 'No labels' }), row)
+      for (const tag of new Map(tags.map(t => [t.name.toLowerCase(), t])).values()) put(tag.name.toLowerCase(), () => ({ key: tag.name.toLowerCase(), label: tag.name, tag }), row)
+    }
+  }
+  const lower = new Map<string, number>()
+  for (const [value, count] of Object.entries(counts)) lower.set(group === 'tag' ? value.toLowerCase() : value, (lower.get(group === 'tag' ? value.toLowerCase() : value) ?? 0) + count)
+  const out = [...groups.values()]
+  for (const entry of out) entry.total = Math.max(lower.get(entry.key) ?? 0, entry.rows.length)
+  const rank = (entry: RowGroup): [number, string | number] => {
+    if (entry.key === 'none') return [9, '']
+    if (group === 'assignee') return [entry.key === options.me ? 0 : 1, entry.label.toLowerCase()]
+    if (group === 'priority') return [1, PRIORITY_RANK[entry.key] ?? 3]
+    if (group === 'type') return [1, WORK_KINDS.indexOf(entry.key) === -1 ? 9 : ['epic', 'ticket', 'task'].indexOf(entry.key)]
+    return [1, entry.label.toLowerCase()]
+  }
+  return out.sort((a, b) => {
+    const [x1, x2] = rank(a), [y1, y2] = rank(b)
+    return x1 - y1 || (x2 < y2 ? -1 : x2 > y2 ? 1 : 0)
+  })
+}
+// The facet whose counts give a grouping its totals.
+export function groupFacet(group: GroupBy): string | null {
+  return ({ status: 'state', assignee: 'assignee', priority: 'priority', type: 'kind', tag: 'tag' } as Partial<Record<GroupBy, string>>)[group] ?? null
 }

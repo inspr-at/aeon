@@ -11,6 +11,7 @@ export type IconName =
   | 'users' | 'history' | 'sparkle' | 'wrench' | 'bug' | 'gear' | 'commit' | 'tag' | 'box' | 'rollback'
   | 'command' | 'option' | 'backspace'
   | 'book' | 'runbook' | 'guideline' | 'memory' | 'server' | 'folders' | 'terminal' | 'hash'
+  | 'bookmark' | 'star' | 'calendar' | 'coin' | 'not' | 'sort' | 'select' | 'shift'
 </script>
 <script setup lang="ts">
 withDefaults(defineProps<{ name: IconName; size?: number }>(), { size: 16 })
@@ -106,6 +107,14 @@ withDefaults(defineProps<{ name: IconName; size?: number }>(), { size: 16 })
     <template v-else-if="name === 'folders'"><path d="M4.6 5.2V4c0-.6.4-1 1-1h2.3l1.2 1.2h4.1c.6 0 1 .4 1 1v5.4c0 .6-.4 1-1 1h-.9" /><path d="M1.8 7.2c0-.6.4-1 1-1h2.3l1.2 1.2h4c.6 0 1 .4 1 1v4c0 .6-.4 1-1 1H2.8c-.6 0-1-.4-1-1Z" /></template>
     <template v-else-if="name === 'terminal'"><rect x="1.8" y="2.6" width="12.4" height="10.8" rx="1.8" /><path d="m4.7 6.3 2 1.7-2 1.7M8.3 10.1h3" /></template>
     <path v-else-if="name === 'hash'" d="M6.3 2.4 5.1 13.6M10.9 2.4 9.7 13.6M2.8 5.9h10.6M2.6 10.1h10.6" />
+    <path v-else-if="name === 'bookmark'" d="M4.4 2.2h7.2c.3 0 .6.3.6.6v11L8 11.1l-4.2 2.7v-11c0-.3.3-.6.6-.6Z" />
+    <path v-else-if="name === 'star'" d="m8 2 1.8 3.7 4 .6-2.9 2.8.7 4L8 11.2l-3.6 1.9.7-4-2.9-2.8 4-.6Z" />
+    <template v-else-if="name === 'calendar'"><rect x="2.2" y="3.2" width="11.6" height="10.6" rx="2.2" /><path d="M2.2 6.8h11.6M5.4 1.8v2.8M10.6 1.8v2.8" /></template>
+    <template v-else-if="name === 'coin'"><circle cx="8" cy="8" r="6" /><path d="M9.9 5.9c-.4-.6-1.1-1-1.9-1-1.1 0-1.9.6-1.9 1.4 0 2 3.8 1 3.8 3.1 0 .8-.8 1.4-1.9 1.4-.8 0-1.6-.4-2-1M8 3.8v1.1M8 11v1.2" /></template>
+    <template v-else-if="name === 'not'"><circle cx="8" cy="8" r="5.8" /><path d="m3.9 12.1 8.2-8.2" /></template>
+    <path v-else-if="name === 'sort'" d="M4.8 2.6v10.8M2.4 11l2.4 2.4 2.4-2.4M11.2 13.4V2.6M8.8 5l2.4-2.4L13.6 5" />
+    <template v-else-if="name === 'select'"><rect x="2.2" y="2.2" width="11.6" height="11.6" rx="3" /><path d="m5.2 8.2 2 2 3.6-4.2" /></template>
+    <path v-else-if="name === 'shift'" d="M8 2.2 2.6 8h2.9v5.2h5V8h2.9Z" />
     <template v-else-if="name === 'info'"><circle cx="8" cy="8" r="6.2" /><path d="M8 7.4v3.8M8 4.9v.05" /></template>
     <template v-else><circle cx="8" cy="8" r="6.2" /><path d="M10.6 5.4 9.2 9.2l-3.8 1.4 1.4-3.8Z" /></template>
   </svg>

@@ -34,7 +34,7 @@ test('a saved choice fixes order and visibility; what cannot fit steps aside', (
 
 test('order keeps Key and Title first and appends unknown or missing columns', () => {
   assert.deepEqual(orderOf({ order: ['title', 'created', 'bogus' as never, 'created'] }).slice(0, 4), ['key', 'title', 'created', 'status'])
-  assert.equal(orderOf(null).length, 11)
+  assert.equal(orderOf(null).length, 12)
   const order = orderOf(null)
   assert.deepEqual(moveColumn(order, 'priority', -1).slice(0, 4), ['key', 'title', 'priority', 'status'])
   assert.deepEqual(moveColumn(order, 'status', -1), order)

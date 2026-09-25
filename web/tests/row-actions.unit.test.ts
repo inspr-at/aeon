@@ -57,8 +57,9 @@ describe('quote row actions', () => {
     const accepted = row({ state: 'accepted', classic_status: 'accepted', current_version: 1 })
     expect(find(quoteActions(accepted, { ...admin, link: 'none' }), 'link')).toBeUndefined()
     const issued = row({ state: 'issued', classic_status: 'sent', current_version: 1 })
-    expect(find(quoteActions(issued, { ...admin, link: 'none' }), 'link')?.label).toBe('Create customer link')
+    expect(find(quoteActions(issued, { ...admin, link: 'none' }), 'link')?.label).toBe('Create customer link in Details')
     expect(find(quoteActions(issued, { ...admin, link: 'hidden' }), 'link')?.reason).toMatch(/cannot be copied again/)
+    expect(find(quoteActions(issued, { ...admin, link: 'unavailable' }), 'link')?.reason).toMatch(/no customer-link key/)
     expect(find(quoteActions(issued, { ...admin, link: 'ended' }), 'link')?.reason).toMatch(/has ended/)
     expect(find(quoteActions(issued, { ...admin, link: 'loading' }), 'link')?.busy).toBe(true)
     expect(find(quoteActions(issued, { ...admin, link: 'copy', busy: 'link' }), 'link')?.busy).toBe(true)
@@ -70,6 +71,7 @@ describe('quote row actions', () => {
     expect(linkState({ ...base, revoked_at: '2026-09-20T00:00:00Z' }, now)).toBe('none')
     expect(linkState({ ...base, path: '/offers/t/x' }, now)).toBe('copy')
     expect(linkState(base, now)).toBe('hidden')
+    expect(linkState({ ...base, copy_unavailable_reason: 'key_not_configured' }, now)).toBe('unavailable')
     expect(linkState({ ...base, path: '/offers/t/x' }, Date.parse('2026-10-02T00:00:00Z'))).toBe('ended')
   })
   it('opens on its own page on phones', () => {

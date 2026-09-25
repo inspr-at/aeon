@@ -3,20 +3,21 @@
 import { setPageTitle } from '../lib/brand'
 import { computed, defineAsyncComponent, nextTick, onBeforeUnmount, onMounted, ref, watch } from 'vue'
 import { onBeforeRouteLeave, onBeforeRouteUpdate, useRoute, useRouter } from 'vue-router'
-import { createNode, listNodes, type ListItem } from '../lib/api'
+import { APIError, createNode, listNodes, type ListItem, type SavedView } from '../lib/api'
 import { canWrite } from '../lib/activity'
 import { confirmAction } from '../lib/confirm'
 import { asListItem, guardedMove, keyPrefix, kinds } from '../lib/useTicket'
 import { useOutline } from '../lib/useOutline'
-import { density } from '../lib/prefs'
-import { orderOf, type ColumnId, type ListPrefs } from '../lib/columns'
+import { useDensity } from '../lib/prefs'
+import { orderOf, PINNED, type ColumnId, type ListPrefs } from '../lib/columns'
+import { copyName, duplicateView, loadViews, removeView, renameView, saveNewView, saveViewState, shareView, viewsOf } from '../lib/savedViews'
 import { usePreference } from '../lib/preferences'
 import { toast } from '../lib/toast'
 import { command, consume, run } from '../lib/commands'
 import { remember } from '../lib/recents'
-import { apiParams, effectiveSort, facetOptions, filtersFromQuery, filtersToQuery, groupRows, hasFilters, orderByStatus, totalFrom, WORK_KINDS, type Dimension, type EpicRef, type GroupBy, type ListFilters } from '../lib/ticketList'
+import { apiParams, clearedFilters, effectiveSort, facetOptions, filtersFromQuery, filtersFromView, filtersToQuery, groupFacet, groupRows, hasFilters, orderByStatus, rowTags, sameListState, suggestName, toggleIn, toggleOut, totalFrom, valueLabel, WORK_KINDS, type DateFilter, type Dimension, type EpicRef, type GroupBy, type ListFilters } from '../lib/ticketList'
 import { useTicketList } from '../lib/useTicketList'
-import { absoluteTime, cycleSort, relativeTime, statusMeta, type SortField } from '../lib/work'
+import { absoluteTime, cycleSort, plural, PRIORITIES, priorityLabel, relativeTime, statusMeta, type SortField, type SortKey } from '../lib/work'
 import { useProjects } from '../stores/projects'
 import { useSession } from '../stores/session'
 import AppIcon from '../components/AppIcon.vue'
@@ -27,6 +28,12 @@ import StatusIcon from '../components/work/StatusIcon.vue'
 import StatusMenu from '../components/work/StatusMenu.vue'
 import TicketTable from '../components/work/TicketTable.vue'
 import TicketWorkspace from '../components/work/TicketWorkspace.vue'
+import ViewBar from '../components/work/ViewBar.vue'
+import SaveViewPanel from '../components/work/SaveViewPanel.vue'
+import BulkBar from '../components/work/BulkBar.vue'
+import LabelMenu, { type LabelChoice } from '../components/work/LabelMenu.vue'
+import OptionMenu from '../components/work/OptionMenu.vue'
+import EpicPicker from '../components/work/EpicPicker.vue'
 import JourneyChip from '../components/journey/JourneyChip.vue'
 import type KnowledgeEntryPageType from '../components/knowledge/KnowledgeEntryPage.vue'
 import type KnowledgeTabType from '../components/knowledge/KnowledgeTab.vue'
@@ -54,12 +61,29 @@ const routeKey = computed(() => project.value?.routeKey ?? projectKey.value)
 // ---------- Columns: the person's order, visibility and widths for this project ----------
 const listPref = computed(() => projectId.value ? usePreference<ListPrefs>(`list:${projectId.value}`) : null)
 const listPrefs = computed(() => listPref.value?.value.value ?? null)
-const tableLayout = ref<{ visible: ColumnId[]; customised: boolean }>({ visible: [], customised: false })
-const toolbarColumns = computed(() => ({ order: orderOf(listPrefs.value), visible: tableLayout.value.visible, customised: tableLayout.value.customised }))
-function saveColumns(order: ColumnId[], visible: ColumnId[]) { listPref.value?.save({ ...(listPrefs.value ?? {}), order, visible }, 0) }
-function resetColumns() { const { order: _order, visible: _visible, ...rest } = listPrefs.value ?? {}; listPref.value?.save(rest, 0) }
-function saveWidths(widths: Partial<Record<ColumnId, number>>) { listPref.value?.save({ ...(listPrefs.value ?? {}), widths }) }
 const filters = computed(() => filtersFromQuery(route.query))
+// A view (or a shared link) may carry its own column set; widths stay the person's.
+const tablePrefs = computed<ListPrefs | null>(() => {
+  const cols = filters.value.cols
+  if (!cols) return listPrefs.value
+  const rest = orderOf(listPrefs.value).filter(id => !PINNED.includes(id) && !cols.includes(id))
+  return { ...(listPrefs.value ?? {}), order: [...PINNED, ...cols, ...rest], visible: cols }
+})
+const tableLayout = ref<{ visible: ColumnId[]; customised: boolean }>({ visible: [], customised: false })
+const toolbarColumns = computed(() => ({ order: orderOf(tablePrefs.value), visible: tableLayout.value.visible, customised: tableLayout.value.customised }))
+// In a saved view the columns belong to the view (they become part of the list's
+// state); on the plain list they are the person's own for this project.
+function saveColumns(order: ColumnId[], visible: ColumnId[]) {
+  if (filters.value.view) { update({ cols: order.filter(id => visible.includes(id) && !PINNED.includes(id)) }); return }
+  listPref.value?.save({ ...(listPrefs.value ?? {}), order, visible }, 0)
+}
+function resetColumns() {
+  if (filters.value.cols) { update({ cols: null }); return }
+  const { order: _order, visible: _visible, ...rest } = listPrefs.value ?? {}
+  listPref.value?.save(rest, 0)
+}
+function saveWidths(widths: Partial<Record<ColumnId, number>>) { listPref.value?.save({ ...(listPrefs.value ?? {}), widths }) }
+const { density, set: setDensity } = useDensity()
 const list = useTicketList(projectId, filters)
 const now = ref(Date.now())
 // List, Outline, Journey or Knowledge. The full page keeps whichever the ticket was opened from.
@@ -129,14 +153,20 @@ const displayRows = computed(() => {
   return primary?.field === 'state' ? orderByStatus(list.rows.value, primary.desc) : list.rows.value
 })
 const rowsById = computed(() => new Map(list.rows.value.map(row => [row.id, row])))
-const groups = computed(() => groupRows(displayRows.value, filters.value.group, list.facets.value.state))
+const groups = computed(() => {
+  const facet = groupFacet(filters.value.group)
+  return groupRows(displayRows.value, filters.value.group, facet ? list.facetCounts(facet) : {}, { me: session.identity?.principal.id })
+})
+// Keyboard order: every visible row once (a ticket under two labels is visited once).
 const sequence = computed(() => {
   if (outlineActive.value) return outline.rows.value
   const out: ListItem[] = []
+  const seen = new Set<string>()
+  const push = (row: ListItem) => { if (!seen.has(row.id)) { seen.add(row.id); out.push(row) } }
   for (const group of groups.value) {
     const epicRow = group.epic ? rowsById.value.get(group.epic.id) : undefined
-    if (epicRow) out.push(epicRow)
-    if (!collapsed.value.has(group.key)) out.push(...group.rows)
+    if (epicRow) push(epicRow)
+    if (!collapsed.value.has(group.key)) group.rows.forEach(push)
   }
   return out
 })
@@ -161,13 +191,33 @@ const knownStates = computed(() => Object.keys(list.facets.value.state ?? {}))
 const filtered = computed(() => hasFilters(filters.value))
 
 function options(dimension: Dimension) {
-  return facetOptions(dimension, list.counts(dimension), filters.value[dimension], list.names, session.identity?.principal.id)
+  return facetOptions(dimension, list.counts(dimension), filters.value[dimension], list.names, session.identity?.principal.id, { colors: list.colors, epics: list.epics.value })
 }
+function chipLabel(dimension: Dimension, value: string) {
+  return valueLabel(dimension, value, { names: list.names, me: session.identity?.principal.id, epics: list.epics.value })
+}
+// What a menu needs before it opens: names, label counts or the project's epics.
+const facetLoading = ref(false)
+function needOptions(dimension: Dimension) {
+  if (dimension === 'assignee') { void list.resolveNames(options('assignee').map(o => o.value)); return }
+  if (dimension === 'epic') { facetLoading.value = true; void list.loadEpics().finally(() => { facetLoading.value = false }); return }
+  const facet = dimension === 'tag' ? 'tag' : dimension === 'cost' ? 'cost_unit' : dimension === 'release' ? 'release' : null
+  if (facet && !filters.value[dimension].length) { facetLoading.value = true; void list.requestFacet(facet).finally(() => { facetLoading.value = false }) }
+}
+function sheetOpened() {
+  void list.resolveNames(options('assignee').map(o => o.value))
+  void list.loadEpics()
+  for (const facet of ['tag', 'cost_unit', 'release']) void list.requestFacet(facet)
+}
+// Chips name epics by title, so the epics load when an epic filter is on.
+watch(() => filters.value.epic.length > 0 && !!projectId.value, on => { if (on) void list.loadEpics() }, { immediate: true })
 
 // ---------- URL state ----------
+function modeQuery() {
+  return route.query.view === 'outline' || route.query.view === 'full' || route.query.view === 'journey' ? { view: route.query.view as string } : {}
+}
 function update(patch: Partial<ListFilters>) {
-  const view = route.query.view === 'outline' || route.query.view === 'full' || route.query.view === 'journey' ? { view: route.query.view } : {}
-  void router.replace({ path: route.path, query: { ...filtersToQuery({ ...filters.value, ...patch }), ...view } })
+  void router.replace({ path: route.path, query: { ...filtersToQuery({ ...filters.value, ...patch }), ...modeQuery() } })
 }
 function setView(mode: ViewMode) {
   if (mode === viewMode.value) return
@@ -180,23 +230,78 @@ function setView(mode: ViewMode) {
   void router.replace({ path, query: mode === 'outline' ? { ...query, view: 'outline' } : query })
 }
 function toggleValue(dimension: Dimension, value: string) {
-  const current = filters.value[dimension]
-  const adding = !current.includes(value)
-  const patch: Partial<ListFilters> = { [dimension]: adding ? [...current, value] : current.filter(item => item !== value) }
+  const next = toggleIn(filters.value[dimension], value)
+  const adding = next.includes(value)
+  const patch: Partial<ListFilters> = { [dimension]: next }
   // Choosing a closed status while closed tickets are hidden would show nothing.
   if (dimension === 'status' && adding && statusMeta(value).closed && !filters.value.showClosed) patch.showClosed = true
   update(patch)
 }
-function clearFilters() { update({ q: '', status: [], priority: [], assignee: [], type: [] }) }
+function excludeValue(dimension: Dimension, value: string) { update({ [dimension]: toggleOut(filters.value[dimension], value) }) }
+function clearFilters() { update(clearedFilters()) }
+function setDate(date: DateFilter | null) { update({ date }) }
 function sortBy(field: SortField, additive: boolean) { update({ sort: cycleSort(filters.value.sort, field, additive) }) }
-function setGroup(group: GroupBy) { collapsed.value = new Set(); update({ group }) }
+function setSort(sort: SortKey[]) { update({ sort }) }
+function setGroup(group: GroupBy) {
+  collapsed.value = new Set()
+  if (group === 'tag') void list.requestFacet('tag')
+  update({ group })
+}
+function setAllGroups(open: boolean) { collapsed.value = open ? new Set() : new Set(groups.value.map(group => group.key)) }
+watch(() => filters.value.group === 'tag' && list.loadedOnce.value, on => { if (on) void list.requestFacet('tag') })
 function toggleGroup(key: string) {
   const next = new Set(collapsed.value)
   if (next.has(key)) next.delete(key); else next.add(key)
   collapsed.value = next
 }
 
-const queryKey = computed(() => projectId.value ? JSON.stringify(apiParams(projectId.value, filters.value)) : '')
+// ---------- Saved views ----------
+const views = computed(() => viewsOf(projectId.value))
+const activeView = computed(() => filters.value.view ? views.value.items.find(view => view.id === filters.value.view) ?? null : null)
+const viewFilters = computed(() => activeView.value ? filtersFromView(activeView.value) : null)
+const customised = computed(() => hasFilters(filters.value) || filters.value.sort.length > 0 || filters.value.group !== 'none' || !!filters.value.cols || filters.value.showClosed)
+const viewDirty = computed(() => !!viewFilters.value && !sameListState(filters.value, viewFilters.value))
+const canSaveView = computed(() => !journeyActive.value && (activeView.value ? viewDirty.value : customised.value))
+const defaultViewId = computed(() => listPrefs.value?.defaultView ?? null)
+function viewQuery(view: SavedView | null): Record<string, string> {
+  return view ? filtersToQuery(filtersFromView(view)) : {}
+}
+function hrefFor(id: string | null) {
+  const view = id ? views.value.items.find(item => item.id === id) ?? null : null
+  const query = new URLSearchParams({ ...viewQuery(view), ...(outlineActive.value ? { view: 'outline' } : {}) }).toString()
+  return `/p/${encodeURIComponent(routeKey.value)}${query ? `?${query}` : ''}`
+}
+function openView(id: string | null, replace = false) {
+  const view = id ? views.value.items.find(item => item.id === id) ?? null : null
+  collapsed.value = new Set()
+  const query = { ...viewQuery(view), ...(outlineActive.value ? { view: 'outline' } : {}) }
+  const location = { path: `/p/${encodeURIComponent(routeKey.value)}`, query }
+  if (replace) void router.replace(location); else void router.push(location)
+}
+// A link to a view someone cannot see (private, or deleted) keeps its filters.
+watch([() => filters.value.view, () => views.value.loaded], ([id, loaded]) => {
+  if (id && loaded && !views.value.items.some(view => view.id === id)) update({ view: null })
+})
+// The project opens with the person's default view when nothing else was asked for.
+// The list waits for that answer, so it never shows the plain list first.
+const entryResolved = ref(false)
+let resolvedFor = ''
+watch(projectId, async id => {
+  if (!id || resolvedFor === id) return
+  resolvedFor = id
+  const plain = () => Object.keys(route.query).every(key => key === 'view') && (route.query.view === undefined || route.query.view === 'outline')
+  if (!plain() || ticketKey.value) { entryResolved.value = true; void loadViews(id); return }
+  entryResolved.value = false
+  const pref = usePreference<ListPrefs>(`list:${id}`)
+  await Promise.race([Promise.all([loadViews(id), pref.ready]), new Promise(resolve => setTimeout(resolve, 1500))])
+  if (projectId.value !== id) return
+  const target = pref.value.value?.defaultView
+  const view = target ? viewsOf(id).items.find(item => item.id === target) : null
+  if (view && plain()) await router.replace({ path: route.path, query: { ...viewQuery(view), ...modeQuery() } })
+  entryResolved.value = true
+}, { immediate: true })
+
+const queryKey = computed(() => projectId.value && entryResolved.value ? JSON.stringify(apiParams(projectId.value, filters.value)) : '')
 // The Outline without filters loads its own levels; the list query then only supplies
 // counts. With filters or Hide closed, the Outline needs the list's whole match set.
 const listLoadMode = computed(() => journeyActive.value || knowledgeActive.value ? 'counts' : !outlineActive.value ? 'list' : outline.matchMode.value ? 'all' : 'counts')
@@ -475,6 +580,225 @@ async function closeKnowledgeEntry() {
   if (id) setTimeout(() => knowledgeTab.value?.reveal(id), 60)
 }
 
+// ---------- Saved view actions ----------
+const savePanel = ref<{ mode: 'create' | 'rename'; anchor: HTMLElement; view?: SavedView; name: string } | null>(null)
+const saveBusy = ref(false)
+const saveError = ref('')
+const viewBar = ref<InstanceType<typeof ViewBar>>()
+function startSave(anchor: HTMLElement) {
+  saveError.value = ''
+  const base = activeView.value ? copyName(activeView.value.name, views.value.items.map(v => v.name)) : suggestName(filters.value, chipLabel)
+  savePanel.value = { mode: 'create', anchor, name: base }
+}
+function startRename(view: SavedView, anchor: HTMLElement) { saveError.value = ''; savePanel.value = { mode: 'rename', anchor, view, name: view.name } }
+function closeSave(restore: boolean) {
+  const anchor = savePanel.value?.anchor
+  savePanel.value = null
+  if (restore && anchor?.isConnected) anchor.focus()
+}
+function problem(e: unknown) { return e instanceof Error ? e.message : 'Something went wrong' }
+async function submitSave(value: { name: string; shared: boolean; makeDefault: boolean }) {
+  const panel = savePanel.value, id = projectId.value
+  if (!panel || !id) return
+  saveBusy.value = true; saveError.value = ''
+  try {
+    if (panel.mode === 'rename' && panel.view) {
+      const saved = await renameView(id, panel.view, value.name)
+      toast(`Renamed the view to “${saved.name}”`)
+    } else {
+      const saved = await saveNewView(id, value.name, { ...filters.value, view: null }, value.shared)
+      if (value.makeDefault) listPref.value?.save({ ...(listPrefs.value ?? {}), defaultView: saved.id }, 0)
+      update({ view: saved.id })
+      toast(`Saved the view “${saved.name}”${saved.shared ? ', shared with the project' : ''}`)
+    }
+    closeSave(false)
+  } catch (e) {
+    saveError.value = problem(e)
+  } finally {
+    saveBusy.value = false
+  }
+}
+async function saveActive(view: SavedView) {
+  const id = projectId.value
+  if (!id) return
+  try {
+    await saveViewState(id, view, { ...filters.value, view: null })
+    toast(`Saved the changes to “${view.name}”`)
+  } catch (e) { toast(`The view was not saved: ${problem(e)}`, { tone: 'error' }) }
+}
+async function duplicate(view: SavedView) {
+  const id = projectId.value
+  if (!id) return
+  try {
+    const copy = await duplicateView(id, view, copyName(view.name, views.value.items.map(v => v.name)))
+    openView(copy.id)
+    toast(`Made “${copy.name}”, your own copy`)
+  } catch (e) { toast(`The view was not copied: ${problem(e)}`, { tone: 'error' }) }
+}
+function setDefaultView(view: SavedView | null) {
+  listPref.value?.save({ ...(listPrefs.value ?? {}), defaultView: view?.id ?? null }, 0)
+  toast(view ? `${project.value?.title ?? 'The project'} opens with “${view.name}” for you` : `${project.value?.title ?? 'The project'} opens with all tickets again`)
+}
+async function share(view: SavedView, shared: boolean) {
+  const id = projectId.value
+  if (!id) return
+  try {
+    await shareView(id, view, shared)
+    toast(shared ? `“${view.name}” is shared with everyone in ${project.value?.title ?? 'the project'}` : `“${view.name}” is private again`)
+  } catch (e) { toast(`Sharing did not change: ${problem(e)}`, { tone: 'error' }) }
+}
+function copyViewLink(view: SavedView) {
+  const url = new URL(hrefFor(view.id), window.location.origin).toString()
+  navigator.clipboard.writeText(url).then(() => toast(`Copied the link to “${view.name}”`), () => toast('The link could not be copied', { tone: 'error' }))
+}
+async function remove(view: SavedView) {
+  const id = projectId.value
+  if (!id) return
+  try {
+    const restore = await removeView(id, view)
+    if (filters.value.view === view.id) update({ view: null })
+    toast(`Deleted the view “${view.name}”`, { timeout: 8000, action: { label: 'Undo', run: () => void restore().then(back => { toast(`“${back.name}” is back`) }, e => toast(`The view could not be brought back: ${problem(e)}`, { tone: 'error' })) } })
+  } catch (e) { toast(`The view was not deleted: ${problem(e)}`, { tone: 'error' }) }
+}
+
+// ---------- Selection and bulk changes ----------
+const selectable = computed(() => writable.value && !journeyActive.value && !knowledgeActive.value && !fullView.value)
+const selected = ref(new Set<string>())
+let selectAnchor: string | null = null
+function selectRow(row: ListItem, mode: 'toggle' | 'range') {
+  const next = new Set(selected.value)
+  const rows = sequence.value
+  const from = selectAnchor ? rows.findIndex(item => item.id === selectAnchor) : -1
+  const to = rows.findIndex(item => item.id === row.id)
+  if (mode === 'range' && from !== -1 && to !== -1) {
+    for (let i = Math.min(from, to); i <= Math.max(from, to); i++) next.add(rows[i].id)
+  } else {
+    if (next.has(row.id)) next.delete(row.id); else next.add(row.id)
+    selectAnchor = row.id
+  }
+  selected.value = next
+  cursorId.value = row.id
+}
+function selectAll(on: boolean) {
+  selected.value = on ? new Set(sequence.value.map(row => row.id)) : new Set()
+  selectAnchor = on ? sequence.value[0]?.id ?? null : null
+}
+function clearSelection() { selected.value = new Set(); selectAnchor = null }
+// Everything that matches, beyond the loaded pages (up to the bulk limit of 500).
+async function selectAllMatching() {
+  if (list.cursor.value) await list.loadAll(500)
+  selectAll(true)
+}
+// Rows that left the list leave the selection.
+watch(() => list.rows.value, rows => {
+  if (!selected.value.size) return
+  const ids = new Set(rows.map(row => row.id))
+  const kept = [...selected.value].filter(id => ids.has(id))
+  if (kept.length !== selected.value.size) selected.value = new Set(kept)
+})
+watch(selectable, on => { if (!on) clearSelection() })
+const selectedRows = computed(() => list.rows.value.filter(row => selected.value.has(row.id)))
+// Where the list is, so the bulk bar centres over it (a docked panel takes the right).
+const listFrame = ref<{ left: number; width: number } | null>(null)
+let frameObserver: ResizeObserver | undefined
+function measureFrame() {
+  const el = (table.value as unknown as { $el?: HTMLElement } | undefined)?.$el
+  if (!el) return
+  const rect = el.getBoundingClientRect()
+  listFrame.value = { left: Math.round(rect.left), width: Math.round(rect.width) }
+}
+watch(() => selected.value.size > 0, on => {
+  frameObserver?.disconnect()
+  window.removeEventListener('resize', measureFrame)
+  if (!on) return
+  measureFrame()
+  const el = (table.value as unknown as { $el?: HTMLElement } | undefined)?.$el
+  if (el) { frameObserver = new ResizeObserver(measureFrame); frameObserver.observe(el) }
+  window.addEventListener('resize', measureFrame)
+})
+onBeforeUnmount(() => { frameObserver?.disconnect(); window.removeEventListener('resize', measureFrame) })
+const bulkBusy = ref(false)
+const bulkMenu = ref<{ kind: 'status' | 'assignee' | 'priority' | 'labels' | 'move'; anchor: HTMLElement } | null>(null)
+function openBulk(kind: NonNullable<typeof bulkMenu.value>['kind'], anchor?: HTMLElement | null) {
+  const at = anchor ?? document.querySelector<HTMLElement>(`.bulk-bar [aria-keyshortcuts="${{ status: 's', assignee: 'a', priority: 'p', labels: 'l', move: 'm' }[kind]}"]`)
+  if (!at) return
+  if (kind === 'labels') void list.requestFacet('tag')
+  if (kind === 'move') void list.loadEpics()
+  bulkMenu.value = { kind, anchor: at }
+}
+function closeBulk(restore: boolean) {
+  const anchor = bulkMenu.value?.anchor
+  bulkMenu.value = null
+  if (restore) anchor?.focus()
+}
+const bulkPeople = computed(() => {
+  const mine = me.value ? [{ value: me.value.id, label: me.value.name, hint: 'you' }] : []
+  return [{ value: '', label: 'Unassigned' }, ...mine, ...people.value.filter(person => person.id !== me.value?.id).map(person => ({ value: person.id, label: person.name }))]
+})
+const bulkPriorities = [...PRIORITIES.map(p => ({ value: p.value as string, label: p.label as string })), { value: '', label: 'No priority' }]
+const bulkLabels = computed<LabelChoice[]>(() => {
+  const byName = new Map<string, LabelChoice>()
+  for (const [name] of Object.entries(list.facetCounts('tag'))) if (name !== 'none' && !byName.has(name.toLowerCase())) byName.set(name.toLowerCase(), { name, color: list.colors.get(name.toLowerCase()) ?? '', on: 0 })
+  for (const row of selectedRows.value) for (const tag of rowTags(row)) {
+    const key = tag.name.toLowerCase()
+    if (!byName.has(key)) byName.set(key, { name: tag.name, color: tag.color, on: 0 })
+  }
+  for (const choice of byName.values()) choice.on = selectedRows.value.filter(row => rowTags(row).some(tag => tag.name.toLowerCase() === choice.name.toLowerCase())).length
+  return [...byName.values()].sort((a, b) => b.on - a.on || a.name.localeCompare(b.name))
+})
+async function runBulk(change: Omit<import('../lib/api').BulkChange, 'ids'>, done: (count: number) => string) {
+  const ids = [...selected.value]
+  if (!ids.length || bulkBusy.value) return
+  bulkMenu.value = null
+  bulkBusy.value = true
+  try {
+    const result = await list.applyBulk({ ids, ...change })
+    const changed = result.items.length
+    const skipped = result.skipped.length
+    const eventId = result.event_id
+    if (changed) {
+      toast(`${done(changed)}${skipped ? ` · ${plural(skipped, 'ticket')} skipped` : ''}`, {
+        timeout: 8000, action: eventId ? { label: 'Undo', run: () => void undoBulk(eventId) } : undefined,
+      })
+    } else if (!skipped) toast(`Nothing to change: ${plural(result.unchanged.length, 'ticket is', 'tickets are')} already so`)
+    if (skipped) {
+      const first = result.skipped[0]
+      toast(`${first.key ?? 'A ticket'} was skipped: ${first.reason}${skipped > 1 ? ` (and ${skipped - 1} more)` : ''}`, { tone: 'error' })
+    }
+    if (changed) { void list.load(); void projects.load(true); for (const node of result.items) outline.refreshStatsFor(node.id) }
+  } catch (e) {
+    toast(`Nothing was changed: ${problem(e)}`, { tone: 'error' })
+  } finally {
+    bulkBusy.value = false
+    table.value?.focusGrid()
+  }
+}
+async function undoBulk(eventId: number) {
+  try {
+    await list.undoBulk(eventId)
+    toast('Undone: the tickets are as they were')
+    void list.load(); void projects.load(true)
+  } catch (e) {
+    toast(e instanceof APIError && e.status === 409 ? 'Some of them changed since, so nothing was undone.' : `Undo did not work: ${problem(e)}`, { tone: 'error' })
+  }
+}
+const count = (n: number) => plural(n, 'ticket')
+function bulkStatus(state: string) { void runBulk({ state }, n => `${count(n)} ${n === 1 ? 'is' : 'are'} now ${statusMeta(state).label}`) }
+function bulkArchive() { void runBulk({ state: 'archived' }, n => `Archived ${count(n)}`) }
+function bulkAssign(value: string) {
+  const name = bulkPeople.value.find(person => person.value === value)?.label ?? 'someone'
+  void runBulk({ assignee: value || null }, n => value ? `Assigned ${count(n)} to ${name}` : `Unassigned ${count(n)}`)
+}
+function bulkPriority(value: string) { void runBulk({ priority: value || null }, n => value ? `${count(n)} ${n === 1 ? 'is' : 'are'} now ${priorityLabel(value)} priority` : `Cleared the priority of ${count(n)}`) }
+function bulkLabelsApply(change: { add: { name: string; color?: string }[]; remove: string[] }) {
+  void runBulk({ tags_add: change.add, tags_remove: change.remove }, n => `Changed the labels of ${count(n)}`)
+}
+function bulkMove(epic: { id: string; key: string; title: string } | null) {
+  const target = epic?.id ?? project.value?.id
+  if (!target) return
+  void runBulk({ parent_id: target }, n => epic ? `Moved ${count(n)} to ${epic.title}` : `Took ${count(n)} out of their epic`)
+}
+
 // ---------- Unsaved changes ----------
 function dirty() { return !!panel.value?.isDirty() || !!knowledgeEntry.value?.isDirty() }
 async function confirmDiscard() {
@@ -487,7 +811,6 @@ onBeforeRouteUpdate(async (to, from) => {
 })
 onBeforeRouteLeave(async () => (await confirmDiscard()) && (!table.value?.createDirty() || skipGuard || confirmAction({ title: 'Discard the new ticket?', body: 'Its title has not been created yet.', confirmLabel: 'Discard', danger: true })))
 function beforeUnload(event: BeforeUnloadEvent) { if (dirty() || table.value?.createDirty()) { event.preventDefault(); event.returnValue = '' } }
-function setDensity(value: 'comfortable' | 'compact') { density.value = value }
 // Tabbing into the table lands on a visible row, not on an invisible container.
 function focusFirst() { if (!cursorId.value && sequence.value.length) cursorId.value = sequence.value[0].id }
 
@@ -519,10 +842,29 @@ async function move(step: number) {
   void nextTick(() => table.value?.scrollToRow(row.id))
   table.value?.focusGrid()
 }
+// Shift with j/k or the arrows grows the selection from the cursor row.
+function extendSelection(step: number) {
+  const rows = sequence.value
+  const at = rows.findIndex(row => row.id === cursorId.value)
+  if (at === -1) { void move(step); return }
+  const to = Math.max(0, Math.min(rows.length - 1, at + step))
+  const next = new Set(selected.value)
+  next.add(rows[at].id); next.add(rows[to].id)
+  if (!selectAnchor) selectAnchor = rows[at].id
+  selected.value = next
+  cursorId.value = rows[to].id
+  void nextTick(() => table.value?.scrollToRow(rows[to].id))
+  table.value?.focusGrid()
+}
 function keydown(event: KeyboardEvent) {
   if (event.altKey && event.key === 'ArrowLeft' && ticketKey.value && trail.value.length && !typing(event.target as HTMLElement | null)) { event.preventDefault(); trailBack(); return }
   // The Knowledge tab and its entries have their own keys.
   if (knowledgeActive.value) return
+  // Command or Control A in the list selects every loaded row.
+  if ((event.metaKey || event.ctrlKey) && !event.altKey && !event.shiftKey && event.key.toLowerCase() === 'a' && selectable.value && !event.defaultPrevented
+    && !typing(event.target) && !document.querySelector('dialog[open], .floating') && !panel.value?.el?.contains(document.activeElement)) {
+    event.preventDefault(); selectAll(true); return
+  }
   if (event.defaultPrevented || event.metaKey || event.ctrlKey || event.altKey) return
   if (document.querySelector('dialog[open]')) return
   const target = event.target as HTMLElement | null
@@ -535,6 +877,17 @@ function keydown(event: KeyboardEvent) {
   if (journeyActive.value && !ticketKey.value) return
   if (journeyActive.value && ['j', 'k', 'ArrowDown', 'ArrowUp', 'Enter', 'o', '/', 'n'].includes(event.key)) return
   const row = sequence.value.find(item => item.id === cursorId.value)
+  if (event.key === 'F') { event.preventDefault(); toolbar.value?.openFilterMenu(); return }
+  if (selectable.value && !panel.value?.el?.contains(document.activeElement)) {
+    if (event.key === 'Escape' && selected.value.size) { event.preventDefault(); clearSelection(); return }
+    if (!ticketKey.value) {
+      if (event.key === 'x' && row) { event.preventDefault(); selectRow(row, 'toggle'); return }
+      if (event.key === 'J' || (event.key === 'ArrowDown' && event.shiftKey)) { event.preventDefault(); extendSelection(1); return }
+      if (event.key === 'K' || (event.key === 'ArrowUp' && event.shiftKey)) { event.preventDefault(); extendSelection(-1); return }
+      const bulkKey = ({ s: 'status', a: 'assignee', p: 'priority', l: 'labels', m: 'move' } as const)[event.key as 's']
+      if (selected.value.size && bulkKey) { event.preventDefault(); openBulk(bulkKey); return }
+    }
+  }
   if (outlineActive.value && !fullView.value && outlineKey(event, row)) return
   switch (event.key) {
     case 'j': case 'ArrowDown': event.preventDefault(); void move(1); break
@@ -630,7 +983,7 @@ watch([project, panelItem, knowledgeActive, knowledgeEntryOpen], ([current, item
 <template>
   <section class="project-page" :class="{ 'panel-open': !!ticketKey && !fullView, 'full-view': fullView, 'knowledge-entry': knowledgeEntryOpen }" :style="{ '--toolbar-h': `${toolbarHeight}px` }" :aria-labelledby="project && !knowledgeEntryOpen ? 'project-title' : undefined">
     <template v-if="project">
-      <div v-show="!fullView && !knowledgeEntryOpen" class="list-view">
+      <div v-show="!fullView && !knowledgeEntryOpen" class="list-view" :class="{ selecting: selectable && selected.size }">
       <header class="project-head">
         <div class="head-main">
           <div class="title-line">
@@ -659,14 +1012,21 @@ watch([project, panelItem, knowledgeActive, knowledgeEntryOpen], ([current, item
         </div>
       </header>
 
+      <ViewBar
+        v-if="!journeyActive" ref="viewBar" :views="views.items" :active-id="activeView?.id ?? null" :dirty="viewDirty" :default-id="defaultViewId" :can-save-new="canSaveView && !activeView"
+        :me="me?.id ?? null" :href-for="hrefFor" @open="id => openView(id)" @save="saveActive" @save-as="startSave" @reset="openView(activeView?.id ?? null, true)"
+        @rename="startRename" @duplicate="duplicate" @set-default="setDefaultView" @share="share" @copy-link="copyViewLink" @remove="remove"
+      />
       <div ref="stickMark" class="stick-mark" aria-hidden="true" />
       <div ref="toolbarWrap" class="toolbar-wrap" :class="{ stuck }">
         <ListToolbar
-          ref="toolbar" :filters="filters" :options="options" :total="total" :loading="list.loading.value" :density="density" :stuck="stuck"
-          @search="q => update({ q })" @toggle="toggleValue" @clear="dimension => update({ [dimension]: [] })" @clear-all="clearFilters"
-          @show-closed="value => update({ showClosed: value })" @group="setGroup" @density="setDensity"
-          @open-sheet="filterSheet?.open()" @need-names="list.resolveNames(options('assignee').map(o => o.value))" @create="startCreate()"
+          ref="toolbar" :filters="filters" :options="options" :label="chipLabel" :total="total" :loading="list.loading.value" :density="density" :stuck="stuck"
+          :facet-loading="facetLoading"
+          @search="q => update({ q })" @toggle="toggleValue" @exclude="excludeValue" @clear="dimension => update({ [dimension]: [] })" @clear-all="clearFilters"
+          @show-closed="value => update({ showClosed: value })" @group="setGroup" @sort="setSort" @density="setDensity" @date="setDate"
+          @open-sheet="filterSheet?.open()" @need-options="needOptions" @create="startCreate()"
           :view="viewMode" @view="setView" @expand-all="outline.expandAll()" @collapse-all="outline.collapseAll()"
+          @expand-groups="setAllGroups(true)" @collapse-groups="setAllGroups(false)"
           :columns="toolbarColumns" @columns="saveColumns" @columns-reset="resetColumns"
         />
       </div>
@@ -688,7 +1048,8 @@ watch([project, panelItem, knowledgeActive, knowledgeEntryOpen], ([current, item
         :has-more="outlineActive ? outline.hasMoreRoot.value : !!list.cursor.value" :filtered="filtered" :hiding-closed="!filters.showClosed"
         :collapsed="collapsed" :total="total" :project-key="routeKey" :scroll-root="scrollRoot" :now="now" :show-assignee="showAssignee"
         :creating="creating" :project-id="project.id" :known-states="knownStates" :create="quickCreate" @close-create="closeCreate"
-        :outline="outlineActive ? outline.entries.value : null" :can-drag="outlineActive && writable" :prefs="listPrefs"
+        :outline="outlineActive ? outline.entries.value : null" :can-drag="outlineActive && writable" :prefs="tablePrefs"
+        :selectable="selectable" :selected="selected" @select="selectRow" @select-all="selectAll"
         @layout="(visible, customised) => tableLayout = { visible, customised }" @widths="saveWidths"
         @toggle-row="outline.toggle" @toggle-no-epic="outline.noEpicCollapsed.value = !outline.noEpicCollapsed.value"
         @more-children="id => id === project!.id ? outline.loadMoreRoot() : outline.loadChildren(id, true)" @move="moveRow"
@@ -697,6 +1058,11 @@ watch([project, panelItem, knowledgeActive, knowledgeEntryOpen], ([current, item
         @retry="outlineActive ? outline.reload() : list.load()" @more="outlineActive ? outline.loadMoreRoot() : list.loadMore()" @grid-focus="focusFirst" @clear-filters="clearFilters" @show-closed="update({ showClosed: true })"
       />
 
+      <BulkBar
+        v-if="selectable && selected.size" :count="selected.size" :loaded="sequence.length" :total="total" :busy="bulkBusy" :can-write="writable" :frame="listFrame"
+        @status="anchor => openBulk('status', anchor)" @assignee="anchor => openBulk('assignee', anchor)" @priority="anchor => openBulk('priority', anchor)"
+        @labels="anchor => openBulk('labels', anchor)" @move="anchor => openBulk('move', anchor)" @archive="bulkArchive" @clear="clearSelection" @select-all="selectAllMatching"
+      />
       <p v-if="!journeyActive && !knowledgeActive" class="hint">
         <kbd class="keycap">j</kbd><kbd class="keycap">k</kbd> move · <kbd class="keycap"><AppIcon name="enter" /></kbd> open · <kbd class="keycap">/</kbd> search ·
         <button type="button" class="hint-link" @click="run({ name: 'shortcuts' })"><kbd class="keycap">?</kbd> all shortcuts</button>
@@ -717,10 +1083,23 @@ watch([project, panelItem, knowledgeActive, knowledgeEntryOpen], ([current, item
       />
       <StatusMenu v-if="statusMenu" :anchor="statusMenu.anchor" :current="statusMenu.row.state" :known-states="knownStates" :ticket-key="statusMenu.row.key" @choose="chooseStatus" @close="closeStatus" />
       <FilterSheet
-        ref="filterSheet" :filters="filters" :options="options" :total="total" :view="viewMode === 'journey' || viewMode === 'knowledge' ? 'list' : viewMode" @expand-all="outline.expandAll()" @collapse-all="outline.collapseAll()"
-        @toggle="toggleValue" @clear-all="clearFilters" @show-closed="value => update({ showClosed: value })" @group="setGroup"
-        @opened="list.resolveNames(options('assignee').map(o => o.value))"
+        ref="filterSheet" :filters="filters" :options="options" :total="total" :view="viewMode === 'journey' || viewMode === 'knowledge' ? 'list' : viewMode" :can-save="canSaveView"
+        @expand-all="outline.expandAll()" @collapse-all="outline.collapseAll()"
+        @toggle="toggleValue" @exclude="excludeValue" @clear-all="clearFilters" @show-closed="value => update({ showClosed: value })" @group="setGroup" @date="setDate"
+        @opened="sheetOpened" @save-view="anchor => startSave(viewBar?.$el ?? anchor)"
       />
+      <SaveViewPanel
+        v-if="savePanel" :key="`${savePanel.mode}-${savePanel.view?.id ?? 'new'}`" :anchor="savePanel.anchor" :mode="savePanel.mode" :name="savePanel.name" :project-title="project.title"
+        :busy="saveBusy" :error="saveError" @submit="submitSave" @close="closeSave"
+      />
+      <StatusMenu v-if="bulkMenu?.kind === 'status'" :anchor="bulkMenu.anchor" current="" :known-states="knownStates" :ticket-key="plural(selected.size, 'ticket')" @choose="bulkStatus" @close="closeBulk" />
+      <OptionMenu
+        v-else-if="bulkMenu?.kind === 'assignee'" :anchor="bulkMenu.anchor" title="Assignee" :subject="plural(selected.size, 'ticket')" kind="assignee" :options="bulkPeople" current="-" :searchable="bulkPeople.length > 8"
+        @choose="bulkAssign" @close="closeBulk"
+      />
+      <OptionMenu v-else-if="bulkMenu?.kind === 'priority'" :anchor="bulkMenu.anchor" title="Priority" :subject="plural(selected.size, 'ticket')" kind="priority" :options="bulkPriorities" current="-" @choose="bulkPriority" @close="closeBulk" />
+      <LabelMenu v-else-if="bulkMenu?.kind === 'labels'" :anchor="bulkMenu.anchor" :labels="bulkLabels" :count="selectedRows.length" :busy="bulkBusy" @apply="bulkLabelsApply" @close="closeBulk" />
+      <EpicPicker v-else-if="bulkMenu?.kind === 'move'" :anchor="bulkMenu.anchor" :project-id="project.id" current="-" :subject="plural(selected.size, 'ticket')" allow-none @choose="bulkMove" @close="closeBulk" />
     </template>
 
     <div v-else-if="projects.error && !projects.loaded" class="page-state" role="alert">
@@ -766,6 +1145,8 @@ watch([project, panelItem, knowledgeActive, knowledgeEntryOpen], ([current, item
 .activity { font-size: 12px; color: var(--ink-3); }
 .activity time { color: var(--ink-2); }
 .stick-mark { height: 1px; margin-bottom: -1px; }
+/* While tickets are selected the bulk bar floats at the bottom: the list can scroll clear of it. */
+.list-view.selecting { padding-bottom: 76px; }
 .toolbar-wrap { position: sticky; top: 0; z-index: 5; margin: 0 calc(-1 * var(--gutter)); padding: 0 var(--gutter); container: toolbar / inline-size; }
 .toolbar-wrap.stuck { background: var(--glass); box-shadow: 0 1px 0 var(--line), 0 12px 24px -20px rgba(16, 35, 39, .35); backdrop-filter: blur(18px) saturate(1.2); -webkit-backdrop-filter: blur(18px) saturate(1.2); }
 .hint { display: flex; align-items: center; justify-content: center; flex-wrap: wrap; gap: 5px; padding: 16px 0 6px; font-size: 12px; color: var(--ink-3); }

@@ -1,17 +1,21 @@
 <!-- SPDX-License-Identifier: AGPL-3.0-only -->
 <script setup lang="ts">
-import { computed, onBeforeUnmount, onMounted, ref, watch } from 'vue'
-import { DIMENSIONS, activeDimensions, type Dimension, type FacetOption, type GroupBy, type ListFilters } from '../../lib/ticketList'
-import { plural } from '../../lib/work'
+import { computed, nextTick, onBeforeUnmount, onMounted, ref, watch } from 'vue'
+import { DIMENSION_BY_KEY, DIMENSIONS, activeDimensions, dateLabel, excluded, fieldLabel, included, type DateFilter, type Dimension, type FacetOption, type GroupBy, type ListFilters } from '../../lib/ticketList'
+import { plural, type SortKey } from '../../lib/work'
 import AppIcon from '../AppIcon.vue'
+import DateMenu from './DateMenu.vue'
+import DisplayPanel from './DisplayPanel.vue'
 import FacetMenu from './FacetMenu.vue'
+import FilterMenu from './FilterMenu.vue'
 import FloatingPanel from './FloatingPanel.vue'
-import ColumnPicker from './ColumnPicker.vue'
 import type { ColumnId } from '../../lib/columns'
 
 const props = defineProps<{
   filters: ListFilters
   options: (dimension: Dimension) => FacetOption[]
+  // The words for one value in a chip (an epic's title, a person's name).
+  label: (dimension: Dimension, value: string) => string
   total: number | null
   loading: boolean
   density: 'comfortable' | 'compact'
@@ -19,21 +23,27 @@ const props = defineProps<{
   view: 'list' | 'outline' | 'journey' | 'knowledge'
   // The table's columns for the Display menu's picker.
   columns?: { order: ColumnId[]; visible: ColumnId[]; customised: boolean } | null
+  facetLoading?: boolean
 }>()
 const emit = defineEmits<{
   search: [q: string]
   toggle: [dimension: Dimension, value: string]
+  exclude: [dimension: Dimension, value: string]
   clear: [dimension: Dimension]
   clearAll: []
   showClosed: [value: boolean]
   group: [value: GroupBy]
+  sort: [keys: SortKey[]]
   density: [value: 'comfortable' | 'compact']
+  date: [value: DateFilter | null]
   openSheet: []
-  needNames: []
+  needOptions: [dimension: Dimension]
   create: []
   view: [value: 'list' | 'outline' | 'journey' | 'knowledge']
   expandAll: []
   collapseAll: []
+  expandGroups: []
+  collapseGroups: []
   columns: [order: ColumnId[], visible: ColumnId[]]
   columnsReset: []
 }>()
@@ -49,7 +59,10 @@ onMounted(() => {
   resize.observe(root.value)
 })
 const input = ref<HTMLInputElement>()
+const filterButton = ref<HTMLButtonElement>()
 const open = ref<{ dimension: Dimension; anchor: HTMLElement } | null>(null)
+const dateAnchor = ref<HTMLElement | null>(null)
+const menuAnchor = ref<HTMLElement | null>(null)
 const displayAnchor = ref<HTMLElement | null>(null)
 let timer: ReturnType<typeof setTimeout> | undefined
 watch(() => props.filters.q, value => { if (value !== draft.value.trim()) draft.value = value })
@@ -59,33 +72,62 @@ watch(draft, value => {
 })
 onBeforeUnmount(() => { clearTimeout(timer); resize?.disconnect() })
 
+const PRIMARY = DIMENSIONS.filter(d => d.primary)
 const active = computed(() => activeDimensions(props.filters))
-const filterCount = computed(() => active.value.reduce((sum, key) => sum + props.filters[key].length, 0) + (props.filters.q ? 1 : 0))
-const groups: { value: GroupBy; label: string }[] = [{ value: 'none', label: 'None' }, { value: 'status', label: 'Status' }, { value: 'epic', label: 'Epic' }]
-const displayLabel = computed(() => props.view === 'outline' || props.filters.group === 'none' ? 'Display' : `Grouped by ${props.filters.group}`)
+const secondaryActive = computed(() => active.value.filter(key => !DIMENSION_BY_KEY.get(key)!.primary).length + (props.filters.date ? 1 : 0))
+const filterCount = computed(() => active.value.reduce((sum, key) => sum + props.filters[key].length, 0) + (props.filters.q ? 1 : 0) + (props.filters.date ? 1 : 0))
+const chipCount = computed(() => active.value.length + (props.filters.date ? 1 : 0))
+const groupWord = computed(() => props.filters.group === 'tag' ? 'label' : props.filters.group)
+const displayLabel = computed(() => props.view === 'outline' || props.filters.group === 'none' ? 'Display' : `Grouped by ${groupWord.value}`)
+const displayText = computed(() => props.view === 'outline' || props.filters.group === 'none' ? 'Display' : `By ${groupWord.value}`)
 
-function title(dimension: Dimension) { return DIMENSIONS.find(d => d.key === dimension)!.title }
-function openMenu(dimension: Dimension, event: MouseEvent) {
-  const anchor = event.currentTarget as HTMLElement
-  if (open.value?.dimension === dimension) { open.value = null; return }
+function title(dimension: Dimension) { return DIMENSION_BY_KEY.get(dimension)!.title }
+function openMenu(dimension: Dimension, anchor: HTMLElement) {
+  if (open.value?.dimension === dimension && open.value.anchor === anchor) { open.value = null; return }
+  menuAnchor.value = null
   open.value = { dimension, anchor }
-  if (dimension === 'assignee') emit('needNames')
+  emit('needOptions', dimension)
 }
 function closeMenu(restore: boolean) {
   const anchor = open.value?.anchor
   open.value = null
   if (restore) anchor?.focus()
 }
+function chooseFilter(choice: Dimension | 'date') {
+  const anchor = menuAnchor.value ?? filterButton.value ?? null
+  menuAnchor.value = null
+  if (!anchor) return
+  // The chosen filter opens where the Filter menu was, so the eye stays put.
+  void nextTick(() => { if (choice === 'date') dateAnchor.value = anchor; else openMenu(choice, anchor) })
+}
 function chipText(dimension: Dimension) {
-  const labels = props.filters[dimension].map(value => props.options(dimension).find(option => option.value === value)?.label ?? value)
-  return labels.length > 2 ? `${labels.slice(0, 2).join(', ')} +${labels.length - 2}` : labels.join(', ')
+  const words = (values: string[]) => values.map(value => props.label(dimension, value))
+  const plain = words(included(props.filters[dimension]))
+  const not = words(excluded(props.filters[dimension]))
+  const shorten = (parts: string[]) => parts.length > 2 ? `${parts.slice(0, 2).join(', ')} +${parts.length - 2}` : parts.join(', ')
+  return [plain.length ? shorten(plain) : '', not.length ? `not ${shorten(not)}` : ''].filter(Boolean).join(' · ')
+}
+function chipKey(event: KeyboardEvent, clear: () => void) {
+  if (event.key === 'Backspace' || event.key === 'Delete') {
+    event.preventDefault()
+    const chip = (event.currentTarget as HTMLElement).closest('.filter-chip')
+    const next = (chip?.nextElementSibling ?? chip?.previousElementSibling)?.querySelector<HTMLElement>('button')
+    clear()
+    void nextTick(() => (next ?? input.value)?.focus())
+  }
 }
 function closeDisplay(restore: boolean) {
   const anchor = displayAnchor.value
   displayAnchor.value = null
   if (restore) anchor?.focus()
 }
+function closeDate(restore: boolean) {
+  const anchor = dateAnchor.value
+  dateAnchor.value = null
+  if (restore) anchor?.focus()
+}
 function focusSearch() { input.value?.focus(); input.value?.select() }
+function openFilterMenu() { if (filterButton.value && filterButton.value.offsetParent) { open.value = null; menuAnchor.value = filterButton.value } else emit('openSheet') }
 function clearSearch() { draft.value = ''; emit('search', ''); input.value?.focus() }
 function searchKey(event: KeyboardEvent) {
   if (event.key === 'Escape') {
@@ -94,7 +136,7 @@ function searchKey(event: KeyboardEvent) {
     else input.value?.blur()
   }
 }
-defineExpose({ focusSearch, input })
+defineExpose({ focusSearch, openFilterMenu, input })
 </script>
 
 <template>
@@ -115,8 +157,8 @@ defineExpose({ focusSearch, input })
 
     <div class="facets">
       <button
-        v-for="dimension in DIMENSIONS" :key="dimension.key" type="button" class="btn sm facet-btn"
-        :class="{ on: filters[dimension.key].length }" :aria-expanded="open?.dimension === dimension.key" aria-haspopup="dialog" @click="openMenu(dimension.key, $event)"
+        v-for="dimension in PRIMARY" :key="dimension.key" type="button" class="btn sm facet-btn" :data-dim="dimension.key"
+        :class="{ on: filters[dimension.key].length }" :aria-expanded="open?.dimension === dimension.key && open.anchor.classList.contains('facet-btn')" aria-haspopup="dialog" @click="openMenu(dimension.key, $event.currentTarget as HTMLElement)"
       >
         {{ dimension.title }}
         <span class="facet-end">
@@ -124,14 +166,25 @@ defineExpose({ focusSearch, input })
           <AppIcon v-else name="chevron" :size="12" class="facet-chevron" />
         </span>
       </button>
+      <button
+        ref="filterButton" type="button" class="btn sm facet-btn more-btn" :class="{ on: secondaryActive }" aria-haspopup="menu" :aria-expanded="!!menuAnchor"
+        aria-label="Filter by more" aria-keyshortcuts="Shift+F" data-tip="Labels, epic, cost unit, release, date · Shift F" @click="menuAnchor = menuAnchor ? null : ($event.currentTarget as HTMLElement)"
+      >
+        <AppIcon name="filter" :size="13" /><span class="more-label">Filter</span>
+        <span v-if="secondaryActive" class="facet-count mono">{{ secondaryActive }}</span>
+      </button>
     </div>
 
-    <div v-if="active.length" class="chips" aria-label="Applied filters">
-      <span v-for="dimension in active" :key="dimension" class="filter-chip">
-        <button type="button" class="chip-body" :aria-label="`Edit ${title(dimension)} filter`" @click="openMenu(dimension, $event)"><span class="chip-dim">{{ title(dimension) }}</span>{{ chipText(dimension) }}</button>
+    <div v-if="chipCount" class="chips" aria-label="Applied filters">
+      <span v-for="dimension in active" :key="dimension" class="filter-chip" :class="{ negated: !included(filters[dimension]).length }">
+        <button type="button" class="chip-body" :aria-label="`Edit ${title(dimension)} filter: ${chipText(dimension)}`" @click="openMenu(dimension, $event.currentTarget as HTMLElement)" @keydown="chipKey($event, () => emit('clear', dimension))"><span class="chip-dim">{{ title(dimension) }}</span><span class="chip-text">{{ chipText(dimension) }}</span></button>
         <button type="button" class="chip-x" :aria-label="`Remove ${title(dimension)} filter`" @click="emit('clear', dimension)"><AppIcon name="close" :size="11" /></button>
       </span>
-      <button v-if="active.length > 1" type="button" class="btn sm ghost clear-all" @click="emit('clearAll')">Clear all</button>
+      <span v-if="filters.date" class="filter-chip">
+        <button type="button" class="chip-body" :aria-label="`Edit date filter: ${fieldLabel(filters.date.field)} ${dateLabel(filters.date)}`" @click="dateAnchor = $event.currentTarget as HTMLElement" @keydown="chipKey($event, () => emit('date', null))"><AppIcon name="calendar" :size="12" class="chip-icon" /><span class="chip-dim">{{ fieldLabel(filters.date.field) }}</span><span class="chip-text">{{ dateLabel(filters.date) }}</span></button>
+        <button type="button" class="chip-x" aria-label="Remove date filter" @click="emit('date', null)"><AppIcon name="close" :size="11" /></button>
+      </span>
+      <button v-if="chipCount > 1" type="button" class="btn sm ghost clear-all" @click="emit('clearAll')">Clear all</button>
     </div>
 
     <span class="spacer" />
@@ -145,8 +198,8 @@ defineExpose({ focusSearch, input })
       type="button" class="btn sm closed-pill" :class="{ on: !filters.showClosed }" :aria-pressed="!filters.showClosed" aria-label="Hide closed tickets"
       :data-tip="filters.showClosed ? 'Closed tickets are shown\nClick to hide them' : 'Closed tickets are hidden\nClick to show them'" @click="emit('showClosed', !filters.showClosed)"
     ><AppIcon :name="filters.showClosed ? 'eye' : 'eye-off'" :size="14" />Closed</button>
-    <button type="button" class="btn sm display-btn" :class="{ on: view === 'list' && filters.group !== 'none' }" aria-haspopup="dialog" :aria-expanded="!!displayAnchor" :aria-label="`Display: ${displayLabel}`" data-tip="Grouping, row height and columns" @click="displayAnchor = displayAnchor ? null : ($event.currentTarget as HTMLElement)">
-      <AppIcon name="layers" :size="13" /><span class="display-label">{{ displayLabel }}</span><AppIcon name="chevron" :size="12" class="facet-chevron" />
+    <button type="button" class="btn sm display-btn" :class="{ on: view === 'list' && filters.group !== 'none' }" aria-haspopup="dialog" :aria-expanded="!!displayAnchor" :aria-label="`Display: ${displayLabel}`" data-tip="Grouping, sort, row height and columns" @click="displayAnchor = displayAnchor ? null : ($event.currentTarget as HTMLElement)">
+      <AppIcon name="layers" :size="13" /><span class="display-label">{{ displayText }}</span><AppIcon name="chevron" :size="12" class="facet-chevron" />
     </button>
 
     <button type="button" class="btn primary new-btn" aria-label="New ticket" aria-keyshortcuts="n" data-tip="New ticket · n" @click="emit('create')"><AppIcon name="plus" :size="14" /><span class="new-label">New</span></button>
@@ -161,31 +214,19 @@ defineExpose({ focusSearch, input })
     <slot name="journey" />
 
     <FacetMenu
-      v-if="open" :anchor="open.anchor" :dimension="open.dimension" :title="title(open.dimension)" :options="options(open.dimension)" :selected="filters[open.dimension]"
-      @toggle="value => emit('toggle', open!.dimension, value)" @clear="emit('clear', open!.dimension)" @close="closeMenu"
+      v-if="open" :anchor="open.anchor" :dimension="open.dimension" :title="title(open.dimension)" :options="options(open.dimension)" :selected="filters[open.dimension]" :loading="facetLoading"
+      @toggle="value => emit('toggle', open!.dimension, value)" @exclude="value => emit('exclude', open!.dimension, value)" @clear="emit('clear', open!.dimension)" @close="closeMenu"
     />
-    <FloatingPanel v-if="displayAnchor" :anchor="displayAnchor" :width="300" :tallest="720" align="end" label="Display options" @close="closeDisplay">
-      <div class="display-panel">
-        <template v-if="view === 'list'">
-          <p class="eyebrow">Group by</p>
-          <div class="seg wide" role="radiogroup" aria-label="Group by">
-            <button v-for="option in groups" :key="option.value" type="button" role="radio" :aria-checked="filters.group === option.value" :data-autofocus="filters.group === option.value ? '' : undefined" @click="emit('group', option.value)">{{ option.label }}</button>
-          </div>
-        </template>
-        <template v-else>
-          <p class="eyebrow">Outline</p>
-          <div class="outline-actions">
-            <button type="button" class="btn sm" data-autofocus @click="emit('expandAll'); closeDisplay(false)"><AppIcon name="expand-all" :size="13" />Expand all</button>
-            <button type="button" class="btn sm" @click="emit('collapseAll'); closeDisplay(false)"><AppIcon name="collapse-all" :size="13" />Collapse all</button>
-          </div>
-        </template>
-        <p class="eyebrow">Row height</p>
-        <div class="seg wide" role="radiogroup" aria-label="Row height">
-          <button type="button" role="radio" :aria-checked="density === 'comfortable'" @click="emit('density', 'comfortable')"><AppIcon name="rows-comfortable" :size="14" />Comfortable</button>
-          <button type="button" role="radio" :aria-checked="density === 'compact'" @click="emit('density', 'compact')"><AppIcon name="rows-compact" :size="14" />Compact</button>
-        </div>
-        <ColumnPicker v-if="columns" class="column-picker" :order="columns.order" :visible="columns.visible" :customised="columns.customised" @change="(order, visible) => emit('columns', order, visible)" @reset="emit('columnsReset')" />
-      </div>
+    <FilterMenu v-if="menuAnchor" :anchor="menuAnchor" :filters="filters" @choose="chooseFilter" @close="restore => { const a = menuAnchor; menuAnchor = null; if (restore) a?.focus() }" />
+    <DateMenu v-if="dateAnchor" :anchor="dateAnchor" :value="filters.date" @change="value => emit('date', value)" @close="closeDate" />
+    <FloatingPanel v-if="displayAnchor" :anchor="displayAnchor" :width="320" :tallest="760" align="end" label="Display options" @close="closeDisplay">
+      <DisplayPanel
+        :filters="filters" :view="view === 'knowledge' ? 'list' : view" :density="density" :columns="columns" :grouped="view === 'list' && filters.group !== 'none'"
+        @group="value => emit('group', value)" @sort="keys => emit('sort', keys)" @density="value => emit('density', value)"
+        @columns="(order, visible) => emit('columns', order, visible)" @columns-reset="emit('columnsReset')"
+        @expand-all="emit('expandAll'); closeDisplay(false)" @collapse-all="emit('collapseAll'); closeDisplay(false)"
+        @expand-groups="emit('expandGroups')" @collapse-groups="emit('collapseGroups')"
+      />
     </FloatingPanel>
   </div>
 </template>
@@ -204,15 +245,19 @@ defineExpose({ focusSearch, input })
 .facet-btn { gap: 6px; padding: 0 9px 0 12px; font-weight: 600; color: var(--ink-2); }
 .facet-btn:hover, .facet-btn[aria-expanded="true"] { color: var(--ink); }
 .facet-btn.on { color: var(--teal-ink); }
+.more-btn { padding: 0 11px 0 10px; }
 /* Chevron and count badge share one slot so buttons never change width. */
 .facet-end { display: inline-grid; place-items: center; width: 18px; }
 .facet-chevron { color: var(--ink-3); }
 .facet-count { display: inline-grid; place-items: center; min-width: 17px; height: 17px; padding: 0 5px; border-radius: 999px; background: linear-gradient(180deg, #1a8683, #0e6f6c); color: #fff; font-size: 10.5px; font-weight: 700; }
-.chips { display: flex; align-items: center; flex-wrap: wrap; gap: 6px; min-width: 0; }
-.filter-chip { display: inline-flex; align-items: center; height: 28px; border-radius: 999px; background: var(--chip-teal-bg); box-shadow: inset 0 0 0 1px var(--chip-teal-line); color: var(--teal-ink); font-size: 12.5px; max-width: 320px; }
-.chip-body { display: inline-flex; align-items: center; gap: 6px; min-width: 0; height: 100%; padding: 0 4px 0 11px; border: 0; border-radius: 999px 0 0 999px; background: transparent; color: inherit; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; font-weight: 600; }
+/* Applied filters take their own line under the controls, so the controls never move. */
+.chips { display: flex; align-items: center; flex-wrap: wrap; gap: 6px; order: 20; flex: 1 0 100%; min-width: 0; }
+.filter-chip { display: inline-flex; align-items: center; height: 28px; border-radius: 999px; background: var(--chip-teal-bg); box-shadow: inset 0 0 0 1px var(--chip-teal-line); color: var(--teal-ink); font-size: 12.5px; max-width: 340px; }
+.chip-body { display: inline-flex; align-items: center; gap: 6px; min-width: 0; height: 100%; padding: 0 4px 0 11px; border: 0; border-radius: 999px 0 0 999px; background: transparent; color: inherit; white-space: nowrap; overflow: hidden; font-weight: 600; }
+.chip-text { min-width: 0; overflow: hidden; text-overflow: ellipsis; }
 .chip-body:hover { background: rgba(14, 111, 108, .06); }
-.chip-dim { font: 500 10px/1 var(--mono); letter-spacing: .1em; text-transform: uppercase; color: var(--ink-3); font-variant-ligatures: none; }
+.chip-dim { flex-shrink: 0; font: 500 10px/1 var(--mono); letter-spacing: .1em; text-transform: uppercase; color: var(--ink-3); font-variant-ligatures: none; }
+.chip-icon { flex-shrink: 0; color: var(--ink-3); }
 .chip-x { display: grid; place-items: center; flex-shrink: 0; width: 24px; height: 24px; margin-right: 2px; padding: 0; border: 0; border-radius: 50%; background: transparent; color: var(--teal-ink); }
 .chip-x:hover { background: rgba(14, 111, 108, .12); }
 .chip-x:active { background: rgba(14, 111, 108, .2); }
@@ -227,21 +272,18 @@ defineExpose({ focusSearch, input })
 .display-btn.on { color: var(--teal-ink); }
 .filters-btn { display: none; }
 .new-btn { height: 32px; padding: 0 14px 0 11px; gap: 6px; }
-.display-panel { display: grid; gap: 8px; padding: 6px 8px 8px; }
-.display-panel .eyebrow + .seg, .outline-actions { margin-bottom: 6px; }
-.column-picker { margin-top: 8px; padding-top: 10px; border-top: 1px solid var(--line); }
-.outline-actions { display: grid; grid-template-columns: 1fr 1fr; gap: 6px; }
 .view-seg { flex-shrink: 0; }
 .knowledge-controls { display: contents; }
 .view-seg button { height: 26px; padding: 0 11px; }
-.seg.wide { display: grid; grid-auto-flow: column; grid-auto-columns: 1fr; }
-.seg.wide button { height: 30px; }
-/* Narrow list (docked panel or small window): tighter search, no count. */
-@container toolbar (max-width: 1180px) { .view-label { display: none; } .view-seg button { padding: 0 8px; } }
-@container toolbar (max-width: 1000px) { .list-search { width: 190px; } .count { display: none; } .new-btn { width: 32px; padding: 0; } .new-label { display: none; } }
+/* The controls keep to one line; as the list narrows (a docked panel, a smaller
+   window) labels step back first, then the rarer quick filters, which stay in
+   the Filter menu. */
+@container toolbar (max-width: 1500px) { .more-label { display: none; } .more-btn { padding: 0 9px; } .list-search { width: 208px; } }
+@container toolbar (max-width: 1300px) { .view-label { display: none; } .view-seg button { padding: 0 8px; } }
+@container toolbar (max-width: 1000px) { .list-search { width: 190px; } .count { display: none; } .new-btn { width: 32px; padding: 0; } .new-label { display: none; } .facet-btn[data-dim="type"]:not(.on) { display: none; } .display-label { display: none; } .display-btn { padding: 0 9px; } }
 @container toolbar (max-width: 920px) { .list-search { width: 150px; } .facet-btn { padding: 0 11px; } .facet-btn:not(.on) .facet-end { display: none; } }
-@container toolbar (max-width: 820px) { .list-search { width: 104px; } .list-search .field { padding-right: 10px; } .facet-btn { padding: 0 10px; } .facet-btn:not(.on) .facet-end { display: none; } .view-seg button { padding: 0 6px; } .toolbar { column-gap: 8px; } }
-@container toolbar (max-width: 900px) { .display-label { display: none; } .display-btn { padding: 0 9px; } }
+@container toolbar (max-width: 820px) { .list-search { width: 112px; } .list-search .field { padding-right: 10px; } .facet-btn { padding: 0 10px; } .facet-btn:not(.on) .facet-end { display: none; } .view-seg button { padding: 0 7px; } }
+@container toolbar (max-width: 760px) { .facet-btn[data-dim="assignee"]:not(.on) { display: none; } }
 /* Narrowest docked width: a labelled pill replaces the switch and its longer label. */
 .closed-pill { display: none; gap: 6px; padding: 0 11px 0 9px; color: var(--ink-2); }
 .closed-pill.on { color: var(--teal-ink); }

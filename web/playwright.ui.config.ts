@@ -1,7 +1,12 @@
 // SPDX-License-Identifier: AGPL-3.0-only
+import { createHash } from 'node:crypto'
 import { defineConfig } from '@playwright/test'
 
-const port = process.env.PLAYWRIGHT_PORT ?? '5175'
+// Each checkout gets its own stable port (derived from its path), and a run never
+// reuses a server it did not start: parallel worktrees sharing 5175 once ran one
+// worktree's specs against another worktree's code (2026-09-25).
+const derived = 5200 + (parseInt(createHash('sha256').update(process.cwd()).digest('hex').slice(0, 4), 16) % 700)
+const port = process.env.PLAYWRIGHT_PORT ?? String(derived)
 
 export default defineConfig({
   testDir: './tests',
@@ -12,6 +17,6 @@ export default defineConfig({
   webServer: {
     command: `npm run dev -- --host 127.0.0.1 --port ${port} --strictPort`,
     url: `http://127.0.0.1:${port}`,
-    reuseExistingServer: !process.env.CI && !process.env.PLAYWRIGHT_PORT,
+    reuseExistingServer: process.env.PLAYWRIGHT_REUSE === '1',
   },
 })

@@ -305,6 +305,15 @@ func (m *Module) updateNode(ctx context.Context, p tenant.Principal, id string, 
 		if err != nil {
 			return err
 		}
+		if _, renaming := raw["title"]; renaming {
+			kind, _, err := loadKind(ctx, tx, current.KindID)
+			if err != nil {
+				return err
+			}
+			if kind.Slug == "tag" {
+				return badRequest("rename tags through /api/tags/{tagId}")
+			}
+		}
 		// Compare after SELECT FOR UPDATE, so competing patches cannot both
 		// consume the same timestamp. Advance even on equal clock readings.
 		if expected != nil && !current.UpdatedAt.Equal(*expected) {
@@ -378,6 +387,13 @@ func (m *Module) deleteNode(ctx context.Context, p tenant.Principal, id string) 
 		current, err := loadNode(ctx, tx, id, true)
 		if err != nil {
 			return err
+		}
+		kind, _, err := loadKind(ctx, tx, current.KindID)
+		if err != nil {
+			return err
+		}
+		if kind.Slug == "tag" {
+			return badRequest("delete tags through /api/tags/{tagId}")
 		}
 		loaded, scanErr := scanNode(tx.QueryRow(ctx, `
 			UPDATE nodes SET deleted_at = now(), updated_at = now()

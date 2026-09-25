@@ -6,7 +6,11 @@ import { listNodes, searchNodes, type ListItem, type WorkNode } from '../lib/api
 import { entryPath, listKnowledge, typeMeta, type KnowledgeItem } from '../lib/knowledge'
 import { visibleSections } from '../lib/settings'
 import { run } from '../lib/commands'
-import { actionResults, assemble, keyPrefixOf, keyQuery, knowledgeResults, projectResults, recentResults, ticketResults, type ActionResult, type Group, type Result, type TicketResult } from '../lib/palette'
+import { actionResults, assemble, keyPrefixOf, keyQuery, knowledgeResults, projectResults, recentResults, ticketResults, viewResults, type ActionResult, type Group, type Result, type TicketResult } from '../lib/palette'
+import { loadViews, viewsOf } from '../lib/savedViews'
+import { filtersFromView, filtersToQuery } from '../lib/ticketList'
+import { usePreference } from '../lib/preferences'
+import { useSession } from '../stores/session'
 import { recents } from '../lib/recents'
 import { dark, toggleTheme } from '../lib/theme'
 import { toast } from '../lib/toast'
@@ -92,7 +96,19 @@ function projectFor(key: string) {
   const project = projects.byRouteKey(keyPrefixOf(key))
   return project ? project.routeKey : null
 }
+// The saved views of the project in scope, by name.
+const session = useSession()
+const viewProject = computed(() => scopeProject.value ?? (scope.value ? undefined : routeProject.value))
+const viewPref = computed(() => viewProject.value ? usePreference<{ defaultView?: string | null }>(`list:${viewProject.value.id}`) : null)
+const views = computed(() => {
+  const project = viewProject.value
+  if (!project) return []
+  const me = session.identity?.principal.id
+  const preferred = viewPref.value?.value.value?.defaultView ?? null
+  return viewsOf(project.id).items.map(view => ({ id: view.id, name: view.name, shared: view.shared, mine: view.owner_principal_id === me, isDefault: view.id === preferred }))
+})
 const groups = computed<Group[]>(() => assemble(query.value, {
+  views: viewResults(query.value, views.value),
   recent: recentResults(recents, scope.value),
   tickets: ticketResults(searched, listed.value, hits.value, workKinds.value, projectFor, scope.value),
   knowledge: knowledgeResults(knowledgeHits.value, id => projects.byId(id)?.routeKey ?? null, scope.value),
@@ -149,6 +165,7 @@ async function open() {
   scope.value = routeProject.value?.routeKey ?? null
   term.value = ''; listed.value = []; hits.value = []; knowledgeHits.value = []; failed.value = ''; active.value = 0; searched = ''
   void projects.load()
+  if (routeProject.value) void loadViews(routeProject.value.id)
   dialog.value?.showModal()
   await nextTick()
   input.value?.focus()
@@ -191,6 +208,11 @@ function act(id: string) {
   else if (id === 'releases') run({ name: 'releases' })
   else if (id === 'settings') void router.push('/settings')
   else if (id.startsWith('settings-')) void router.push(`/settings/${id.slice('settings-'.length)}`)
+  else if (id.startsWith('view:')) {
+    const project = viewProject.value
+    const view = project ? viewsOf(project.id).items.find(item => `view:${item.id}` === id) : undefined
+    if (project && view) void router.push({ path: `/p/${encodeURIComponent(project.routeKey)}`, query: filtersToQuery(filtersFromView(view)) })
+  }
 }
 async function choose(result: Result | undefined, newTab = false) {
   if (!result) return

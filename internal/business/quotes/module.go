@@ -15,6 +15,7 @@ import (
 	"strings"
 	"time"
 
+	"github.com/inspr-at/aeon/internal/config"
 	"github.com/inspr-at/aeon/internal/db"
 	"github.com/inspr-at/aeon/internal/httpapi"
 	"github.com/inspr-at/aeon/internal/plugins"
@@ -27,6 +28,7 @@ import (
 type Module struct {
 	pool     *pgxpool.Pool
 	registry *plugins.Registry
+	linkKey  []byte
 }
 
 var _ httpapi.Module = (*Module)(nil)
@@ -45,7 +47,11 @@ func New(pool *pgxpool.Pool, registry *plugins.Registry) (httpapi.Module, error)
 	if !ok {
 		return nil, fmt.Errorf("quotes: manifest is not registered")
 	}
-	return &Module{pool: pool, registry: registry}, nil
+	key, err := config.LinkKeyFromEnv()
+	if err != nil {
+		return nil, err
+	}
+	return &Module{pool: pool, registry: registry, linkKey: key}, nil
 }
 func (m *Module) Mount(mux *http.ServeMux) {
 	mux.HandleFunc("GET /api/quotes", m.list)

@@ -448,13 +448,20 @@ paths:
       parameters:
         - {name: kind_id, in: query, schema: {type: string, format: uuid}}
         - {name: kind, in: query, description: Repeatable or comma-separated kind slugs or IDs, schema: {type: array, items: {type: string}}}
-        - {name: state, in: query, description: Repeatable or comma-separated states, schema: {type: array, items: {type: string}}}
-        - {name: priority, in: query, description: Repeatable or comma-separated priorities, schema: {type: array, items: {type: string}}}
-        - {name: assignee, in: query, description: Repeatable or comma-separated principal IDs or none, schema: {type: array, items: {type: string}}}
-        - {name: q, in: query, schema: {type: string}}
+        - {name: state, in: query, description: 'Repeatable or comma-separated states. In every list filter a leading ! excludes a value: plain values of one filter are alternatives, excluded values must all not match, and filters combine with AND.', schema: {type: array, items: {type: string}}}
+        - {name: priority, in: query, description: Repeatable or comma-separated priorities or none; ! excludes, schema: {type: array, items: {type: string}}}
+        - {name: assignee, in: query, description: Repeatable or comma-separated principal IDs or none; ! excludes, schema: {type: array, items: {type: string}}}
+        - {name: tag, in: query, description: 'Tag names (case-insensitive) or none for untagged work; ! excludes. Tags are the name strings or {name} objects in fields.tags.', schema: {type: array, items: {type: string}}}
+        - {name: cost_unit, in: query, description: 'Cost unit labels (case-insensitive) or none; ! excludes. Reads fields.cost_unit, else the imported fields.classic.cost_unit.', schema: {type: array, items: {type: string}}}
+        - {name: release, in: query, description: 'Release labels (case-insensitive) or none; ! excludes. Reads fields.release.', schema: {type: array, items: {type: string}}}
+        - {name: epic, in: query, description: 'Epic node IDs (matching their whole subtree, not the epic itself) or none for work under no epic; ! excludes.', schema: {type: array, items: {type: string}}}
+        - {name: date_field, in: query, description: 'Which date date_from and date_to bound. created and updated compare instants; start, end and accepted read fields.start_date, end_date and accepted_at by the calendar day of the bounds in their own offset. Alone it keeps work that has that date.', schema: {type: string, enum: [created, updated, start, end, accepted]}}
+        - {name: date_from, in: query, description: Inclusive lower bound (RFC 3339), schema: {type: string, format: date-time}}
+        - {name: date_to, in: query, description: Exclusive upper bound (RFC 3339), schema: {type: string, format: date-time}}
+        - {name: q, in: query, description: Matches keys (also earlier keys), titles and descriptions; key prefixes rank first and description-only matches last, schema: {type: string}}
         - {name: within, in: query, description: Descendants of this node, excluding itself, schema: {type: string, format: uuid}}
         - {name: hide_closed, in: query, schema: {type: boolean, default: false}}
-        - {name: facets, in: query, description: Repeatable or comma-separated state,kind,priority,assignee, schema: {type: array, items: {type: string}}}
+        - {name: facets, in: query, description: 'Repeatable or comma-separated state, kind, priority, assignee, tag, cost_unit, release. Tag, cost unit and release counts are keyed by their display spelling; none counts work without one.', schema: {type: array, items: {type: string}}}
         - {name: parent_id, in: query, schema: {type: string, format: uuid}}
         - {name: include_descendants, in: query, schema: {type: boolean, default: false}}
         - {$ref: '#/components/parameters/Sort'}
@@ -480,6 +487,98 @@ paths:
         '409':
           $ref: '#/components/responses/Error'
         '422':
+          $ref: '#/components/responses/Error'
+  /tags/{tagId}:
+    parameters:
+      - {name: tagId, in: path, required: true, schema: {type: string, format: uuid}}
+    patch:
+      operationId: updateTagAssignments
+      description: Atomically update a tag and replace its old name in every live assigned node in the tenant. Each changed node and the tag write an event in the same transaction.
+      security: *auth
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: {$ref: '#/components/schemas/TagPatch'}
+      responses:
+        '200': {$ref: '#/components/responses/Node'}
+        '400': {$ref: '#/components/responses/Error'}
+        '404': {$ref: '#/components/responses/Error'}
+        '409': {$ref: '#/components/responses/Error'}
+    delete:
+      operationId: deleteTagAssignments
+      description: Atomically remove a tag name from every live assigned node and soft-delete the tag. Each changed node and the tag write an event in the same transaction.
+      security: *auth
+      responses:
+        '204': {description: Tag deleted and assignments removed}
+        '400': {$ref: '#/components/responses/Error'}
+        '404': {$ref: '#/components/responses/Error'}
+        '409': {$ref: '#/components/responses/Error'}
+  /nodes/bulk:
+    post:
+      operationId: bulkChangeNodes
+      description: |
+        One change for up to 500 nodes in one transaction: a state (archive is the
+        state archived), a priority or assignee (null clears, also over an imported
+        value), tags to add and remove (by name, case-insensitive), and a new parent
+        inside the same project. Each changed node gets its own node.updated and
+        node.moved events; the batch gets one node.bulk_changed event whose id is
+        returned. POST /events/{event_id}/undo restores every node of the batch, or
+        answers 409 and changes nothing when any of them changed since. A node that
+        cannot take the change (not found, another project, a kind rule, a cycle) is
+        listed under skipped with a reason; nodes already so are listed as unchanged.
+      security: *auth
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              additionalProperties: false
+              required: [ids]
+              minProperties: 2
+              properties:
+                ids: {type: array, minItems: 1, maxItems: 500, items: {type: string, format: uuid}}
+                state: {type: string, minLength: 1, maxLength: 64}
+                priority: {type: [string, 'null'], maxLength: 32}
+                assignee: {type: [string, 'null'], format: uuid}
+                tags_add:
+                  type: array
+                  maxItems: 20
+                  items:
+                    oneOf:
+                      - {type: string, minLength: 1, maxLength: 100}
+                      - type: object
+                        required: [name]
+                        properties:
+                          name: {type: string, minLength: 1, maxLength: 100}
+                          color: {type: string, maxLength: 32}
+                tags_remove: {type: array, maxItems: 20, items: {type: string, minLength: 1, maxLength: 100}}
+                parent_id: {type: string, format: uuid}
+      responses:
+        '200':
+          description: Changed, unchanged and skipped nodes
+          content:
+            application/json:
+              schema:
+                type: object
+                required: [event_id, items, unchanged, skipped]
+                properties:
+                  event_id: {type: [integer, 'null'], description: The node.bulk_changed event to undo; null when nothing changed}
+                  items: {type: array, items: {$ref: '#/components/schemas/Node'}}
+                  unchanged: {type: array, items: {type: string, format: uuid}}
+                  skipped:
+                    type: array
+                    items:
+                      type: object
+                      required: [id, reason]
+                      properties:
+                        id: {type: string, format: uuid}
+                        key: {type: string}
+                        reason: {type: string}
+        '400':
+          $ref: '#/components/responses/Error'
+        '404':
           $ref: '#/components/responses/Error'
   /nodes/lookup:
     get:
@@ -544,6 +643,7 @@ paths:
       operationId: updateNode
       description: |
         Key, kind, and parent are immutable here; use move for parent.
+        Tag renames use PATCH /tags/{tagId} so assignments change atomically.
         Optional optimistic concurrency compares If-Unmodified-Since to the exact
         updated_at value while holding the node row lock in the write transaction.
         A stale value returns 412 without changing the node or appending an event.
@@ -569,7 +669,7 @@ paths:
           $ref: '#/components/responses/Error'
     delete:
       operationId: deleteNode
-      description: Soft-delete; reject while live children remain.
+      description: Soft-delete; reject while live children remain. Tags use DELETE /tags/{tagId} so assignments are removed atomically.
       security: *auth
       responses:
         '204':
@@ -1046,8 +1146,10 @@ paths:
   /views:
     get:
       operationId: listViews
-      description: Own and tenant-shared views.
+      description: Own and tenant-shared views, deleted ones left out. With project_id, that project's views in the order they were made (its view bar); without, every view, most recently changed first.
       security: *auth
+      parameters:
+        - {name: project_id, in: query, schema: {type: string, format: uuid}}
       responses:
         '200':
           $ref: '#/components/responses/Views'
@@ -1118,7 +1220,7 @@ paths:
           $ref: '#/components/responses/Error'
     delete:
       operationId: deleteView
-      description: Owner only.
+      description: Owner only. The delete is soft; restore brings the view back with its id.
       security: *auth
       responses:
         '204':
@@ -1127,6 +1229,19 @@ paths:
           $ref: '#/components/responses/Error'
         '404':
           $ref: '#/components/responses/Error'
+  /views/{viewId}/restore:
+    parameters: [{$ref: '#/components/parameters/ViewId'}]
+    post:
+      operationId: restoreView
+      description: Owner only. Brings a deleted view back (the Undo of a delete) and appends view.restored.
+      security: *auth
+      responses:
+        '200':
+          $ref: '#/components/responses/View'
+        '404':
+          $ref: '#/components/responses/Error'
+        '409':
+          description: The view is not deleted
   /imports:
     get:
       operationId: listImports
@@ -2425,7 +2540,7 @@ paths:
     post:
       operationId: createQuotePublicLink
       summary: Create a scoped capability for the current issued document
-      description: Admin person only. Finalization creates the first link. Explicit creation is for a historical issued version without one, or reissue after revocation. The projection stores only a SHA-256 verifier; the capability is kept separately for repeat copying by admins. Revoke before reissue; expired links stay readable but cannot accept.
+      description: Admin person only. Finalization creates the first link when a persistent link or messaging host key is configured; otherwise explicit creation returns a one-time link. The projection stores only a SHA-256 verifier. Retained capabilities are AES-256-GCM encrypted for admin re-copy. Without a host key re-copy is unavailable. Revoke before reissue; expired links stay readable but cannot accept.
       security: [{session: []}]
       parameters: [{name: quoteId, in: path, required: true, schema: {type: string, format: uuid}}, {name: version, in: path, required: true, schema: {type: integer, minimum: 1}}]
       requestBody: {required: false, content: {application/json: {schema: {type: object, additionalProperties: false, properties: {expires_at: {type: string, format: date-time}}}}}}
@@ -2434,7 +2549,7 @@ paths:
         '409': {$ref: '#/components/responses/Error'}
     get:
       operationId: getQuotePublicLink
-      summary: Read link metadata and the stable path as an admin
+      summary: Read link metadata and, when a host key is available, decrypt the stable path as an admin
       security: [{session: []}]
       parameters: [{name: quoteId, in: path, required: true, schema: {type: string, format: uuid}}, {name: version, in: path, required: true, schema: {type: integer, minimum: 1}}]
       responses:
@@ -3562,8 +3677,9 @@ components:
         target_content_sha256: {type: string, pattern: '^[0-9a-f]{64}$'}
         expires_at: {type: string, format: date-time}
         revoked_at: {type: string, format: date-time}
-        path: {type: string, description: Returned to admins for an active link when its capability is retained; historical links without a retained capability omit it}
+        path: {type: string, description: Returned on creation or to admins for an active link whose retained capability can be decrypted; omitted after one-time delivery without a host key}
         token: {type: string, description: Returned only on creation}
+        copy_unavailable_reason: {type: string, enum: [key_not_configured], description: Active links cannot be re-copied when the server has no persistent link key}
     QuotePublicDocument:
       type: object
       required: [document, offer_no, version, content_sha256, state, expires_at, acceptable, receipt_ready]
@@ -4473,6 +4589,14 @@ components:
           type: object
         state:
           type: string
+    TagPatch:
+      type: object
+      minProperties: 1
+      additionalProperties: false
+      properties:
+        name: {type: string, minLength: 1}
+        color: {type: string, enum: [gray, slate, blue, indigo, purple, pink, red, orange, yellow, green, teal, cyan]}
+        description: {type: string}
     MoveNode:
       type: object
       required: [parent_id]
@@ -4652,14 +4776,28 @@ components:
           type: [string, 'null']
     ViewWrite:
       type: object
-      required: [name, filters, sort, columns]
+      required: [name, filters, columns]
       properties:
         name:
           type: string
           minLength: 1
+          maxLength: 80
+        project_id:
+          type: [string, 'null']
+          format: uuid
+          description: The project whose lists show the view; null or absent is workspace-wide. Set on create only.
         filters:
           type: object
-          description: Node-list filter keys and values
+          description: Node-list filter keys and values (at most 8 KiB); the web app owns their shape
+        sort_keys:
+          type: array
+          maxItems: 8
+          description: The list sort in the node list's spelling, for example [state, -updated_at]
+          items: {type: string, pattern: '^-?[a-z][a-z_]{0,23}$'}
+        group_by:
+          type: string
+          default: none
+          pattern: '^[a-z][a-z_]{0,23}$'
         sort:
           type: object
           required: [field, direction]
@@ -4670,10 +4808,14 @@ components:
             direction:
               type: string
               enum: [asc, desc]
+          description: The earlier single-key sort; defaults to position asc
         columns:
           type: array
+          maxItems: 32
+          description: Column ids in order; empty means the columns follow the table width
           items:
             type: string
+            pattern: '^[a-z][a-z_]{0,23}$'
         shared:
           type: boolean
           default: false
@@ -4684,10 +4826,17 @@ components:
         name:
           type: string
           minLength: 1
+          maxLength: 80
         filters:
           type: object
         sort:
           type: object
+        sort_keys:
+          type: array
+          maxItems: 8
+          items: {type: string}
+        group_by:
+          type: string
         columns:
           type: array
           items:
@@ -4698,12 +4847,13 @@ components:
       allOf:
         - {$ref: '#/components/schemas/ViewWrite'}
         - type: object
-          required: [id, owner_principal_id, shared, created_at, updated_at]
+          required: [id, owner_principal_id, project_id, sort, sort_keys, group_by, shared, created_at, updated_at, deleted_at]
           properties:
             id: {type: string, format: uuid}
             owner_principal_id: {type: string, format: uuid}
             created_at: {type: string, format: date-time}
             updated_at: {type: string, format: date-time}
+            deleted_at: {type: [string, 'null'], format: date-time}
     ViewList:
       type: object
       required: [items]
@@ -4817,7 +4967,7 @@ components:
       in: query
       schema:
         type: string
-        description: Comma-separated sort keys; prefix a key with - for descending order. Keys are position, updated_at, created_at, key, title, state, priority, kind.
+        description: Comma-separated sort keys; prefix a key with - for descending order. Keys are position, updated_at, created_at, key, title, state, priority, kind, assignee (by name, unassigned work last in both directions).
         default: position
     Direction:
       name: direction
