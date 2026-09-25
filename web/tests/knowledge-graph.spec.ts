@@ -1,0 +1,131 @@
+// SPDX-License-Identifier: AGPL-3.0-only
+import { test, expect, type Page } from '@playwright/test'
+import { fixtures, mockWork } from './work-fixtures'
+import { knowledgeWorld, mockKnowledge } from './knowledge-fixtures'
+
+// Always Playwright's bundled Chromium; software WebGL also works on CI.
+test.use({ launchOptions: { args: ['--use-gl=angle', '--use-angle=swiftshader', '--enable-unsafe-swiftshader'] } })
+async function setup(page: Page) {
+  await mockWork(page, fixtures())
+  const world = knowledgeWorld()
+  await mockKnowledge(page, world)
+  const nodes = world.entries.filter(n => n.project === 'p-pharos' && n.status !== 'archived').map(n => ({
+    id: n.id, key: n.key, type: n.type, kind: 'knowledge', slug: n.slug, title: n.title, status: n.status, degree: 2, updated_at: n.updated_at,
+  }))
+  const edges = nodes.slice(1).map((n, i) => ({ source: nodes[i].id, target: n.id, kind: 'mention', label: 'mentions' }))
+  const calls: URLSearchParams[] = []
+  await page.route('**/api/knowledge/graph?*', route => {
+    const params = new URL(route.request().url()).searchParams; calls.push(params)
+    const include = params.get('include') === 'tickets'
+    return route.fulfill({ json: { nodes: [...nodes, ...(include ? [{ id: 'ticket-1', key: 'PHAROS-11', type: 'ticket', kind: 'ticket', slug: '', title: 'Linked ticket', degree: 1, status: 'done', updated_at: nodes[0].updated_at }] : [])], edges: [...edges, ...(include ? [{ source: nodes[0].id, target: 'ticket-1', kind: 'relation', label: 'cites' }] : [])], truncated: false } })
+  })
+  return { calls, nodes }
+}
+const toggle = (page: Page, name: 'List' | 'Graph') => page.getByRole('group', { name: 'Knowledge display', exact: true }).getByRole('button', { name, exact: true })
+const canvas = (page: Page) => page.locator('.kg-canvas')
+async function ready(page: Page) {
+  // Cold lazy-module compilation and a software GPU can exceed the default 5s
+  // when the coordinator runs the suite with four browser workers.
+  await expect(canvas(page)).toHaveAttribute('data-ready', 'true', { timeout: 15_000 })
+  await expect(page.locator('.kg-state')).toHaveCount(0)
+}
+
+test('graph toggle and filters preserve the URL; selection, keyboard open and history work', async ({ page }) => {
+  const loaded: string[] = []
+  page.on('request', request => loaded.push(new URL(request.url()).pathname))
+  const { calls } = await setup(page)
+  await page.goto('/p/PHAROS/knowledge')
+  await expect(page.locator('.k-row')).toHaveCount(8)
+  expect(loaded.some(path => /3d-force-graph|force-graph|three-spritetext/.test(path))).toBe(false)
+  await toggle(page, 'Graph').click(); await expect(page).toHaveURL(/mode=graph/); await ready(page)
+  await expect(canvas(page)).toHaveAttribute('data-dimension', '2d')
+  await expect(canvas(page)).toHaveAttribute('data-motion', 'still')
+  await expect(page.getByRole('button', { name: 'Resume motion' })).toBeDisabled()
+  await page.getByRole('navigation', { name: 'Kinds of knowledge' }).getByRole('button', { name: /Runbooks/ }).click()
+  await expect(page).toHaveURL(/mode=graph.*type=runbook/)
+  await expect(canvas(page)).toHaveAttribute('aria-label', /2 entries, 1 link/)
+  await page.getByRole('searchbox', { name: 'Search knowledge in Pharos' }).fill('Deploy')
+  await expect(page.locator('.kg-results')).toContainText('1 match')
+  await page.locator('.kg-results').getByRole('button', { name: 'Deploy a release to production' }).click()
+  await expect(page).toHaveURL(/entry=runbook\/deploy-release/)
+  await expect(page.locator('.kg-selection')).toContainText('Deploy a release to production')
+  await canvas(page).press('Escape'); await expect(page).not.toHaveURL(/entry=/)
+  await canvas(page).press('ArrowRight'); await expect(page).toHaveURL(/entry=runbook\/rotate-host-keys/)
+  await canvas(page).press('Enter'); await expect(page).toHaveURL(/knowledge\/runbook\/rotate-host-keys/)
+  await page.goBack(); await ready(page)
+  await page.getByRole('button', { name: 'Show linked tickets' }).click()
+  await expect.poll(() => calls.some(q => q.get('include') === 'tickets')).toBe(true)
+  await toggle(page, 'List').click(); await expect(page).not.toHaveURL(/mode=graph/)
+  await expect(canvas(page)).toHaveCount(0)
+})
+
+test('selection deep links survive reload, retheme, and dimension changes', async ({ page }) => {
+  await page.emulateMedia({ reducedMotion: 'no-preference' })
+  await setup(page)
+  await page.goto('/p/PHAROS/knowledge?mode=graph&entry=runbook/deploy-release'); await ready(page)
+  await expect(page.locator('.kg-selection')).toContainText('Deploy a release to production')
+  await expect(canvas(page)).toHaveAttribute('data-dimension', '3d')
+  await page.evaluate(() => { document.documentElement.dataset.theme = 'dark' })
+  await page.getByRole('button', { name: '2D', exact: true }).click(); await ready(page)
+  await expect(page).toHaveURL(/entry=runbook\/deploy-release/)
+  await page.getByRole('button', { name: '3D', exact: true }).click(); await ready(page)
+  await page.reload(); await ready(page)
+  await expect(page.locator('.kg-selection')).toContainText('Deploy a release to production')
+})
+
+test('no WebGL uses the canvas fallback with the same selection controls', async ({ page }) => {
+  await page.emulateMedia({ reducedMotion: 'no-preference' })
+  await page.addInitScript(() => {
+    const original = HTMLCanvasElement.prototype.getContext
+    HTMLCanvasElement.prototype.getContext = function (kind: string, ...args: unknown[]) {
+      if (kind.startsWith('webgl') || kind === 'experimental-webgl') return null
+      return original.apply(this, [kind, ...args] as Parameters<typeof original>)
+    } as typeof original
+  })
+  await setup(page); await page.goto('/p/PHAROS/knowledge?mode=graph'); await ready(page)
+  await expect(canvas(page)).toHaveAttribute('data-dimension', '2d')
+  await expect(page.getByText('3D is unavailable here.', { exact: false })).toBeVisible()
+  await canvas(page).press('ArrowRight'); await expect(page).toHaveURL(/entry=/)
+})
+
+test('20 mode switches dispose every WebGL context and removed canvas', async ({ page }) => {
+  test.setTimeout(120_000)
+  await page.emulateMedia({ reducedMotion: 'no-preference' })
+  await page.addInitScript(() => {
+    const state = { created: 0, lost: 0 }; Object.assign(window, { graphContexts: state })
+    const seen = new WeakSet<object>(), original = HTMLCanvasElement.prototype.getContext
+    HTMLCanvasElement.prototype.getContext = function (...args: Parameters<typeof original>) {
+      const result = original.apply(this, args)
+      if (result && String(args[0]).startsWith('webgl') && !seen.has(result)) {
+        seen.add(result); state.created++
+        this.addEventListener('webglcontextlost', () => state.lost++, { once: true })
+      }
+      return result
+    } as typeof original
+  })
+  await setup(page); await page.goto('/p/PHAROS/knowledge')
+  for (let i = 0; i < 20; i++) {
+    await toggle(page, 'Graph').click(); await ready(page)
+    await expect(canvas(page)).toHaveAttribute('data-dimension', '3d')
+    await expect(page.locator('.kg-canvas canvas')).toHaveCount(1)
+    await toggle(page, 'List').click(); await expect(page.locator('.kg-canvas canvas')).toHaveCount(0)
+    await expect.poll(() => page.evaluate(() => { const s = (window as unknown as { graphContexts: { created: number; lost: number } }).graphContexts; return s.created - s.lost })).toBe(0)
+  }
+  expect(await page.evaluate(() => (window as unknown as { graphContexts: { created: number } }).graphContexts.created)).toBeGreaterThanOrEqual(20)
+})
+
+test('a bubble hover, click and double-click work on the canvas itself', async ({ page }) => {
+  const { nodes } = await setup(page)
+  await page.route('**/api/knowledge/graph?*', route => route.fulfill({ json: { nodes: [nodes[0]], edges: [], truncated: false } }))
+  await page.goto('/p/PHAROS/knowledge?mode=graph'); await ready(page)
+  const box = (await canvas(page).boundingBox())!
+  const point = { x: box.x + box.width / 2, y: box.y + box.height / 2 }
+  await page.mouse.move(point.x, point.y)
+  await expect(page.getByRole('tooltip')).toContainText(nodes[0].title)
+  await page.mouse.click(point.x, point.y)
+  await expect(page).toHaveURL(new RegExp(`entry=${nodes[0].type}/${nodes[0].slug}`))
+  await expect(page.locator('.kg-selection')).toContainText(nodes[0].title)
+  // Two clicks after selection also open the full entry page.
+  await page.mouse.dblclick(point.x, point.y)
+  await expect(page).toHaveURL(new RegExp(`/knowledge/${nodes[0].type}/${nodes[0].slug}`))
+})

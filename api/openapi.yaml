@@ -1140,6 +1140,37 @@ paths:
               schema: {$ref: '#/components/schemas/KnowledgeProblem'}
         '422':
           $ref: '#/components/responses/Error'
+  /knowledge/graph:
+    get:
+      operationId: getKnowledgeGraph
+      description: |
+        Read-only project graph, with the same live-node and tenant visibility as
+        knowledge. Links combine directed relations and resolved body mentions:
+        wiki slugs, local knowledge Markdown links, backticked slugs and node keys.
+        Slugs resolve in the source kind first, then the project, following rename
+        events like resolve. Explicit typed links stay in that type and project.
+        Relations win over mentions of the same directed pair; degree counts unique
+        neighbours. Tickets are optional directly linked/mentioned satellites;
+        their bodies are never read. At most 2000 nodes and 8000 edges, newest
+        knowledge first, then tickets. Filters apply before the node cap.
+      security: *auth
+      parameters:
+        - {name: project_id, in: query, required: true, schema: {type: string, format: uuid}}
+        - {name: types, in: query, description: Comma-separated knowledge types, schema: {type: string}}
+        - {name: status, in: query, description: Comma-separated active, proposed, archived; omitted means all, schema: {type: string}}
+        - {name: include, in: query, schema: {type: string, enum: [tickets]}}
+      responses:
+        '200':
+          description: Bounded graph, without entry or ticket bodies
+          content:
+            application/json:
+              schema: {$ref: '#/components/schemas/KnowledgeGraph'}
+        '400':
+          $ref: '#/components/responses/Error'
+        '401':
+          $ref: '#/components/responses/Error'
+        '404':
+          $ref: '#/components/responses/Error'
   /knowledge/resolve:
     get:
       operationId: resolveKnowledge
@@ -4399,6 +4430,38 @@ components:
             token:
               type: string
               description: Returned once. Format aeon_<prefix>_<secret>.
+    KnowledgeGraph:
+      type: object
+      required: [nodes, edges, truncated]
+      properties:
+        truncated: {type: boolean}
+        nodes:
+          type: array
+          maxItems: 2000
+          items:
+            type: object
+            required: [id, key, type, slug, title, status, degree, updated_at, kind]
+            properties:
+              id: {type: string, format: uuid}
+              key: {type: string}
+              type: {type: string, enum: [runbook, guideline, memory, external-system, related-project, ticket]}
+              kind: {type: string, enum: [knowledge, ticket]}
+              slug: {type: string}
+              title: {type: string}
+              status: {type: string, description: Knowledge status or ticket state}
+              degree: {type: integer, minimum: 0, description: Unique neighbours in the returned graph}
+              updated_at: {type: string, format: date-time}
+        edges:
+          type: array
+          maxItems: 8000
+          items:
+            type: object
+            required: [source, target, kind, label]
+            properties:
+              source: {type: string, format: uuid}
+              target: {type: string, format: uuid}
+              kind: {type: string, enum: [relation, mention]}
+              label: {type: string}
     KnowledgeType:
       type: string
       enum: [runbook, guideline, memory, external-system, related-project]
