@@ -185,7 +185,7 @@ func TestLegacyMappingAndOwnerProtection(t *testing.T) {
 	check("ownership.transfer", nil, true)
 	p.Kind = tenant.Agent
 	check("nodes.read", nil, false)
-	check("nodes.read", []string{"nodes.read"}, true)
+	check("nodes.read", []string{"nodes.read"}, false)
 	err = db.InTenant(ctx, d.App, tid, func(tx pgx.Tx) error {
 		_, err := tx.Exec(ctx, `UPDATE principals SET status='deactivated' WHERE id=$1::uuid`, ids["super_admin"])
 		return err

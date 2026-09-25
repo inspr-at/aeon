@@ -116,7 +116,7 @@ func validateCompatSend(in *compatSend) error {
 	return nil
 }
 func (m *messaging) sendMessage(w http.ResponseWriter, r *http.Request) {
-	p, project, ok := messagingPrincipal(w, r, false)
+	p, project, ok := m.messagingPrincipal(w, r, false)
 	if !ok {
 		return
 	}
@@ -289,7 +289,7 @@ func queueCompatDelivery(ctx context.Context, tx pgx.Tx, p tenant.Principal, pro
 	return err
 }
 func (m *messaging) getDeliveries(w http.ResponseWriter, r *http.Request) {
-	p, project, ok := messagingPrincipal(w, r, true)
+	p, project, ok := m.messagingPrincipal(w, r, true)
 	if !ok {
 		return
 	}
@@ -334,7 +334,7 @@ func (m *messaging) inspectMessages(w http.ResponseWriter, r *http.Request) {
 	m.readMessages(w, r, true)
 }
 func (m *messaging) readMessages(w http.ResponseWriter, r *http.Request, inspect bool) {
-	p, project, ok := messagingPrincipal(w, r, inspect)
+	p, project, ok := m.messagingPrincipal(w, r, inspect)
 	if !ok {
 		return
 	}

@@ -87,12 +87,8 @@ func (m *module) Mount(mux *http.ServeMux) {
 }
 
 func (m *module) bind(w http.ResponseWriter, r *http.Request) {
-	p, ok := principal(w, r)
+	p, ok := m.actor(w, r, true)
 	if !ok {
-		return
-	}
-	if err := requireAdmin(p); err != nil {
-		writeErr(w, err)
 		return
 	}
 	contactID, ok := parseUUID(r.PathValue("contactId"))
@@ -278,16 +274,6 @@ func principal(w http.ResponseWriter, r *http.Request) (tenant.Principal, bool) 
 		return tenant.Principal{}, false
 	}
 	return p, true
-}
-
-func requireAdmin(p tenant.Principal) error {
-	if p.Kind != tenant.Person {
-		return errForbidden
-	}
-	if !slices.Contains(p.Roles, "admin") {
-		return errForbidden
-	}
-	return nil
 }
 
 func parseUUID(s string) (string, bool) {

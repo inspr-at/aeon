@@ -8,6 +8,7 @@ import (
 	"testing"
 
 	"github.com/inspr-at/aeon/internal/db"
+	"github.com/inspr-at/aeon/internal/dbtest"
 	"github.com/inspr-at/aeon/internal/tenant"
 	"github.com/jackc/pgx/v5"
 )
@@ -22,7 +23,7 @@ func TestApprovalRiskProjection(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	for _, tc := range []struct{ scope, kind, risk string }{{"nodes.read", "node", "low"}, {"nodes.read.fields", "node", "low"}, {"nodes.read", "tenant", "high"}, {"harness.control", "node", "high"}, {"release.deploy", "node", "high"}, {"nodes.delete", "node", "high"}, {"nodes.delete.read", "node", "high"}, {"nodes.write", "node", "medium"}, {"run.claim", "run", "medium"}, {"nodes.readiness", "node", "medium"}} {
+	for _, tc := range []struct{ scope, kind, risk string }{{"nodes.read", "node", "low"}, {"nodes.read.fields", "node", "low"}, {"nodes.read", "tenant", "high"}, {"harness.control", "node", "high"}, {"release.deploy", "node", "high"}, {"nodes.delete", "node", "high"}, {"nodes.delete.read", "node", "high"}, {"nodes.write", "node", "medium"}, {"run.claim", "run", "medium"}} {
 		t.Run(tc.scope+"-"+tc.kind, func(t *testing.T) {
 			resource := &f.nodeA
 			if tc.kind == "tenant" {
@@ -44,6 +45,9 @@ func TestApprovalRiskProjection(t *testing.T) {
 			}
 		})
 	}
+	if response := f.do(f.agentA, f.wide, "POST", "/api/approvals", proposalJSON("nodes.readiness", "node", &f.nodeA, nil)); response.Code != http.StatusBadRequest {
+		t.Fatalf("unknown permission was proposed: %d %s", response.Code, response.Body.String())
+	}
 	response := f.do(f.personA, "", "GET", "/api/approvals", "")
 	if response.Code != 200 {
 		t.Fatal(response.Body.String())
@@ -52,7 +56,7 @@ func TestApprovalRiskProjection(t *testing.T) {
 	if err = json.Unmarshal(response.Body.Bytes(), &items); err != nil {
 		t.Fatal(err)
 	}
-	if len(items) != 10 {
+	if len(items) != 9 {
 		t.Fatal("missing approvals")
 	}
 	for _, item := range items {
@@ -97,6 +101,7 @@ func TestDecisionRiskRequiresPersonRole(t *testing.T) {
 		if err != nil {
 			t.Fatal(err)
 		}
+		dbtest.BindLegacy(t, f.db, f.tenantA, p.ID)
 		return p
 	}
 	member := person("member", "member")

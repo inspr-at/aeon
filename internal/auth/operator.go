@@ -31,5 +31,5 @@ func OperatorCreateAgentKey(ctx context.Context, pool *pgxpool.Pool, tenantID, n
 // OperatorRevokeAgentKey revokes an agent key by id.
 func OperatorRevokeAgentKey(ctx context.Context, pool *pgxpool.Pool, tenantID, id string) error {
 	m := &Module{pool: pool, inTenant: db.InTenant}
-	return m.revokeAgentKey(ctx, tenantID, id)
+	return m.revokeAgentKey(ctx, tenant.Principal{TenantID: tenantID}, id)
 }

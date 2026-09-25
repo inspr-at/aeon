@@ -40,7 +40,7 @@ type claimInput struct {
 }
 
 func (m *messaging) ackCompatMessage(w http.ResponseWriter, r *http.Request) {
-	p, project, ok := messagingPrincipal(w, r, false)
+	p, project, ok := m.messagingPrincipal(w, r, false)
 	if !ok {
 		return
 	}
@@ -69,7 +69,7 @@ func (m *messaging) ackCompatMessage(w http.ResponseWriter, r *http.Request) {
 }
 
 func (m *messaging) claimDelivery(w http.ResponseWriter, r *http.Request) {
-	p, project, ok := messagingPrincipal(w, r, false)
+	p, project, ok := m.messagingPrincipal(w, r, false)
 	if !ok {
 		return
 	}
@@ -212,7 +212,7 @@ type completeInput struct {
 }
 
 func (m *messaging) completeDelivery(w http.ResponseWriter, r *http.Request) {
-	p, project, ok := messagingPrincipal(w, r, false)
+	p, project, ok := m.messagingPrincipal(w, r, false)
 	if !ok {
 		return
 	}
@@ -321,7 +321,7 @@ type unavailableInput struct {
 }
 
 func (m *messaging) unavailableDelivery(w http.ResponseWriter, r *http.Request) {
-	p, project, ok := messagingPrincipal(w, r, false)
+	p, project, ok := m.messagingPrincipal(w, r, false)
 	if !ok {
 		return
 	}

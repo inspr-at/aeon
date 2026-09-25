@@ -50,12 +50,12 @@ func (m *Module) undoEntry(ctx context.Context, tx pgx.Tx, p tenant.Principal, e
 	if err != nil {
 		return events.Change{}, events.ErrForbidden
 	}
-	if before.PrincipalID != p.ID && !admin(p) {
+	if before.PrincipalID != p.ID && !admin(ctx, tx, p) {
 		return events.Change{}, events.ErrForbidden
 	}
 	// Also enforce current event-actor authority, rather than a stale role claim
 	// accepted by the generic event endpoint.
-	if e.ActorPrincipalID != p.ID && !admin(p) {
+	if e.ActorPrincipalID != p.ID && !admin(ctx, tx, p) {
 		return events.Change{}, events.ErrForbidden
 	}
 	if err = m.gate(ctx, tx, p, "time_entry"); err != nil {

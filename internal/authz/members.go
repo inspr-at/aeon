@@ -10,7 +10,6 @@ import (
 	"time"
 
 	"github.com/inspr-at/aeon/internal/db"
-	"github.com/inspr-at/aeon/internal/events"
 	"github.com/jackc/pgx/v5"
 )
 
@@ -230,7 +229,7 @@ func (m *Module) putWorkspaceRole(w http.ResponseWriter, r *http.Request) {
 				return err
 			}
 		}
-		_, err = events.Append(r.Context(), tx, p, events.Change{Type: "authz.workspace_role_changed", Before: map[string]any{"principal_id": id, "role_id": priorID}, After: map[string]any{"principal_id": id, "role_id": roleID}})
+		err = appendEvent(r.Context(), tx, p, "authz.workspace_role_changed", map[string]any{"principal_id": id, "role_id": priorID}, map[string]any{"principal_id": id, "role_id": roleID})
 		return err
 	})
 	if err != nil {

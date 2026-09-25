@@ -11,6 +11,7 @@ import (
 
 	"github.com/jackc/pgx/v5"
 
+	"github.com/inspr-at/aeon/internal/authz"
 	"github.com/inspr-at/aeon/internal/db"
 	"github.com/inspr-at/aeon/internal/events"
 	"github.com/inspr-at/aeon/internal/tenant"
@@ -99,7 +100,7 @@ func (m *module) handleCreateTarget(w http.ResponseWriter, r *http.Request) {
 		writeError(w, 400, "invalid_request", "invalid principal_id")
 		return
 	}
-	if !strings.EqualFold(principalID, p.ID) && !isAdmin(p) {
+	if !strings.EqualFold(principalID, p.ID) && authz.Require(authz.BindPool(r.Context(), m.pool), "inbox.manage", authz.Scope{}) != nil {
 		writeError(w, 403, "forbidden", "forbidden")
 		return
 	}
@@ -197,7 +198,7 @@ func (m *module) disableTarget(ctx context.Context, p tenant.Principal, id strin
 		if err != nil {
 			return err
 		}
-		if !strings.EqualFold(item.PrincipalID, p.ID) && !isAdmin(p) {
+		if !strings.EqualFold(item.PrincipalID, p.ID) && authz.RequireTx(ctx, tx, p, "inbox.manage", authz.Scope{}) != nil {
 			return errForbidden
 		}
 		if !item.Enabled {

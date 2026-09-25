@@ -20,9 +20,10 @@ func TestImportStatusTenantPagination(t *testing.T) {
 	if err := db.Admin.QueryRow(ctx, `INSERT INTO tenants (slug, name) VALUES ('imports-test', 'Imports') RETURNING id::text`).Scan(&tenantID); err != nil {
 		t.Fatal(err)
 	}
-	if err := db.Admin.QueryRow(ctx, `INSERT INTO principals (tenant_id, kind, name) VALUES ($1, 'person', 'caller') RETURNING id::text`, tenantID).Scan(&principalID); err != nil {
+	if err := db.Admin.QueryRow(ctx, `INSERT INTO principals (tenant_id, kind, name, roles) VALUES ($1, 'person', 'caller', ARRAY['admin']) RETURNING id::text`, tenantID).Scan(&principalID); err != nil {
 		t.Fatal(err)
 	}
+	dbtest.BindLegacy(t, db, tenantID, principalID)
 	if err := db.Admin.QueryRow(ctx, `INSERT INTO tenants (slug, name) VALUES ('imports-other', 'Other') RETURNING id::text`).Scan(&otherTenantID); err != nil {
 		t.Fatal(err)
 	}

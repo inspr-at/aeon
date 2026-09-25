@@ -5,6 +5,7 @@ package auth
 
 import (
 	"context"
+	"errors"
 	"net/http"
 	"strconv"
 	"strings"
@@ -16,6 +17,7 @@ import (
 	"github.com/jackc/pgx/v5/pgxpool"
 	"golang.org/x/oauth2"
 
+	"github.com/inspr-at/aeon/internal/authz"
 	"github.com/inspr-at/aeon/internal/db"
 	"github.com/inspr-at/aeon/internal/httpapi"
 	"github.com/inspr-at/aeon/internal/tenant"
@@ -117,18 +119,48 @@ func (m *Module) Middleware(next http.Handler) http.Handler {
 			}
 			return
 		}
-		if kind == credSession && p.Kind == tenant.Person && !tenant.IsAdmin(p) && !hasRole(p, "member") && !customerRouteAllowed(r, p) {
-			httpapi.WriteError(w, http.StatusForbidden, "customer access denied")
-			return
-		}
 		if kind == credAgent {
-			if scope, controlled := coreAgentScope(r); !controlled || scope == "" || !agentHasScope(p.Scopes, scope) {
+			if scope, controlled := coreAgentScope(r); !controlled || scope == "" || r.URL.Path == "/api/me" && !agentHasScope(p.Scopes, scope) {
 				httpapi.WriteError(w, http.StatusForbidden, "agent key scope required")
 				return
 			}
 		}
+		if (kind == credSession || kind == credAgent) && isProtectedAPI(r.URL.Path) {
+			// SEC4's route table remains the outer agent allowlist. The binding
+			// and the exact route permission are checked inside the tenant.
+			if kind != credAgent || r.Method != http.MethodGet || r.URL.Path != "/api/me" {
+				ctx := authz.BindPool(r.Context(), m.pool)
+				permissionErr := authz.RequirePattern(ctx, r.Pattern, projectScope(r))
+				if permissionErr != nil && r.Pattern == "GET /api/people/{principalId}/avatar/{size}" && p.Kind == tenant.Person {
+					parts := strings.Split(strings.Trim(r.URL.Path, "/"), "/")
+					if len(parts) == 5 && parts[2] == p.ID {
+						permissionErr = authz.Require(ctx, "profile.portal_read", authz.Scope{})
+					}
+				}
+				if err := permissionErr; err != nil {
+					if errors.Is(err, authz.ErrForbidden) {
+						httpapi.WriteJSON(w, http.StatusForbidden, map[string]any{"error": "permission denied", "code": "forbidden", "reason": "This action needs a permission you do not hold"})
+					} else {
+						writeInternal(w)
+					}
+					return
+				}
+				r = r.WithContext(ctx)
+			}
+		}
 		next.ServeHTTP(w, r)
 	})
+}
+
+func projectScope(r *http.Request) authz.Scope {
+	if !strings.Contains(r.Pattern, "{projectId}") {
+		return authz.Scope{}
+	}
+	parts := strings.Split(strings.Trim(r.URL.Path, "/"), "/")
+	if len(parts) >= 3 && parts[0] == "api" && parts[1] == "projects" && validRouteUUID(parts[2]) {
+		return authz.Scope{ProjectID: parts[2]}
+	}
+	return authz.Scope{}
 }
 
 func validRouteUUID(s string) bool {
@@ -444,15 +476,6 @@ func hasScope(have []string, want string) bool {
 	want = strings.ReplaceAll(want, ":", ".")
 	for _, s := range have {
 		if strings.ReplaceAll(s, ":", ".") == want {
-			return true
-		}
-	}
-	return false
-}
-
-func hasRole(p tenant.Principal, role string) bool {
-	for _, candidate := range p.Roles {
-		if candidate == role {
 			return true
 		}
 	}

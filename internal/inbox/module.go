@@ -78,10 +78,6 @@ func principal(w http.ResponseWriter, r *http.Request) (tenant.Principal, bool) 
 	return p, true
 }
 
-func isAdmin(p tenant.Principal) bool {
-	return tenant.IsAdmin(p)
-}
-
 func writeError(w http.ResponseWriter, status int, code, message string) {
 	w.Header().Set("Cache-Control", "no-store")
 	httpapi.WriteJSON(w, status, struct {

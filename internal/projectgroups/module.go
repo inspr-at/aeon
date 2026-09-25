@@ -19,6 +19,7 @@ import (
 	"github.com/jackc/pgx/v5/pgtype"
 	"github.com/jackc/pgx/v5/pgxpool"
 
+	"github.com/inspr-at/aeon/internal/authz"
 	"github.com/inspr-at/aeon/internal/db"
 	"github.com/inspr-at/aeon/internal/events"
 	"github.com/inspr-at/aeon/internal/httpapi"
@@ -140,14 +141,12 @@ func principal(w http.ResponseWriter, r *http.Request) (tenant.Principal, bool) 
 	return p, true
 }
 
-func isAdmin(p tenant.Principal) bool { return tenant.IsAdmin(p) }
-
-func admin(w http.ResponseWriter, r *http.Request) (tenant.Principal, bool) {
+func (m *Module) admin(w http.ResponseWriter, r *http.Request) (tenant.Principal, bool) {
 	p, ok := principal(w, r)
 	if !ok {
 		return p, false
 	}
-	if !isAdmin(p) {
+	if authz.Require(authz.BindPool(r.Context(), m.pool), "project_groups.write", authz.Scope{}) != nil {
 		fail(w, errNotAdmin)
 		return p, false
 	}
@@ -239,7 +238,7 @@ func (m *Module) list(w http.ResponseWriter, r *http.Request) {
 }
 
 func (m *Module) create(w http.ResponseWriter, r *http.Request) {
-	p, ok := admin(w, r)
+	p, ok := m.admin(w, r)
 	if !ok {
 		return
 	}
@@ -323,7 +322,7 @@ func (m *Module) create(w http.ResponseWriter, r *http.Request) {
 }
 
 func (m *Module) patch(w http.ResponseWriter, r *http.Request) {
-	p, ok := admin(w, r)
+	p, ok := m.admin(w, r)
 	if !ok {
 		return
 	}
@@ -406,7 +405,7 @@ func (m *Module) patch(w http.ResponseWriter, r *http.Request) {
 }
 
 func (m *Module) remove(w http.ResponseWriter, r *http.Request) {
-	p, ok := admin(w, r)
+	p, ok := m.admin(w, r)
 	if !ok {
 		return
 	}
@@ -443,7 +442,7 @@ func (m *Module) remove(w http.ResponseWriter, r *http.Request) {
 }
 
 func (m *Module) assign(w http.ResponseWriter, r *http.Request) {
-	p, ok := admin(w, r)
+	p, ok := m.admin(w, r)
 	if !ok {
 		return
 	}

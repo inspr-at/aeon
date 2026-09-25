@@ -9,6 +9,7 @@ import (
 
 	"github.com/jackc/pgx/v5"
 
+	"github.com/inspr-at/aeon/internal/authz"
 	"github.com/inspr-at/aeon/internal/events"
 	"github.com/inspr-at/aeon/internal/tenant"
 )
@@ -80,7 +81,7 @@ func undoWith(ctx context.Context, tx pgx.Tx, p tenant.Principal, e events.Event
 	if err != nil {
 		return events.Change{}, err
 	}
-	if current.OwnerPrincipal != p.ID && !tenant.IsAdmin(p) {
+	if current.OwnerPrincipal != p.ID && authz.RequireTx(ctx, tx, p, "views.share", authz.Scope{}) != nil {
 		return events.Change{}, events.ErrForbidden
 	}
 	if !current.UpdatedAt.Equal(after.UpdatedAt) {

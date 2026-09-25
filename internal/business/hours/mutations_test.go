@@ -14,6 +14,7 @@ import (
 	"time"
 
 	"github.com/inspr-at/aeon/internal/db"
+	"github.com/inspr-at/aeon/internal/dbtest"
 	"github.com/inspr-at/aeon/internal/events"
 	"github.com/inspr-at/aeon/internal/tenant"
 	"github.com/jackc/pgx/v5"
@@ -58,6 +59,7 @@ func (f *fixture) secondMember() tenant.Principal {
 	f.sql(func(tx pgx.Tx) error {
 		return tx.QueryRow(f.t.Context(), `INSERT INTO principals(tenant_id,kind,name,roles) VALUES($1,'person','Other member',ARRAY['member']) RETURNING id::text`, p.TenantID).Scan(&p.ID)
 	})
+	dbtest.BindLegacy(f.t, f.database, p.TenantID, p.ID)
 	return p
 }
 
@@ -405,7 +407,7 @@ func TestUndoUsesCurrentAdminAuthority(t *testing.T) {
 	requireStatus(t, f.correction(f.member, "PATCH", e, map[string]any{"note": "changed"}), 200)
 	event := f.lastEvent("time_entry.updated")
 	f.sql(func(tx pgx.Tx) error {
-		_, err := tx.Exec(t.Context(), `UPDATE principals SET roles=ARRAY['member'] WHERE id=$1`, f.admin.ID)
+		_, err := tx.Exec(t.Context(), `UPDATE role_bindings SET role_id=(SELECT id FROM roles WHERE tenant_id=$1::uuid AND key='member') WHERE principal_id=$2::uuid AND scope_type='workspace'`, f.admin.TenantID, f.admin.ID)
 		return err
 	})
 	requireStatus(t, f.undo(f.admin, event), 403)

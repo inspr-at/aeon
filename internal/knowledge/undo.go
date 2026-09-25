@@ -42,7 +42,7 @@ func unchanged(current, after nodeSnap) bool {
 }
 
 func guard(ctx context.Context, tx pgx.Tx, p tenant.Principal, e events.Event, deleted bool) (nodeSnap, nodeSnap, nodeSnap, error) {
-	if !canWrite(p) {
+	if !canWrite(ctx, tx, p, "knowledge.write") {
 		return nodeSnap{}, nodeSnap{}, nodeSnap{}, events.ErrForbidden
 	}
 	before, after, err := snapshots(e)

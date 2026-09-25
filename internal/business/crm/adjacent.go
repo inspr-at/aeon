@@ -18,7 +18,7 @@ import (
 // ReformatCustomerNumber delegates the guarded multi-quote conversion to QP1.
 // Both modules use crm_customer_numbers; no second allocator is introduced.
 func (m *module) reformatNumber(w http.ResponseWriter, r *http.Request) {
-	p, ok := actor(w, r, true)
+	p, ok := m.actor(w, r, true)
 	if !ok {
 		return
 	}
@@ -81,7 +81,7 @@ type Related struct {
 }
 
 func (m *module) related(w http.ResponseWriter, r *http.Request) {
-	p, ok := actor(w, r, false)
+	p, ok := m.actor(w, r, false)
 	if !ok {
 		return
 	}
@@ -196,7 +196,7 @@ func dateOK(s *string) bool {
 	return e == nil
 }
 func (m *module) putDocumentMetadata(w http.ResponseWriter, r *http.Request) {
-	p, ok := actor(w, r, true)
+	p, ok := m.actor(w, r, true)
 	if !ok {
 		return
 	}
@@ -269,7 +269,7 @@ func liveNode(ctx context.Context, tx pgx.Tx, id, kind string, lock bool) error 
 	return e
 }
 func (m *module) setProjectCustomer(w http.ResponseWriter, r *http.Request) {
-	p, ok := actor(w, r, true)
+	p, ok := m.actor(w, r, true)
 	if !ok {
 		return
 	}
@@ -349,7 +349,7 @@ type Cooperation struct {
 }
 
 func (m *module) getCooperation(w http.ResponseWriter, r *http.Request) {
-	p, ok := actor(w, r, false)
+	p, ok := m.actor(w, r, false)
 	if !ok {
 		return
 	}
@@ -387,7 +387,7 @@ func (m *module) getCooperation(w http.ResponseWriter, r *http.Request) {
 }
 
 func (m *module) putCooperation(w http.ResponseWriter, r *http.Request) {
-	p, ok := actor(w, r, true)
+	p, ok := m.actor(w, r, true)
 	if !ok {
 		return
 	}
@@ -436,7 +436,7 @@ func (m *module) putCooperation(w http.ResponseWriter, r *http.Request) {
 }
 
 func (m *module) draftNote(w http.ResponseWriter, r *http.Request) {
-	p, ok := actor(w, r, true)
+	p, ok := m.actor(w, r, true)
 	if !ok {
 		return
 	}
@@ -479,7 +479,7 @@ func (m *module) draftNote(w http.ResponseWriter, r *http.Request) {
 	httpapi.WriteJSON(w, 201, map[string]any{"id": draftID, "organisation_node_id": id, "draft_text": in.DraftText, "applied": false})
 }
 func (m *module) applyNote(w http.ResponseWriter, r *http.Request) {
-	p, ok := actor(w, r, true)
+	p, ok := m.actor(w, r, true)
 	if !ok {
 		return
 	}

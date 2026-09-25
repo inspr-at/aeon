@@ -282,7 +282,7 @@ func (m *Module) profileList(w http.ResponseWriter, r *http.Request) {
 		respond(w, 0, nil, e)
 		return
 	}
-	if !staff(p) {
+	if !m.allow(r, p) {
 		respond(w, 0, nil, denied())
 		return
 	}
@@ -314,7 +314,7 @@ func (m *Module) profileGet(w http.ResponseWriter, r *http.Request) {
 		respond(w, 0, nil, e)
 		return
 	}
-	if !staff(p) {
+	if !m.allow(r, p) {
 		respond(w, 0, nil, denied())
 		return
 	}
@@ -341,7 +341,7 @@ func (m *Module) profileWrite(w http.ResponseWriter, r *http.Request) {
 		respond(w, 0, nil, e)
 		return
 	}
-	if !admin(p) {
+	if !m.allow(r, p) {
 		respond(w, 0, nil, denied())
 		return
 	}
@@ -418,7 +418,7 @@ func (m *Module) profileArchive(w http.ResponseWriter, r *http.Request) {
 		respond(w, 0, nil, e)
 		return
 	}
-	if !admin(p) {
+	if !m.allow(r, p) {
 		respond(w, 0, nil, denied())
 		return
 	}
@@ -460,7 +460,7 @@ func (m *Module) profileUndo(w http.ResponseWriter, r *http.Request) {
 		respond(w, 0, nil, e)
 		return
 	}
-	if !admin(p) {
+	if !m.allow(r, p) {
 		respond(w, 0, nil, denied())
 		return
 	}
@@ -701,7 +701,7 @@ func (m *Module) profileAssetUpload(w http.ResponseWriter, r *http.Request) {
 		respond(w, 0, nil, e)
 		return
 	}
-	if !admin(p) {
+	if !m.allow(r, p) {
 		respond(w, 0, nil, denied())
 		return
 	}
@@ -738,7 +738,7 @@ func (m *Module) profileAssetGet(w http.ResponseWriter, r *http.Request) {
 		respond(w, 0, nil, e)
 		return
 	}
-	if !staff(p) {
+	if !m.allow(r, p) {
 		respond(w, 0, nil, denied())
 		return
 	}
@@ -791,7 +791,7 @@ func (m *Module) selectProfile(w http.ResponseWriter, r *http.Request) {
 		respond(w, 0, nil, e)
 		return
 	}
-	if !staff(p) {
+	if !m.allow(r, p) {
 		respond(w, 0, nil, denied())
 		return
 	}

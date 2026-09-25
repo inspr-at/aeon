@@ -14,6 +14,7 @@ import (
 	"strings"
 	"time"
 
+	"github.com/inspr-at/aeon/internal/authz"
 	"github.com/inspr-at/aeon/internal/db"
 	"github.com/inspr-at/aeon/internal/events"
 	"github.com/inspr-at/aeon/internal/tenant"
@@ -110,14 +111,10 @@ func Import(ctx context.Context, pool *pgxpool.Pool, tenantID, actorID, instance
 		if _, err := tx.Exec(ctx, `SELECT pg_advisory_xact_lock(hashtextextended($1,0))`, tenantID+":paimos-offers:"+instance); err != nil {
 			return err
 		}
-		var permitted bool
-		if err := tx.QueryRow(ctx, `SELECT EXISTS(SELECT 1 FROM principals WHERE tenant_id=$1::uuid AND id=$2::uuid AND kind='person' AND 'admin'=ANY(roles))`, tenantID, actorID).Scan(&permitted); err != nil {
-			return err
-		}
-		if !permitted {
-			return errors.New("actor must be a tenant admin")
-		}
 		actor := tenant.Principal{TenantID: tenantID, ID: actorID, Kind: tenant.Person}
+		if err := authz.RequireTx(ctx, tx, actor, "imports.manage", authz.Scope{}); err != nil {
+			return errors.New("actor requires import management permission")
+		}
 		var profile *ProfileSnapshot
 		var selected ProfileSnapshot
 		profileErr := tx.QueryRow(ctx, `

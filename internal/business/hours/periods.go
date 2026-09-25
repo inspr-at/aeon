@@ -109,7 +109,7 @@ func (m *Module) createPeriod(r *http.Request, tx pgx.Tx, p tenant.Principal) (a
 	if !workorders.UUID(in.PrincipalID) || !validInterval(in.StartsAt, in.EndsAt) {
 		return nil, fail(400, "principal and a valid period interval required")
 	}
-	if in.PrincipalID != p.ID && !admin(p) {
+	if in.PrincipalID != p.ID && !admin(r.Context(), tx, p) {
 		return nil, fail(403, "only an admin person can open another principal's period")
 	}
 	// Serialize same-principal creates to prevent duplicate/overlapping periods.
@@ -140,7 +140,7 @@ func (m *Module) createPeriod(r *http.Request, tx pgx.Tx, p tenant.Principal) (a
 var digestPattern = regexp.MustCompile(`^[0-9a-f]{64}$`)
 
 func (m *Module) approve(r *http.Request, tx pgx.Tx, p tenant.Principal) (any, error) {
-	if !admin(p) {
+	if !admin(r.Context(), tx, p) {
 		return nil, fail(403, "admin person required")
 	}
 	var in struct {

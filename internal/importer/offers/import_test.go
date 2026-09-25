@@ -101,6 +101,7 @@ func TestImportVersionAndIsolation(t *testing.T) {
 			t.Fatal(err)
 		}
 	}
+	dbtest.BindLegacy(t, d, tenantID, adminID)
 	var profileID string
 	if err := db.InTenant(ctx, d.App, tenantID, func(tx pgx.Tx) error {
 		if err := tx.QueryRow(ctx, `INSERT INTO quote_document_profiles(tenant_id,name,current_revision) VALUES($1::uuid,'Synthetic print',1) RETURNING id::text`, tenantID).Scan(&profileID); err != nil {

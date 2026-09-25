@@ -24,6 +24,7 @@ import (
 	"time"
 	"unicode/utf16"
 
+	"github.com/inspr-at/aeon/internal/authz"
 	"github.com/inspr-at/aeon/internal/business/quotes"
 	"github.com/inspr-at/aeon/internal/db"
 	"github.com/inspr-at/aeon/internal/httpapi"
@@ -150,22 +151,18 @@ func has(roles []string, role string) bool {
 	return false
 }
 
-// authorize deliberately reloads principal roles and installation digests in
+// authorize reloads current grants and installation digests in
 // every transaction, including each stream poll. Public/customer readers never
 // learn staff identities through this route.
 func (m *Module) authorize(ctx context.Context, tx pgx.Tx, p tenant.Principal, quoteID string, write bool) error {
-	var kind string
-	var roles []string
-	if err := tx.QueryRow(ctx, `SELECT kind,roles FROM principals WHERE tenant_id=$1::uuid AND id=$2::uuid`, p.TenantID, p.ID).Scan(&kind, &roles); err != nil {
-		if errors.Is(err, pgx.ErrNoRows) {
-			return errDenied
-		}
-		return err
-	}
-	if kind != "person" || !(has(roles, "admin") || has(roles, "member") || has(roles, "viewer")) {
+	if p.Kind != tenant.Person {
 		return errDenied
 	}
-	if write && !(has(roles, "admin") || has(roles, "member")) {
+	permission := "quotes.read"
+	if write {
+		permission = "quotes.write"
+	}
+	if err := authz.RequireTx(ctx, tx, p, permission, authz.Scope{}); err != nil {
 		return errDenied
 	}
 	for _, id := range []string{"business_quotes", "business_crm", "business_costs"} {

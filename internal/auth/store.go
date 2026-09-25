@@ -8,6 +8,7 @@ import (
 	"encoding/hex"
 	"errors"
 	"fmt"
+	"slices"
 	"strings"
 	"time"
 
@@ -15,6 +16,7 @@ import (
 	"github.com/jackc/pgx/v5/pgconn"
 	"github.com/jackc/pgx/v5/pgtype"
 
+	"github.com/inspr-at/aeon/internal/authz"
 	"github.com/inspr-at/aeon/internal/events"
 	"github.com/inspr-at/aeon/internal/tenant"
 	"github.com/inspr-at/aeon/internal/tenantbootstrap"
@@ -248,8 +250,14 @@ func (m *Module) startSession(ctx context.Context, identityID, tenantID, princip
 		return "", err
 	}
 	err := m.inTenant(ctx, m.pool, tenantID, func(tx pgx.Tx) error {
-		_, err := tx.Exec(ctx, `INSERT INTO sessions (id, identity_id, tenant_id, principal_id, expires_at)
-			VALUES ($1, $2::uuid, $3::uuid, $4::uuid, now() + interval '30 days')`, sessionID(raw), identityID, tenantID, principalID)
+		var id string
+		if err := tx.QueryRow(ctx, `INSERT INTO sessions (id, identity_id, tenant_id, principal_id, expires_at)
+			SELECT $1,$2::uuid,$3::uuid,p.id,now() + interval '30 days'
+			FROM principals p WHERE p.tenant_id=$3::uuid AND p.id=$4::uuid AND p.status='active'
+			RETURNING id`, sessionID(raw), identityID, tenantID, principalID).Scan(&id); err != nil {
+			return err
+		}
+		_, err := tx.Exec(ctx, `SELECT aeon_bind_legacy_principal($1::uuid,$2::uuid)`, tenantID, principalID)
 		return err
 	})
 	if err != nil {
@@ -362,6 +370,7 @@ func (m *Module) authenticateAgent(ctx context.Context, prefix, secret string) (
 	var p tenant.Principal
 	err := m.inTenant(ctx, m.pool, tenantID, func(tx pgx.Tx) error {
 		var principalID, gotTenant string
+		var creatorID *string
 		var scopes pgtype.FlatArray[string]
 		err := tx.QueryRow(ctx, `
 			UPDATE agent_keys k
@@ -371,11 +380,11 @@ func (m *Module) authenticateAgent(ctx context.Context, prefix, secret string) (
 			  AND (k.expires_at IS NULL OR k.expires_at > now())
 			  AND EXISTS (
 			    SELECT 1 FROM principals p
-			    WHERE p.id = k.principal_id AND p.kind = 'agent'
+			    WHERE p.id = k.principal_id AND p.kind = 'agent' AND p.status='active'
 			      AND NOT (p.roles && ARRAY['system','importer','operator','embedding','quote_public_service','quote_confirmation_service']::text[])
 			  )
-			RETURNING k.principal_id::text, k.tenant_id::text, k.scopes
-		`, prefix, hashSecret(secret)).Scan(&principalID, &gotTenant, &scopes)
+			RETURNING k.principal_id::text, k.tenant_id::text, k.scopes, k.created_by_principal_id::text
+		`, prefix, hashSecret(secret)).Scan(&principalID, &gotTenant, &scopes, &creatorID)
 		if err != nil {
 			return err
 		}
@@ -387,6 +396,9 @@ func (m *Module) authenticateAgent(ctx context.Context, prefix, secret string) (
 			FROM principals WHERE id = $1::uuid
 		`, principalID))
 		p.Scopes = []string(scopes)
+		if creatorID != nil {
+			p.KeyCreatorID = *creatorID
+		}
 		return err
 	})
 	if errors.Is(err, pgx.ErrNoRows) {
@@ -420,6 +432,10 @@ func (m *Module) createAgentKey(ctx context.Context, p tenant.Principal, name st
 	}
 	var rec keyRecord
 	err := m.inTenant(ctx, m.pool, p.TenantID, func(tx pgx.Tx) error {
+		var tenantLock string
+		if err := tx.QueryRow(ctx, `SELECT id::text FROM tenants WHERE id=$1::uuid FOR UPDATE`, p.TenantID).Scan(&tenantLock); err != nil {
+			return err
+		}
 		var principalID string
 		rows, err := tx.Query(ctx, `
 			SELECT id::text,kind,roles && ARRAY['system','importer','operator','embedding','quote_public_service','quote_confirmation_service']::text[]
@@ -458,6 +474,9 @@ func (m *Module) createAgentKey(ctx context.Context, p tenant.Principal, name st
 		if err != nil {
 			return err
 		}
+		if err := ensureAgentBinding(ctx, tx, p, principalID, name, scopes); err != nil {
+			return err
+		}
 		for attempt := 0; attempt < 5; attempt++ {
 			prefix, err := prefixFor(p.TenantID)
 			if err != nil {
@@ -472,11 +491,15 @@ func (m *Module) createAgentKey(ctx context.Context, p tenant.Principal, name st
 			}
 			var id string
 			var created time.Time
+			var creator any
+			if p.ID != "" {
+				creator = p.ID
+			}
 			err = tx.QueryRow(ctx, `
-				INSERT INTO agent_keys (tenant_id, principal_id, name, prefix, hash, scopes, expires_at)
-				VALUES ($1::uuid, $2::uuid, $3, $4, $5, $6, $7)
+				INSERT INTO agent_keys (tenant_id, principal_id, name, prefix, hash, scopes, expires_at, created_by_principal_id)
+				VALUES ($1::uuid, $2::uuid, $3, $4, $5, $6, $7, $8::uuid)
 				RETURNING id::text, created_at
-			`, p.TenantID, principalID, name, prefix, hash, scopes, expires).Scan(&id, &created)
+			`, p.TenantID, principalID, name, prefix, hash, scopes, expires, creator).Scan(&id, &created)
 			if isUnique(err) {
 				if _, rbErr := tx.Exec(ctx, "ROLLBACK TO SAVEPOINT key_insert"); rbErr != nil {
 					return rbErr
@@ -499,11 +522,103 @@ func (m *Module) createAgentKey(ctx context.Context, p tenant.Principal, name st
 				ExpiresAt:   expires,
 				Token:       "aeon_" + prefix + "_" + secret,
 			}
+			actorID := p.ID
+			if actorID == "" {
+				actorID = principalID
+			}
+			_, err = events.Append(ctx, tx, tenant.Principal{ID: actorID, TenantID: p.TenantID}, events.Change{
+				Type: "authz.key_created", After: map[string]any{"key_id": id, "principal_id": principalID, "scopes": scopes},
+			})
+			if err != nil {
+				return err
+			}
 			return nil
 		}
 		return errors.New("agent key prefix collision")
 	})
 	return rec, err
+}
+
+func ensureAgentBinding(ctx context.Context, tx pgx.Tx, creator tenant.Principal, agentID, name string, scopes []string) error {
+	requested := map[string]bool{}
+	for _, scope := range scopes {
+		key := strings.ReplaceAll(scope, ":", ".")
+		if _, ok := authz.Lookup(key); !ok {
+			return authz.ErrForbidden
+		}
+		requested[key] = true
+	}
+	if creator.ID != "" {
+		effective, err := authz.EffectiveTx(ctx, tx, creator, "")
+		if err != nil {
+			return err
+		}
+		for key := range requested {
+			if !slices.Contains(effective.Workspace.Permissions, key) {
+				return authz.ErrForbidden
+			}
+		}
+	}
+	var roleID, roleKey string
+	var builtin bool
+	err := tx.QueryRow(ctx, `SELECT r.id::text,r.key,r.builtin FROM role_bindings b
+		JOIN roles r ON r.tenant_id=b.tenant_id AND r.id=b.role_id
+		WHERE b.tenant_id=$1::uuid AND b.principal_id=$2::uuid AND b.scope_type='workspace' FOR UPDATE OF b`, creator.TenantID, agentID).Scan(&roleID, &roleKey, &builtin)
+	if err != nil && !errors.Is(err, pgx.ErrNoRows) {
+		return err
+	}
+	actorID := creator.ID
+	if actorID == "" {
+		actorID = agentID
+	}
+	actor := tenant.Principal{ID: actorID, TenantID: creator.TenantID}
+	if errors.Is(err, pgx.ErrNoRows) {
+		roleKey = "agent_" + strings.ReplaceAll(agentID, "-", "")
+		if err := tx.QueryRow(ctx, `INSERT INTO roles(tenant_id,key,name,description)
+			VALUES($1::uuid,$2,$3,'Permissions assigned to this agent') RETURNING id::text`, creator.TenantID, roleKey, "Agent "+name).Scan(&roleID); err != nil {
+			return err
+		}
+		for key := range requested {
+			if _, err := tx.Exec(ctx, `INSERT INTO role_permissions(tenant_id,role_id,permission)
+				VALUES($1::uuid,$2::uuid,$3)`, creator.TenantID, roleID, key); err != nil {
+				return err
+			}
+		}
+		if _, err := tx.Exec(ctx, `INSERT INTO role_bindings(tenant_id,principal_id,role_id,scope_type)
+			VALUES($1::uuid,$2::uuid,$3::uuid,'workspace')`, creator.TenantID, agentID, roleID); err != nil {
+			return err
+		}
+		_, err = events.Append(ctx, tx, actor, events.Change{Type: "authz.agent_binding_created",
+			After: map[string]any{"principal_id": agentID, "role_id": roleID, "permissions": scopes}})
+		return err
+	}
+	agent := tenant.Principal{ID: agentID, TenantID: creator.TenantID, Kind: tenant.Agent}
+	effective, err := authz.EffectiveTx(ctx, tx, agent, "")
+	if err != nil {
+		return err
+	}
+	if !builtin && roleKey == "agent_"+strings.ReplaceAll(agentID, "-", "") {
+		for key := range requested {
+			if slices.Contains(effective.Workspace.Permissions, key) {
+				continue
+			}
+			if _, err := tx.Exec(ctx, `INSERT INTO role_permissions(tenant_id,role_id,permission)
+					VALUES($1::uuid,$2::uuid,$3) ON CONFLICT DO NOTHING`, creator.TenantID, roleID, key); err != nil {
+				return err
+			}
+			if _, err := events.Append(ctx, tx, actor, events.Change{Type: "authz.agent_permission_granted",
+				After: map[string]any{"principal_id": agentID, "role_id": roleID, "permission": key}}); err != nil {
+				return err
+			}
+		}
+		return nil
+	}
+	for key := range requested {
+		if !slices.Contains(effective.Workspace.Permissions, key) {
+			return authz.ErrForbidden
+		}
+	}
+	return nil
 }
 
 func (m *Module) listAgentKeys(ctx context.Context, tenantID string) ([]keyRecord, error) {
@@ -538,20 +653,32 @@ func (m *Module) listAgentKeys(ctx context.Context, tenantID string) ([]keyRecor
 	return out, err
 }
 
-func (m *Module) revokeAgentKey(ctx context.Context, tenantID, id string) error {
-	return m.inTenant(ctx, m.pool, tenantID, func(tx pgx.Tx) error {
-		tag, err := tx.Exec(ctx, `
-			UPDATE agent_keys
-			SET revoked_at = COALESCE(revoked_at, now())
-			WHERE id = $1::uuid
-		`, id)
-		if err != nil {
+func (m *Module) revokeAgentKey(ctx context.Context, p tenant.Principal, id string) error {
+	return m.inTenant(ctx, m.pool, p.TenantID, func(tx pgx.Tx) error {
+		var principalID string
+		var revokedAt *time.Time
+		if err := tx.QueryRow(ctx, `SELECT principal_id::text,revoked_at FROM agent_keys WHERE id=$1::uuid FOR UPDATE`, id).Scan(&principalID, &revokedAt); err != nil {
+			if errors.Is(err, pgx.ErrNoRows) {
+				return errNotFound
+			}
 			return err
 		}
-		if tag.RowsAffected() == 0 {
-			return errNotFound
+		if revokedAt != nil {
+			return nil
 		}
-		return nil
+		if _, err := tx.Exec(ctx, `UPDATE agent_keys SET revoked_at=now() WHERE id=$1::uuid`, id); err != nil {
+			return err
+		}
+		actorID := p.ID
+		via := "api"
+		if actorID == "" {
+			actorID = principalID
+			via = "operator"
+		}
+		_, err := events.Append(ctx, tx, tenant.Principal{ID: actorID, TenantID: p.TenantID}, events.Change{
+			Type: "authz.key_revoked", After: map[string]any{"key_id": id, "principal_id": principalID, "via": via},
+		})
+		return err
 	})
 }
 
@@ -628,6 +755,6 @@ func displayPrincipal(ctx context.Context, tx pgx.Tx, tenantID, id string) (tena
 		SELECT p.id::text,p.tenant_id::text,p.kind,COALESCE(target.name,p.name),p.roles
 		FROM principals p
 		LEFT JOIN principals target ON target.tenant_id=p.tenant_id AND target.id=p.linked_to
-		WHERE p.tenant_id=$1::uuid AND p.id=$2::uuid
+		WHERE p.tenant_id=$1::uuid AND p.id=$2::uuid AND p.status='active'
 	`, tenantID, id))
 }

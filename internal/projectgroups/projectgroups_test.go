@@ -60,6 +60,7 @@ func (w *world) principal(tenantOrSlug, name, role string) tenant.Principal {
 	if err := w.db.Admin.QueryRow(ctx, `INSERT INTO principals (tenant_id, kind, name, roles) VALUES ($1, 'person', $2, $3) RETURNING id::text`, tenantID, name, []string{role}).Scan(&id); err != nil {
 		w.t.Fatal(err)
 	}
+	dbtest.BindLegacy(w.t, w.db, tenantID, id)
 	return tenant.Principal{ID: id, TenantID: tenantID, Kind: tenant.Person, Name: name, Roles: []string{role}}
 }
 

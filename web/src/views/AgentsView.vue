@@ -31,7 +31,9 @@ const queue = ref<InstanceType<typeof ApprovalQueue>>()
 const sessionId = computed(() => typeof route.params.sessionId === 'string' ? route.params.sessionId : '')
 const selected = computed(() => agents.views.find(v => v.session.id === sessionId.value))
 const writable = computed(() => can('harness.control'))
-const canDecide = computed(() => session.identity?.principal.kind === 'person' && (can('approvals.decide') || can('inbox.send')))
+const canResolve = computed(() => session.identity?.principal.kind === 'person' && can('inbox.manage'))
+const canRevoke = computed(() => session.identity?.principal.kind === 'person' && can('approvals.revoke'))
+const canDecide = computed(() => session.identity?.principal.kind === 'person' && (can('approvals.decide') || canResolve.value))
 const canDecideApproval = (approval: Approval) => session.identity?.principal.kind === 'person' && can('approvals.decide') && (riskFor(approval) !== 'high' || can('approvals.decide_high'))
 const history = computed(() => decidedApprovals(agents.approvals, agents.now))
 const counts = computed(() => ({ working: agents.grouped.working.length, idle: agents.grouped.idle.length }))
@@ -224,7 +226,7 @@ watch(sessionId, id => { if (id) cursor.value = `s:${id}` }, { immediate: true }
       <div class="main-col">
         <ApprovalQueue
           ref="queue" :pending="agents.pending" :held="agents.held" :history="history" :now="agents.now" :loaded="agents.loaded"
-          :cursor="cursor" :can-decide="canDecide" :can-decide-approval="canDecideApproval" :asker="agents.askerName" :resource="resource" :decide="decide" :revoke="agents.revoke" :resolve="resolveHeld"
+          :cursor="cursor" :can-decide="canDecide" :can-decide-approval="canDecideApproval" :can-resolve="canResolve" :can-revoke="canRevoke" :asker="agents.askerName" :resource="resource" :decide="decide" :revoke="agents.revoke" :resolve="resolveHeld"
           @focus-row="id => cursor = id" @open-agent="openAgent"
         />
         <p v-if="agents.approvalsState === 'error'" class="inline-error" role="alert"><AppIcon name="alert" :size="14" />Permission requests could not be loaded: {{ agents.approvalsError }} <button type="button" class="btn sm" @click="agents.refreshApprovals()">Try again</button></p>

@@ -63,6 +63,9 @@ func newQuoteFixture(t *testing.T, tenantID, slug string) *quoteFixture {
 				return err
 			}
 			ids[p.key] = id
+			if err := dbtest.BindLegacyTx(ctx, tx, tenantID, id); err != nil {
+				return err
+			}
 		}
 		for slug, prefix := range map[string]string{"cost_unit": "CU", "organisation": "ORG", "contact": "CON", "quote": "QUO"} {
 			var id string

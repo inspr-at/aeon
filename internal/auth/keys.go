@@ -9,6 +9,7 @@ import (
 	"strings"
 	"time"
 
+	"github.com/inspr-at/aeon/internal/authz"
 	"github.com/inspr-at/aeon/internal/tenant"
 )
 
@@ -108,17 +109,13 @@ func keyJSON(rec keyRecord) agentKeyJSON {
 	}
 }
 
-func isAdmin(p tenant.Principal) bool {
-	return tenant.IsAdmin(p)
-}
-
-func (m *Module) requireAdmin(w http.ResponseWriter, r *http.Request) (tenant.Principal, bool) {
+func (m *Module) requireKeyManagement(w http.ResponseWriter, r *http.Request) (tenant.Principal, bool) {
 	p, ok := tenant.PrincipalFrom(r.Context())
 	if !ok {
 		writeUnauthorized(w)
 		return tenant.Principal{}, false
 	}
-	if p.Kind != tenant.Person || !isAdmin(p) {
+	if p.Kind != tenant.Person || authz.Require(authz.BindPool(r.Context(), m.pool), "keys.manage", authz.Scope{}) != nil {
 		writeForbidden(w)
 		return tenant.Principal{}, false
 	}
@@ -126,7 +123,7 @@ func (m *Module) requireAdmin(w http.ResponseWriter, r *http.Request) (tenant.Pr
 }
 
 func (m *Module) handleCreateAgentKey(w http.ResponseWriter, r *http.Request) {
-	p, ok := m.requireAdmin(w, r)
+	p, ok := m.requireKeyManagement(w, r)
 	if !ok {
 		return
 	}
@@ -154,7 +151,7 @@ func (m *Module) handleCreateAgentKey(w http.ResponseWriter, r *http.Request) {
 	}
 	rec, err := m.createAgentKey(r.Context(), p, name, scopes, body.ExpiresAt)
 	if err != nil {
-		if errors.Is(err, errServicePrincipal) {
+		if errors.Is(err, errServicePrincipal) || errors.Is(err, authz.ErrForbidden) {
 			writeForbidden(w)
 			return
 		}
@@ -166,7 +163,7 @@ func (m *Module) handleCreateAgentKey(w http.ResponseWriter, r *http.Request) {
 }
 
 func (m *Module) handleListAgentKeys(w http.ResponseWriter, r *http.Request) {
-	p, ok := m.requireAdmin(w, r)
+	p, ok := m.requireKeyManagement(w, r)
 	if !ok {
 		return
 	}
@@ -183,7 +180,7 @@ func (m *Module) handleListAgentKeys(w http.ResponseWriter, r *http.Request) {
 }
 
 func (m *Module) handleRevokeAgentKey(w http.ResponseWriter, r *http.Request) {
-	p, ok := m.requireAdmin(w, r)
+	p, ok := m.requireKeyManagement(w, r)
 	if !ok {
 		return
 	}
@@ -192,7 +189,7 @@ func (m *Module) handleRevokeAgentKey(w http.ResponseWriter, r *http.Request) {
 		writeBadRequest(w, "invalid id")
 		return
 	}
-	err := m.revokeAgentKey(r.Context(), p.TenantID, id)
+	err := m.revokeAgentKey(r.Context(), p, id)
 	if errors.Is(err, errNotFound) {
 		writeJSON(w, http.StatusNotFound, errorJSON{Error: "not found"})
 		return
@@ -214,6 +211,9 @@ func cleanScopes(in []string) ([]string, error) {
 		s = strings.TrimSpace(s)
 		if s == "" || len(s) > 128 || strings.ContainsAny(s, " \t\r\n") {
 			return nil, errors.New("bad scope")
+		}
+		if _, ok := authz.Lookup(strings.ReplaceAll(s, ":", ".")); !ok {
+			return nil, errors.New("unknown scope")
 		}
 		out = append(out, s)
 	}

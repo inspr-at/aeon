@@ -14,7 +14,6 @@ import (
 	"strings"
 
 	"github.com/inspr-at/aeon/internal/db"
-	"github.com/inspr-at/aeon/internal/events"
 	"github.com/inspr-at/aeon/internal/httpapi"
 	"github.com/inspr-at/aeon/internal/tenant"
 	"github.com/jackc/pgx/v5"
@@ -276,7 +275,7 @@ func (m *Module) createRole(w http.ResponseWriter, r *http.Request) {
 		if err != nil {
 			return err
 		}
-		_, err = events.Append(r.Context(), tx, p, events.Change{Type: "authz.role_created", After: out})
+		err = appendEvent(r.Context(), tx, p, "authz.role_created", nil, out)
 		return err
 	})
 	if err != nil {
@@ -342,7 +341,7 @@ func (m *Module) patchRole(w http.ResponseWriter, r *http.Request) {
 		if err != nil {
 			return err
 		}
-		_, err = events.Append(r.Context(), tx, p, events.Change{Type: "authz.role_updated", Before: before, After: out})
+		err = appendEvent(r.Context(), tx, p, "authz.role_updated", before, out)
 		return err
 	})
 	if err != nil {
@@ -416,7 +415,7 @@ func (m *Module) deleteRole(w http.ResponseWriter, r *http.Request) {
 				if _, err := tx.Exec(r.Context(), `UPDATE role_bindings SET role_id=$1::uuid WHERE id=$2::uuid`, target, b.id); err != nil {
 					return err
 				}
-				if _, err := events.Append(r.Context(), tx, p, events.Change{Type: "authz.binding_reassigned", Before: map[string]any{"principal_id": b.principal, "role_id": id, "scope_type": b.scope, "scope_id": b.project}, After: map[string]any{"principal_id": b.principal, "role_id": target, "scope_type": b.scope, "scope_id": b.project}}); err != nil {
+				if err := appendEvent(r.Context(), tx, p, "authz.binding_reassigned", map[string]any{"principal_id": b.principal, "role_id": id, "scope_type": b.scope, "scope_id": b.project}, map[string]any{"principal_id": b.principal, "role_id": target, "scope_type": b.scope, "scope_id": b.project}); err != nil {
 					return err
 				}
 			}
@@ -424,7 +423,7 @@ func (m *Module) deleteRole(w http.ResponseWriter, r *http.Request) {
 		if _, err := tx.Exec(r.Context(), `DELETE FROM roles WHERE id=$1::uuid`, id); err != nil {
 			return err
 		}
-		_, err = events.Append(r.Context(), tx, p, events.Change{Type: "authz.role_deleted", Before: before})
+		err = appendEvent(r.Context(), tx, p, "authz.role_deleted", before, nil)
 		return err
 	})
 	if errors.Is(err, errRoleInUse) {

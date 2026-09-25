@@ -23,7 +23,7 @@ var Registry = makeRegistry()
 func makeRegistry() []Permission {
 	groups := []struct{ group, actions string }{
 		{"nodes", "read write delete move restore configure"},
-		{"kinds", "read manage"}, {"tags", "read manage"},
+		{"kinds", "read manage"}, {"tags", "read write manage"},
 		{"relations", "read write delete"}, {"comments", "read write delete"},
 		{"attachments", "read write delete"}, {"knowledge", "read write delete"},
 		{"journey", "read act manage"}, {"requirements", "read write agree"},
@@ -31,14 +31,14 @@ func makeRegistry() []Permission {
 		{"stage_handoffs", "read write decide"}, {"harness", "read write worker control manage"},
 		{"work_orders", "read write assign"}, {"runs", "read write control claim"},
 		{"run", "create read claim telemetry"}, {"account", "read manage route probe"},
-		{"approvals", "read request propose decide revoke"}, {"inbox", "read send manage"},
+		{"approvals", "read request propose decide decide_high revoke"}, {"inbox", "read send manage"},
 		{"stage", "prepare deploy verify apply"},
 		{"models", "read manage resolve"}, {"plugins", "read manage invoke"},
 		{"imports", "read manage"}, {"views", "read write share"},
-		{"events", "read undo"}, {"search", "read"},
+		{"events", "read undo undo_other"}, {"search", "read"},
 		{"hours", "read write approve"}, {"quotes", "read write issue accept delete manage portal_read portal_accept"},
 		{"crm", "read write manage"}, {"cost_units", "read write manage"},
-		{"project_groups", "read write"}, {"profile", "read write"},
+		{"project_groups", "read write"}, {"profile", "read write manage portal_read portal_write"},
 		{"settings", "read manage"}, {"members", "read manage"},
 		{"roles", "read manage"}, {"keys", "read manage"},
 		{"audit", "read"}, {"authz", "read"},
@@ -50,7 +50,7 @@ func makeRegistry() []Permission {
 			if action == "read" || strings.HasSuffix(action, "_read") || action == "resolve" {
 				risk = "low"
 			}
-			if action == "delete" || action == "deploy" || action == "apply" || action == "decide" || action == "manage" || action == "issue" || action == "approve" || action == "undo" {
+			if action == "delete" || action == "deploy" || action == "apply" || action == "decide" || action == "decide_high" || action == "manage" || action == "issue" || action == "approve" || action == "undo" || action == "undo_other" || action == "control" || action == "configure" || action == "revoke" {
 				risk = "high"
 			}
 			at := []string{"workspace", "project"}
@@ -105,14 +105,14 @@ func builtinPermissions(key string) []string {
 				allow = p.Key == resource+".read"
 			case "imports", "settings", "roles", "keys", "audit", "account", "ownership":
 			default:
-				allow = !strings.HasSuffix(p.Key, ".manage") && p.Key != "nodes.configure" && p.Key != "releases.deploy" && p.Key != "approvals.decide" && p.Key != "hours.approve" && p.Key != "quotes.issue" && p.Key != "quotes.accept" && p.Key != "quotes.portal_accept" && p.Key != "stage_handoffs.decide" && p.Key != "stage.deploy" && p.Key != "stage.apply" && p.Key != "intake.decide"
+				allow = !strings.HasSuffix(p.Key, ".manage") && p.Key != "nodes.configure" && p.Key != "releases.deploy" && p.Key != "approvals.decide_high" && p.Key != "hours.approve" && p.Key != "quotes.issue" && p.Key != "quotes.accept" && p.Key != "quotes.delete" && p.Key != "quotes.portal_accept" && p.Key != "stage_handoffs.decide" && p.Key != "stage.deploy" && p.Key != "stage.apply" && p.Key != "intake.decide" && p.Key != "project_groups.write" && p.Key != "runs.control" && p.Key != "events.undo_other"
 			}
 		case "viewer":
 			allow = p.Key == "authz.read" || p.Key == "quotes.portal_read" || (p.Risk == "low" && strings.HasSuffix(p.Key, ".read") && productReadGroup(resource))
 		case "guest":
 			allow = p.Key == "comments.write" || p.Key == "authz.read" || (p.Risk == "low" && strings.HasSuffix(p.Key, ".read") && guestReadGroup(resource))
 		case "customer":
-			allow = p.Key == "profile.read" || p.Key == "profile.write" || p.Key == "quotes.portal_read" || p.Key == "quotes.portal_accept" || p.Key == "authz.read"
+			allow = p.Key == "profile.portal_read" || p.Key == "profile.portal_write" || p.Key == "quotes.portal_read" || p.Key == "quotes.portal_accept" || p.Key == "authz.read"
 		}
 		if allow {
 			out = append(out, p.Key)

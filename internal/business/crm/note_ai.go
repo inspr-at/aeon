@@ -8,6 +8,7 @@ import (
 	"strings"
 	"time"
 
+	"github.com/inspr-at/aeon/internal/authz"
 	"github.com/inspr-at/aeon/internal/db"
 	"github.com/inspr-at/aeon/internal/httpapi"
 	"github.com/inspr-at/aeon/internal/modelregistry"
@@ -47,7 +48,7 @@ type NoteGenerator interface {
 type noteTool struct{ generator NoteGenerator }
 
 func (t noteTool) Invoke(ctx context.Context, call plugins.Call, id string, input any) (any, error) {
-	if id != NoteToolID || !call.Grant.Allows(fence.PermToolsInvoke) || requireAdmin(call.Principal) != nil {
+	if id != NoteToolID || !call.Grant.Allows(fence.PermToolsInvoke) || call.Principal.Kind != tenant.Person || authz.Require(ctx, "crm.manage", authz.Scope{}) != nil {
 		return nil, plugins.ErrDenied
 	}
 	if t.generator == nil {
@@ -156,7 +157,7 @@ func (m *module) noteState(ctx context.Context, p tenant.Principal, id string) (
 }
 
 func (m *module) noteAIStatus(w http.ResponseWriter, r *http.Request) {
-	p, ok := actor(w, r, true)
+	p, ok := m.actor(w, r, true)
 	if !ok {
 		return
 	}
@@ -174,7 +175,7 @@ func (m *module) noteAIStatus(w http.ResponseWriter, r *http.Request) {
 }
 
 func (m *module) generateNote(w http.ResponseWriter, r *http.Request) {
-	p, ok := actor(w, r, true)
+	p, ok := m.actor(w, r, true)
 	if !ok {
 		return
 	}

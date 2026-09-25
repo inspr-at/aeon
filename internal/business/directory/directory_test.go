@@ -60,6 +60,9 @@ func TestDirectoryListsTenantPrincipalsForStaff(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
+	for _, id := range []string{ids["admin"], ids["member"], ids["customer"]} {
+		dbtest.BindLegacy(t, d, tenants["dir-a"], id)
+	}
 	err = db.InTenant(t.Context(), d.App, tenants["dir-b"], func(tx pgx.Tx) error {
 		var id string
 		if err := tx.QueryRow(t.Context(), `INSERT INTO principals(tenant_id,kind,name,roles) VALUES($1,'person','Other tenant',ARRAY['admin']) RETURNING id::text`, tenants["dir-b"]).Scan(&id); err != nil {
@@ -71,6 +74,7 @@ func TestDirectoryListsTenantPrincipalsForStaff(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
+	dbtest.BindLegacy(t, d, tenants["dir-b"], ids["other"])
 	install := func(tenantID string, enabled bool, digest string) {
 		t.Helper()
 		err := db.InTenant(t.Context(), d.App, tenantID, func(tx pgx.Tx) error {

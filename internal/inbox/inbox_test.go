@@ -73,6 +73,7 @@ func insertPrincipal(t *testing.T, d *dbtest.DB, tenantID string, kind tenant.Pr
 	if err != nil {
 		t.Fatal(err)
 	}
+	dbtest.BindLegacy(t, d, tenantID, p.ID)
 	return p
 }
 

@@ -7,6 +7,7 @@ import (
 	"encoding/json"
 	"errors"
 
+	"github.com/inspr-at/aeon/internal/authz"
 	"github.com/inspr-at/aeon/internal/events"
 	"github.com/inspr-at/aeon/internal/plugins"
 	"github.com/inspr-at/aeon/internal/plugins/fence"
@@ -29,7 +30,7 @@ func UndoHandlers(registry *plugins.Registry) map[string]events.UndoFunc {
 }
 
 func (m *Module) undoGate(ctx context.Context, tx pgx.Tx, p tenant.Principal) error {
-	if !admin(p) {
+	if authz.RequireTx(ctx, tx, p, "quotes.delete", authz.Scope{}) != nil {
 		return events.ErrForbidden
 	}
 	if m.registry == nil || m.enabled(ctx, tx, p.TenantID, fence.PermNodesContribute, true) != nil {

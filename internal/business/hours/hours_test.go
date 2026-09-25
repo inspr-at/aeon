@@ -57,6 +57,7 @@ func setup(t *testing.T) *fixture {
 		if err != nil {
 			t.Fatal(err)
 		}
+		dbtest.BindLegacy(t, d, id, p.ID)
 		return p
 	}
 	f.admin = seedPrincipal(tid, "person", "admin")
@@ -135,6 +136,9 @@ func (f *fixture) call(p tenant.Principal, method, path string, body any, bearer
 	f.t.Helper()
 	raw, _ := json.Marshal(body)
 	r := httptest.NewRequest(method, "/api"+path, strings.NewReader(string(raw)))
+	if len(bearer) > 0 && p.Kind == tenant.Agent {
+		p.Scopes = []string{"hours.read", "hours.write"}
+	}
 	r = r.WithContext(tenant.WithPrincipal(r.Context(), p))
 	if len(bearer) > 0 {
 		r.Header.Set("Authorization", "Bearer "+bearer[0])
@@ -424,6 +428,16 @@ func TestScopedAgentTerminalTimeAndLeastPrivilege(t *testing.T) {
 	sum := sha256.Sum256([]byte("fixture-only"))
 	bearer := "aeon_fixture_fixture-only"
 	f.sql(func(tx pgx.Tx) error {
+		var roleID string
+		if err := tx.QueryRow(t.Context(), `INSERT INTO roles(tenant_id,key,name) VALUES($1,'fixture_agent_hours','Fixture agent hours') RETURNING id::text`, f.agent.TenantID).Scan(&roleID); err != nil {
+			return err
+		}
+		if _, err := tx.Exec(t.Context(), `INSERT INTO role_permissions(tenant_id,role_id,permission) VALUES($1,$2,'hours.read'),($1,$2,'hours.write')`, f.agent.TenantID, roleID); err != nil {
+			return err
+		}
+		if _, err := tx.Exec(t.Context(), `INSERT INTO role_bindings(tenant_id,principal_id,role_id,scope_type) VALUES($1,$2,$3,'workspace')`, f.agent.TenantID, f.agent.ID, roleID); err != nil {
+			return err
+		}
 		_, err := tx.Exec(t.Context(), `INSERT INTO agent_keys(tenant_id,principal_id,name,prefix,hash,scopes) VALUES($1,$2,'test','fixture',$3,ARRAY['hours.read','hours.write'])`, f.agent.TenantID, f.agent.ID, hex.EncodeToString(sum[:]))
 		return err
 	})

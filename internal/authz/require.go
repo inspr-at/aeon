@@ -77,6 +77,12 @@ func requireTx(ctx context.Context, tx pgx.Tx, p tenant.Principal, permission st
 	return permitEffective(p, permission, effective)
 }
 
+// RequireTx makes a decision inside an existing db.InTenant transaction. It
+// is used by handlers whose resource lock and access check must be atomic.
+func RequireTx(ctx context.Context, tx pgx.Tx, p tenant.Principal, permission string, scope Scope) error {
+	return requireTx(ctx, tx, p, permission, scope)
+}
+
 func permitEffective(p tenant.Principal, permission string, effective Effective) error {
 	allowed := contains(effective.Workspace.Permissions, permission)
 	if effective.Project != nil {
@@ -127,11 +133,11 @@ func loadTx(ctx context.Context, tx pgx.Tx, p tenant.Principal, projectID string
 	if projectID != "" {
 		result.Project = &ProjectGrant{ID: projectID, Permissions: []string{}}
 	}
-	var status string
-	if err := tx.QueryRow(ctx, `SELECT status FROM principals WHERE tenant_id=$1::uuid AND id=$2::uuid`, p.TenantID, p.ID).Scan(&status); err != nil {
+	var status, kind string
+	if err := tx.QueryRow(ctx, `SELECT status,kind FROM principals WHERE tenant_id=$1::uuid AND id=$2::uuid`, p.TenantID, p.ID).Scan(&status, &kind); err != nil {
 		return Effective{}, err
 	}
-	if status != "active" {
+	if status != "active" || kind != string(p.Kind) {
 		return Effective{}, ErrForbidden
 	}
 	rows, err := tx.Query(ctx, `SELECT b.scope_type,coalesce(b.scope_id::text,''),r.id::text,r.key,r.name,r.builtin,rp.permission
@@ -180,7 +186,34 @@ func loadTx(ctx context.Context, tx pgx.Tx, p tenant.Principal, projectID string
 	if result.Project != nil {
 		result.Project.Permissions = unique(append(result.Project.Permissions, result.Workspace.Permissions...))
 	}
+	if p.Kind == tenant.Agent && p.KeyCreatorID != "" {
+		creator := tenant.Principal{ID: p.KeyCreatorID, TenantID: p.TenantID, Kind: tenant.Person}
+		ceiling, err := loadTx(ctx, tx, creator, projectID)
+		if err != nil {
+			return Effective{}, err
+		}
+		result.Workspace.Permissions = intersect(result.Workspace.Permissions, ceiling.Workspace.Permissions)
+		if result.Project != nil && ceiling.Project != nil {
+			result.Project.Permissions = intersect(result.Project.Permissions, ceiling.Project.Permissions)
+		}
+	}
 	return result, nil
+}
+
+func intersect(grants, ceiling []string) []string {
+	out := make([]string, 0, len(grants))
+	for _, key := range grants {
+		if contains(ceiling, key) {
+			out = append(out, key)
+		}
+	}
+	return out
+}
+
+// EffectiveTx is for an existing db.InTenant transaction, chiefly key issuance.
+// It keeps the grant check and key insert on one connection and snapshot.
+func EffectiveTx(ctx context.Context, tx pgx.Tx, p tenant.Principal, projectID string) (Effective, error) {
+	return loadTx(ctx, tx, p, projectID)
 }
 
 func nullUUID(s string) any {

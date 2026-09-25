@@ -16,7 +16,7 @@ import (
 )
 
 func (m *Module) content(w http.ResponseWriter, r *http.Request) {
-	p, ok := principal(w, r)
+	p, ok := m.principal(w, r, "attachments.read")
 	if !ok {
 		return
 	}

@@ -8,12 +8,12 @@ import (
 	"errors"
 	"fmt"
 	"net/http"
-	"slices"
 	"strconv"
 	"time"
 
 	"github.com/jackc/pgx/v5"
 
+	"github.com/inspr-at/aeon/internal/authz"
 	"github.com/inspr-at/aeon/internal/httpapi"
 	"github.com/inspr-at/aeon/internal/tenant"
 )
@@ -37,7 +37,7 @@ type pageCursor struct {
 }
 
 func (m *Module) list(w http.ResponseWriter, r *http.Request) {
-	p, ok := importAdmin(w, r)
+	p, ok := m.importAdmin(w, r)
 	if !ok {
 		return
 	}
@@ -103,7 +103,7 @@ func (m *Module) list(w http.ResponseWriter, r *http.Request) {
 }
 
 func (m *Module) get(w http.ResponseWriter, r *http.Request) {
-	p, ok := importAdmin(w, r)
+	p, ok := m.importAdmin(w, r)
 	if !ok {
 		return
 	}
@@ -133,13 +133,13 @@ func (m *Module) get(w http.ResponseWriter, r *http.Request) {
 	httpapi.WriteJSON(w, http.StatusOK, result)
 }
 
-func importAdmin(w http.ResponseWriter, r *http.Request) (tenant.Principal, bool) {
+func (m *Module) importAdmin(w http.ResponseWriter, r *http.Request) (tenant.Principal, bool) {
 	p, ok := tenant.PrincipalFrom(r.Context())
 	if !ok {
 		httpapi.WriteError(w, http.StatusUnauthorized, "authentication required")
 		return p, false
 	}
-	if p.Kind != tenant.Person || !slices.Contains(p.Roles, "admin") {
+	if p.Kind != tenant.Person || authz.Require(authz.BindPool(r.Context(), m.pool), "imports.read", authz.Scope{}) != nil {
 		httpapi.WriteError(w, http.StatusForbidden, "administrator required")
 		return p, false
 	}

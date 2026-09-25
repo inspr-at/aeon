@@ -151,7 +151,7 @@ func TestBindRejectsClosedGatesWithoutEvents(t *testing.T) {
 	f.setInstall(t, true, f.digest, []string{fence.PermStepsApply})
 	forged := f.admin
 	forged.ID = f.other.ID
-	expect(t, request(f.handler, forged, "POST", "/api/crm/contacts/"+f.contact+"/principals", customerCall), 500)
+	expect(t, request(f.handler, forged, "POST", "/api/crm/contacts/"+f.contact+"/principals", customerCall), 403)
 	if count(t, f, f.admin.TenantID, `SELECT count(*) FROM crm_contact_principals`) != 0 || len(logEvents(t, f)) != before {
 		t.Fatal("failed event append left a binding")
 	}
@@ -347,6 +347,9 @@ func insertPrincipal(t *testing.T, tx pgx.Tx, tenantID, kind, name string, roles
 	}
 	var id string
 	err := tx.QueryRow(t.Context(), `INSERT INTO principals(tenant_id,kind,name,roles) VALUES($1,$2,$3,$4) RETURNING id::text`, tenantID, kind, name, roles).Scan(&id)
+	if err == nil {
+		err = dbtest.BindLegacyTx(t.Context(), tx, tenantID, id)
+	}
 	return id, err
 }
 

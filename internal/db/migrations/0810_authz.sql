@@ -2,6 +2,9 @@
 -- ADR-003 P1. Built-in role permissions live in the versioned Go registry.
 ALTER TABLE principals ADD COLUMN status text NOT NULL DEFAULT 'active'
     CHECK (status IN ('active', 'deactivated'));
+ALTER TABLE agent_keys ADD COLUMN created_by_principal_id uuid;
+ALTER TABLE agent_keys ADD CONSTRAINT agent_keys_creator_tenant
+    FOREIGN KEY (tenant_id,created_by_principal_id) REFERENCES principals(tenant_id,id);
 
 CREATE TABLE roles (
     tenant_id uuid NOT NULL REFERENCES tenants(id),
