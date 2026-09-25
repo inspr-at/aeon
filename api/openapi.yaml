@@ -2070,6 +2070,7 @@ paths:
       requestBody: {required: true, content: {application/json: {schema: {$ref: '#/components/schemas/QuoteDraftWrite'}}}}
       responses:
         '200': {description: Mutation acknowledgement and canonical document for a new save, content: {application/json: {schema: {$ref: '#/components/schemas/QuoteMutationReceipt'}}}}
+        '400': {description: Invalid draft document includes field reasons; malformed request errors retain the standard error body, content: {application/json: {schema: {oneOf: [{$ref: '#/components/schemas/QuoteDraftValidationError'}, {$ref: '#/components/schemas/ApiError'}]}}}}
         '412': {$ref: '#/components/responses/Error'}
         '428': {$ref: '#/components/responses/Error'}
   /quotes/{quoteId}/presence:
@@ -3265,6 +3266,12 @@ components:
         mutation_id: {type: string, format: uuid}
         writer_version: {type: integer, enum: [1, 2]}
         document: {$ref: '#/components/schemas/QuoteDocument'}
+    QuoteDraftValidationError:
+      type: object
+      required: [error, errors]
+      properties:
+        error: {type: string}
+        errors: {type: object, description: Field paths within the draft request mapped to reasons, additionalProperties: {type: string}}
     QuoteMutationReceipt:
       type: object
       required: [mutation_id, acknowledged_revision, acknowledged_quote_revision, current_revision, current_quote_revision, replayed]

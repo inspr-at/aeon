@@ -449,7 +449,7 @@ defineExpose({ focus: () => root.value?.focus({ preventScroll: true }), issue, r
         <button type="button" class="btn sm" @click="review">{{ view.local === 'clean' ? 'Load it' : 'Review changes' }}</button>
       </p>
       <p v-if="view?.local === 'failed' || view?.local === 'offline'" class="notice bad" role="alert">
-        <QuoteIcon name="alert" :size="15" /><span>{{ view.local === 'offline' ? 'You are offline. Your changes are kept in this tab.' : 'Your changes were not saved.' }}</span>
+        <QuoteIcon name="alert" :size="15" /><span>{{ view.local === 'offline' ? 'You are offline. Your changes are kept in this tab.' : `Your changes were not saved. ${view.error || ''}` }}</span>
         <button type="button" class="btn sm" @click="live?.session.retry()">Try again</button>
       </p>
     </div>

@@ -111,7 +111,13 @@ export class QuoteSession {
       } catch(e) {
         if(this.disposed || this.pending!==sent)return
         if(e instanceof APIError && (e.status===412 || e.status===409)) {this.view.local='conflict';this.view.remote='newer';this.pending=null;await this.reviewChanges().catch(()=>{})}
-        else {this.view.local=e instanceof TypeError?'offline':'failed';this.view.remote='unavailable';this.view.error=e instanceof Error?e.message:'Save failed'}
+        else {
+          this.view.local=e instanceof TypeError?'offline':'failed';this.view.remote='unavailable'
+          if(e instanceof APIError && e.status===400){this.pending=null;this.view.pendingMutationId=null;this.view.remote='current'}
+          const fields=e instanceof APIError && e.status===400 && e.body.errors && typeof e.body.errors==='object'
+            ? Object.entries(e.body.errors).filter((pair):pair is [string,string]=>typeof pair[1]==='string') : []
+          this.view.error=fields.length ? fields.map(([field,reason])=>`${field}: ${reason}`).join('; ') : e instanceof Error?e.message:'Save failed'
+        }
         this.emit();void this.persist()
       } finally {this.inFlight=null}
     })()

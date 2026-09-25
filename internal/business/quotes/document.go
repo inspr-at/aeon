@@ -7,6 +7,7 @@ import (
 	"context"
 	"crypto/rand"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"math/big"
 	"net/mail"
@@ -99,28 +100,35 @@ func decodeDocument(raw []byte) (quoteDocument, error) {
 	dec.DisallowUnknownFields()
 	dec.UseNumber()
 	if err := dec.Decode(&d); err != nil {
-		return d, bad("invalid document schema")
+		var typeError *json.UnmarshalTypeError
+		if errors.As(err, &typeError) {
+			return d, badField("document."+typeError.Field, "must be "+typeError.Type.String())
+		}
+		if field, ok := strings.CutPrefix(err.Error(), `json: unknown field "`); ok {
+			return d, badField("document."+strings.TrimSuffix(field, `"`), "unsupported field")
+		}
+		return d, badField("document", "invalid JSON schema")
 	}
 	if d.SchemaVersion != 1 || d.MinimumWriterVersion < 1 || d.MinimumWriterVersion > 2 {
 		return d, conflict("unsupported document writer")
 	}
 	if !jsonObject(d.Sender) || !jsonObject(d.Recipient) || !jsonObject(d.Legal) || !jsonObject(d.Layout) {
-		return d, bad("invalid document snapshots")
+		return d, badField("document.sender/recipient/legal/layout", "must be objects")
 	}
 	if err := validateSnapshotFields(d.Sender, senderFields); err != nil {
-		return d, err
+		return d, badField("document.sender", err.Error())
 	}
 	if err := validateSnapshotFields(d.Recipient, recipientFields); err != nil {
-		return d, err
+		return d, badField("document.recipient", err.Error())
 	}
 	if err := validateSnapshotFields(d.Legal, legalFields); err != nil {
-		return d, err
+		return d, badField("document.legal", err.Error())
 	}
 	if err := validateSnapshotFields(d.Layout, layoutFields); err != nil {
-		return d, err
+		return d, badField("document.layout", err.Error())
 	}
 	if d.Profile != nil && (!uuidRe.MatchString(d.Profile.ID) || d.Profile.Revision < 1 || d.Profile.Definition.Schema != "inspr.document-profile.v1") {
-		return d, bad("invalid document profile snapshot")
+		return d, badField("document.profile", "invalid profile snapshot")
 	}
 	return d, nil
 }
@@ -218,77 +226,79 @@ func parseMM(s string, min, max int64) (int64, error) {
 }
 func validateDocument(d *quoteDocument, final bool) error {
 	if len(d.Title) > 512 || len(d.Subtitle) > 512 || len(d.ProjectRef) > 512 || !currencyRe.MatchString(d.Currency) || len(d.Sections) > 20 || len(d.Positions) > 100 {
-		return bad("invalid document bounds")
+		return badField("document", "title, currency, sections or positions exceed document limits")
 	}
 	day, e := time.Parse("2006-01-02", d.OfferDate)
 	if e != nil {
-		return bad("invalid offer date")
+		return badField("document.offer_date", "must be a calendar date")
 	}
 	until, e := time.Parse("2006-01-02", d.ValidUntil)
 	if e != nil || until.Before(day) {
-		return bad("invalid validity date")
+		return badField("document.valid_until", "must be a date on or after offer date")
 	}
 	if final && (strings.TrimSpace(d.Title) == "" || len(d.Positions) == 0) {
-		return bad("document needs a title and position")
+		return badField("document", "needs a title and position")
 	}
 	ids := map[string]bool{}
-	for _, s := range d.Sections {
+	for si, s := range d.Sections {
+		sectionPath := fmt.Sprintf("document.sections[%d]", si)
 		if !uuidRe.MatchString(s.ID) || ids[s.ID] || len(s.Heading) > 500 || len(s.Body) > 100000 || len(s.Nodes) > 100 {
-			return bad("invalid section")
+			return badField(sectionPath, "invalid ID or content bounds")
 		}
 		if s.NumberingStyle != "" && s.NumberingStyle != "decimal" && s.NumberingStyle != "upper-roman" && s.NumberingStyle != "lower-roman" && s.NumberingStyle != "upper-alpha" && s.NumberingStyle != "lower-alpha" && s.NumberingStyle != "none" {
-			return bad("invalid section numbering style")
+			return badField(sectionPath+".numbering_style", "unsupported numbering style")
 		}
 		if _, err := parseMM(s.SpacingBeforeMM, 0, 400); err != nil {
-			return err
+			return badField(sectionPath+".spacing_before_mm", err.Error())
 		}
 		if _, err := parseMM(s.SpacingAfterMM, 0, 400); err != nil {
-			return err
+			return badField(sectionPath+".spacing_after_mm", err.Error())
 		}
 		ids[s.ID] = true
-		for _, n := range s.Nodes {
+		for ni, n := range s.Nodes {
+			nodePath := fmt.Sprintf("%s.nodes[%d]", sectionPath, ni)
 			if !uuidRe.MatchString(n.ID) || ids[n.ID] || utf8.RuneCountInString(n.Text) > 2000 || n.Depth < 0 || n.Depth > 5 || utf8.RuneCountInString(n.Glyph) > 4 {
-				return bad("invalid prose node")
+				return badField(nodePath, "invalid ID or content bounds")
 			}
 			ids[n.ID] = true
 			if n.Kind != "paragraph" && n.Kind != "item" {
-				return bad("invalid prose kind")
+				return badField(nodePath+".kind", "must be paragraph or item")
 			}
 			if n.Kind == "paragraph" && (n.Marker != "" || n.Numbering != "" || n.ListStart != 0 || n.ListContinue || n.SectionBound) {
-				return bad("invalid paragraph markers")
+				return badField(nodePath, "paragraph cannot have list markers")
 			}
 			if (n.Kind != "item" || n.Marker != "decimal") && (n.Numbering != "" || n.ListStart != 0 || n.ListContinue || n.SectionBound) {
-				return bad("numbering requires a decimal item")
+				return badField(nodePath+".numbering", "requires a decimal item")
 			}
 			if n.Kind == "paragraph" && (n.Depth != 0 || n.Glyph != "" || n.MarkerXMM != "" || n.MarkerYMM != "" || n.TextStartMM != "") {
-				return bad("invalid paragraph layout")
+				return badField(nodePath, "paragraph cannot have item layout")
 			}
 			if n.Glyph != "" && (n.Marker == "decimal" || strings.TrimSpace(n.Glyph) != n.Glyph || strings.ContainsAny(n.Glyph, "<>&")) {
-				return bad("invalid bullet glyph")
+				return badField(nodePath+".glyph", "invalid bullet glyph")
 			}
 			if _, err := parseMM(n.MarkerXMM, -300, 300); err != nil {
-				return err
+				return badField(nodePath+".marker_x_mm", err.Error())
 			}
 			if _, err := parseMM(n.MarkerYMM, -200, 200); err != nil {
-				return err
+				return badField(nodePath+".marker_y_mm", err.Error())
 			}
 			if _, err := parseMM(n.TextStartMM, -200, 400); err != nil {
-				return err
+				return badField(nodePath+".text_start_mm", err.Error())
 			}
 			if n.Marker != "" && n.Marker != "disc" && n.Marker != "circle" && n.Marker != "square" && n.Marker != "dash" && n.Marker != "decimal" {
-				return bad("invalid list marker")
+				return badField(nodePath+".marker", "unsupported list marker")
 			}
 			if n.Numbering != "" && n.Numbering != "outline" {
-				return bad("invalid numbering")
+				return badField(nodePath+".numbering", "unsupported numbering")
 			}
 			if n.ListStart < 0 || n.ListStart > 9999 || n.ListStart > 0 && n.ListContinue || n.SectionBound && n.Numbering != "outline" {
-				return bad("invalid numbering start")
+				return badField(nodePath+".list_start", "invalid numbering start")
 			}
 			units := utf16.Encode([]rune(n.Text))
 			end := 0
-			for _, m := range n.Marks {
+			for mi, m := range n.Marks {
 				if m.Start < end || m.Start < 0 || m.End <= m.Start || m.End > len(units) || (!m.Bold && !m.Italic) || !utf16Boundary(units, m.Start) || !utf16Boundary(units, m.End) {
-					return bad("invalid inline marks")
+					return badField(fmt.Sprintf("%s.marks[%d]", nodePath, mi), "invalid inline mark range")
 				}
 				end = m.End
 			}
@@ -297,31 +307,32 @@ func validateDocument(d *quoteDocument, final bool) error {
 	var total int64
 	for i := range d.Positions {
 		p := &d.Positions[i]
+		positionPath := fmt.Sprintf("document.positions[%d]", i)
 		if !uuidRe.MatchString(p.ID) || ids[p.ID] || len(p.ShortText) > 2000 || len(p.LongText) > 10000 || len(p.UnitLabel) > 80 || strings.TrimSpace(p.UnitLabel) == "" || p.Currency != d.Currency || p.UnitPriceCents < 0 || p.UnitPriceCents > 1_000_000_000 {
-			return bad("invalid position")
+			return badField(positionPath, "invalid ID, currency, unit or content bounds")
 		}
 		ids[p.ID] = true
 		if p.PricingSource != "manual" && p.PricingSource != "cost_unit" {
-			return bad("invalid pricing source")
+			return badField(positionPath+".pricing_source", "unsupported pricing source")
 		}
 		if p.PricingSource == "manual" && p.CostUnitNodeID != "" || p.PricingSource == "cost_unit" && !uuidRe.MatchString(p.CostUnitNodeID) {
-			return bad("invalid cost unit")
+			return badField(positionPath+".cost_unit_node_id", "invalid cost unit")
 		}
 		if (p.PricingSource == "manual" && p.RateUnit != "") || (p.PricingSource == "cost_unit" && p.RateUnit != "hour" && p.RateUnit != "day" && p.RateUnit != "item") {
-			return bad("invalid rate unit")
+			return badField(positionPath+".rate_unit", "invalid rate unit")
 		}
 		qty, e := parseQuantity(p.Quantity)
 		if e != nil {
-			return bad("invalid quantity")
+			return badField(positionPath+".quantity", "invalid quantity")
 		}
 		if final && (strings.TrimSpace(p.ShortText) == "" || qty == 0) {
-			return bad("incomplete position")
+			return badField(positionPath, "position needs text and a positive quantity")
 		}
 		amount := new(big.Int).Mul(big.NewInt(qty), big.NewInt(p.UnitPriceCents))
 		amount.Add(amount, big.NewInt(50))
 		amount.Div(amount, big.NewInt(100))
 		if !amount.IsInt64() || amount.Int64() > 1_000_000_000_000-total {
-			return bad("quote total too large")
+			return badField(positionPath+".unit_price_cents", "quote total too large")
 		}
 		p.TotalCents = amount.Int64()
 		total += p.TotalCents

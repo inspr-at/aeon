@@ -95,7 +95,7 @@ type draftWrite struct {
 func draftPrecondition(r *http.Request) (int64, error) {
 	h := r.Header.Get("If-Match")
 	if h == "" {
-		return 0, failure{428, "If-Match is required"}
+		return 0, failure{status: 428, message: "If-Match is required"}
 	}
 	parts := draftETagRe.FindStringSubmatch(h)
 	if parts == nil {
@@ -179,7 +179,7 @@ func (m *Module) draftPatch(w http.ResponseWriter, r *http.Request) {
 			return conflict("quote is not editable")
 		}
 		if current.DraftRevision != expected {
-			return failure{412, "draft revision is stale"}
+			return failure{status: 412, message: "draft revision is stale"}
 		}
 		// Profile changes have their own server-side selection endpoint. A full
 		// document save may neither forge a definition nor silently drop it.

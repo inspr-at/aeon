@@ -46,3 +46,30 @@ test('Quotes list opens a live draft in the session and presence editor', async 
   await expect(page.getByRole('button', { name: 'Save draft' })).toBeDisabled()
   await expect.poll(() => presenceJoined).toBe(true)
 })
+
+test('draft save shows field reasons from a 400 response', async ({ page }) => {
+  await mockWork(page, fixtures())
+  await mockBusiness(page, businessData({ enabled: ['business_costs', 'business_crm', 'business_quotes', 'business_hours'] }))
+  await page.route('**/api/quotes**', route => {
+    const path = new URL(route.request().url()).pathname
+    if (path === `/api/quotes/${quoteId}/draft` && route.request().method() === 'PATCH') {
+      return route.fulfill({ status: 400, json: { error: 'invalid quote document', errors: { 'document.sections.nodes.marker_x_mm': 'must be string' } } })
+    }
+    if (path === `/api/quotes/${quoteId}/draft`) return route.fulfill({ json: {
+      document, document_sha256: 'a'.repeat(64), draft_revision: 1, quote_revision: 1,
+      schema_version: 1, minimum_writer_version: 1, base_version: 0,
+      updated_at: '2026-09-24T09:00:00Z', updated_by_principal_id: '22222222-2222-4222-8222-222222222222',
+    } })
+    if (path === `/api/quotes/${quoteId}/presence`) return route.fulfill({ json: { session_id: '33333333-3333-4333-8333-333333333333', snapshot: {
+      sessions: [], draft_revision: 1, quote_revision: 1, state: 'draft',
+    } } })
+    if (path.endsWith('/collaboration/stream')) return route.fulfill({ contentType: 'text/event-stream', body: '' })
+    if (path === `/api/quotes/${quoteId}`) return route.fulfill({ json: { quote_node_id: quoteId, offer_no: 'A260924-1', state: 'draft' } })
+    return route.fallback()
+  })
+  await page.goto(`/business/quotes/${quoteId}`)
+  const title = page.getByRole('textbox', { name: 'Angebotstitel' })
+  await title.fill('Changed synthetic draft')
+  await page.getByRole('button', { name: 'Save draft' }).click()
+  await expect(page.getByRole('alert')).toContainText('document.sections.nodes.marker_x_mm: must be string')
+})
