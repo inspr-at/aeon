@@ -30,8 +30,11 @@ func TestRegistryAndBuiltins(t *testing.T) {
 		{"owner", "ownership.transfer", true}, {"admin", "ownership.transfer", false},
 		{"admin", "roles.manage", true}, {"member", "nodes.write", true},
 		{"member", "roles.manage", false}, {"viewer", "nodes.read", true},
+		{"member", "plugins.read", true}, {"member", "plugins.manage", false},
+		{"member", "quotes.portal_accept", false},
 		{"viewer", "nodes.write", false}, {"guest", "comments.write", true},
-		{"guest", "nodes.write", false}, {"customer", "quotes.portal_read", true},
+		{"guest", "nodes.write", false}, {"guest", "keys.read", false},
+		{"customer", "quotes.portal_read", true},
 		{"customer", "quotes.read", false},
 		{"customer", "quotes.issue", false},
 	}
@@ -135,11 +138,15 @@ func TestLegacyMappingAndOwnerProtection(t *testing.T) {
 	err = db.InTenant(ctx, d.App, tid, func(tx pgx.Tx) error {
 		_, err := tx.Exec(ctx, `UPDATE role_bindings SET role_id=(SELECT id FROM roles WHERE tenant_id=$1::uuid AND key='owner')
 		  WHERE tenant_id=$1::uuid AND principal_id=$2::uuid`, tid, ids["admin"])
-		if err != nil { return err }
+		if err != nil {
+			return err
+		}
 		_, err = tx.Exec(ctx, `UPDATE principals SET status='deactivated' WHERE id=$1::uuid`, ids["super_admin"])
 		return err
 	})
-	if err != nil {t.Fatal(err)}
-	p.Kind=tenant.Person
-	check("nodes.read",nil,false)
+	if err != nil {
+		t.Fatal(err)
+	}
+	p.Kind = tenant.Person
+	check("nodes.read", nil, false)
 }

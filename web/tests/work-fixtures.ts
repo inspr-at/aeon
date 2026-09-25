@@ -3,6 +3,7 @@
 // the B1 query semantics (within, kind, state, priority, assignee, q, hide_closed,
 // sort, facets, cursor paging) so specs can assert on real behaviour.
 import type { Page } from '@playwright/test'
+import { mockEffectivePermissions } from './authz-fixtures'
 
 export const me = { id: '11111111-1111-4111-8111-111111111111', name: 'Markus Barta' }
 const mira = { id: '22222222-2222-4222-8222-222222222222', name: 'Mira Holm' }
@@ -303,6 +304,7 @@ export async function mockWork(page: Page, data: Fixtures, options: MockOptions 
       batch.undone = true
       return route.fulfill({ status: 201, json: { id: batch.id + 1, type: 'node.bulk_changed', undo_of: batch.id } })
     }
+    if (path === '/api/me/permissions') return route.fulfill({ json: mockEffectivePermissions(options.readOnly ? 'viewer' : options.admin ? 'admin' : 'member', query.get('project_id') ?? undefined) })
     if (path === '/api/me') return route.fulfill({ json: { principal: { id: me.id, name: me.name, roles: options.readOnly ? ['viewer'] : options.admin ? ['admin'] : ['member'] }, tenant: { id: 't1', name: 'INSPR Studio' } } })
     if (path === '/api/kinds') return route.fulfill({ json: { items: ['epic', 'ticket', 'task', 'project'].map(slug => ({ id: `k-${slug}`, slug, label: slug[0].toUpperCase() + slug.slice(1), short_prefix: slug.slice(0, 3).toUpperCase(), icon: slug, allowed_child_kinds: null, field_schema: {} })) } })
     if (path === '/api/relations') return route.fulfill({ json: { items: data.relations.filter(r => r.source_node_id === query.get('node_id') || r.target_node_id === query.get('node_id')), next_cursor: null } })

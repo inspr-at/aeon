@@ -241,10 +241,16 @@ func (m *Module) putWorkspaceRole(w http.ResponseWriter, r *http.Request) {
 	result := Member{}
 	err = db.InTenant(r.Context(), m.pool, p.TenantID, func(tx pgx.Tx) error {
 		var legacy []string
-		var roleID, roleKey, roleName *string
-		if err := tx.QueryRow(r.Context(), `SELECT p.id::text,p.name,p.email,p.status,p.roles,r.id::text,r.key,r.name
+		var roleID, roleKey, roleName, issuer *string
+		var avatarHash string
+		if err := tx.QueryRow(r.Context(), `SELECT p.id::text,p.name,p.email,p.status,p.roles,r.id::text,r.key,r.name,
+		  i.issuer,coalesce(pp.avatar_original_hash,''),
+		  (SELECT max(s.last_seen_at) FROM sessions s WHERE s.tenant_id=p.tenant_id AND s.principal_id=p.id)
           FROM principals p LEFT JOIN role_bindings b ON b.tenant_id=p.tenant_id AND b.principal_id=p.id AND b.scope_type='workspace'
-          LEFT JOIN roles r ON r.tenant_id=b.tenant_id AND r.id=b.role_id WHERE p.tenant_id=$1::uuid AND p.id=$2::uuid`, p.TenantID, id).Scan(&result.PrincipalID, &result.Name, &result.Email, &result.Status, &legacy, &roleID, &roleKey, &roleName); err != nil {
+		  LEFT JOIN roles r ON r.tenant_id=b.tenant_id AND r.id=b.role_id
+		  LEFT JOIN identities i ON i.id=p.identity_id
+		  LEFT JOIN personal_profiles pp ON pp.tenant_id=p.tenant_id AND pp.principal_id=p.id
+		  WHERE p.tenant_id=$1::uuid AND p.id=$2::uuid`, p.TenantID, id).Scan(&result.PrincipalID, &result.Name, &result.Email, &result.Status, &legacy, &roleID, &roleKey, &roleName, &issuer, &avatarHash, &result.LastActiveAt); err != nil {
 			return err
 		}
 		if roleID != nil {
@@ -254,9 +260,29 @@ func (m *Module) putWorkspaceRole(w http.ResponseWriter, r *http.Request) {
 			v := legacy[0]
 			result.ClassicRole = &v
 		}
+		if issuer != nil && *issuer != "paimos-classic" {
+			v := "inspr_id"
+			result.Identity = &v
+		}
+		if avatarHash != "" {
+			v := "/api/people/" + id + "/avatar"
+			result.AvatarURL = &v
+		}
 		result.ProjectRoles = []any{}
 		result.Aliases = []Alias{}
-		return nil
+		rows, err := tx.Query(r.Context(), `SELECT id::text,name FROM principals WHERE tenant_id=$1::uuid AND linked_to=$2::uuid ORDER BY name,id`, p.TenantID, id)
+		if err != nil {
+			return err
+		}
+		defer rows.Close()
+		for rows.Next() {
+			var source, name string
+			if err := rows.Scan(&source, &name); err != nil {
+				return err
+			}
+			result.Aliases = append(result.Aliases, Alias{PrincipalID: source, Name: name, Source: "classic"})
+		}
+		return rows.Err()
 	})
 	if err != nil {
 		internalFail(w, err)

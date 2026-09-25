@@ -6,6 +6,7 @@
 // the face depends on, so specs can assert on what is sent.
 import type { Page } from '@playwright/test'
 import { me, type Call } from './work-fixtures'
+import { mockEffectivePermissions } from './authz-fixtures'
 
 const now = Date.parse('2026-09-23T12:00:00Z')
 const ago = (minutes: number) => new Date(now - minutes * 60_000).toISOString()
@@ -152,6 +153,7 @@ export async function mockJourney(page: Page, world: JourneyWorld, options: { fa
     try { body = request.postDataJSON() ?? {} } catch { body = {} }
     const record = () => calls.push({ path, method, query, body, headers: request.headers() })
     if (path === '/api/me') return route.fulfill({ json: { principal: { id: me.id, name: me.name, kind: options.kind ?? 'person', roles: ['member'] }, tenant: { id: 't1', name: 'INSPR Studio' } } })
+    if (path === '/api/me/permissions') return route.fulfill({ json: mockEffectivePermissions('member', query.get('project_id') ?? undefined) })
     if (path === '/api/kinds') return route.fulfill({ json: { items: ['epic', 'ticket', 'task', 'project', 'release'].map(slug => ({ id: `k-${slug}`, slug, label: slug[0].toUpperCase() + slug.slice(1), short_prefix: slug.slice(0, 3).toUpperCase(), icon: slug, allowed_child_kinds: null, field_schema: {} })) } })
     if (path === '/api/plugins') return route.fulfill({ json: PLUGINS })
     // The agent asking for the gates: one Claude session, so it has a name.

@@ -47,10 +47,10 @@ func makeRegistry() []Permission {
 	for _, g := range groups {
 		for _, action := range strings.Fields(g.actions) {
 			risk := "medium"
-			if action == "read" || action == "resolve" {
+			if action == "read" || strings.HasSuffix(action, "_read") || action == "resolve" {
 				risk = "low"
 			}
-			if action == "delete" || action == "deploy" || action == "decide" || action == "manage" || action == "issue" || action == "approve" || action == "undo" {
+			if action == "delete" || action == "deploy" || action == "apply" || action == "decide" || action == "manage" || action == "issue" || action == "approve" || action == "undo" {
 				risk = "high"
 			}
 			at := []string{"workspace", "project"}
@@ -87,14 +87,16 @@ func builtinPermissions(key string) []string {
 			allow = p.Key != "ownership.transfer"
 		case "member":
 			switch p.Group {
-			case "kinds", "models", "plugins", "imports", "settings", "members", "roles", "keys", "audit", "ownership":
+			case "kinds", "models", "plugins", "members":
+				allow = p.Key == p.Group+".read"
+			case "imports", "settings", "roles", "keys", "audit", "account", "ownership":
 			default:
-				allow = p.Key != "nodes.configure" && p.Key != "releases.deploy" && p.Key != "approvals.decide" && p.Key != "hours.approve" && p.Key != "quotes.issue" && p.Key != "stage_handoffs.decide" && p.Key != "stage.deploy" && p.Key != "stage.apply" && p.Key != "intake.decide"
+				allow = !strings.HasSuffix(p.Key, ".manage") && p.Key != "nodes.configure" && p.Key != "releases.deploy" && p.Key != "approvals.decide" && p.Key != "hours.approve" && p.Key != "quotes.issue" && p.Key != "quotes.accept" && p.Key != "quotes.portal_accept" && p.Key != "stage_handoffs.decide" && p.Key != "stage.deploy" && p.Key != "stage.apply" && p.Key != "intake.decide"
 			}
 		case "viewer":
-			allow = p.Key == "profile.write" || p.Key == "authz.read" || (p.Risk == "low" && strings.HasSuffix(p.Key, ".read"))
+			allow = p.Key == "authz.read" || p.Key == "quotes.portal_read" || (p.Risk == "low" && strings.HasSuffix(p.Key, ".read") && productReadGroup(p.Group))
 		case "guest":
-			allow = p.Key == "comments.write" || p.Key == "profile.write" || p.Key == "authz.read" || (p.Risk == "low" && strings.HasSuffix(p.Key, ".read"))
+			allow = p.Key == "comments.write" || p.Key == "authz.read" || (p.Risk == "low" && strings.HasSuffix(p.Key, ".read") && guestReadGroup(p.Group))
 		case "customer":
 			allow = p.Key == "profile.read" || p.Key == "profile.write" || p.Key == "quotes.portal_read" || p.Key == "quotes.portal_accept" || p.Key == "authz.read"
 		}
@@ -103,6 +105,22 @@ func builtinPermissions(key string) []string {
 		}
 	}
 	return out
+}
+
+func productReadGroup(group string) bool {
+	switch group {
+	case "nodes", "kinds", "tags", "relations", "comments", "attachments", "knowledge", "journey", "requirements", "releases", "intake", "stage_handoffs", "harness", "work_orders", "runs", "run", "approvals", "inbox", "models", "views", "events", "search", "hours", "quotes", "crm", "cost_units", "project_groups", "profile":
+		return true
+	}
+	return false
+}
+
+func guestReadGroup(group string) bool {
+	switch group {
+	case "nodes", "kinds", "tags", "relations", "comments", "attachments", "knowledge", "journey", "requirements", "releases", "intake", "views", "events", "search", "profile":
+		return true
+	}
+	return false
 }
 
 func BuiltinPermissions(key string) ([]string, bool) {

@@ -107,7 +107,7 @@ type Role struct {
 func roleTx(ctx context.Context, tx pgx.Tx, id string) (Role, error) {
 	var out Role
 	err := tx.QueryRow(ctx, `SELECT r.id::text,r.key,r.name,r.description,r.builtin,r.based_on::text,
-      (SELECT count(*) FROM role_bindings b WHERE b.tenant_id=r.tenant_id AND b.role_id=r.id)
+	  (SELECT count(DISTINCT b.principal_id) FROM role_bindings b WHERE b.tenant_id=r.tenant_id AND b.role_id=r.id)
       FROM roles r WHERE r.id=$1::uuid`, id).Scan(&out.ID, &out.Key, &out.Name, &out.Description, &out.Builtin, &out.BasedOn, &out.MemberCount)
 	if err != nil {
 		return Role{}, err
