@@ -33,6 +33,9 @@ func mappedFields(original, refs Record, sourceID string, project bool) Record {
 	}
 	fields := Record{"classic": classic}
 	if project {
+		if key := stringField(original, "key"); key != "" {
+			fields["project_key"] = key
+		}
 		if v, ok := original["tags"]; ok {
 			fields["tags"] = v
 		}
