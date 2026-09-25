@@ -32,6 +32,9 @@ import (
 // replacing that key requires an explicit re-encryption migration. Nothing in
 // this package reads environment secrets or starts vendor processes. Target
 // registration is configuration, never proof of local process ownership.
+// The coordinator mounts this module and runs NewRoutineDispatcher per tenant
+// for server-owned grok_bot_routine webhook delivery; neither constructor
+// starts a background worker implicitly.
 func NewMessaging(pool *pgxpool.Pool, key []byte) (httpapi.Module, error) {
 	if len(key) != 32 {
 		return nil, errors.New("messaging requires a 32-byte encryption key")
@@ -69,7 +72,11 @@ func (m *messaging) Mount(mux *http.ServeMux) {
 	mux.HandleFunc("GET /api/projects/{projectId}/messages", m.inspectMessages)
 	mux.HandleFunc("POST /api/projects/{projectId}/messages/{messageId}/resolution", m.resolveMessage)
 	mux.HandleFunc("GET /api/projects/{projectId}/messages/listen", m.listenMessages)
+	mux.HandleFunc("POST /api/projects/{projectId}/messages/{messageId}/ack", m.ackCompatMessage)
 	mux.HandleFunc("GET /api/projects/{projectId}/message-deliveries", m.getDeliveries)
+	mux.HandleFunc("POST /api/projects/{projectId}/messages/delivery-claim", m.claimDelivery)
+	mux.HandleFunc("POST /api/projects/{projectId}/messages/delivery-complete", m.completeDelivery)
+	mux.HandleFunc("POST /api/projects/{projectId}/messages/delivery-unavailable", m.unavailableDelivery)
 }
 
 // Messaging errors must not log pgx errors: they can contain private row
@@ -251,7 +258,15 @@ func validateCompatTarget(ctx context.Context, in *targetInput) error {
 		if err := validateWebhookURL(ctx, in.Ref); err != nil {
 			return badRequest("target must be a public HTTPS URL")
 		}
-		if len(in.Secret) < 1 || len(in.Secret) > 4096 || strings.ContainsAny(in.Secret, " \t\r\n\x00") {
+		if len(in.Secret) < 8 || len(in.Secret) > 512 || strings.HasPrefix(strings.ToLower(in.Secret), "bearer ") {
+			return badRequest("invalid routine sender key")
+		}
+		for _, c := range []byte(in.Secret) {
+			if c < '!' || c > '~' {
+				return badRequest("invalid routine sender key")
+			}
+		}
+		if strings.ContainsAny(in.Secret, " \t\r\n\x00") {
 			return badRequest("invalid routine sender key")
 		}
 	default:

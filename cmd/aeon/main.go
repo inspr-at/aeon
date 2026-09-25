@@ -87,5 +87,5 @@ func main() {
 		}
 		return
 	}
-	os.Exit(cli.Run(os.Args, os.Stdin, os.Stdout, os.Stderr))
+	os.Exit(cli.RunMessaging(os.Args, os.Stdin, os.Stdout, os.Stderr))
 }

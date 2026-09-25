@@ -2,16 +2,17 @@
 
 // Package cli is the agent command line for the aeon binary.
 //
-// Run is the constructor the coordinator calls from cmd/aeon. This package
+// RunMessaging is the constructor cmd/aeon calls for the complete CLI tree.
+// Run remains available for callers explicitly testing the base tree. This package
 // does not mount an httpapi.Module and does not register a plugin manifest:
 // the verbs below call the APIs the coordinator already mounts (nodes, search,
 // models, inbox, auth). When argv[0] is paimos, programName selects
 // compatibility mode: the same verbs, PAIMOS_URL / PAIMOS_API_KEY, and the
-// classic text shapes documented by the paimos CLI.
+// classic text and JSON shapes documented by the paimos CLI.
 //
 // Served compatibility verbs (issue, knowledge for memory, runbook, guideline,
 // external-system and related-project, search, model resolve, onboard,
-// session start, tell, listen, message target, anchors scan/verify, skill
+// session start, tell, listen, message target, message deliveries, anchors scan/verify, skill
 // render, and sync check) talk only to the configured Aeon instance, except
 // anchors scan/verify, which read and write the repo-side index
 // .paimos/anchors.json and do not open a network connection. skill render

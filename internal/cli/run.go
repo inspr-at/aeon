@@ -53,18 +53,19 @@ func programName(argv0 string) string {
 }
 
 type runtime struct {
-	program    string
-	stdin      io.Reader
-	stdout     io.Writer
-	stderr     io.Writer
-	configPath string
-	instance   string
-	jsonOut    bool
-	agentName  string
-	sessionID  string
-	help       bool
-	version    bool
-	kinds      *kindTable
+	program            string
+	stdin              io.Reader
+	stdout             io.Writer
+	stderr             io.Writer
+	configPath         string
+	instance           string
+	jsonOut            bool
+	agentName          string
+	sessionID          string
+	help               bool
+	version            bool
+	kinds              *kindTable
+	messagingDeliverer localDeliverer
 }
 
 func (rt *runtime) execute(args []string) error {

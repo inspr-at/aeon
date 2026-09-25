@@ -34,6 +34,15 @@ paths:
         - {name: limit, in: query, schema: {type: integer, minimum: 1, maximum: 10, default: 10}}
       responses:
         '200': {description: Message page with items, next_after and untrusted-message preamble}
+  /api/projects/{projectId}/messages/{messageId}/ack:
+    parameters:
+      - {$ref: '#/components/parameters/Project'}
+      - {name: messageId, in: path, required: true, schema: {type: string, format: uuid}}
+    post:
+      operationId: ackCompatMessage
+      description: Recipient-only ACK of a compatibility message. Resolves its R2 inbox ID in the project and appends the inbox ACK event; exact replay is idempotent.
+      responses:
+        '200': {description: Redacted ACK result}
   /api/projects/{projectId}/message-targets:
     parameters:
       - {$ref: '#/components/parameters/Project'}
@@ -59,9 +68,36 @@ paths:
       - {$ref: '#/components/parameters/Project'}
     get:
       operationId: listCompatDeliveries
-      description: Administrator only; state, reason, attempts and immutable target IDs only. No bodies, references, credentials or provider errors.
+      description: Administrator only; state, reason, attempts, controlled effective level and fallback reason, and immutable target IDs only. No bodies, references, credentials or provider errors.
       responses:
         '200': {description: Redacted delivery array}
+  /api/projects/{projectId}/messages/delivery-claim:
+    parameters:
+      - {$ref: '#/components/parameters/Project'}
+    post:
+      operationId: claimCompatDelivery
+      description: Recipient-only, ordered claim for one local adapter. Returns a private target reference and authenticated tenant/principal scope only for the selected adapter; never returns a sender key. A claim is leased and appends an event. Empty work returns null. Blocked or foreign-adapter work is reported without a reference.
+      requestBody: {required: true, content: {application/json: {schema: {type: object, required: [to, adapter], properties: {to: {type: string}, adapter: {type: string}}}}}}
+      responses:
+        '200': {description: One delivery work item or null}
+  /api/projects/{projectId}/messages/delivery-complete:
+    parameters:
+      - {$ref: '#/components/parameters/Project'}
+    post:
+      operationId: completeCompatDelivery
+      description: Recipient-only fenced completion; atomically records the redacted result, durable cursor, inbox ACK and tenant events. Exact replay is idempotent.
+      requestBody: {required: true, content: {application/json: {schema: {type: object, required: [delivery_id, lease_token, effective_level], properties: {delivery_id: {type: string, format: uuid}, lease_token: {type: string, format: uuid}, effective_level: {type: string, enum: [simple, steer]}, fallback_reason: {type: string}}}}}}
+      responses:
+        '200': {description: Redacted delivery result}
+  /api/projects/{projectId}/messages/delivery-unavailable:
+    parameters:
+      - {$ref: '#/components/parameters/Project'}
+    post:
+      operationId: rerouteCompatDelivery
+      description: Recipient-only fenced reroute of a leased unavailable local adapter to the frozen simple fallback target. Preserves the original target, clears the lease, and appends an event; no recipient ACK occurs.
+      requestBody: {required: true, content: {application/json: {schema: {type: object, required: [delivery_id, lease_token, fallback_reason], properties: {delivery_id: {type: string, format: uuid}, lease_token: {type: string, format: uuid}, fallback_reason: {type: string, enum: [idle, not_steerable, transport_error, unsupported]}}}}}}
+      responses:
+        '200': {description: Redacted reroute result}
 components:
   parameters:
     Project: {name: projectId, in: path, required: true, schema: {type: string, format: uuid}}
@@ -75,6 +111,7 @@ components:
         body: {type: string, minLength: 1, maxLength: 65536}
         idempotency_key: {type: string, minLength: 1, maxLength: 128, writeOnly: true}
         reply_to: {type: string, format: uuid}
+        thread_id: {type: string, maxLength: 128}
         expects_reply: {type: boolean, default: false}
         is_action_request: {type: boolean, default: false}
         delivery_level: {type: string, enum: [simple, steer], default: simple}
@@ -84,15 +121,29 @@ components:
         id: {type: string, format: uuid}
         sender_principal_id: {type: string, format: uuid}
         recipient_principal_id: {type: string, format: uuid}
+        from: {type: string, description: Sender address at send time}
         to: {type: string}
         body: {type: string}
         reply_to: {type: [string, 'null'], format: uuid}
+        thread_id: {type: string}
+        hop: {type: integer, minimum: 1}
         sent_event_id: {type: integer}
         is_action_request: {type: boolean}
         expects_reply: {type: boolean}
         reply_obligation: {type: string, enum: [none, open, closed]}
         status: {type: string, enum: [accepted, held]}
         delivery_level: {type: string, enum: [simple, steer]}
+        delivery_target:
+          description: Immutable redacted primary and simple fallback target version snapshot; private references and credentials are excluded.
+          type: [object, 'null']
+          properties:
+            primary: {$ref: '#/components/schemas/TargetBinding'}
+            simple_fallback: {$ref: '#/components/schemas/TargetBinding'}
+    TargetBinding:
+      type: [object, 'null']
+      properties:
+        binding_id: {type: string, format: uuid}
+        kind: {type: string}
     TargetInput:
       type: object
       additionalProperties: false

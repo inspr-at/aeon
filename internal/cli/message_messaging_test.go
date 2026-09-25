@@ -51,6 +51,21 @@ func TestMessagePrivateFileAndErrorRedaction(t *testing.T) {
 	if _, err := rt.readMessagingPrivateFile(link, true); err == nil {
 		t.Fatal("symlink key accepted")
 	}
+	hardlinkSource := filepath.Join(t.TempDir(), "linked-key")
+	if err := os.WriteFile(hardlinkSource, []byte(fixtureKey), 0600); err != nil {
+		t.Fatal(err)
+	}
+	hardlink := filepath.Join(t.TempDir(), "hardlink")
+	if err := os.Link(hardlinkSource, hardlink); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := rt.readMessagingPrivateFile(hardlinkSource, true); err == nil {
+		t.Fatal("multiply linked key accepted")
+	}
+	rt.stdin = strings.NewReader(fixtureKey + "\n")
+	if key, err := rt.readMessagingPrivateFile("-", true); err != nil || key != fixtureKey {
+		t.Fatal("stdin target key failed")
+	}
 	if _, err := rt.readMessagingPrivateFile(filepath.Join(t.TempDir(), fixtureKey), true); err == nil || strings.Contains(err.Error(), fixtureKey) {
 		t.Fatal("private pathname in error")
 	}

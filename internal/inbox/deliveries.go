@@ -25,6 +25,7 @@ type compatSend struct {
 	Body          string  `json:"body"`
 	Key           string  `json:"idempotency_key"`
 	ReplyTo       *string `json:"reply_to,omitempty"`
+	ThreadID      string  `json:"thread_id,omitempty"`
 	ExpectsReply  bool    `json:"expects_reply"`
 	ActionRequest bool    `json:"is_action_request"`
 	Level         string  `json:"delivery_level"`
@@ -33,28 +34,52 @@ type compatSend struct {
 // CompatMessage holds recipient-visible content. Never put this object in a
 // tenant event: event readers need only the IDs and controlled status fields.
 type CompatMessage struct {
-	CreatedAt              time.Time `json:"created_at"`
-	HumanResolutionOutcome *string   `json:"human_resolution_outcome"`
-	ID                     string    `json:"id"`
-	SenderPrincipalID      string    `json:"sender_principal_id"`
-	RecipientPrincipalID   string    `json:"recipient_principal_id"`
-	To                     string    `json:"to"`
-	Body                   string    `json:"body"`
-	ReplyTo                *string   `json:"reply_to,omitempty"`
-	SentEventID            int64     `json:"sent_event_id"`
-	ActionRequest          bool      `json:"is_action_request"`
-	ExpectsReply           bool      `json:"expects_reply"`
-	Level                  string    `json:"delivery_level"`
-	Status                 string    `json:"status"`
-	ReplyObligation        string    `json:"reply_obligation"`
+	CreatedAt              time.Time             `json:"created_at"`
+	HumanResolutionOutcome *string               `json:"human_resolution_outcome"`
+	ID                     string                `json:"id"`
+	SenderPrincipalID      string                `json:"sender_principal_id"`
+	RecipientPrincipalID   string                `json:"recipient_principal_id"`
+	From                   string                `json:"from"`
+	To                     string                `json:"to"`
+	Body                   string                `json:"body"`
+	ReplyTo                *string               `json:"reply_to,omitempty"`
+	ThreadID               string                `json:"thread_id"`
+	Hop                    int                   `json:"hop"`
+	SentEventID            int64                 `json:"sent_event_id"`
+	ActionRequest          bool                  `json:"is_action_request"`
+	ExpectsReply           bool                  `json:"expects_reply"`
+	Level                  string                `json:"delivery_level"`
+	Status                 string                `json:"status"`
+	ReplyObligation        string                `json:"reply_obligation"`
+	DeliveryTarget         *CompatTargetSnapshot `json:"delivery_target,omitempty"`
 }
 
-const compatMessageCols = `c.id::text,c.sender_principal_id::text,c.recipient_principal_id::text,c.recipient_address,c.body,c.reply_to_id::text,c.sent_event_id,c.is_action_request,c.expects_reply,c.delivery_level,CASE WHEN c.is_action_request THEN 'held' ELSE 'accepted' END,CASE WHEN o.message_id IS NULL THEN 'none' WHEN o.closed_at IS NULL THEN 'open' ELSE 'closed' END,c.created_at,(SELECT e.after->>'decision' FROM events e WHERE e.type='inbox.action_resolved' AND e.node_id=c.project_id AND e.after->>'message_id'=c.id::text ORDER BY e.id LIMIT 1)`
+type CompatTargetBinding struct {
+	BindingID string `json:"binding_id"`
+	Kind      string `json:"kind"`
+}
+
+type CompatTargetSnapshot struct {
+	Primary        *CompatTargetBinding `json:"primary"`
+	SimpleFallback *CompatTargetBinding `json:"simple_fallback"`
+}
+
+const compatMessageCols = `c.id::text,c.sender_principal_id::text,c.recipient_principal_id::text,c.sender_address,c.recipient_address,c.body,c.reply_to_id::text,c.thread_id,c.hop,c.sent_event_id,c.is_action_request,c.expects_reply,c.delivery_level,CASE WHEN c.is_action_request THEN 'held' ELSE 'accepted' END,CASE WHEN o.message_id IS NULL THEN 'none' WHEN o.closed_at IS NULL THEN 'open' ELSE 'closed' END,c.created_at,(SELECT e.after->>'decision' FROM events e WHERE e.type='inbox.action_resolved' AND e.node_id=c.project_id AND e.after->>'message_id'=c.id::text ORDER BY e.id LIMIT 1),(SELECT d.target_id::text FROM inbox_message_deliveries d WHERE d.tenant_id=c.tenant_id AND d.message_id=c.id),(SELECT t.target_kind FROM inbox_message_deliveries d JOIN inbox_message_targets t ON t.tenant_id=d.tenant_id AND t.id=d.target_id WHERE d.tenant_id=c.tenant_id AND d.message_id=c.id),(SELECT d.fallback_target_id::text FROM inbox_message_deliveries d WHERE d.tenant_id=c.tenant_id AND d.message_id=c.id),(SELECT t.target_kind FROM inbox_message_deliveries d JOIN inbox_message_targets t ON t.tenant_id=d.tenant_id AND t.id=d.fallback_target_id WHERE d.tenant_id=c.tenant_id AND d.message_id=c.id)`
 const compatObligationJoin = ` LEFT JOIN inbox_reply_obligations o ON o.tenant_id=c.tenant_id AND o.message_id=c.id `
 
 func scanCompatMessage(row pgx.Row) (CompatMessage, error) {
 	var v CompatMessage
-	err := row.Scan(&v.ID, &v.SenderPrincipalID, &v.RecipientPrincipalID, &v.To, &v.Body, &v.ReplyTo, &v.SentEventID, &v.ActionRequest, &v.ExpectsReply, &v.Level, &v.Status, &v.ReplyObligation, &v.CreatedAt, &v.HumanResolutionOutcome)
+	var primaryID, primaryKind, fallbackID, fallbackKind *string
+	err := row.Scan(&v.ID, &v.SenderPrincipalID, &v.RecipientPrincipalID, &v.From, &v.To, &v.Body, &v.ReplyTo, &v.ThreadID, &v.Hop, &v.SentEventID, &v.ActionRequest, &v.ExpectsReply, &v.Level, &v.Status, &v.ReplyObligation, &v.CreatedAt, &v.HumanResolutionOutcome, &primaryID, &primaryKind, &fallbackID, &fallbackKind)
+	if err == nil && (primaryID != nil || fallbackID != nil) {
+		v.DeliveryTarget = &CompatTargetSnapshot{}
+		if primaryID != nil && primaryKind != nil {
+			v.DeliveryTarget.Primary = &CompatTargetBinding{BindingID: *primaryID, Kind: *primaryKind}
+		}
+		if fallbackID != nil && fallbackKind != nil {
+			v.DeliveryTarget.SimpleFallback = &CompatTargetBinding{BindingID: *fallbackID, Kind: *fallbackKind}
+		}
+	}
 	return v, err
 }
 func messageDigest(v any) string {
@@ -84,6 +109,9 @@ func validateCompatSend(in *compatSend) error {
 			return badRequest("invalid reply_to")
 		}
 		in.ReplyTo = &v
+	}
+	if len(in.ThreadID) > 128 || strings.ContainsAny(in.ThreadID, "\x00\r\n") || strings.TrimSpace(in.ThreadID) != in.ThreadID {
+		return badRequest("invalid thread id")
 	}
 	return nil
 }
@@ -143,19 +171,37 @@ func (m *messaging) commitMessage(ctx context.Context, p tenant.Principal, proje
 		if recipient == p.ID {
 			return badRequest("sender and recipient must differ")
 		}
+		thread, hop := in.ThreadID, 1
 		if in.ReplyTo != nil {
-			var counterpart bool
-			err := tx.QueryRow(ctx, `SELECT EXISTS(SELECT 1 FROM inbox_compat_messages WHERE project_id=$1::uuid AND id=$2::uuid AND sender_principal_id=$3::uuid AND recipient_principal_id=$4::uuid)`, project, *in.ReplyTo, recipient, p.ID).Scan(&counterpart)
+			var parentThread string
+			var parentHop int
+			err := tx.QueryRow(ctx, `SELECT thread_id,hop FROM inbox_compat_messages WHERE project_id=$1::uuid AND id=$2::uuid AND sender_principal_id=$3::uuid AND recipient_principal_id=$4::uuid`, project, *in.ReplyTo, recipient, p.ID).Scan(&parentThread, &parentHop)
+			if errors.Is(err, pgx.ErrNoRows) {
+				return errNotFound
+			}
 			if err != nil {
 				return err
 			}
-			if !counterpart {
-				return errNotFound
+			if thread != "" && thread != parentThread {
+				return badRequest("thread id does not match reply")
 			}
+			thread, hop = parentThread, parentHop+1
+		} else if thread != "" {
+			var lastHop int
+			if err := tx.QueryRow(ctx, `SELECT COALESCE(MAX(hop),0) FROM inbox_compat_messages WHERE project_id=$1::uuid AND thread_id=$2`, project, thread).Scan(&lastHop); err != nil {
+				return err
+			}
+			hop = lastHop + 1
+		}
+		if hop > 10 {
+			return badRequest("message hop limit exceeded")
 		}
 		var id string
 		if err := tx.QueryRow(ctx, `SELECT gen_random_uuid()::text`).Scan(&id); err != nil {
 			return err
+		}
+		if thread == "" {
+			thread = id
 		}
 		meta := map[string]any{"id": id, "project_id": project, "sender_principal_id": p.ID, "recipient_principal_id": recipient, "is_action_request": in.ActionRequest, "expects_reply": in.ExpectsReply}
 		ev, err := events.Append(ctx, tx, p, events.Change{Type: "inbox.compat_sent", After: meta})
@@ -172,7 +218,7 @@ func (m *messaging) commitMessage(ctx context.Context, p tenant.Principal, proje
 				return err
 			}
 		}
-		if _, err := tx.Exec(ctx, `INSERT INTO inbox_compat_messages(tenant_id,id,project_id,sender_principal_id,recipient_principal_id,recipient_address,body,key_digest,request_digest,reply_to_id,inbox_message_id,sent_event_id,is_action_request,expects_reply,delivery_level) VALUES($1::uuid,$2::uuid,$3::uuid,$4::uuid,$5::uuid,$6,$7,$8,$9,$10::uuid,$11::uuid,$12,$13,$14,$15)`, p.TenantID, id, project, p.ID, recipient, in.To, in.Body, key, digest, in.ReplyTo, inboxID, ev.ID, in.ActionRequest, in.ExpectsReply, in.Level); err != nil {
+		if _, err := tx.Exec(ctx, `INSERT INTO inbox_compat_messages(tenant_id,id,project_id,sender_principal_id,recipient_principal_id,sender_address,recipient_address,body,key_digest,request_digest,reply_to_id,thread_id,hop,inbox_message_id,sent_event_id,is_action_request,expects_reply,delivery_level) VALUES($1::uuid,$2::uuid,$3::uuid,$4::uuid,$5::uuid,$6,$7,$8,$9,$10,$11::uuid,$12,$13,$14::uuid,$15,$16,$17,$18)`, p.TenantID, id, project, p.ID, recipient, "paimos:"+p.Name, in.To, in.Body, key, digest, in.ReplyTo, thread, hop, inboxID, ev.ID, in.ActionRequest, in.ExpectsReply, in.Level); err != nil {
 			return err
 		}
 		if in.ExpectsReply {
@@ -217,6 +263,8 @@ type MessageDelivery struct {
 	State            string  `json:"state"`
 	Reason           string  `json:"reason"`
 	Attempts         int     `json:"attempts"`
+	EffectiveLevel   string  `json:"effective_level"`
+	FallbackReason   string  `json:"fallback_reason"`
 }
 
 func queueCompatDelivery(ctx context.Context, tx pgx.Tx, p tenant.Principal, project, id string, in compatSend) error {
@@ -233,7 +281,7 @@ func queueCompatDelivery(ctx context.Context, tx pgx.Tx, p tenant.Principal, pro
 		}
 	}
 	var d MessageDelivery
-	err := tx.QueryRow(ctx, `INSERT INTO inbox_message_deliveries(tenant_id,message_id,target_id,fallback_target_id,state,reason) VALUES($1::uuid,$2::uuid,$3::uuid,$4::uuid,$5,$6) RETURNING id::text,message_id::text,target_id::text,fallback_target_id::text,state,reason,attempts`, p.TenantID, id, target, fallback, state, reason).Scan(&d.ID, &d.MessageID, &d.TargetID, &d.FallbackTargetID, &d.State, &d.Reason, &d.Attempts)
+	err := tx.QueryRow(ctx, `INSERT INTO inbox_message_deliveries(tenant_id,message_id,target_id,fallback_target_id,state,reason) VALUES($1::uuid,$2::uuid,$3::uuid,$4::uuid,$5,$6) RETURNING id::text,message_id::text,target_id::text,fallback_target_id::text,state,reason,attempts,COALESCE(effective_level,''),fallback_reason`, p.TenantID, id, target, fallback, state, reason).Scan(&d.ID, &d.MessageID, &d.TargetID, &d.FallbackTargetID, &d.State, &d.Reason, &d.Attempts, &d.EffectiveLevel, &d.FallbackReason)
 	if err != nil {
 		return err
 	}
@@ -250,14 +298,14 @@ func (m *messaging) getDeliveries(w http.ResponseWriter, r *http.Request) {
 		if err := messagingProject(r.Context(), tx, project); err != nil {
 			return err
 		}
-		rows, err := tx.Query(r.Context(), `SELECT d.id::text,d.message_id::text,d.target_id::text,d.fallback_target_id::text,d.state,d.reason,d.attempts FROM inbox_message_deliveries d JOIN inbox_compat_messages c ON c.tenant_id=d.tenant_id AND c.id=d.message_id WHERE c.project_id=$1::uuid ORDER BY c.sent_event_id DESC LIMIT 200`, project)
+		rows, err := tx.Query(r.Context(), `SELECT d.id::text,d.message_id::text,d.target_id::text,d.fallback_target_id::text,d.state,d.reason,d.attempts,COALESCE(d.effective_level,''),d.fallback_reason FROM inbox_message_deliveries d JOIN inbox_compat_messages c ON c.tenant_id=d.tenant_id AND c.id=d.message_id WHERE c.project_id=$1::uuid ORDER BY c.sent_event_id DESC LIMIT 200`, project)
 		if err != nil {
 			return err
 		}
 		defer rows.Close()
 		for rows.Next() {
 			var d MessageDelivery
-			if err := rows.Scan(&d.ID, &d.MessageID, &d.TargetID, &d.FallbackTargetID, &d.State, &d.Reason, &d.Attempts); err != nil {
+			if err := rows.Scan(&d.ID, &d.MessageID, &d.TargetID, &d.FallbackTargetID, &d.State, &d.Reason, &d.Attempts, &d.EffectiveLevel, &d.FallbackReason); err != nil {
 				return err
 			}
 			items = append(items, d)

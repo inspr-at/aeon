@@ -44,5 +44,4 @@ var unsupportedCompat = []struct {
 	{"run-agent watch", []string{"run-agent", "watch"}, reasonRunAgent},
 	{"baseline-batch report-built", []string{"baseline-batch", "report-built"}, reasonBaseline},
 	{"paimos-agentd serve", nil, reasonAgentd},
-	{"listen --follow", []string{"listen", "--project", "AEON", "--follow"}, reasonListenFollow},
 }
