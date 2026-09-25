@@ -1,0 +1,71 @@
+<!-- SPDX-License-Identifier: AGPL-3.0-only -->
+<script setup lang="ts">
+import { GROUPS, type GroupBy, type ListFilters } from '../../lib/ticketList'
+import type { ColumnId } from '../../lib/columns'
+import type { SortKey } from '../../lib/work'
+import AppIcon from '../AppIcon.vue'
+import ColumnPicker from './ColumnPicker.vue'
+import SortEditor from './SortEditor.vue'
+
+// The Display menu: grouping, sort, row height and columns of this list. In a
+// saved view these are part of the view; otherwise columns are the person's own.
+defineProps<{
+  filters: ListFilters
+  view: 'list' | 'outline' | 'journey'
+  density: 'comfortable' | 'compact'
+  columns?: { order: ColumnId[]; visible: ColumnId[]; customised: boolean } | null
+  grouped?: boolean
+}>()
+const emit = defineEmits<{
+  group: [value: GroupBy]; sort: [keys: SortKey[]]; density: [value: 'comfortable' | 'compact']
+  columns: [order: ColumnId[], visible: ColumnId[]]; columnsReset: []
+  expandAll: []; collapseAll: []; expandGroups: []; collapseGroups: []
+}>()
+</script>
+
+<template>
+  <div class="display-panel">
+    <template v-if="view === 'list'">
+      <p class="eyebrow">Group by</p>
+      <div class="group-grid" role="radiogroup" aria-label="Group by">
+        <button
+          v-for="option in GROUPS" :key="option.value" type="button" role="radio" class="group-option" :aria-checked="filters.group === option.value"
+          :data-autofocus="filters.group === option.value ? '' : undefined" @click="emit('group', option.value)"
+        >{{ option.label }}</button>
+      </div>
+      <div v-if="grouped" class="pair">
+        <button type="button" class="btn sm" @click="emit('expandGroups')"><AppIcon name="expand-all" :size="13" />Expand groups</button>
+        <button type="button" class="btn sm" @click="emit('collapseGroups')"><AppIcon name="collapse-all" :size="13" />Collapse groups</button>
+      </div>
+    </template>
+    <template v-else>
+      <p class="eyebrow">Outline</p>
+      <div class="pair">
+        <button type="button" class="btn sm" data-autofocus @click="emit('expandAll')"><AppIcon name="expand-all" :size="13" />Expand all</button>
+        <button type="button" class="btn sm" @click="emit('collapseAll')"><AppIcon name="collapse-all" :size="13" />Collapse all</button>
+      </div>
+    </template>
+    <SortEditor class="section" :sort="filters.sort" @change="keys => emit('sort', keys)" />
+    <div class="section">
+      <p class="eyebrow">Row height</p>
+      <div class="seg wide" role="radiogroup" aria-label="Row height">
+        <button type="button" role="radio" :aria-checked="density === 'comfortable'" @click="emit('density', 'comfortable')"><AppIcon name="rows-comfortable" :size="14" />Comfortable</button>
+        <button type="button" role="radio" :aria-checked="density === 'compact'" @click="emit('density', 'compact')"><AppIcon name="rows-compact" :size="14" />Compact</button>
+      </div>
+    </div>
+    <ColumnPicker v-if="columns" class="section" :order="columns.order" :visible="columns.visible" :customised="columns.customised" @change="(order, visible) => emit('columns', order, visible)" @reset="emit('columnsReset')" />
+  </div>
+</template>
+
+<style scoped>
+.display-panel { display: grid; gap: 8px; padding: 6px 8px 8px; }
+.group-grid { display: grid; grid-template-columns: repeat(4, minmax(0, 1fr)); gap: 4px; padding: 3px; border-radius: 12px; background: var(--seg-bg); }
+.group-option { height: 28px; padding: 0 4px; border: 0; border-radius: 9px; background: transparent; color: var(--ink-2); font-size: 12.5px; font-weight: 500; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+.group-option:hover { color: var(--ink); }
+.group-option[aria-checked="true"] { background: var(--seg-on); color: var(--ink); font-weight: 600; box-shadow: var(--shadow-btn); }
+.group-option:focus-visible { box-shadow: var(--focus-ring); }
+.pair { display: grid; grid-template-columns: 1fr 1fr; gap: 6px; }
+.section { margin-top: 6px; padding-top: 10px; border-top: 1px solid var(--line); }
+.seg.wide { display: grid; grid-auto-flow: column; grid-auto-columns: 1fr; }
+.seg.wide button { height: 30px; }
+</style>

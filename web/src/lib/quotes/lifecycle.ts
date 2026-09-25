@@ -20,7 +20,7 @@ export interface QuoteVersion {
 }
 export interface PublicLink {
   id: string; public_tenant: string; quote_node_id: string; version: number; target_content_sha256: string
-  expires_at: string; revoked_at?: string; path?: string; token?: string
+  expires_at: string; revoked_at?: string; path?: string; token?: string; copy_unavailable_reason?: 'key_not_configured'
 }
 export type ReceiptState = 'pending' | 'rendering' | 'ready' | 'sending' | 'sent' | 'failed' | 'uncertain'
 export interface ConfirmationJob {
@@ -63,16 +63,18 @@ export const setArchived = (id: string, expectedRevision: number, archived: bool
 export const listVersions = (id: string) => send<QuoteVersion[]>(`${quote(id)}/versions`)
 export const getVersion = (id: string, version: number) => send<QuoteVersion>(`${quote(id)}/versions/${version}`)
 
-// The customer link. Its token is returned once, on creation; afterwards only its metadata.
+// The customer link. With a host key admins can re-copy the decrypted path;
+// without one, the token is returned only on creation.
 export async function getLink(id: string, version: number): Promise<PublicLink | null> {
   try { return await send<PublicLink>(`${quote(id)}/versions/${version}/public-link`) } catch (e) { if (e instanceof APIError && e.status === 404) return null; throw e }
 }
 export const createLink = (id: string, version: number, expiresAt: string) => send<PublicLink>(`${quote(id)}/versions/${version}/public-link`, 'POST', { expires_at: expiresAt })
 export const revokeLink = (id: string, version: number) => send<PublicLink>(`${quote(id)}/versions/${version}/public-link/revoke`, 'POST', {})
 // What a row menu can do with the current version's link.
-export function linkState(link: PublicLink | null, now = Date.now()): 'none' | 'copy' | 'hidden' | 'ended' {
+export function linkState(link: PublicLink | null, now = Date.now()): 'none' | 'copy' | 'hidden' | 'unavailable' | 'ended' {
   if (!link || link.revoked_at) return 'none'
   if (Date.parse(link.expires_at) <= now) return 'ended'
+  if (link.copy_unavailable_reason === 'key_not_configured') return 'unavailable'
   return link.path ? 'copy' : 'hidden'
 }
 export const linkUrl = (link: Pick<PublicLink, 'path'>, origin = location.origin) => link.path ? `${origin}${link.path}` : ''

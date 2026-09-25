@@ -14,6 +14,18 @@ export interface MockNode {
   fields: Record<string, unknown>; parent_id: string | null; project: string
   created_at: string; updated_at: string
 }
+export interface MockView {
+  id: string; owner_principal_id: string; project_id: string | null; name: string; filters: Record<string, string>
+  sort: { field: string; direction: string }; sort_keys: string[]; group_by: string; columns: string[]; shared: boolean
+  created_at: string; updated_at: string; deleted_at: string | null
+}
+// A saved view as the server stores it (ids are UUIDs, like the server's).
+export function mockView(partial: Partial<MockView> & Pick<MockView, 'id' | 'name'>): MockView {
+  return {
+    owner_principal_id: me.id, project_id: 'p-pharos', filters: {}, sort: { field: 'position', direction: 'asc' }, sort_keys: [], group_by: 'none', columns: [], shared: false,
+    created_at: ago(24 * 3), updated_at: ago(24 * 3), deleted_at: null, ...partial,
+  }
+}
 export interface MockOptions {
   conflictAlways?: string
   delayChildren?: number
@@ -86,7 +98,10 @@ export function fixtures(options: MockOptions = {}) {
   const preferences: Record<string, Record<string, unknown>> = {}
   // Events the mock records (attachment removals and their undo), oldest first.
   const events: { id: number; node_id: string; type: string; before: ReturnType<typeof attachment>; after: ReturnType<typeof attachment>; undo_of: number | null }[] = []
-  return { projects, nodes, people: [me, mira], activity, relations, attachments, preferences, events, counter: { next: 100 } }
+  // U22 saved views and bulk batches (their before and after, for undo).
+  const views: MockView[] = []
+  const batches: { id: number; before: MockNode[]; after: MockNode[]; undone: boolean }[] = []
+  return { projects, nodes, people: [me, mira], activity, relations, attachments, preferences, events, views, batches, counter: { next: 100 } }
 }
 // A 1x1 PNG for every attachment variant.
 export const PNG = Buffer.from('iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAYAAAAfFcSJAAAADUlEQVR42mNk+M9QDwADhgGAWjR9awAAAABJRU5ErkJggg==', 'base64')
@@ -128,6 +143,27 @@ function projectItem(project: Fixtures['projects'][number]) {
 }
 const listParam = (query: URLSearchParams, name: string) => (query.get(name) ?? '').split(',').map(v => v.trim()).filter(Boolean)
 const normal = (state: string) => state.replace(/-/g, '_')
+// "!" excludes: plain values are alternatives, excluded values must all not match.
+function passes(values: string[], has: (value: string) => boolean): boolean {
+  const plain = values.filter(v => !v.startsWith('!')), not = values.filter(v => v.startsWith('!')).map(v => v.slice(1))
+  return (!plain.length || plain.some(has)) && !not.some(has)
+}
+function tagNames(node: MockNode): { name: string; color: string }[] {
+  const tags = Array.isArray(node.fields.tags) ? node.fields.tags : []
+  return tags.flatMap(tag => typeof tag === 'string' ? [{ name: tag, color: '' }] : tag && typeof tag === 'object' && typeof (tag as { name?: unknown }).name === 'string' ? [{ name: (tag as { name: string }).name, color: String((tag as { color?: unknown }).color ?? '') }] : [])
+}
+function labelOf(value: unknown): string {
+  if (typeof value === 'string') return value
+  if (value && typeof value === 'object') { const v = (value as { label?: unknown; name?: unknown }).label ?? (value as { name?: unknown }).name; return typeof v === 'string' ? v : '' }
+  return ''
+}
+function costUnit(node: MockNode): string {
+  if ('cost_unit' in node.fields) return labelOf(node.fields.cost_unit)
+  const classic = node.fields.classic as Record<string, unknown> | undefined
+  return classic ? labelOf(classic.cost_unit) : ''
+}
+const release = (node: MockNode) => labelOf(node.fields.release)
+const personName = (data: Fixtures, id: unknown) => typeof id === 'string' ? data.people.find(p => p.id === id)?.name ?? '' : ''
 
 export async function mockWork(page: Page, data: Fixtures, options: MockOptions = {}) {
   const calls: Call[] = []
@@ -150,7 +186,7 @@ export async function mockWork(page: Page, data: Fixtures, options: MockOptions 
       return route.fulfill({ json: { items, next_after: null } })
     }
     const undoPath = /^\/api\/events\/(\d+)\/undo$/.exec(path)
-    if (undoPath && method === 'POST') {
+    if (undoPath && method === 'POST' && !data.batches.some(b => b.id === Number(undoPath[1]))) {
       const event = data.events.find(e => e.id === Number(undoPath[1]))
       if (!event || data.events.some(e => e.undo_of === event.id)) return route.fulfill({ status: 409, json: { error: 'conflict' } })
       const restored = { ...event.before, updated_at: new Date(now + 5000).toISOString() }
@@ -196,6 +232,74 @@ export async function mockWork(page: Page, data: Fixtures, options: MockOptions 
         }
       }
       return route.fulfill({ status: 404, json: { error: 'attachment not found' } })
+    }
+    // ---------- Saved views (U22) ----------
+    if (path === '/api/views' && method === 'GET') {
+      const project = query.get('project_id')
+      const items = data.views.filter(v => !v.deleted_at && (v.owner_principal_id === me.id || v.shared) && (!project || v.project_id === project))
+      return route.fulfill({ json: { items } })
+    }
+    if (path === '/api/views' && method === 'POST') {
+      const input = body as Partial<MockView>
+      if (!input.name?.trim()) return route.fulfill({ status: 400, json: { error: 'name is required' } })
+      const view = mockView({ id: `00000000-0000-4000-8000-${String(data.counter.next++).padStart(12, '0')}`, name: input.name.trim(), project_id: input.project_id ?? null, filters: input.filters ?? {}, sort_keys: input.sort_keys ?? [], group_by: input.group_by ?? 'none', columns: input.columns ?? [], shared: !!input.shared, created_at: new Date(now + calls.length * 1000).toISOString(), updated_at: new Date(now + calls.length * 1000).toISOString() })
+      data.views.push(view)
+      return route.fulfill({ status: 201, json: view })
+    }
+    const viewPath = /^\/api\/views\/([^/]+)(\/restore)?$/.exec(path)
+    if (viewPath) {
+      const view = data.views.find(v => v.id === viewPath[1])
+      if (!view || (view.deleted_at && !viewPath[2])) return route.fulfill({ status: 404, json: { error: 'view not found' } })
+      if (method !== 'GET' && view.owner_principal_id !== me.id) return route.fulfill({ status: 403, json: { error: 'only the owner can change this view' } })
+      if (viewPath[2]) {
+        if (!view.deleted_at) return route.fulfill({ status: 409, json: { error: 'view is not deleted' } })
+        view.deleted_at = null
+        return route.fulfill({ json: view })
+      }
+      if (method === 'PATCH') { Object.assign(view, body as object, { updated_at: new Date(now + calls.length * 1000).toISOString() }); return route.fulfill({ json: view }) }
+      if (method === 'DELETE') { view.deleted_at = new Date(now).toISOString(); return route.fulfill({ status: 204 }) }
+      return route.fulfill({ json: view })
+    }
+    // ---------- Bulk changes (U22) ----------
+    if (path === '/api/nodes/bulk' && method === 'POST') {
+      if (options.readOnly) return route.fulfill({ status: 403, json: { error: 'forbidden' } })
+      const input = body as { ids: string[]; state?: string; priority?: string | null; assignee?: string | null; tags_add?: (string | { name: string; color?: string })[]; tags_remove?: string[]; parent_id?: string }
+      const before: MockNode[] = [], after: MockNode[] = [], skipped: { id: string; key?: string; reason: string }[] = [], unchanged: string[] = []
+      for (const id of input.ids) {
+        const node = data.nodes.find(n => n.id === id)
+        if (!node) { skipped.push({ id, reason: 'not found' }); continue }
+        if (input.parent_id && node.kind_slug === 'task' && data.nodes.find(n => n.id === input.parent_id)?.kind_slug === 'epic') { skipped.push({ id, key: node.key, reason: 'a task cannot sit under an epic' }); continue }
+        const old = JSON.parse(JSON.stringify(node)) as MockNode
+        const fields = { ...node.fields }
+        if ('priority' in input) fields.priority = input.priority
+        if ('assignee' in input) fields.assignee = input.assignee
+        if (input.tags_add?.length || input.tags_remove?.length) {
+          const drop = new Set((input.tags_remove ?? []).map(t => t.toLowerCase()))
+          const kept = (Array.isArray(fields.tags) ? fields.tags : []).filter(tag => !drop.has((typeof tag === 'string' ? tag : (tag as { name: string }).name).toLowerCase()))
+          for (const tag of input.tags_add ?? []) {
+            const name = typeof tag === 'string' ? tag : tag.name
+            if (!kept.some(t => (typeof t === 'string' ? t : (t as { name: string }).name).toLowerCase() === name.toLowerCase())) kept.push(typeof tag === 'string' ? { name } : tag)
+          }
+          fields.tags = kept
+        }
+        const next = { ...node, fields, state: input.state ?? node.state, parent_id: input.parent_id ?? node.parent_id }
+        if (JSON.stringify(next) === JSON.stringify(node)) { unchanged.push(id); continue }
+        Object.assign(node, next, { updated_at: new Date(now + 120_000 + calls.length).toISOString() })
+        before.push(old); after.push(JSON.parse(JSON.stringify(node)))
+      }
+      const eventId = after.length ? 5000 + data.batches.length : null
+      if (eventId) data.batches.push({ id: eventId, before, after, undone: false })
+      const items = after.map(({ kind_slug: kind, project: _p, ...rest }) => ({ ...rest, kind_id: `k-${kind}`, position: '0', deleted_at: null }))
+      return route.fulfill({ json: { event_id: eventId, items, unchanged, skipped } })
+    }
+    const batchUndo = /^\/api\/events\/(\d+)\/undo$/.exec(path)
+    if (batchUndo && method === 'POST' && data.batches.some(b => b.id === Number(batchUndo[1]))) {
+      const batch = data.batches.find(b => b.id === Number(batchUndo[1]))!
+      const stale = batch.after.some(a => data.nodes.find(n => n.id === a.id)?.updated_at !== a.updated_at)
+      if (batch.undone || stale) return route.fulfill({ status: 409, json: { code: 'conflict', message: 'resource changed or event is not reversible' } })
+      for (const old of batch.before) Object.assign(data.nodes.find(n => n.id === old.id)!, old, { updated_at: new Date(now + 180_000 + calls.length).toISOString() })
+      batch.undone = true
+      return route.fulfill({ status: 201, json: { id: batch.id + 1, type: 'node.bulk_changed', undo_of: batch.id } })
     }
     if (path === '/api/me') return route.fulfill({ json: { principal: { id: me.id, name: me.name, roles: options.readOnly ? ['viewer'] : ['member'] }, tenant: { id: 't1', name: 'INSPR Studio' } } })
     if (path === '/api/kinds') return route.fulfill({ json: { items: ['epic', 'ticket', 'task', 'project'].map(slug => ({ id: `k-${slug}`, slug, label: slug[0].toUpperCase() + slug.slice(1), short_prefix: slug.slice(0, 3).toUpperCase(), icon: slug, allowed_child_kinds: null, field_schema: {} })) } })
@@ -270,11 +374,22 @@ export async function mockWork(page: Page, data: Fixtures, options: MockOptions 
         for (let parent = n.parent_id; parent; parent = data.nodes.find(x => x.id === parent)?.parent_id ?? null) if (parent === within) return true
         return false
       }
+      const tags = listParam(query, 'tag').map(v => v.toLowerCase()), epics = listParam(query, 'epic'), costs = listParam(query, 'cost_unit').map(v => v.toLowerCase()), releases = listParam(query, 'release').map(v => v.toLowerCase())
+      const dateField = query.get('date_field'), dateFrom = query.get('date_from'), dateTo = query.get('date_to')
+      const dateOf = (n: MockNode): number | null => {
+        const raw = dateField === 'created' ? n.created_at : dateField === 'updated' ? n.updated_at : dateField === 'start' ? n.fields.start_date : dateField === 'end' ? n.fields.end_date : n.fields.accepted_at
+        return typeof raw === 'string' && !Number.isNaN(Date.parse(raw)) ? Date.parse(raw) : null
+      }
       let rows = data.nodes.filter(n => inside(n) && (!parentFilter || n.parent_id === parentFilter) && (!kinds.length || kinds.includes(n.kind_slug)))
-        .filter(n => !states.length || states.includes(n.state))
-        .filter(n => !priorities.length || priorities.includes(typeof n.fields.priority === 'string' ? n.fields.priority : 'none'))
-        .filter(n => !assignees.length || assignees.includes(typeof n.fields.assignee === 'string' ? n.fields.assignee : 'none'))
-        .filter(n => !q || n.key.toLowerCase().includes(q) || n.title.toLowerCase().includes(q))
+        .filter(n => passes(states, v => v === n.state))
+        .filter(n => passes(priorities, v => v === (typeof n.fields.priority === 'string' ? n.fields.priority : 'none')))
+        .filter(n => passes(assignees, v => v === (typeof n.fields.assignee === 'string' ? n.fields.assignee : 'none')))
+        .filter(n => passes(tags, v => v === 'none' ? !tagNames(n).length : tagNames(n).some(t => t.name.toLowerCase() === v)))
+        .filter(n => passes(epics, v => v === 'none' ? n.kind_slug !== 'epic' && !epicAbove(n, data) : epicAbove(n, data)?.id === v))
+        .filter(n => passes(costs, v => v === (costUnit(n).toLowerCase() || 'none')))
+        .filter(n => passes(releases, v => v === (release(n).toLowerCase() || 'none')))
+        .filter(n => !dateField || (dateOf(n) !== null && (!dateFrom || dateOf(n)! >= Date.parse(dateFrom)) && (!dateTo || dateOf(n)! < Date.parse(dateTo))))
+        .filter(n => !q || n.key.toLowerCase().includes(q) || n.title.toLowerCase().includes(q) || n.body.toLowerCase().includes(q))
         .filter(n => query.get('hide_closed') !== 'true' || !CLOSED.includes(n.state))
       const sort = (query.get('sort') ?? 'position').split(',')
       rows = [...rows].sort((a, b) => {
@@ -282,7 +397,8 @@ export async function mockWork(page: Page, data: Fixtures, options: MockOptions 
           const desc = raw.startsWith('-'), field = desc ? raw.slice(1) : raw
           const value = (n: MockNode): string | number => field === 'state' ? (STATE_ORDER.indexOf(normal(n.state)) + 1 || 99)
             : field === 'priority' ? PRIORITY_ORDER.indexOf(typeof n.fields.priority === 'string' ? n.fields.priority : 'none')
-            : field === 'updated_at' ? Date.parse(n.updated_at) : field === 'key' ? Number(n.key.split('-')[1]) : field === 'title' ? n.title : 0
+            : field === 'updated_at' ? Date.parse(n.updated_at) : field === 'created_at' ? Date.parse(n.created_at) : field === 'key' ? Number(n.key.split('-')[1]) : field === 'title' ? n.title
+            : field === 'kind' ? n.kind_slug : field === 'assignee' ? (personName(data, n.fields.assignee) || '\uffff') : 0
           const x = value(a), y = value(b)
           if (x !== y) return (x < y ? -1 : 1) * (desc ? -1 : 1)
         }
@@ -292,8 +408,10 @@ export async function mockWork(page: Page, data: Fixtures, options: MockOptions 
       for (const facet of listParam(query, 'facets')) {
         facets[facet] = {}
         for (const n of rows) {
-          const value = facet === 'state' ? n.state : facet === 'kind' ? n.kind_slug : facet === 'priority' ? (typeof n.fields.priority === 'string' ? n.fields.priority : 'none') : (typeof n.fields.assignee === 'string' ? n.fields.assignee : 'none')
-          facets[facet][value] = (facets[facet][value] ?? 0) + 1
+          const values = facet === 'tag' ? (tagNames(n).length ? tagNames(n).map(t => t.name) : ['none'])
+            : facet === 'cost_unit' ? [costUnit(n) || 'none'] : facet === 'release' ? [release(n) || 'none']
+            : [facet === 'state' ? n.state : facet === 'kind' ? n.kind_slug : facet === 'priority' ? (typeof n.fields.priority === 'string' ? n.fields.priority : 'none') : (typeof n.fields.assignee === 'string' ? n.fields.assignee : 'none')]
+          for (const value of values) facets[facet][value] = (facets[facet][value] ?? 0) + 1
         }
       }
       const limit = Number(query.get('limit') ?? 50), offset = Number((query.get('cursor') ?? 'o:0').slice(2))

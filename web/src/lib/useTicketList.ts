@@ -1,11 +1,12 @@
 // SPDX-License-Identifier: AGPL-3.0-only
 import { reactive, ref, type Ref } from 'vue'
-import { APIError, getNode, listNodes, updateNode, type Facets, type ListItem } from './api'
-import { activeDimensions, apiParams, DIMENSIONS, WORK_KINDS, type Dimension, type ListFilters } from './ticketList'
+import { APIError, bulkChange, getNode, listNodes, undoEvent, updateNode, type BulkChange, type BulkResult, type Facets, type ListItem } from './api'
+import { activeDimensions, apiParams, DIMENSION_BY_KEY, LIST_FACETS, rowTags, WORK_KINDS, type Dimension, type EpicOption, type ListFilters } from './ticketList'
 import { toast } from './toast'
 import { normaliseState, statusMeta } from './work'
 
-const FACETS = DIMENSIONS.map(d => d.facet)
+const FACETS = LIST_FACETS
+const facetOf = (dimension: Dimension) => DIMENSION_BY_KEY.get(dimension)!.facet
 function message(error: unknown) { return error instanceof Error ? error.message : 'Something went wrong' }
 
 // Loads one project's ticket list page by page (cursor paging, 200 rows),
@@ -22,10 +23,19 @@ export function useTicketList(projectId: Ref<string | null>, filters: Ref<ListFi
   const facets = ref<Facets>({})
   const dimensionFacets = ref<Partial<Record<Dimension, Record<string, number>>>>({})
   const names = reactive(new Map<string, string>())
+  // Label colours seen on loaded rows (tag facets carry names only).
+  const colors = reactive(new Map<string, string>())
   const loadedOnce = ref(false)
+  // Counts asked for when a menu opens (labels, cost units, releases), per query.
+  const extraFacets = ref<Record<string, Record<string, number>>>({})
   let generation = 0
 
-  function learn(items: ListItem[]) { for (const item of items) if (item.assignee) names.set(item.assignee.id, item.assignee.name) }
+  function learn(items: ListItem[]) {
+    for (const item of items) {
+      if (item.assignee) names.set(item.assignee.id, item.assignee.name)
+      for (const tag of rowTags(item)) if (tag.color && !colors.has(tag.name.toLowerCase())) colors.set(tag.name.toLowerCase(), tag.color)
+    }
+  }
 
   // pageSize 1 fetches counts and facets only (the Outline builds its own rows then).
   let pageSize = 200
@@ -36,8 +46,9 @@ export function useTicketList(projectId: Ref<string | null>, filters: Ref<ListFi
     const request = ++generation
     const current = filters.value
     loading.value = true; loadingMore.value = false; error.value = ''; moreError.value = ''
-    const extras = activeDimensions(current).map(async dimension => {
-      const facet = DIMENSIONS.find(d => d.key === dimension)!.facet
+    extraFacets.value = {}
+    const extras = activeDimensions(current).filter(dimension => facetOf(dimension)).map(async dimension => {
+      const facet = facetOf(dimension)!
       const page = await listNodes(apiParams(within, current, { omit: dimension, facets: [facet], limit: 1 }))
       return [dimension, page.facets?.[facet] ?? {}] as const
     })
@@ -86,8 +97,41 @@ export function useTicketList(projectId: Ref<string | null>, filters: Ref<ListFi
   }
 
   function counts(dimension: Dimension): Record<string, number> {
-    const facet = DIMENSIONS.find(d => d.key === dimension)!.facet
-    return (filters.value[dimension].length ? dimensionFacets.value[dimension] : undefined) ?? facets.value[facet] ?? {}
+    const facet = facetOf(dimension)
+    if (!facet) return {}
+    return (filters.value[dimension].length ? dimensionFacets.value[dimension] : undefined) ?? facets.value[facet] ?? extraFacets.value[facet] ?? {}
+  }
+  // Counts that do not come with every page: fetched once per query when needed.
+  const asked = new Map<string, Promise<void>>()
+  function requestFacet(facet: string): Promise<void> {
+    const within = projectId.value
+    if (!within || facets.value[facet] || extraFacets.value[facet]) return Promise.resolve()
+    const request = generation
+    const key = `${request}:${facet}`
+    if (asked.has(key)) return asked.get(key)!
+    const run = listNodes(apiParams(within, filters.value, { facets: [facet], limit: 1 }))
+      .then(page => { if (request === generation) extraFacets.value = { ...extraFacets.value, [facet]: page.facets?.[facet] ?? {} } })
+      .catch(() => { /* the menu shows what the loaded rows have */ })
+    asked.set(key, run)
+    return run
+  }
+  function facetCounts(facet: string): Record<string, number> {
+    return facets.value[facet] ?? extraFacets.value[facet] ?? {}
+  }
+
+  // The project's epics, for the Epic filter and the bulk move; loaded once per project.
+  const epics = ref<EpicOption[]>([])
+  let epicsFor = ''
+  let epicsLoad: Promise<void> | null = null
+  function loadEpics(): Promise<void> {
+    const within = projectId.value
+    if (!within) return Promise.resolve()
+    if (epicsFor === within && epicsLoad) return epicsLoad
+    epicsFor = within
+    epicsLoad = listNodes({ within, kind: ['epic'], sort: 'key', limit: 500 })
+      .then(page => { if (epicsFor === within) epics.value = page.items.map(item => ({ id: item.id, key: item.key, title: item.title, state: item.state })) })
+      .catch(() => { epicsLoad = null })
+    return epicsLoad
   }
 
   async function resolveNames(ids: string[]) {
@@ -145,6 +189,33 @@ export function useTicketList(projectId: Ref<string | null>, filters: Ref<ListFi
     }
   }
 
+  // Bulk change: rows update in place from the server's answer; the list then
+  // reloads so rows that no longer match the filters leave.
+  async function applyBulk(change: BulkChange): Promise<BulkResult> {
+    const result = await bulkChange(change)
+    const projectRef = rows.value[0]?.project
+    for (const node of result.items) {
+      const row = rows.value.find(item => item.id === node.id)
+      if (!row) continue
+      const assignee = typeof node.fields.assignee === 'string' ? node.fields.assignee : null
+      const priority = typeof node.fields.priority === 'string' ? node.fields.priority : null
+      let parent = row.parent
+      if (node.parent_id !== row.parent_id) {
+        const epic = epics.value.find(e => e.id === node.parent_id)
+        parent = epic ? { id: epic.id, key: epic.key, title: epic.title, kind_slug: 'epic' } : projectRef && node.parent_id === projectRef.id ? { ...projectRef, kind_slug: 'project' } : null
+        row.epic = epic ? { id: epic.id, key: epic.key, title: epic.title } : null
+      }
+      Object.assign(row, {
+        state: node.state, fields: node.fields, parent_id: node.parent_id, updated_at: node.updated_at, parent, priority,
+        assignee: assignee ? { id: assignee, name: names.get(assignee) ?? 'Someone' } : null,
+      })
+    }
+    return result
+  }
+  async function undoBulk(eventId: number): Promise<void> {
+    await undoEvent(eventId)
+  }
+
   function invalidate() { generation++ }
   // Every page of the current query, up to a cap (the Outline needs the whole match set).
   async function loadAll(cap = 2000): Promise<boolean> {
@@ -171,5 +242,5 @@ export function useTicketList(projectId: Ref<string | null>, filters: Ref<ListFi
     if (state?.[row.state]) state[row.state]--
   }
 
-  return { rows, cursor, loading, loadingMore, error, moreError, facets, names, loadedOnce, load, loadMore, loadAll, counts, resolveNames, setStatus, invalidate, insertRow, removeRow }
+  return { rows, cursor, loading, loadingMore, error, moreError, facets, names, colors, loadedOnce, load, loadMore, loadAll, counts, requestFacet, facetCounts, epics, loadEpics, resolveNames, setStatus, invalidate, insertRow, removeRow, applyBulk, undoBulk }
 }

@@ -11,6 +11,7 @@ const mac = /Mac|iPhone|iPad/.test(navigator.platform || navigator.userAgent)
 const SYMBOLS: Record<string, [IconName, string]> = {
   enter: ['enter', 'Enter'], backspace: ['backspace', 'Backspace'],
   up: ['arrow-up', 'Up arrow'], down: ['arrow-down', 'Down arrow'], left: ['arrow-left', 'Left arrow'], right: ['arrow', 'Right arrow'],
+  minus: ['minus', 'Minus'], shift: ['shift', 'Shift'],
 }
 const key = computed<{ icon?: IconName; label: string }>(() => {
   if (props.k === 'mod') return mac ? { icon: 'command', label: 'Command' } : { label: 'Ctrl' }

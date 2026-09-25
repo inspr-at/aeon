@@ -73,21 +73,6 @@ func (rt *runtime) tagByID(id string) (apiNode, error) {
 	return n, nil
 }
 
-func (rt *runtime) tagAssigned(name string) (bool, error) {
-	nodes, err := rt.walkNodes(nil, nil)
-	if err != nil {
-		return false, err
-	}
-	for _, n := range nodes {
-		for _, tag := range fieldStrings(fieldMap(n.Fields), "tags") {
-			if tag == name {
-				return true, nil
-			}
-		}
-	}
-	return false, nil
-}
-
 func (rt *runtime) cmdTag() *Command {
 	return &Command{Name: "tag", Short: "List and manage tenant tags", Use: "tag <list|create|update|delete>", subs: []*Command{rt.cmdTagList(), rt.cmdTagCreate(), rt.cmdTagUpdate(), rt.cmdTagDelete()}}
 }
@@ -228,33 +213,22 @@ func (rt *runtime) cmdTagUpdate() *Command {
 			if err != nil {
 				return err
 			}
-			if name != "" && name != n.Title {
-				assigned, err := rt.tagAssigned(n.Title)
-				if err != nil {
-					return err
-				}
-				if assigned {
-					return notYet("rename of an assigned tag requires an atomic tag-assignment API")
-				}
-			}
 			body := map[string]any{}
 			if name != "" {
-				body["title"] = strings.TrimSpace(name)
+				body["name"] = strings.TrimSpace(name)
 			}
 			if color != "" {
-				f := fieldMap(n.Fields)
-				f["color"] = color
-				body["fields"] = f
+				body["color"] = color
 			}
 			if desc != "" || descFile != "" {
 				text, err := rt.readText(desc, descFile, "description")
 				if err != nil {
 					return err
 				}
-				body["body"] = text
+				body["description"] = text
 			}
 			var changed apiNode
-			if err := rt.do(http.MethodPatch, "/api/nodes/"+n.ID, body, &changed); err != nil {
+			if err := rt.do(http.MethodPatch, "/api/tags/"+n.ID, body, &changed); err != nil {
 				return err
 			}
 			v := tagShape(changed)
@@ -277,14 +251,7 @@ func (rt *runtime) cmdTagDelete() *Command {
 			if err != nil {
 				return err
 			}
-			assigned, err := rt.tagAssigned(n.Title)
-			if err != nil {
-				return err
-			}
-			if assigned {
-				return notYet("deletion of an assigned tag requires an atomic tag-assignment API")
-			}
-			if err := rt.do(http.MethodDelete, "/api/nodes/"+n.ID, nil, nil); err != nil {
+			if err := rt.do(http.MethodDelete, "/api/tags/"+n.ID, nil, nil); err != nil {
 				return err
 			}
 			if rt.jsonOut {
