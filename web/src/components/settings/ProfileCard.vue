@@ -27,6 +27,7 @@ const TEXT: { key: TextField; label: string; hint?: string; placeholder?: string
   { key: 'short_name', label: 'Handle', hint: 'Lowercase letters, digits, dots, dashes and underscores.' },
   { key: 'initials', label: 'Initials', hint: 'Shown when there is no photo.' },
 ]
+const SKELETON_ROWS = [...TEXT.map(field => field.key), 'email', 'zone', 'locale']
 const LABEL: Record<string, string> = { first_name: 'First name', last_name: 'Last name', preferred_name: 'What we call you', short_name: 'Handle', initials: 'Initials', timezone: 'Time zone', locale: 'Language' }
 const draft = reactive<Record<TextField, string>>({ first_name: '', last_name: '', preferred_name: '', short_name: '', initials: '' })
 const errors = reactive<Record<string, string>>({})
@@ -149,7 +150,13 @@ const name = computed(() => [p.value?.first_name, p.value?.last_name].filter(Boo
 </script>
 
 <template>
-  <div v-if="!p" class="set-skeleton" role="status" aria-label="Loading your profile"><span class="skeleton" /><span class="skeleton" /><span class="skeleton" /></div>
+  <!-- The loading card has the form's own shape, so the page below it stays put. -->
+  <div v-if="!p" class="profile" role="status" aria-label="Loading your profile">
+    <div class="photo-col" aria-hidden="true"><span class="skeleton sk-photo" /><span class="skeleton sk-button" /><span class="skeleton sk-hint" /></div>
+    <div class="fields" aria-hidden="true">
+      <div v-for="row in SKELETON_ROWS" :key="row" class="field-row" :class="row"><span class="skeleton sk-label" /><span class="skeleton sk-field" /><span class="skeleton sk-note" /></div>
+    </div>
+  </div>
   <div v-else class="profile" :class="{ dragging }" @dragover="dragOver" @dragleave.self="dragging = false" @drop.prevent="dropped">
     <div class="photo-col">
       <button type="button" class="photo" :aria-label="store.hasPicture ? 'Change your photo' : 'Add a photo'" @click="picker?.click()">
@@ -279,10 +286,17 @@ const name = computed(() => [p.value?.first_name, p.value?.last_name].filter(Boo
 .pick-hint { flex-shrink: 0; font-size: 11.5px; color: var(--ink-2); }
 .pick-region { color: var(--ink-2); }
 .chev { margin-left: 2px; }
+.sk-photo { width: 104px; height: 104px; margin: 4px; border-radius: 50%; }
+.sk-button { width: 92px; height: 30px; border-radius: 9px; }
+.sk-hint { width: 150px; height: 28px; border-radius: 8px; }
+.sk-label { width: 38%; height: 12px; margin: 3px 0; }
+.sk-field { height: 38px; border-radius: var(--radius-s); }
+.sk-note { width: 62%; height: 12px; margin: 3px 0; }
 @media (max-width: 900px) { .profile { grid-template-columns: minmax(0, 1fr); } }
 @media (max-width: 600px) {
   .fields { grid-template-columns: minmax(0, 1fr); }
-  .input-wrap .field, .pick, .static { height: 44px; min-height: 44px; }
+  .input-wrap .field, .pick, .static, .sk-field { height: 44px; min-height: 44px; }
+  .sk-button { height: 40px; }
   .pick { height: auto; padding-block: 8px; flex-wrap: wrap; }
   .photo-actions .btn { height: 40px; }
 }

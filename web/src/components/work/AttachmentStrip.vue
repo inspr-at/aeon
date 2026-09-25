@@ -149,9 +149,9 @@ function saveCaption(item: Attachment) { if (editing.value !== item.id) return; 
 .file-card { display: grid; justify-items: center; gap: 3px; padding: 8px; text-align: center; }
 .badge { display: grid; place-items: center; min-width: 34px; height: 22px; padding: 0 6px; border-radius: 6px; background: var(--chip-teal-bg); color: var(--teal-ink); font: 700 10.5px/1 var(--mono); }
 .file-name { max-width: 116px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; font-size: 11.5px; color: var(--ink); }
-.file-size { font-size: 10.5px; color: var(--ink-3); }
+.file-size { font-size: 10.5px; color: var(--ink-2); }
 .remove {
-  position: absolute; top: 5px; right: 5px; display: grid; place-items: center; width: 22px; height: 22px; padding: 0; border: 0; border-radius: 50%;
+  position: absolute; top: 5px; right: 5px; display: grid; place-items: center; width: 24px; height: 24px; padding: 0; border: 0; border-radius: 50%;
   background: rgba(16, 35, 39, .72); color: #fff; opacity: 0; transition: opacity .12s ease;
 }
 .item:hover .remove, .item:focus-within .remove { opacity: 1; }

@@ -23,6 +23,17 @@ const cadenceLabel = computed(() => {
   const total = props.stats.cadence.reduce((a, b) => a + b, 0)
   return `${total} ${total === 1 ? 'release' : 'releases'} in the last ${props.stats.cadence.length} days, at most ${peak.value} a day`
 })
+// One bar a day, oldest first, each with its count above it ("3 releases on 23 Sept").
+// Bars share the chart's lower 19 px; the count sits just above its bar.
+const dayName = new Intl.DateTimeFormat('en-GB', { day: 'numeric', month: 'short' })
+const days = computed(() => {
+  const d = new Date(props.now), last = props.stats.cadence.length - 1
+  return props.stats.cadence.map((n, i) => {
+    const day = new Date(d.getFullYear(), d.getMonth(), d.getDate() - (last - i))
+    const height = n ? Math.max(4, Math.round((n / peak.value) * 19)) : 2
+    return { n, height, today: i === last, label: `${n ? `${n} ${n === 1 ? 'release' : 'releases'}` : 'No releases'} on ${dayName.format(day)}${i === last ? ', today' : ''}` }
+  })
+})
 </script>
 
 <template>
@@ -58,10 +69,12 @@ const cadenceLabel = computed(() => {
     </div>
     <div class="tile cadence">
       <p class="label">Last {{ stats.cadence.length }} days</p>
-      <svg class="spark" :viewBox="`0 0 ${stats.cadence.length * 8} 30`" preserveAspectRatio="none" role="img" :aria-label="cadenceLabel">
-        <rect v-for="(n, i) in stats.cadence" :key="i" :x="i * 8 + 1" :width="6" rx="1.5"
-          :y="n ? 30 - Math.max(4, (n / peak) * 28) : 28" :height="n ? Math.max(4, (n / peak) * 28) : 2" :class="{ zero: !n, today: i === stats.cadence.length - 1 }" />
-      </svg>
+      <ol class="spark" :aria-label="cadenceLabel" :style="{ gridTemplateColumns: `repeat(${days.length}, minmax(0, 1fr))` }">
+        <li v-for="(day, i) in days" :key="i" class="day" :class="{ zero: !day.n, today: day.today }" :aria-label="day.label">
+          <span v-if="day.n" class="count" aria-hidden="true">{{ day.n }}</span>
+          <span class="bar" :style="{ height: `${day.height}px` }" aria-hidden="true" />
+        </li>
+      </ol>
       <p class="sub"><span>{{ stats.cadence.length - 1 }} days ago</span><span>today</span></p>
     </div>
     </div>
@@ -79,10 +92,14 @@ const cadenceLabel = computed(() => {
 .value.num { font: 600 20px/1.25 var(--mono); font-variant-numeric: tabular-nums; }
 .running .value { font: 500 16px/1.45 var(--mono); }
 .sub { display: flex; justify-content: space-between; gap: 8px; font-size: 11.5px; color: var(--ink-3); white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
-.spark { width: 100%; height: 30px; margin: 3px 0 1px; overflow: visible; }
-.spark rect { fill: var(--teal); opacity: .55; }
-.spark rect.today { opacity: 1; }
-.spark rect.zero { fill: var(--line-2); opacity: 1; }
+.spark { display: grid; column-gap: 2px; height: 30px; margin: 3px 0 1px; padding: 0; list-style: none; }
+.day { position: relative; display: flex; flex-direction: column; justify-content: flex-end; align-items: center; min-width: 0; }
+.bar { display: block; width: 75%; max-width: 12px; border-radius: 1.5px; background: var(--teal); opacity: .55; }
+.today .bar { opacity: 1; }
+.zero .bar { background: var(--line-2); opacity: 1; }
+/* The day's count, just above its bar: small tabular figures, muted; today's in the bar's colour. */
+.count { margin-bottom: 1px; font: 500 9.5px/1 var(--mono); font-variant-numeric: tabular-nums; font-variant-ligatures: none; color: var(--ink-3); }
+.today .count { color: var(--teal-ink); font-weight: 600; }
 @media (max-width: 1280px) { .stats { grid-template-columns: minmax(200px, 1.5fr) repeat(4, minmax(90px, 1fr)) minmax(140px, 1.1fr); } .tile { padding: 10px 12px 9px; } }
 @media (max-width: 1100px) { .stats { grid-template-columns: repeat(3, minmax(0, 1fr)); } .running { grid-column: span 2; } }
 /* The rest sit in the same grid as the first three. */

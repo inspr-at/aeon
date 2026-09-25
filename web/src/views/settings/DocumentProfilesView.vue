@@ -640,6 +640,8 @@ watch(() => props.profileId, () => { void nextTick(() => form.value?.scrollTo({ 
   .profiles-head { padding: 8px 12px; }
   .head-right { width: 100%; justify-content: space-between; }
   .sections { padding: 0 12px 32px; }
+  /* Touch-sized section jumps and pane switch. */
+  .jump, .pane-switch button { height: 36px; }
   .form-top { padding: 10px 12px; }
   .variants, .f-pair, .labels, .mm-grid, .margins .mm-grid { grid-template-columns: minmax(0, 1fr); }
   .margins { grid-template-columns: 56px minmax(0, 1fr); }
