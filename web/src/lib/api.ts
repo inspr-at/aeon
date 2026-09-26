@@ -19,13 +19,22 @@ import { learnPictures } from './avatar.ts'
 export interface Version { version: string; scheme: string; brand?: import('./brand').Brand }
 
 export async function api(path: string, init: RequestInit = {}) {
-  return fetch(`/api${path}`, {
+  // A revoked tab stays readable, but must not send another protected request.
+  // Sign-in and public resources remain available to recover in a new tab.
+  if (sessionEnded.blocked && path !== '/auth/dev-login' && !path.startsWith('/public/') && path !== '/version') {
+    return new Response(null, { status: 401 })
+  }
+  const response = await fetch(`/api${path}`, {
     credentials: 'same-origin',
     cache: 'no-store',
     signal: AbortSignal.timeout(10_000),
     ...init,
     headers: { Accept: 'application/json', ...init.headers },
   })
+  // Every caller, including those that handle Response themselves, must revoke a
+  // session on 401. Do this before returning the response to the caller.
+  if (response.status === 401) { sessionEnded.blocked = true; sessionEnded.handler?.(path) }
+  return response
 }
 
 // Keep the P0.3 auth wire contract here, separate from view components.
@@ -79,17 +88,16 @@ async function json<T>(path: string, method = 'GET', body?: unknown, headers: Re
   })
   if (!response.ok) {
     const data = await response.json().catch(() => ({}))
-    // A session that ended mid-work: the page keeps what was typed, and the shell
-    // offers to sign in again beside it (AEON-140), instead of the bare word "unauthorized".
-    if (response.status === 401) { sessionEnded.handler?.(); throw new APIError(401, 'your session has ended', data && typeof data === 'object' ? data : {}) }
+    // Keep the caller's useful error wording after api() has revoked the session.
+    if (response.status === 401) throw new APIError(401, 'your session has ended', data && typeof data === 'object' ? data : {})
     // Modules answer {error} or {code, message}; either reads as the reason.
     const reason = typeof data?.error === 'string' && data.error ? data.error : typeof data?.message === 'string' && data.message ? data.message : `Request failed (${response.status})`
     throw new APIError(response.status, reason, data && typeof data === 'object' ? data : {})
   }
   return response.status === 204 ? undefined as T : response.json()
 }
-// The shell registers what happens when a request finds the session ended.
-export const sessionEnded: { handler: (() => void) | null } = { handler: null }
+// The router registers what happens when a request finds the session ended.
+export const sessionEnded: { blocked: boolean; handler: ((path: string) => void) | null } = { blocked: false, handler: null }
 function query(values: object): string {
   const params = new URLSearchParams()
   for (const [key, value] of Object.entries(values)) {
@@ -206,4 +214,3 @@ export const createRelation = (body: { source_node_id: string; target_node_id: s
 export const deleteRelation = (id: string) => json<void>(`/relations/${idPath(id)}`, 'DELETE')
 export interface NodePreview { id: string; key: string; title: string; state: string }
 export const lookupNodes = (ids: string[]) => json<{ items: NodePreview[] }>(`/nodes/lookup${query({ ids })}`)
-

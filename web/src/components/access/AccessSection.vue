@@ -36,7 +36,7 @@ const liveTabs = computed(() => TABS.filter(tab => can(tab.permission)))
 const tabs = ref(liveTabs.value)
 watch(liveTabs, now => { if (!permissionsRevoked()) tabs.value = now })
 const ended = computed(() => permissionsRevoked())
-function signIn() { window.open('/signin?error=expired', '_blank', 'noopener') }
+function signIn() { window.open(`/signin?error=expired&return=${encodeURIComponent(route.fullPath)}`, '_blank', 'noopener') }
 const tab = computed<Tab>(() => { const wanted = route.params.tab as Tab | undefined; return tabs.value.some(t => t.id === wanted) ? wanted! : tabs.value[0]?.id ?? 'people' })
 const current = computed(() => TABS.find(t => t.id === tab.value)!)
 const detail = computed(() => typeof route.params.id === 'string' ? route.params.id : '')
@@ -72,7 +72,7 @@ watch(needsMembers, yes => { if (yes) void access.load() })
           <p class="lead">Who works here, with which role and on which projects. {{ brand.short_name }} decides access; an INSPR ID only proves who someone is.</p>
         </div>
       </header>
-      <p v-if="ended" class="set-note error ended" role="alert"><AppIcon name="alert" :size="14" /><span>Your session has ended, so nothing here can change. Sign in again in a new tab; what you typed and any link on screen stay here.</span><button type="button" class="btn sm" @click="signIn">Sign in</button></p>
+      <p v-if="ended" class="set-note error ended" role="alert"><AppIcon name="alert" :size="14" /><span>Your session has ended, so nothing here can change. Sign in again in a new tab; what you typed and any link on screen stay here.</span><button type="button" class="btn sm" data-session-keep @click="signIn">Sign in again</button></p>
       <div ref="tabBar" class="tabs" :class="{ drilled: !!detail && (tab === 'roles' || tab === 'projects') }" role="tablist" aria-label="Access" @keydown="tabKeys">
         <RouterLink
           v-for="t in tabs" :id="`access-tab-${t.id}`" :key="t.id" :to="`/settings/access/${t.id}`" class="tab" role="tab" :aria-selected="tab === t.id" :tabindex="tab === t.id ? 0 : -1"

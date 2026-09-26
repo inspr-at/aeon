@@ -61,7 +61,7 @@ test('Open, Doing and Done cells: icons hold the left edge, numbers the right, t
 })
 
 test('m opens Move to group with type-ahead; a new name creates the group; the toast undoes the move', async ({ page }) => {
-  const { calls } = await open(page)
+  const { data } = await open(page)
   await page.keyboard.press('j')
   await expect(projects(page).getByRole('link', { name: /^PHAROS/ })).toBeFocused()
   await page.keyboard.press('m')
@@ -77,11 +77,11 @@ test('m opens Move to group with type-ahead; a new name creates the group; the t
   await expect(page.getByText('Moved Pharos to Focus')).toBeVisible()
   // Focus followed the project to its new group.
   await expect(group(page, 'Focus').getByRole('link')).toBeFocused()
-  await expect.poll(() => lastPut(calls, 'project-groups')?.value).toMatchObject({ groups: [{ name: 'Focus' }], place: { 'p-pharos': expect.stringMatching(/^g:/) } })
+  await expect.poll(() => data.preferences['project-groups']).toMatchObject({ groups: [{ name: 'Focus' }], place: { 'p-pharos': expect.stringMatching(/^g:/) } })
   await page.getByRole('button', { name: 'Undo' }).click()
   await expect(group(page, 'No group').getByRole('link')).toHaveCount(3)
   await expect(page.getByText('No projects here yet.')).toBeVisible()
-  await expect.poll(() => lastPut(calls, 'project-groups')?.value.place ?? {}).toEqual({})
+  await expect.poll(() => (data.preferences['project-groups'] as { place?: Record<string, string> } | undefined)?.place ?? {}).toEqual({})
 })
 
 test('chips show and hide groups; hidden groups fold into one quiet line', async ({ page }) => {
@@ -199,7 +199,7 @@ test('cards: the switch is remembered; a card shows its ring, aligned counts, pe
 
 test('cards: arrows walk the cards; x, Shift and Command clicks select; m moves the selection; undo', async ({ page }) => {
   await page.setViewportSize({ width: 1440, height: 900 })
-  const { calls } = await open(page, { view: 'cards', prefs: { groups: [{ id: 'g:paused', name: 'Paused' }] } })
+  const { data } = await open(page, { view: 'cards', prefs: { groups: [{ id: 'g:paused', name: 'Paused' }] } })
   const links = group(page, 'No group').locator('.card-link')
   await expect(links).toHaveCount(3)
   await links.nth(0).focus()
@@ -221,9 +221,10 @@ test('cards: arrows walk the cards; x, Shift and Command clicks select; m moves 
   await expect(page.getByText('Moved 2 projects to Paused')).toBeVisible()
   await expect(group(page, 'Paused').locator('.card')).toHaveCount(2)
   await expect(bar).toHaveCount(0)
-  await expect.poll(() => lastPut(calls, 'project-groups')?.value.place).toEqual({ 'p-pharos': 'g:paused', 'p-frozen': 'g:paused' })
+  await expect.poll(() => data.preferences['project-groups']?.place).toEqual({ 'p-pharos': 'g:paused', 'p-frozen': 'g:paused' })
   await page.getByRole('button', { name: 'Undo' }).click()
   await expect(group(page, 'No group').locator('.card')).toHaveCount(3)
+  await expect.poll(() => (data.preferences['project-groups'] as { place?: Record<string, string> } | undefined)?.place ?? {}).toEqual({})
   // Shift-click selects a range from the last selected card; Escape clears.
   await links.nth(0).click({ modifiers: ['ControlOrMeta'] })
   await links.nth(2).click({ modifiers: ['Shift'] })

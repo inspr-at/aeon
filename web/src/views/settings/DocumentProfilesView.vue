@@ -6,6 +6,7 @@ import { onBeforeRouteLeave, onBeforeRouteUpdate, useRouter } from 'vue-router'
 import { contentUrl } from '../../lib/attachments'
 import { setPageTitle } from '../../lib/brand'
 import { confirmAction } from '../../lib/confirm'
+import { useSession } from '../../stores/session'
 import { toast } from '../../lib/toast'
 import { getQuoteSettings, saveQuoteSettings, type QuoteSettings } from '../../lib/settings'
 import { archiveProfile, defaultProfile, duplicateProfile, listProfiles, profileAssetUrl, profileMoney, saveProfile, undoProfile, uploadProfileAsset, type QuoteProfile } from '../../lib/quotes/profile'
@@ -86,7 +87,10 @@ watch(() => props.profileId, () => { if (!loading.value) void arrive() })
 // ---------- Leaving with unsaved edits ----------
 const discard = () => confirmAction({ title: 'Discard your changes?', body: `Your edits to ${working.name.trim() || 'the new profile'} have not been saved.`, confirmLabel: 'Discard', danger: true })
 onBeforeRouteUpdate(async (to, from) => (to.params.profileId === from.params.profileId || !dirty.value) ? true : discard())
-onBeforeRouteLeave(async () => !dirty.value || discard())
+onBeforeRouteLeave(async to => {
+  if (to.path === '/signin' && useSession().requiresSignIn) return true
+  return !dirty.value || discard()
+})
 function beforeUnload(event: BeforeUnloadEvent) { if (dirty.value) event.preventDefault() }
 function keys(event: KeyboardEvent) {
   if ((event.metaKey || event.ctrlKey) && event.key.toLowerCase() === 's') { event.preventDefault(); void save() }

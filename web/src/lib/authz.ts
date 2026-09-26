@@ -63,15 +63,14 @@ let revoked = false
 export function revokePermissions(): void { epoch++; revoked = true; requests.clear(); for (const key of cache.keys()) cache.set(key, null); revision.value++ }
 export function permissionsRevoked(): boolean { revision.value; return revoked }
 // Every Access, Settings and permission request that meets a 401 ends up here:
-// grants go at once, and the shell offers sign-in (App.vue).
-export function sessionGone(): void { revokePermissions(); sessionEnded.handler?.() }
-// My access may have changed (a role change, window focus): every scope already
-// asked about is asked again. The answers on screen stay until the new ones
-// arrive, so gated tabs and open sheets never flicker away; a failed answer
-// still grants nothing. Sign-out uses clearPermissions instead.
+// grants go at once, while the current view keeps its draft or one-time secret.
+export function sessionGone(): void { revokePermissions(); sessionEnded.handler?.('') }
+// While signed in, a role change or window focus rechecks each scope. The old
+// answers stay on screen until replacements arrive; after a 401 no recheck runs
+// until an explicit sign-in starts a fresh session.
 export async function accessChanged(): Promise<void> {
+  if (revoked) return
   // Scopes still in flight are asked again too: their older answers must not land.
-  // A revoked state stays until one of these answers with a 200.
   const keys = new Set(['', ...cache.keys(), ...requests.keys()])
   await Promise.all([...keys].map(key => ask(key || undefined)))
 }

@@ -1,8 +1,9 @@
 // SPDX-License-Identifier: AGPL-3.0-only
 import { afterEach, describe, expect, it, vi } from 'vitest'
 import { accessChanged, can, clearPermissions, myPermissions, myWorkspaceRole, permissionsAvailable, permissionsKnown, refreshPermissions, revokePermissions } from '../src/lib/authz'
+import { sessionEnded } from '../src/lib/api'
 
-afterEach(() => { clearPermissions(); vi.unstubAllGlobals() })
+afterEach(() => { clearPermissions(); sessionEnded.blocked = false; vi.unstubAllGlobals() })
 
 describe('can()', () => {
   it('fails closed until the server returns effective grants', async () => {
@@ -102,6 +103,10 @@ describe('can()', () => {
     expect(can('members.read', 'other')).toBe(false)
     expect(fetch.mock.calls.length).toBe(asked)
     await accessChanged()
+    expect(fetch.mock.calls.length).toBe(asked)
+    expect(can('members.read')).toBe(false)
+    clearPermissions() // an explicit new session starts with fresh grants
+    await refreshPermissions()
     expect(can('members.read')).toBe(true)
   })
   it('review r2: a 401 latches until a later 200, and never refetches by itself', async () => {
@@ -116,10 +121,15 @@ describe('can()', () => {
     expect(permissionsKnown()).toBe(true)
     await refreshPermissions('p')
     expect(fetch.mock.calls.length).toBe(asked) // latched: no self-refetch
-    await accessChanged() // a focus re-check that 401s latches again
+    await accessChanged() // focus cannot retry an ended session
     expect(can('members.read')).toBe(false)
     status = 200
     await accessChanged()
+    expect(fetch.mock.calls.length).toBe(asked)
+    expect(can('members.read')).toBe(false)
+    sessionEnded.blocked = false // explicit sign-in, followed by a fresh grant read
+    clearPermissions()
+    await refreshPermissions()
     expect(can('members.read')).toBe(true)
   })
 })

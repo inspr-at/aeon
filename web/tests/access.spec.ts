@@ -433,6 +433,23 @@ test('review r2 #2: a join link on screen stays when the session ends', async ({
   await expect(page.locator('.access-card')).toBeVisible()
 })
 
+test('an ended session keeps a one-time join link copyable', async ({ page, context }) => {
+  await context.grantPermissions(['clipboard-read', 'clipboard-write'])
+  const world = await open(page, '/settings/access/invites')
+  await page.getByRole('button', { name: 'Invite people' }).click()
+  const sheet = page.getByRole('dialog', { name: 'Invite people' })
+  await sheet.getByLabel('Email').fill('late@studio.at')
+  await sheet.getByRole('button', { name: 'Create invite link' }).click()
+  const ready = page.getByRole('dialog', { name: 'Invite ready' })
+  const link = await ready.getByRole('textbox').inputValue()
+  world.sessionEnded = true
+  await page.evaluate(() => window.dispatchEvent(new Event('focus')))
+  await expect(ready.getByRole('textbox')).toHaveValue(link)
+  await expect(ready.getByRole('button', { name: 'Sign in again' })).toBeEnabled()
+  await ready.getByRole('button', { name: 'Copy link' }).click()
+  expect(await page.evaluate(() => navigator.clipboard.readText())).toBe(link)
+})
+
 test('review r3 #1: another person signing in never sees the previous session’s access data', async ({ page }) => {
   const first = await open(page, '/settings/access/people')
   await expect(people(page)).toContainText('Jonas Weber')

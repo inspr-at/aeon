@@ -1,11 +1,12 @@
 <!-- SPDX-License-Identifier: AGPL-3.0-only -->
 <script setup lang="ts">
 import { computed, defineAsyncComponent, nextTick, onBeforeUnmount, onMounted, ref, watch } from 'vue'
-import { useRoute, useRouter } from 'vue-router'
+import { isNavigationFailure, NavigationFailureType, useRoute, useRouter } from 'vue-router'
 import { brand } from '../../lib/brand'
-import { SORTS, TYPES, entryParam, entryPath, highlightWords, kindToken, statusLabel, type KnowledgeEntry, type KnowledgeItem, type KnowledgeStatus, type KnowledgeType, type SortBy } from '../../lib/knowledge'
+import { DOCK_MEDIA, SORTS, TYPES, entryParam, entryPath, highlightWords, kindToken, statusLabel, type KnowledgeEntry, type KnowledgeItem, type KnowledgeStatus, type KnowledgeType, type SortBy } from '../../lib/knowledge'
 import { STATUS_VIEWS, type KnowledgeFilters, type KnowledgeState, type StatusView } from '../../lib/useKnowledge'
 import { toast } from '../../lib/toast'
+import { settledNavigation } from '../../lib/navigation'
 import { absoluteTime, plural, relativeTime } from '../../lib/work'
 import AppIcon from '../AppIcon.vue'
 import FloatingPanel from '../work/FloatingPanel.vue'
@@ -32,8 +33,27 @@ const graphMode = computed(() => route.query.mode === 'graph')
 const graph = ref<{ focus: () => void }>()
 // A selection carries over between the two displays where the pane can show it; on a narrow
 // screen going back to Entries drops it, which would otherwise open the entry's own page.
-function setMode(graph: boolean) {
-  void router.replace({ query: { ...route.query, mode: graph ? 'graph' : undefined, entry: graph || props.dock ? route.query.entry : undefined } })
+let modeIntent = 0
+async function setMode(graph: boolean) {
+  const intent = ++modeIntent
+  // Width at the click, not the last resize event: a stale "wide" flag keeps
+  // ?entry= on a narrow screen, and the route guard then opens the entry page.
+  const go = () => {
+    const wide = window.matchMedia(DOCK_MEDIA).matches
+    return router.replace({ query: { ...route.query, mode: graph ? 'graph' : undefined, entry: graph || wide ? route.query.entry : undefined } })
+  }
+  let retriedAbort = false
+  while (intent === modeIntent && route.path.endsWith('/knowledge')) {
+    const settled = settledNavigation(router)
+    let failure
+    try { failure = await go() } catch (error) { settled.stop(); throw error }
+    if (isNavigationFailure(failure, NavigationFailureType.cancelled)) await settled.promise
+    else settled.stop()
+    if (intent !== modeIntent || !route.path.endsWith('/knowledge')) return
+    if (isNavigationFailure(failure, NavigationFailureType.cancelled)) continue
+    if (isNavigationFailure(failure, NavigationFailureType.aborted) && !retriedAbort) { retriedAbort = true; continue }
+    return
+  }
 }
 // The page keeps the display (?mode=graph) and the docked entry (?entry=) while filters change.
 function updateFilters(patch: Partial<KnowledgeFilters>) { emit('update', patch) }
@@ -49,9 +69,14 @@ const phoneQuery = window.matchMedia('(max-width: 600px)')
 const phone = ref(phoneQuery.matches)
 const onPhone = (event: MediaQueryListEvent) => { phone.value = event.matches }
 phoneQuery.addEventListener('change', onPhone)
-let timer: ReturnType<typeof setTimeout> | undefined
+// The address is written in this same turn. A timer or a later message does not
+// run while the graph is busy, so the field would show the words and the graph
+// would keep the previous results.
 watch(() => props.filters.q, value => { if (value !== draft.value.trim()) draft.value = value })
-watch(draft, value => { clearTimeout(timer); timer = setTimeout(() => { if (value.trim() !== props.filters.q) updateFilters({ q: value.trim() }) }, 160) })
+watch(draft, () => {
+  const value = draft.value.trim()
+  if (value !== props.filters.q) updateFilters({ q: value })
+})
 
 const q = computed(() => props.filters.q.trim())
 const statusView = computed(() => STATUS_VIEWS.find(view => view.value === props.filters.status) ?? STATUS_VIEWS[0])
@@ -160,13 +185,28 @@ async function copyCommand() {
 }
 // The row the entry page was on is the cursor when the tab shows again.
 function reveal(id: string, focus = false) {
-  if (graphMode.value) { if (focus) graph.value?.focus(); return }
+  if (graphMode.value) { if (focus) graph.value?.focus?.(); return }
   if (!props.state.sequence.value.some(item => item.id === id)) return
   cursorId.value = id
-  void nextTick(() => { const el = rowEl(id); if (focus) el?.focus({ preventScroll: true }); el?.scrollIntoView({ block: 'nearest' }) })
+  const place = () => {
+    const el = rowEl(id)
+    if (!el) return
+    el.scrollIntoView({ block: 'nearest' })
+    if (!focus || el === document.activeElement || el.contains(document.activeElement)) return
+    const active = document.activeElement
+    const onBody = !active || active === document.body || active === document.documentElement
+    const inPane = active instanceof Element && !!active.closest('.entry-page')
+    // The pane's removal moves focus onto the body a frame later. Put the row
+    // back then. A control the user reached in between keeps the focus.
+    if (onBody || inPane) el.focus({ preventScroll: true })
+  }
+  void nextTick(() => {
+    place()
+    if (focus) requestAnimationFrame(() => place())
+  })
 }
 onMounted(() => window.addEventListener('keydown', keydown))
-onBeforeUnmount(() => { window.removeEventListener('keydown', keydown); clearTimeout(timer); phoneQuery.removeEventListener('change', onPhone) })
+onBeforeUnmount(() => { window.removeEventListener('keydown', keydown); phoneQuery.removeEventListener('change', onPhone) })
 defineExpose({ focusSearch, openCreate, reveal })
 const who = (item: KnowledgeItem) => item.imported ? 'imported' : item.updated_by ? `by ${item.updated_by.name}` : ''
 </script>

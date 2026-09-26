@@ -9,6 +9,7 @@ import {
 } from '../../lib/crm'
 import { setPageTitle } from '../../lib/brand'
 import { confirmAction } from '../../lib/confirm'
+import { useSession } from '../../stores/session'
 import { toast } from '../../lib/toast'
 import { useBusiness } from '../../stores/business'
 import { useCustomers } from '../../stores/customers'
@@ -141,7 +142,8 @@ async function cancel() {
   editing.value = false; conflict.value = false
   void nextTick(() => editButton.value?.focus({ preventScroll: true }))
 }
-onBeforeRouteLeave(async () => {
+onBeforeRouteLeave(async to => {
+  if (to.path === '/signin' && useSession().requiresSignIn) return true
   if (!dirty.value) return true
   return confirmAction({ title: 'Leave without saving?', body: `Your edits to ${customer.value?.name ?? 'this customer'} have not been saved.`, confirmLabel: 'Leave', danger: true })
 })

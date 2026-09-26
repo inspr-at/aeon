@@ -19,22 +19,8 @@ import { brand } from './lib/brand'
 import { toast } from './lib/toast'
 import { displayHeadline, getRelease } from './lib/releases'
 import { headerFolded } from './lib/chrome'
-import { sessionEnded } from './lib/api'
-import { revokePermissions } from './lib/authz'
 
 const ReleasesSheet = defineAsyncComponent(() => import('./components/releases/ReleasesSheet.vue'))
-// A request that finds the session ended keeps the page as it is (drafts included)
-// and offers sign-in in a new tab; back here, saving again works (AEON-140).
-sessionEnded.handler = () => {
-  if (!session.identity) return
-  // A dead session authorizes nothing on this page, even before sign-in.
-  revokePermissions()
-  toast('Your session has ended. Sign in again in a new tab; what you typed stays on this page.', {
-    sticky: true, key: 'session-ended', tone: 'error',
-    action: { label: 'Sign in', run: () => { window.open('/signin?error=expired', '_blank', 'noopener') } },
-  })
-}
-
 const session = useSession()
 const route = useRoute()
 const router = useRouter()
@@ -43,6 +29,27 @@ const shortcuts = ref<InstanceType<typeof ShortcutSheet>>()
 const retrying = ref(false)
 // Sign-in is bare: it has no header or footer and shows connection problems itself.
 const bare = computed(() => !!route.meta.bare && !fatal.value)
+const sessionEndedHere = computed(() => session.requiresSignIn && route.path !== '/signin')
+// Keep the mounted page readable and copyable after a 401, while every editor
+// and action control becomes inert. The observer covers controls rendered after
+// an in-flight request settles.
+function freezePage() {
+  if (!sessionEndedHere.value) return
+  for (const root of document.querySelectorAll<HTMLElement>('.page-flow, .sheet-root')) {
+    for (const field of root.querySelectorAll<HTMLInputElement | HTMLTextAreaElement | HTMLSelectElement>('input, textarea, select')) {
+      if (field instanceof HTMLSelectElement || (field instanceof HTMLInputElement && ['checkbox', 'radio', 'file', 'button', 'submit'].includes(field.type))) {
+        if (!field.disabled) field.disabled = true
+      } else if (!field.readOnly) field.readOnly = true
+    }
+    for (const button of root.querySelectorAll<HTMLButtonElement>('button:not([data-session-keep])')) if (!button.disabled) button.disabled = true
+    for (const editor of root.querySelectorAll<HTMLElement>('[contenteditable="true"]')) editor.contentEditable = 'false'
+  }
+}
+let freezeObserver: MutationObserver | undefined
+watch(sessionEndedHere, async ended => { if (ended) { await nextTick(); freezePage() } })
+function signInAgain() {
+  window.open('/signin?error=expired', '_blank', 'noopener')
+}
 // A page that fills the screen (the quote editor) may fold the header away.
 const folded = computed(() => headerFolded.value && !!route.meta.foldHeader && !bare.value && !fatal.value)
 watch(command, value => { if (value?.command.name === 'shortcuts') { consume(); shortcuts.value?.open() } })
@@ -89,11 +96,13 @@ watch(() => session.identity?.principal.id, id => {
 function checkUpdate() { if (session.identity && document.visibilityState === 'visible') void releases.checkForUpdate() }
 let updateTimer: ReturnType<typeof setInterval> | undefined
 onMounted(() => {
+  freezeObserver = new MutationObserver(freezePage)
+  freezeObserver.observe(document.body, { subtree: true, childList: true, attributes: true, attributeFilter: ['disabled', 'readonly', 'contenteditable'] })
   updateTimer = setInterval(checkUpdate, 60_000)
   document.addEventListener('visibilitychange', checkUpdate)
   window.addEventListener('focus', checkUpdate)
 })
-onBeforeUnmount(() => { clearInterval(updateTimer); document.removeEventListener('visibilitychange', checkUpdate); window.removeEventListener('focus', checkUpdate) })
+onBeforeUnmount(() => { freezeObserver?.disconnect(); clearInterval(updateTimer); document.removeEventListener('visibilitychange', checkUpdate); window.removeEventListener('focus', checkUpdate) })
 watch(() => releases.available, async version => {
   if (!version) return
   // The new server knows what the release was about; say it in its reading form.
@@ -149,6 +158,10 @@ watch(() => [route.path, route.params.projectKey, route.params.ticketKey, route.
     <a class="skip-link" href="#main">Skip to content</a>
     <AppHeader v-if="!bare && !folded" />
     <main id="main" ref="main" tabindex="-1" @scroll.passive="scrolled">
+      <div v-if="sessionEndedHere" class="session-ended" role="alert">
+        <span>Your session has ended. Sign in again in a new tab; what you typed stays on this page.</span>
+        <button type="button" class="btn sm" @click="signInAgain">Sign in</button>
+      </div>
       <div class="page-flow" :class="{ fill: route.meta.fill && !session.error && !fatal }">
         <ErrorPage v-if="fatal" :error="fatal" />
         <StatusPage v-else-if="session.error && !bare" eyebrow="Connection interrupted" title="Let’s try that again." tone="problem">
@@ -183,6 +196,7 @@ watch(() => [route.path, route.params.projectKey, route.params.ticketKey, route.
 /* The gutter is reserved so a scrollbar appearing as content loads never shifts the page sideways. */
 main { position: relative; min-height: 0; overflow: auto; scrollbar-gutter: stable; outline: none; scroll-padding-top: 96px; }
 main:focus-visible { box-shadow: none; }
+.session-ended { position: sticky; top: 0; z-index: 50; display: flex; align-items: center; justify-content: space-between; flex-wrap: wrap; gap: 10px; padding: 10px 28px; background: var(--chip-teal-bg); box-shadow: inset 0 -1px 0 var(--line); font-size: 13px; }
 .page-flow { display: flex; flex-direction: column; min-height: 100%; }
 .page-flow > :first-child { flex: 1 0 auto; }
 .page-flow.fill { height: 100%; }

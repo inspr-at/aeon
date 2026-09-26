@@ -1,16 +1,29 @@
 // SPDX-License-Identifier: AGPL-3.0-only
 import { afterEach, test } from 'node:test'
 import assert from 'node:assert/strict'
-import { api, getSession } from '../src/lib/api.ts'
+import { api, getSession, sessionEnded } from '../src/lib/api.ts'
 
 const originalFetch = globalThis.fetch
-afterEach(() => { globalThis.fetch = originalFetch })
+afterEach(() => { globalThis.fetch = originalFetch; sessionEnded.blocked = false })
 
 function respond(body: unknown, status = 200) {
+  sessionEnded.blocked = false
   globalThis.fetch = async () => new Response(JSON.stringify(body), {
     status, headers: { 'Content-Type': 'application/json' },
   })
 }
+
+test('a 401 blocks later protected requests while sign-in remains available', async () => {
+  const urls: string[] = []
+  globalThis.fetch = async url => {
+    urls.push(String(url))
+    return new Response(null, { status: String(url) === '/api/nodes' ? 401 : 204 })
+  }
+  assert.equal((await api('/nodes')).status, 401)
+  assert.equal((await api('/nodes')).status, 401)
+  assert.equal((await api('/auth/dev-login')).status, 204)
+  assert.deepEqual(urls, ['/api/nodes', '/api/auth/dev-login'])
+})
 
 test('accepts the authenticated principal and tenant', async () => {
   const identity = { principal: { id: 'p1', name: 'Markus Barta' }, tenant: { id: 't1', name: 'INSPR' } }

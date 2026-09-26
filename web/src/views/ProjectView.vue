@@ -2,7 +2,7 @@
 <script setup lang="ts">
 import { setPageTitle } from '../lib/brand'
 import { computed, defineAsyncComponent, nextTick, onBeforeUnmount, onMounted, ref, watch } from 'vue'
-import { onBeforeRouteLeave, onBeforeRouteUpdate, useRoute, useRouter } from 'vue-router'
+import { isNavigationFailure, NavigationFailureType, onBeforeRouteLeave, onBeforeRouteUpdate, useRoute, useRouter } from 'vue-router'
 import { APIError, createNode, listNodes, type ListItem, type SavedView } from '../lib/api'
 import { can } from '../lib/authz'
 import { confirmAction } from '../lib/confirm'
@@ -13,6 +13,7 @@ import { orderOf, PINNED, type ColumnId, type ListPrefs } from '../lib/columns'
 import { copyName, duplicateView, loadViews, removeView, renameView, saveNewView, saveViewState, shareView, viewsOf } from '../lib/savedViews'
 import { usePreference } from '../lib/preferences'
 import { toast } from '../lib/toast'
+import { settledNavigation } from '../lib/navigation'
 import { command, consume, run } from '../lib/commands'
 import { remember } from '../lib/recents'
 import { apiParams, clearedFilters, effectiveSort, facetOptions, filtersFromQuery, filtersFromView, filtersToQuery, groupFacet, groupRows, hasFilters, orderByStatus, rowTags, sameListState, suggestName, toggleIn, toggleOut, totalFrom, valueLabel, WORK_KINDS, type DateFilter, type Dimension, type EpicRef, type GroupBy, type ListFilters } from '../lib/ticketList'
@@ -118,8 +119,9 @@ const shownEntry = computed<{ type: KnowledgeType; slug: string; mode: 'page' | 
 })
 // A docked link on a narrow screen (shared, or the window got narrower) opens the entry's page.
 // The graph keeps its selection there instead, shown in its own card.
-watch([dockEntry, knowledgeWide], ([entry, wide]) => {
-  if (entry && !wide && route.query.mode !== 'graph') void router.replace({ path: entryPath(routeKey.value, entry.type, entry.slug), query: knowledgeListQuery.value, hash: route.hash })
+watch([dockEntry, knowledgeWide], ([entry]) => {
+  // The same width the route guard reads. The cached flag can lag a resize.
+  if (entry && !window.matchMedia(DOCK_MEDIA).matches && route.query.mode !== 'graph') void router.replace({ path: entryPath(routeKey.value, entry.type, entry.slug), query: knowledgeListQuery.value, hash: route.hash })
 }, { immediate: true })
 const fullViewQuery = computed(() => !!ticketKey.value && route.query.view === 'full')
 const lastListMode = ref<ViewMode>(modeOf(route.query.view))
@@ -596,23 +598,64 @@ watch(panelItem, item => {
 watch(project, current => { if (current) remember({ type: 'project', key: current.routeKey, title: current.title }) }, { immediate: true })
 
 // ---------- Knowledge: the list's place in the URL, and closing an entry ----------
+// One write at a time. A later filter reads the address after the earlier one has
+// landed, and a replace that lost to another navigation is sent once more.
+let knowledgeWrite: Promise<unknown> = Promise.resolve()
 function updateKnowledge(patch: Partial<KnowledgeFilters>) {
-  // A docked entry, and the graph, stay while the list is searched and filtered.
-  const entry = typeof route.query.entry === 'string' ? { entry: route.query.entry } : {}
-  void router.replace({ path: route.path, query: { ...knowledgeDisplay.value, ...knowledgeQuery({ ...knowledgeFilters.value, ...patch }), ...entry } })
+  knowledgeWrite = knowledgeWrite.catch(() => undefined).then(async () => {
+    const go = () => {
+      const entry = typeof route.query.entry === 'string' ? { entry: route.query.entry } : {}
+      return router.replace({ path: route.path, query: { ...knowledgeDisplay.value, ...knowledgeQuery({ ...knowledgeFilters.value, ...patch }), ...entry } })
+    }
+    let retriedAbort = false
+    while (route.path.endsWith('/knowledge')) {
+      const settled = settledNavigation(router)
+      let failure
+      try { failure = await go() } catch (error) { settled.stop(); throw error }
+      if (isNavigationFailure(failure, NavigationFailureType.cancelled)) await settled.promise
+      else settled.stop()
+      if (isNavigationFailure(failure, NavigationFailureType.cancelled)) continue
+      if (isNavigationFailure(failure, NavigationFailureType.aborted) && !retriedAbort) { retriedAbort = true; continue }
+      return
+    }
+  })
 }
 // The next navigation's outcome: true once it has landed, false when a guard kept the page.
 function landed() {
   return new Promise<boolean>(resolve => { const stop = router.afterEach((_to, _from, failure) => { stop(); resolve(!failure) }) })
 }
+// The row for the address, not the entry the pane has finished loading. j and k
+// change the address at once; the pane keeps the previous entry until its fetch
+// returns, and under load that is still in flight when Esc is pressed.
+function dockedRowId(): string | null {
+  const open = dockEntry.value
+  if (!open) return null
+  return knowledge.sequence.value.find(item => item.type === open.type && item.slug === open.slug)?.id ?? knowledgeEntry.value?.entryId() ?? null
+}
 // Closing the docked entry: back to the list it was opened from, the row selected.
 async function closeKnowledgeDock() {
-  const id = knowledgeEntry.value?.entryId() ?? null
+  const id = dockedRowId()
   const list = { path: `/p/${encodeURIComponent(routeKey.value)}/knowledge`, query: knowledgeListQuery.value }
-  const done = landed()
-  if (window.history.state?.back === router.resolve(list).fullPath) router.back()
-  else void router.replace(list)
-  if (!(await done)) return
+  if (window.history.state?.back === router.resolve(list).fullPath) {
+    const settled = settledNavigation(router)
+    router.back()
+    await settled.promise
+  }
+  // A graph selection or filter can overtake the close while the /me guard is
+  // pending. Retry from the landed address so its display and filters survive.
+  let retriedAbort = false
+  while (route.path === list.path && route.query.entry) {
+    const settled = settledNavigation(router)
+    let failure
+    try { failure = await router.replace({ path: list.path, query: knowledgeListQuery.value }) }
+    catch (error) { settled.stop(); throw error }
+    if (isNavigationFailure(failure, NavigationFailureType.cancelled)) await settled.promise
+    else settled.stop()
+    if (isNavigationFailure(failure, NavigationFailureType.cancelled)) continue
+    if (isNavigationFailure(failure, NavigationFailureType.aborted) && !retriedAbort) { retriedAbort = true; continue }
+    break
+  }
+  if (route.path !== list.path || route.query.entry) return
   await nextTick()
   if (id) knowledgeTab.value?.reveal(id, true)
 }
@@ -867,7 +910,10 @@ onBeforeRouteUpdate(async (to, from) => {
   if (to.params.ticketKey !== from.params.ticketKey || to.params.projectKey !== from.params.projectKey) return confirmDiscard()
   if (shownIn(from) && shownIn(to) !== shownIn(from)) return confirmDiscard()
 })
-onBeforeRouteLeave(async () => (await confirmDiscard()) && (!table.value?.createDirty() || skipGuard || confirmAction({ title: 'Discard the new ticket?', body: 'Its title has not been created yet.', confirmLabel: 'Discard', danger: true })))
+onBeforeRouteLeave(async to => {
+  if (to.path === '/signin' && useSession().requiresSignIn) return true
+  return (await confirmDiscard()) && (!table.value?.createDirty() || skipGuard || confirmAction({ title: 'Discard the new ticket?', body: 'Its title has not been created yet.', confirmLabel: 'Discard', danger: true }))
+})
 function beforeUnload(event: BeforeUnloadEvent) { if (dirty() || table.value?.createDirty()) { event.preventDefault(); event.returnValue = '' } }
 // Tabbing into the table lands on a visible row, not on an invisible container.
 function focusFirst() { if (!cursorId.value && sequence.value.length) cursorId.value = sequence.value[0].id }

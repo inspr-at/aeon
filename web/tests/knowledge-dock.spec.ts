@@ -79,6 +79,26 @@ test('j and k move the selection and the pane follows; Esc closes it and keeps t
   await expect(row(page, 'No coloured edge accents')).toHaveClass(/cursor/)
 })
 
+test('closing the pane leaves focus where the user moved it', async ({ page }) => {
+  await open(page, `${list}?entry=guideline/no-edge-accents`)
+  await expect(pane(page).getByRole('heading', { level: 1 })).toHaveText('No coloured edge accents')
+  // The restore runs on the frame after the pane leaves. Move focus first, as a
+  // keypress in that frame would, and the row must not take it back.
+  await page.evaluate(() => {
+    const native = window.requestAnimationFrame.bind(window)
+    window.requestAnimationFrame = callback => native(() => {
+      document.querySelector<HTMLInputElement>('input[type="search"]')?.focus()
+      callback(performance.now())
+    })
+  })
+  await pane(page).getByRole('button', { name: 'Close the preview' }).click()
+  const search = page.getByRole('searchbox', { name: 'Search knowledge in Pharos' })
+  await expect(search).toBeFocused()
+  await page.evaluate(() => new Promise<void>(resolve => { requestAnimationFrame(() => requestAnimationFrame(() => resolve())) }))
+  await expect(search).toBeFocused()
+  await expect(pane(page)).toHaveCount(0)
+})
+
 test('the address restores the pane on reload, keeps it while the list is searched, and follows a rename', async ({ page }) => {
   await open(page, `${list}?entry=guideline/no-edge-accents`)
   await expect(pane(page).getByRole('heading', { level: 1 })).toHaveText('No coloured edge accents')

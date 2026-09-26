@@ -3,7 +3,7 @@
 // pasted image with progress, caption and reorder with a precondition, delete, and
 // the three content sizes (thumb for strips, preview for the viewer, original only
 // at 100%). Positions are decimal strings; created_by is the principal id.
-import { api, APIError } from './api.ts'
+import { api, APIError, sessionEnded } from './api.ts'
 
 export interface Attachment {
   id: string; node_id: string; name: string; content_type: string; size: number; sha256: string
@@ -53,6 +53,7 @@ export async function listAttachments(nodeId: string): Promise<Attachment[]> {
 
 // Multipart upload with progress (fetch cannot report upload progress).
 export function uploadAttachment(nodeId: string, file: File, options: { caption?: string; onProgress?: (fraction: number) => void; signal?: AbortSignal } = {}): Promise<Attachment> {
+  if (sessionEnded.blocked) return Promise.reject(new APIError(401, 'Your session has ended.'))
   return new Promise((resolve, reject) => {
     const xhr = new XMLHttpRequest()
     xhr.open('POST', `/api/nodes/${encodeURIComponent(nodeId)}/attachments`)
@@ -60,6 +61,7 @@ export function uploadAttachment(nodeId: string, file: File, options: { caption?
     xhr.setRequestHeader('Accept', 'application/json')
     xhr.upload.onprogress = event => { if (event.lengthComputable) options.onProgress?.(event.loaded / event.total) }
     xhr.onload = () => {
+      if (xhr.status === 401) { sessionEnded.blocked = true; sessionEnded.handler?.(`/nodes/${nodeId}/attachments`) }
       let body: unknown = {}
       try { body = JSON.parse(xhr.responseText || '{}') } catch { /* keep empty */ }
       if (xhr.status >= 200 && xhr.status < 300) resolve(one(body))

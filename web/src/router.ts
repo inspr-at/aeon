@@ -4,6 +4,9 @@ import { createRouter, createWebHistory } from 'vue-router'
 import { setPageTitle } from './lib/brand'
 import { useProjects } from './stores/projects'
 import { useSession } from './stores/session'
+import { sessionEnded } from './lib/api'
+import { toast } from './lib/toast'
+import { takeSignInReturn } from './lib/signInReturn'
 import ProjectsView from './views/ProjectsView.vue'
 import SignInView from './views/SignInView.vue'
 import NotFoundView from './views/NotFoundView.vue'
@@ -91,25 +94,51 @@ export const router = createRouter({
   ],
 })
 
-router.beforeEach(async (to) => {
+sessionEnded.handler = path => {
+  const session = useSession()
+  const alreadyEnded = session.requiresSignIn
+  session.invalidate()
+  // The current view may hold a draft or a secret shown only once. Keep it
+  // mounted; the next protected navigation is handled by the guard below.
+  if (!alreadyEnded && path !== '/me') toast('Your session has ended', { tone: 'error' })
+}
+
+// Overlapping checks would race each other and the later failure could clear a
+// session the earlier one had just confirmed.
+let refreshing: Promise<void> | null = null
+function refreshSession() {
+  if (!refreshing) refreshing = useSession().refresh().finally(() => { refreshing = null })
+  return refreshing
+}
+router.beforeEach(async (to, from) => {
   if (to.meta.public) return true
   const session = useSession()
+  // A 401 or sign-out is authoritative for this tab until an explicit sign-in.
+  // A later /me response must not silently reauthorize a revoked page.
+  if (session.requiresSignIn) return to.path === '/signin' ? true : { path: '/signin', query: { error: 'expired', return: to.fullPath } }
   const wasSignedIn = !!session.identity
-  await session.refresh()
+  await refreshSession()
   if (session.error) return true // The shell shows a retry screen, never protected content.
   // Losing a session without signing out means it expired; say so on the sign-in page.
   if (!session.identity && to.path !== '/signin') {
+    // A classic link arrives before sign-in (AEON-175): keep it for after OIDC.
     if (to.path.startsWith('/from-classic/')) sessionStorage.setItem('aeon.fromClassicReturn', to.fullPath)
-    return wasSignedIn ? { path: '/signin', query: { error: 'expired' } } : '/signin'
+    return wasSignedIn
+      ? { path: '/signin', query: { error: 'expired', return: to.fullPath } }
+      : '/signin'
   }
   if (session.identity && to.path === '/signin') return '/'
   // OIDC returns to / after sign-in. Restore only a same-origin resolver route
-  // saved by this tab; it then performs the visibility-scoped API lookup.
+  // saved by this tab, or the return path of an expired session.
   if (session.identity && to.path === '/') {
     const pending = sessionStorage.getItem('aeon.fromClassicReturn')
     if (pending) {
       sessionStorage.removeItem('aeon.fromClassicReturn')
       if (/^\/from-classic\/(?!\/)/.test(pending)) return pending
+    }
+    if (!from.matched.length) {
+      const returnPath = takeSignInReturn()
+      if (returnPath !== '/') return returnPath
     }
   }
 })

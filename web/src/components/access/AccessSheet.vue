@@ -2,6 +2,8 @@
 <script setup lang="ts">
 import { nextTick, onBeforeUnmount, onMounted, ref } from 'vue'
 import AppIcon from '../AppIcon.vue'
+import { useRoute } from 'vue-router'
+import { useSession } from '../../stores/session'
 
 // A sheet over the page: a panel on the right (or centred, for a short form),
 // with a scrim. It is not in the browser's top layer, so menus and pickers
@@ -9,12 +11,15 @@ import AppIcon from '../AppIcon.vue'
 // scrim close it (unless a menu is open, which closes first); focus returns.
 const props = withDefaults(defineProps<{ title: string; label?: string; size?: 'side' | 'center'; wide?: boolean }>(), { label: undefined, size: 'side', wide: false })
 const emit = defineEmits<{ close: [] }>()
+const route = useRoute()
+const session = useSession()
+function signInAgain() { window.open(`/signin?error=expired&return=${encodeURIComponent(route.fullPath)}`, '_blank', 'noopener') }
 const panel = ref<HTMLElement>()
 let opener: HTMLElement | null = null
 const focusables = () => [...(panel.value?.querySelectorAll<HTMLElement>('a[href], button:not(:disabled), input:not(:disabled), select:not(:disabled), textarea:not(:disabled), [tabindex="0"]') ?? [])].filter(el => el.offsetParent !== null)
 function keydown(event: KeyboardEvent) {
   if (document.querySelector('.floating, dialog[open]')) return
-  if (event.key === 'Escape') { event.preventDefault(); event.stopPropagation(); emit('close') }
+  if (event.key === 'Escape') { event.preventDefault(); event.stopPropagation(); if (!session.requiresSignIn) emit('close') }
   else if (event.key === 'Tab') {
     const items = focusables()
     if (!items.length) return
@@ -42,11 +47,12 @@ defineExpose({ panel })
 <template>
   <Teleport to="body">
     <div class="sheet-root" :class="size">
-      <div class="sheet-scrim" aria-hidden="true" @click="emit('close')" />
+      <div class="sheet-scrim" aria-hidden="true" @click="!session.requiresSignIn && emit('close')" />
       <section ref="panel" class="sheet" :class="{ wide }" role="dialog" aria-modal="true" :aria-label="props.label ?? title">
+        <p v-if="session.requiresSignIn" class="sheet-ended" role="alert">Your session has ended. This sheet stays here so you can keep what you entered or copy a one-time secret. <button type="button" class="btn sm" data-session-keep @click="signInAgain">Sign in again</button></p>
         <header class="sheet-head">
           <slot name="head"><h2 class="sheet-title">{{ title }}</h2></slot>
-          <button type="button" class="icon-btn sm flat sheet-close" :aria-label="`Close ${props.label ?? title}`" @click="emit('close')"><AppIcon name="close" :size="14" /></button>
+          <button type="button" class="icon-btn sm flat sheet-close" :aria-label="`Close ${props.label ?? title}`" :disabled="session.requiresSignIn" @click="emit('close')"><AppIcon name="close" :size="14" /></button>
         </header>
         <div class="sheet-body"><slot /></div>
         <footer v-if="$slots.foot" class="sheet-foot"><slot name="foot" /></footer>
@@ -58,6 +64,7 @@ defineExpose({ panel })
 <style scoped>
 .sheet-root { position: fixed; inset: 0; z-index: 55; display: flex; justify-content: flex-end; }
 .sheet-root.center { align-items: center; justify-content: center; padding: 16px; }
+.sheet-ended { position: relative; display: flex; align-items: center; flex-wrap: wrap; gap: 8px; padding: 10px 18px; background: var(--chip-teal-bg); font-size: 12px; }
 .sheet-scrim { position: absolute; inset: 0; background: var(--scrim); backdrop-filter: blur(2px); }
 .sheet {
   position: relative; display: flex; flex-direction: column; width: min(520px, 100vw); height: 100%;

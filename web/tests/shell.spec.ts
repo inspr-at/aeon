@@ -10,7 +10,7 @@ const projects = [
 ]
 const projectNodes = projects.map(p => ({ id: p.id, key: p.key, title: p.title, body: '', state: p.state, kind_slug: 'project', fields: { classic: { key: p.id === 'p1' ? 'BAKE' : 'CLINIC', description: 'A small studio project.' } } }))
 
-async function mockAPI(page: Page, options: { signedIn?: boolean; devMode?: boolean; version?: string; sessionFailure?: boolean; logoutFailure?: boolean; loginFailure?: boolean } = {}) {
+async function mockAPI(page: Page, options: { signedIn?: boolean; auth?: { signedIn: boolean }; devMode?: boolean; version?: string; sessionFailure?: boolean; logoutFailure?: boolean; loginFailure?: boolean } = {}) {
   let signedIn = options.signedIn ?? true
   const calls: { path: string; method: string; body: string | null }[] = []
   await page.route('**/api/**', async route => {
@@ -25,16 +25,19 @@ async function mockAPI(page: Page, options: { signedIn?: boolean; devMode?: bool
     if (path === '/api/version') return route.fulfill({ json: { version: options.version ?? canonical, scheme: 'inspr-calendar-v2' } })
     if (path === '/api/me') {
       if (options.sessionFailure) return route.fulfill({ status: 503, json: { error: 'Unavailable' } })
-      return route.fulfill({ status: signedIn ? 200 : 401, json: { ...(signedIn ? identity : { error: 'Unauthorized' }), dev_mode: options.devMode ?? false } })
+      const live = options.auth?.signedIn ?? signedIn
+      return route.fulfill({ status: live ? 200 : 401, json: { ...(live ? identity : { error: 'Unauthorized' }), dev_mode: options.devMode ?? false } })
     }
     if (path === '/api/auth/logout') {
       if (options.logoutFailure) return route.fulfill({ status: 503, json: { error: 'Unavailable' } })
       signedIn = false
+      if (options.auth) options.auth.signedIn = false
       return route.fulfill({ status: 204 })
     }
     if (path === '/api/auth/dev-login') {
       if (options.loginFailure) return route.fulfill({ status: 403, json: { error: 'Forbidden' } })
       signedIn = true
+      if (options.auth) options.auth.signedIn = true
       return route.fulfill({ status: 204 })
     }
     if (path === '/api/auth/login') return route.fulfill({ contentType: 'text/html', body: '<h1>INSPR sign-in</h1>' })
@@ -116,6 +119,93 @@ test('server-authorized email login and account logout use POST', async ({ page 
   await expect(page).toHaveURL('/signin')
   expect(calls).toContainEqual({ path: '/api/auth/dev-login', method: 'POST', body: JSON.stringify({ email: 'markus@barta.com' }) })
   expect(calls).toContainEqual({ path: '/api/auth/logout', method: 'POST', body: null })
+})
+
+test('an expired session cannot navigate into another protected view', async ({ page }) => {
+  const auth = { signedIn: true }
+  const calls = await mockAPI(page, { auth, devMode: true })
+  await page.goto('/')
+  await expect(page.getByRole('heading', { name: 'Projects', level: 1 })).toBeVisible()
+  auth.signedIn = false
+  await page.evaluate(() => import('/src/router.ts').then(({ router }) => router.push('/settings/personal')))
+  await expect(page).toHaveURL(/\/signin\?error=expired&return=\/settings\/personal/)
+  await expect(page.getByRole('heading', { name: 'Sign in', level: 1 })).toBeVisible()
+  await expect(page.getByRole('heading', { name: 'Personal' })).toHaveCount(0)
+  expect(calls.filter(call => call.path === '/api/me').length).toBeGreaterThanOrEqual(2)
+  await page.getByLabel('Email address').fill('markus@barta.com')
+  await page.getByRole('button', { name: 'Continue with email' }).click()
+  await expect(page).toHaveURL('/settings/personal')
+})
+
+test('a revoked session is checked on the next navigation', async ({ page }) => {
+  const auth = { signedIn: true }
+  await mockAPI(page, { auth })
+  await page.goto('/')
+  await expect(page.getByRole('heading', { name: 'Projects', level: 1 })).toBeVisible()
+  auth.signedIn = false
+  await page.evaluate(() => import('/src/router.ts').then(({ router }) => router.push('/agents')))
+  await expect(page).toHaveURL(/\/signin\?error=expired&return=\/agents/)
+  await expect(page.getByRole('heading', { name: 'Sign in', level: 1 })).toBeVisible()
+  await expect(page.getByRole('heading', { name: 'Projects', level: 1 })).toHaveCount(0)
+})
+
+test('INSPR ID sign-in resumes the saved path after the full-page callback', async ({ page }) => {
+  const auth = { signedIn: false }
+  await mockAPI(page, { auth })
+  await page.goto('/signin?error=expired&return=/agents')
+  await expect(page.getByRole('heading', { name: 'Sign in', level: 1 })).toBeVisible()
+  await page.getByRole('link', { name: 'Sign in with INSPR ID' }).click()
+  await expect(page).toHaveURL('/api/auth/login')
+  auth.signedIn = true
+  await page.goto('/') // The OIDC callback returns home with its new session.
+  await expect(page).toHaveURL('/agents')
+})
+
+test('a raw api 401 clears identity but keeps the current view until navigation', async ({ page }) => {
+  const calls = await mockAPI(page)
+  await page.goto('/')
+  await expect(page.getByRole('heading', { name: 'Projects', level: 1 })).toBeVisible()
+  await page.route('**/api/raw-revocation', route => route.fulfill({ status: 401, json: { error: 'unauthorized' } }))
+  expect(await page.evaluate(() => import('/src/lib/api.ts').then(async ({ api }) => (await api('/raw-revocation')).status))).toBe(401)
+  await expect(page).toHaveURL('/')
+  await expect(page.getByRole('heading', { name: 'Projects', level: 1 })).toBeVisible()
+  await expect(page.locator('.session-ended')).toContainText('Your session has ended')
+  expect(await page.evaluate(() => import('/src/stores/session.ts').then(({ useSession }) => useSession().identity))).toBeNull()
+  const before = calls.length
+  expect(await page.evaluate(() => import('/src/lib/api.ts').then(async ({ api }) => (await api('/kinds')).status))).toBe(401)
+  expect(calls.length).toBe(before)
+  await page.evaluate(() => import('/src/router.ts').then(({ router }) => router.push('/agents')))
+  await expect(page).toHaveURL('/signin?error=expired&return=/agents')
+  await expect(page.getByRole('heading', { name: 'Projects', level: 1 })).toHaveCount(0)
+})
+
+test('a raw api 401 also leaves a public route in place until protected navigation', async ({ page }) => {
+  await mockAPI(page)
+  await page.goto('/offers/studio/token')
+  await expect(page).toHaveURL('/offers/studio/token')
+  await expect.poll(() => page.evaluate(() => import('/src/router.ts').then(({ router }) => router.currentRoute.value.fullPath))).toBe('/offers/studio/token')
+  await page.route('**/api/raw-revocation', route => route.fulfill({ status: 401, json: { error: 'unauthorized' } }))
+  expect(await page.evaluate(() => import('/src/lib/api.ts').then(async ({ api }) => (await api('/raw-revocation')).status))).toBe(401)
+  await expect(page).toHaveURL('/offers/studio/token')
+  await expect(page.locator('.session-ended')).toContainText('Your session has ended')
+  await page.evaluate(() => import('/src/router.ts').then(({ router }) => router.push('/agents')))
+  await expect(page).toHaveURL('/signin?error=expired&return=/agents')
+  await expect(page.getByRole('heading', { name: 'Sign in', level: 1 })).toBeVisible()
+})
+
+test('sign-out then Back never restores a protected page from cache', async ({ page }) => {
+  await mockAPI(page)
+  await page.goto('/')
+  await expect(page.getByRole('heading', { name: 'Projects', level: 1 })).toBeVisible()
+  await page.evaluate(() => import('/src/router.ts').then(({ router }) => router.push('/agents')))
+  await expect(page).toHaveURL('/agents')
+  await page.getByRole('button', { name: 'Account for Markus Barta' }).click()
+  await page.getByRole('button', { name: 'Sign out', exact: true }).click()
+  await expect(page).toHaveURL(/\/signin/)
+  await page.goBack()
+  await expect(page).toHaveURL(/\/signin/)
+  await expect(page.getByRole('heading', { name: 'Sign in', level: 1 })).toBeVisible()
+  await expect(page.getByRole('heading', { name: 'Projects', level: 1 })).toHaveCount(0)
 })
 
 test('session outages show retry rather than authenticated content', async ({ page }) => {

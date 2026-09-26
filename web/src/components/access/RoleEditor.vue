@@ -6,6 +6,7 @@ import { onBeforeRouteLeave, onBeforeRouteUpdate, useRouter, type RouteLocationN
 import { beyond, diff, groupPermissions, permissionLabel, type Permission, type Role } from '../../lib/access'
 import { can, myPermissions, permissionsRevoked } from '../../lib/authz'
 import { confirmAction } from '../../lib/confirm'
+import { useSession } from '../../stores/session'
 import { toast } from '../../lib/toast'
 import { useAccess } from '../../stores/access'
 import AppIcon from '../AppIcon.vue'
@@ -103,6 +104,7 @@ function duplicate() { if (props.role) void router.push(`/settings/access/roles/
 let leaving = false
 // Leaving with unsaved changes asks first (another tab, role or page).
 async function guard(to: RouteLocationNormalized, from: RouteLocationNormalized) {
+  if (to.path === '/signin' && useSession().requiresSignIn) return true
   if (to.path === from.path || leaving || readOnly.value || !unsaved.value || (!props.role && !name.value.trim() && !picked.value.size)) return true
   return confirmAction({ title: props.role ? `Leave ${props.role.name} without saving?` : 'Leave the new role without saving?', points: [changes.value ? `${changes.value} permission change${changes.value === 1 ? '' : 's'} to this role will be lost.` : 'What you entered for this role will be lost.'], confirmLabel: 'Leave without saving', cancelLabel: 'Keep editing', danger: true })
 }

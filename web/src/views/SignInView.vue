@@ -6,6 +6,7 @@ import { useRoute, useRouter } from 'vue-router'
 import hero from '../assets/brand/paimos-hero.jpg'
 import mark from '../assets/brand/aeon-mark.svg'
 import { SignInError, useSession } from '../stores/session'
+import { clearSignInReturn, pendingSignInReturn, rememberSignInReturn, safeReturnPath } from '../lib/signInReturn'
 import { dark, toggleTheme } from '../lib/theme'
 import AppIcon from '../components/AppIcon.vue'
 import VersionDisplay from '../components/VersionDisplay.vue'
@@ -19,6 +20,11 @@ const email = ref('')
 const busy = ref(false)
 const retrying = ref(false)
 const devError = ref('')
+const returnPath = computed(() => {
+  const value = route.query.return
+  return typeof value === 'string' ? safeReturnPath(value) : pendingSignInReturn()
+})
+function startOIDC() { rememberSignInReturn(returnPath.value) }
 
 // Codes the sign-in flow can send back as ?error=.
 const FLOW_ERRORS: Record<string, { title: string; body: string }> = {
@@ -45,7 +51,8 @@ async function signIn() {
   devError.value = ''
   try {
     await session.devLogin(email.value.trim())
-    await router.replace('/')
+    await router.replace(returnPath.value)
+    if (session.identity) clearSignInReturn()
     if (!session.identity && !session.error) devError.value = 'Your session wasn’t established. Please try again.'
   } catch (e) { devError.value = DEV_ERRORS[e instanceof SignInError ? e.reason : 'failed'] }
   finally { busy.value = false }
@@ -84,13 +91,13 @@ function dismiss() { const { error: _error, ...rest } = route.query; void router
           <p class="notice-title">{{ flowError.title }}</p>
           <p>{{ flowError.body }}</p>
           <div class="notice-actions">
-            <a class="btn sm" href="/api/auth/login"><AppIcon name="refresh" :size="13" />Try again</a>
+            <a class="btn sm" href="/api/auth/login" @click="startOIDC"><AppIcon name="refresh" :size="13" />Try again</a>
             <button type="button" class="btn sm ghost" @click="dismiss">Dismiss</button>
           </div>
         </div>
       </div>
 
-      <a class="btn primary login-button" href="/api/auth/login"><AppIcon name="key" :size="16" />Sign in with INSPR ID<AppIcon name="arrow" :size="15" class="go" /></a>
+      <a class="btn primary login-button" href="/api/auth/login" @click="startOIDC"><AppIcon name="key" :size="16" />Sign in with INSPR ID<AppIcon name="arrow" :size="15" class="go" /></a>
       <p class="fine">One account for everything INSPR. You are sent to INSPR ID and back.</p>
 
       <form v-if="session.devMode" class="dev-form" @submit.prevent="signIn">

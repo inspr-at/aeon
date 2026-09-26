@@ -1,7 +1,7 @@
 // SPDX-License-Identifier: AGPL-3.0-only
 // The signed-in person's profile (GET/PATCH /api/me/profile), their avatar
 // (POST/DELETE /api/me/avatar) and the page-load greeting (GET /api/me/greeting).
-import { api } from './api.ts'
+import { api, sessionEnded } from './api.ts'
 import { uploadError } from './avatar.ts'
 
 export interface Profile {
@@ -59,6 +59,7 @@ export function shortNameProblem(value: string) {
 // Uploads with progress (fetch has no upload progress), resolving to the updated profile.
 export function uploadAvatar(file: Blob, crop: { x: number; y: number; size: number }, onProgress: (fraction: number) => void): { done: Promise<Profile>; abort: () => void } {
   const xhr = new XMLHttpRequest()
+  if (sessionEnded.blocked) return { done: Promise.reject(new Error('Your session has ended.')), abort: () => {} }
   const done = new Promise<Profile>((resolve, reject) => {
     const form = new FormData()
     form.append('crop', JSON.stringify(crop))
@@ -68,6 +69,7 @@ export function uploadAvatar(file: Blob, crop: { x: number; y: number; size: num
     xhr.setRequestHeader('Accept', 'application/json')
     xhr.upload.onprogress = event => { if (event.lengthComputable) onProgress(event.loaded / event.total) }
     xhr.onload = () => {
+      if (xhr.status === 401) { sessionEnded.blocked = true; sessionEnded.handler?.('/me/avatar') }
       let body: { error?: string } & Partial<Profile> = {}
       try { body = JSON.parse(xhr.responseText) } catch { body = {} }
       if (xhr.status >= 200 && xhr.status < 300) resolve(body as Profile)
