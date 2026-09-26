@@ -1,6 +1,6 @@
 // SPDX-License-Identifier: AGPL-3.0-only
 import { afterEach, describe, expect, it, vi } from 'vitest'
-import { accessChanged, can, clearPermissions, refreshPermissions } from '../src/lib/authz'
+import { accessChanged, can, clearPermissions, myPermissions, myWorkspaceRole, permissionsAvailable, permissionsKnown, refreshPermissions, revokePermissions } from '../src/lib/authz'
 
 afterEach(() => { clearPermissions(); vi.unstubAllGlobals() })
 
@@ -37,6 +37,19 @@ describe('can()', () => {
     await accessChanged()
     expect(can('keys.manage')).toBe(false)
   })
+  it('keeps the current answer while an access change is asked again (no flicker)', async () => {
+    let finish!: (value: { ok: boolean; json: () => Promise<unknown> }) => void
+    const fetch = vi.fn()
+      .mockImplementationOnce(async () => ({ ok: true, json: async () => ({ workspace: { role: null, permissions: ['members.read'] }, project: null }) }))
+      .mockImplementationOnce(() => new Promise(resolve => { finish = resolve }))
+    vi.stubGlobal('fetch', fetch)
+    await refreshPermissions()
+    const pending = accessChanged()
+    expect(can('members.read')).toBe(true)
+    finish({ ok: true, json: async () => ({ workspace: { role: null, permissions: [] }, project: null }) })
+    await pending
+    expect(can('members.read')).toBe(false)
+  })
   it('ignores an answer started before sign-out', async () => {
     let finishOld!: (value: { ok: boolean; json: () => Promise<unknown> }) => void
     const old = new Promise<{ ok: boolean; json: () => Promise<unknown> }>(resolve => { finishOld = resolve })
@@ -48,5 +61,65 @@ describe('can()', () => {
     finishOld({ ok: true, json: async () => ({ workspace: { role: null, permissions: ['keys.manage'] }, project: null }) })
     await pending
     expect(can('keys.manage')).toBe(false)
+  })
+  it('Access reads my role and permissions from the same answer', async () => {
+    vi.stubGlobal('fetch', vi.fn(async () => ({ ok: true, json: async () => ({ workspace: { role: { id: 'r', key: 'member', name: 'Member' }, permissions: ['nodes.read', 'members.read'] }, project: null }) })))
+    expect(permissionsKnown()).toBe(false)
+    await refreshPermissions()
+    expect(permissionsKnown()).toBe(true)
+    expect(permissionsAvailable()).toBe(true)
+    expect(myWorkspaceRole()?.name).toBe('Member')
+    expect([...myPermissions()].sort()).toEqual(['members.read', 'nodes.read'])
+  })
+  it('a server without the endpoint is known, unavailable and grants nothing', async () => {
+    vi.stubGlobal('fetch', vi.fn(async () => ({ ok: false })))
+    await refreshPermissions()
+    expect(permissionsKnown()).toBe(true)
+    expect(permissionsAvailable()).toBe(false)
+    expect(myPermissions().size).toBe(0)
+  })
+  it('review #1: an answer still in flight when access changes never lands', async () => {
+    let finishOld!: (value: { ok: boolean; json: () => Promise<unknown> }) => void
+    const fetch = vi.fn()
+      .mockImplementationOnce(() => new Promise(resolve => { finishOld = resolve }))
+      .mockImplementationOnce(async () => ({ ok: true, json: async () => ({ workspace: { role: null, permissions: [] }, project: { id: 'p', role: null, permissions: [] } }) }))
+      .mockImplementation(async () => ({ ok: true, json: async () => ({ workspace: { role: null, permissions: [] }, project: null }) }))
+    vi.stubGlobal('fetch', fetch)
+    expect(can('members.manage', 'p')).toBe(false) // asks for project p; the answer is slow
+    const change = accessChanged() // my role was reduced meanwhile
+    finishOld({ ok: true, json: async () => ({ workspace: { role: null, permissions: ['members.manage'] }, project: { id: 'p', role: null, permissions: ['members.manage'] } }) })
+    await change
+    expect(can('members.manage', 'p')).toBe(false)
+  })
+  it('review #2: a session that ended grants nothing and asks nothing until refreshed', async () => {
+    const fetch = vi.fn(async () => ({ ok: true, json: async () => ({ workspace: { role: null, permissions: ['members.read'] }, project: null }) }))
+    vi.stubGlobal('fetch', fetch)
+    await refreshPermissions()
+    expect(can('members.read')).toBe(true)
+    revokePermissions()
+    const asked = fetch.mock.calls.length
+    expect(can('members.read')).toBe(false)
+    expect(can('members.read', 'other')).toBe(false)
+    expect(fetch.mock.calls.length).toBe(asked)
+    await accessChanged()
+    expect(can('members.read')).toBe(true)
+  })
+  it('review r2: a 401 latches until a later 200, and never refetches by itself', async () => {
+    let status = 401
+    const fetch = vi.fn(async () => status === 200
+      ? { ok: true, status, json: async () => ({ workspace: { role: null, permissions: ['members.read'] }, project: null }) }
+      : { ok: false, status, json: async () => ({}) })
+    vi.stubGlobal('fetch', fetch)
+    await refreshPermissions()
+    const asked = fetch.mock.calls.length
+    expect(can('members.read')).toBe(false)
+    expect(permissionsKnown()).toBe(true)
+    await refreshPermissions('p')
+    expect(fetch.mock.calls.length).toBe(asked) // latched: no self-refetch
+    await accessChanged() // a focus re-check that 401s latches again
+    expect(can('members.read')).toBe(false)
+    status = 200
+    await accessChanged()
+    expect(can('members.read')).toBe(true)
   })
 })

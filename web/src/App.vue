@@ -20,12 +20,15 @@ import { toast } from './lib/toast'
 import { displayHeadline, getRelease } from './lib/releases'
 import { headerFolded } from './lib/chrome'
 import { sessionEnded } from './lib/api'
+import { revokePermissions } from './lib/authz'
 
 const ReleasesSheet = defineAsyncComponent(() => import('./components/releases/ReleasesSheet.vue'))
 // A request that finds the session ended keeps the page as it is (drafts included)
 // and offers sign-in in a new tab; back here, saving again works (AEON-140).
 sessionEnded.handler = () => {
   if (!session.identity) return
+  // A dead session authorizes nothing on this page, even before sign-in.
+  revokePermissions()
   toast('Your session has ended. Sign in again in a new tab; what you typed stays on this page.', {
     sticky: true, key: 'session-ended', tone: 'error',
     action: { label: 'Sign in', run: () => { window.open('/signin?error=expired', '_blank', 'noopener') } },
@@ -131,9 +134,11 @@ async function retry() {
 }
 // Move focus to the page on real page changes; opening a ticket panel within a
 // project keeps the list's focus and scroll position.
-watch(() => [route.path, route.params.projectKey, route.params.ticketKey] as const, async ([path, project], old) => {
+watch(() => [route.path, route.params.projectKey, route.params.ticketKey, route.matched.at(-1)] as const, async ([path, project, , record], old) => {
   if (old && project && project === old[1]) return
   if (old && path === old[0]) return
+  // Moving within a route that manages its own focus (Settings > Access tabs and details) keeps it.
+  if (old && record && record === old[3] && record.meta.keepsFocus) return
   await nextTick()
   main.value?.focus({ preventScroll: true })
 })

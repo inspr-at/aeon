@@ -6,6 +6,7 @@ import { listNodes, type ListItem, type WorkNode } from '../lib/api'
 import { searchWork, workKindMap } from '../lib/ticketSearch'
 import { DOCK_MEDIA, dockPath, entryPath, kindToken, listKnowledge, typeMeta, type KnowledgeItem } from '../lib/knowledge'
 import { visibleSections } from '../lib/settings'
+import { can } from '../lib/authz'
 import { run } from '../lib/commands'
 import { actionResults, assemble, keyPrefixOf, keyQuery, knowledgeResults, projectResults, recentResults, ticketResults, viewResults, type ActionResult, type Group, type Result, type TicketResult } from '../lib/palette'
 import { loadViews, viewsOf } from '../lib/savedViews'
@@ -79,7 +80,7 @@ const actions = computed<ActionResult[]>(() => {
   if (business.anyOpen && route.path !== '/business') out.push({ type: 'action', id: 'go-business', label: 'Go to Business', hint: 'Customers, quotes, hours and rates', icon: 'briefcase', keys: ['g', 'b'] })
   if (!route.path.startsWith('/settings')) out.push({ type: 'action', id: 'settings', label: 'Settings', hint: 'Theme, greeting and keys', icon: 'gear' })
   // Each settings section is found by name ("workspace settings", "agent keys").
-  for (const section of visibleSections(business.admin)) out.push({ type: 'action', id: `settings-${section.id}`, label: `${section.label} settings`, hint: section.summary, icon: 'gear', searchOnly: true })
+  for (const section of visibleSections(business.admin, permission => can(permission))) out.push({ type: 'action', id: `settings-${section.id}`, label: `${section.label} settings`, hint: section.summary, icon: 'gear', searchOnly: true })
   out.push({ type: 'action', id: 'theme', label: dark.value ? 'Switch to light theme' : 'Switch to dark theme', icon: dark.value ? 'sun' : 'moon' })
   out.push({ type: 'action', id: 'releases', label: 'Release history', hint: 'What changed, release by release', icon: 'history' })
   out.push({ type: 'action', id: 'shortcuts', label: 'Keyboard shortcuts', icon: 'keyboard', keys: ['?'] })

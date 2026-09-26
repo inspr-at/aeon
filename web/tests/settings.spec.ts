@@ -7,6 +7,7 @@ import { fixtures, mockWork, watchErrors } from './work-fixtures'
 import { businessData, mockBusiness } from './business-fixtures'
 import { agentData, mockAgents } from './agents-fixtures'
 import { mockSettings, settingsData, type SettingsMockOptions } from './settings-fixtures'
+import { accessWorld, mockAccess } from './access-fixtures'
 
 const sections = (page: Page) => page.getByRole('navigation', { name: 'Settings sections' })
 async function setup(page: Page, options: SettingsMockOptions & { role?: 'admin' | 'member' } = {}) {
@@ -25,7 +26,7 @@ test('the account menu opens Settings on Personal: theme, greeting and keys', as
   await page.getByRole('button', { name: 'Settings' }).click()
   await expect(page).toHaveURL('/settings/personal')
   await expect(page).toHaveTitle(/^Settings · /)
-  await expect(sections(page).getByRole('link')).toHaveText([/^Personal/, /^Workspace/, /^Business/, /^Projects/])
+  await expect(sections(page).getByRole('link')).toHaveText([/^Personal/, /^Workspace/, /^Access/, /^Business/, /^Projects/])
   await expect(sections(page).getByRole('link', { name: /^Personal/ })).toHaveAttribute('aria-current', 'page')
 
   await page.getByRole('radio', { name: 'Dark' }).click()
@@ -69,31 +70,17 @@ test('members see only Personal; an admin section explains itself', async ({ pag
   await expect(page.getByRole('option', { name: /Workspace settings/ })).toHaveCount(0)
 })
 
-test('Workspace lists members and agent keys, read-only', async ({ page }) => {
+test('Workspace shows the workspace and my role; people and keys moved to Access', async ({ page }) => {
   await setup(page)
+  await mockAccess(page, accessWorld({ role: 'admin' }))
   await page.goto('/settings/workspace')
-  const members = page.locator('#members')
-  await expect(members.locator('.people').first().getByRole('listitem')).toHaveText([/Markus Barta\s*Admin/, /Mira Holm\s*Member/, /Cleo Customer\s*Customer/])
-  await expect(members).toContainText('Cleo Customer')
-  await expect(members).toContainText('Nova')
-  await expect(members).not.toContainText('System')
-  const rows = page.locator('#agent-keys tbody tr')
-  await expect(rows).toHaveCount(3)
-  await expect(rows.nth(0)).toContainText('aeon-coordinator')
-  await expect(rows.nth(0)).toContainText('aeon_c0or_…')
-  await expect(rows.nth(0)).toContainText('None')
-  await expect(rows.nth(1)).toContainText('journey:write')
-  await expect(rows.nth(2).locator('.state')).toHaveText('Revoked')
-  // Read-only: nothing to create or revoke yet.
-  await expect(page.locator('#agent-keys').getByRole('button')).toHaveCount(0)
-})
-
-test('without members.read the directory explains the access limit', async ({ page }) => {
-  await mockWork(page, fixtures())
-  await mockBusiness(page, businessData(), { noDirectory: true })
-  await mockSettings(page, settingsData())
-  await page.goto('/settings/workspace')
-  await expect(page.locator('#members')).toContainText('You don’t have permission to view workspace members.')
+  const workspace = page.locator('#workspace')
+  await expect(workspace).toContainText('INSPR Studio')
+  // My role comes from /api/me/permissions, not from role strings.
+  await expect(workspace.locator('dd').nth(1)).toHaveText('Admin')
+  await page.locator('#members').getByRole('link', { name: 'Open Access' }).click()
+  await expect(page).toHaveURL('/settings/access')
+  await expect(page.getByRole('table', { name: 'People' })).toBeVisible()
 })
 
 test('card controls share one alignment: centred on the title and its line', async ({ page }) => {
@@ -144,10 +131,11 @@ test('Agents links admins to the agent keys', async ({ page }) => {
   await mockAgents(page, agentData({ me: '11111111-1111-4111-8111-111111111111', projects: { pharos: 'p-pharos', aeon: 'p-aeon', pai: 'p-frozen' }, tickets: { fleet: 'n-1', restore: 'n-2', web: 'n-a1', release: 'n-5', approvals: 'n-6' }, nodes: {}, empty: true }))
   await mockBusiness(page, businessData())
   await mockSettings(page, settingsData())
+  await mockAccess(page, accessWorld())
   await page.goto('/agents')
   await page.getByRole('link', { name: 'Agent keys' }).click()
-  await expect(page).toHaveURL('/settings/workspace#agent-keys')
-  await expect(page.locator('#agent-keys')).toHaveClass(/arrived/)
+  await expect(page).toHaveURL('/settings/access/agents')
+  await expect(page.getByRole('list', { name: 'Agents' })).toContainText('aeon-coordinator')
 })
 
 test('at 390 the sections sit in a grid and nothing is cut', async ({ page }) => {
