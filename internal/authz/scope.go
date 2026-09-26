@@ -32,6 +32,7 @@ var ProjectFilteredRoutes = map[string]bool{
 	"GET /api/search":                             true,
 	"GET /api/events":                             true,
 	"GET /api/events/stream":                      true,
+	"GET /api/from-classic":                       true,
 	"GET /api/knowledge":                          true,
 	"GET /api/knowledge/graph":                    true,
 	"GET /api/knowledge/resolve":                  true,
