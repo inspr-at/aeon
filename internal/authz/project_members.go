@@ -40,7 +40,6 @@ type ProjectBinding struct {
 }
 
 var (
-	errNotProject    = errors.New("not a project")
 	errProjectRole   = errors.New("role cannot be granted on a project")
 	errViaWorkspace  = errors.New("access comes from the workspace role")
 	errNotBindable   = errors.New("principal cannot be bound")
@@ -262,7 +261,7 @@ func (m *Module) putProjectMember(w http.ResponseWriter, r *http.Request) {
 			return nil
 		}
 		after := bindingSnapshot{PrincipalID: principalID, ScopeType: "project", ProjectID: projectID, ProjectKey: projectKey, Role: &out.Role}
-		return appendProjectEvent(ctx, tx, p, projectID, "authz.binding_set", before, after)
+		return appendProjectEvent(ctx, tx, p, projectID, "binding.set", before, after)
 	})
 	if err != nil {
 		projectFail(w, err)
@@ -307,7 +306,7 @@ func (m *Module) deleteProjectMember(w http.ResponseWriter, r *http.Request) {
 			return err
 		}
 		before := bindingSnapshot{PrincipalID: principalID, ScopeType: "project", ProjectID: projectID, ProjectKey: projectKey, Role: &RoleRef{ID: roleID, Key: roleKey, Name: roleName}}
-		return appendProjectEvent(ctx, tx, p, projectID, "authz.binding_removed", before, nil)
+		return appendProjectEvent(ctx, tx, p, projectID, "binding.removed", before, nil)
 	})
 	if err != nil {
 		projectFail(w, err)

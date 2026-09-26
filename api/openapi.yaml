@@ -64,6 +64,99 @@ paths:
         '200': {description: Updated member, content: {application/json: {schema: {$ref: '#/components/schemas/Member'}}}}
         '400': {description: Invalid role; Guest is a project role (code project_only_role)}
         '403': {description: Permission denied or role escalation}
+  /members/invites:
+    post:
+      operationId: createMemberInvite
+      summary: Create an invite and return its join link once
+      description: No email is sent. The join URL contains a token that is stored only as a hash. The invited email must be verified by the identity provider before the invite can be accepted.
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: {$ref: '#/components/schemas/InviteWrite'}
+      responses:
+        '201':
+          description: Invite and the one-time join URL
+          content:
+            application/json:
+              schema:
+                type: object
+                required: [invite, join_url]
+                properties:
+                  invite: {$ref: '#/components/schemas/Invite'}
+                  join_url: {type: string}
+        '400': {description: Invalid email, expiry, role or project}
+        '403': {description: Permission denied or the role exceeds the inviter}
+        '409': {description: Email already belongs to an active member}
+  /members/invites/{id}:
+    delete:
+      operationId: revokeMemberInvite
+      parameters:
+        - {name: id, in: path, required: true, schema: {type: string, format: uuid}}
+      responses:
+        '204': {description: Invite revoked}
+        '404': {description: No such invite}
+        '409': {description: Invite was already accepted}
+  /members/{principal_id}/deactivate:
+    post:
+      operationId: deactivateMember
+      parameters:
+        - {name: principal_id, in: path, required: true, schema: {type: string, format: uuid}}
+      responses:
+        '200': {description: Deactivated member, content: {application/json: {schema: {$ref: '#/components/schemas/Member'}}}}
+        '403': {description: Permission denied}
+        '409': {description: Last active owner, or already deactivated}
+  /members/{principal_id}/reactivate:
+    post:
+      operationId: reactivateMember
+      parameters:
+        - {name: principal_id, in: path, required: true, schema: {type: string, format: uuid}}
+      responses:
+        '200': {description: Reactivated member, content: {application/json: {schema: {$ref: '#/components/schemas/Member'}}}}
+        '403': {description: Permission denied}
+        '409': {description: Already active}
+  /members/{principal_id}/aliases:
+    post:
+      operationId: linkMemberAlias
+      parameters:
+        - {name: principal_id, in: path, required: true, schema: {type: string, format: uuid}}
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [from_principal_id]
+              properties:
+                from_principal_id: {type: string, format: uuid}
+      responses:
+        '200': {description: Person with the new alias, content: {application/json: {schema: {$ref: '#/components/schemas/Member'}}}}
+        '400': {description: Alias would form a chain or a self-link}
+        '403': {description: Permission denied}
+        '409': {description: Already linked, or the alias is the last active owner}
+  /members/{principal_id}/aliases/{from_principal_id}:
+    delete:
+      operationId: unlinkMemberAlias
+      parameters:
+        - {name: principal_id, in: path, required: true, schema: {type: string, format: uuid}}
+        - {name: from_principal_id, in: path, required: true, schema: {type: string, format: uuid}}
+      responses:
+        '204': {description: Alias removed}
+        '404': {description: That alias is not linked to this person}
+  /audit:
+    get:
+      operationId: listAccessAudit
+      summary: Access changes, with names resolved
+      parameters:
+        - {name: category, in: query, required: true, schema: {type: string, enum: [access]}}
+        - {name: after, in: query, schema: {type: integer, minimum: 0}, description: Return events with id greater than this cursor}
+      responses:
+        '200':
+          description: One page of access events
+          content:
+            application/json:
+              schema: {$ref: '#/components/schemas/AccessAuditPage'}
+        '403': {description: audit.read required}
   /projects/{id}/members:
     get:
       operationId: listProjectMembers
@@ -86,7 +179,7 @@ paths:
       description: >-
         Needs members.manage on the project and every project-grantable permission of the role.
         A project binding grants only the role's project-grantable permissions. Owner and
-        Customer are workspace roles. Writes an authz.binding_set event (audit type binding.set)
+        Customer are workspace roles. Writes a binding.set event
         on the project.
       parameters:
         - {name: id, in: path, required: true, schema: {type: string, format: uuid}}
@@ -100,7 +193,7 @@ paths:
     delete:
       operationId: removeProjectRole
       summary: Remove a principal's binding on one project
-      description: Needs members.manage on the project. Writes an authz.binding_removed event (audit type binding.removed) on the project.
+      description: Needs members.manage on the project. Writes a binding.removed event on the project.
       parameters:
         - {name: id, in: path, required: true, schema: {type: string, format: uuid}}
         - {name: principal_id, in: path, required: true, schema: {type: string, format: uuid}}
@@ -361,7 +454,7 @@ paths:
               schema:
                 $ref: "#/components/schemas/Error"
         "403":
-          description: Admin role required
+          description: keys.manage required
           content:
             application/json:
               schema:
@@ -369,7 +462,7 @@ paths:
     post:
       operationId: createAgentKey
       summary: Create an agent key and return its secret once
-      description: Creates an agent principal with this name when the tenant does not already have one.
+      description: Pass principal_id to mint a key for an existing agent. name alone still finds or creates an agent, for older clients. Scopes are stored in dot notation; colon input is normalized. A key never receives a permission the creator does not hold, and never a permission that is not agent_grantable. Requires keys.manage.
       security:
         - session: []
         - agentKey: []
@@ -379,10 +472,14 @@ paths:
           application/json:
             schema:
               type: object
-              required: [name]
               properties:
                 name:
                   type: string
+                  description: Agent name when principal_id is omitted; otherwise the key's label
+                principal_id:
+                  type: string
+                  format: uuid
+                  description: Existing agent. Takes precedence over creating an agent by name.
                 scopes:
                   type: array
                   items:
@@ -410,7 +507,7 @@ paths:
               schema:
                 $ref: "#/components/schemas/Error"
         "403":
-          description: Admin role required
+          description: keys.manage required, or the scopes exceed the creator
           content:
             application/json:
               schema:
@@ -443,7 +540,7 @@ paths:
               schema:
                 $ref: "#/components/schemas/Error"
         "403":
-          description: Admin role required
+          description: keys.manage required
           content:
             application/json:
               schema:
@@ -2990,13 +3087,14 @@ components:
   schemas:
     AuthzPermission:
       type: object
-      required: [key, group, description, risk, grantable_at]
+      required: [key, group, description, risk, grantable_at, agent_grantable]
       properties:
         key: {type: string}
         group: {type: string}
         description: {type: string}
         risk: {type: string, enum: [low, medium, high]}
         grantable_at: {type: array, items: {type: string, enum: [workspace, project]}}
+        agent_grantable: {type: boolean, description: A key may carry this permission. The scope picker is built from this flag.}
     AuthzRoleRef:
       type: object
       required: [id, key, name]
@@ -3059,17 +3157,9 @@ components:
         scope_type: {type: string, enum: [project]}
         role: {$ref: '#/components/schemas/AuthzRoleRef'}
         created_at: {type: string, format: date-time}
-    ProjectRoleGrant:
-      type: object
-      required: [project_id, project_key, project_title, role]
-      properties:
-        project_id: {type: string, format: uuid}
-        project_key: {type: string}
-        project_title: {type: string}
-        role: {$ref: '#/components/schemas/AuthzRoleRef'}
     Member:
       type: object
-      required: [principal_id, name, avatar_url, has_avatar, email, status, identity, workspace_role, project_roles, aliases, classic_role, last_active_at]
+      required: [principal_id, name, avatar_url, has_avatar, email, status, identity, workspace_role, project_roles, aliases, classic_role, last_active_at, last_owner]
       properties:
         principal_id: {type: string, format: uuid}
         name: {type: string}
@@ -3079,18 +3169,99 @@ components:
         status: {type: string, enum: [active, deactivated]}
         identity: {type: [string, 'null'], enum: [inspr_id, null]}
         workspace_role: {oneOf: [{$ref: '#/components/schemas/AuthzRoleRef'}, {type: 'null'}]}
-        project_roles: {type: array, items: {$ref: '#/components/schemas/ProjectRoleGrant'}}
-        aliases: {type: array, items: {type: object}}
+        project_roles: {type: array, items: {$ref: '#/components/schemas/ProjectRole'}}
+        aliases: {type: array, items: {$ref: '#/components/schemas/MemberAlias'}}
         classic_role: {type: [string, 'null']}
         last_active_at: {type: [string, 'null'], format: date-time}
+        last_owner: {type: boolean}
+    MemberAlias:
+      type: object
+      required: [principal_id, name, source]
+      properties:
+        principal_id: {type: string, format: uuid}
+        name: {type: string}
+        source: {type: string, enum: [classic]}
+    ProjectRole:
+      type: object
+      required: [project_id, project_key, project_title, role]
+      properties:
+        project_id: {type: string, format: uuid}
+        project_key: {type: string}
+        project_title: {type: string}
+        role: {$ref: '#/components/schemas/AuthzRoleRef'}
+    PrincipalRef:
+      type: object
+      required: [principal_id, name]
+      properties:
+        principal_id: {type: string, format: uuid}
+        name: {type: string}
+    Invite:
+      type: object
+      required: [id, email, workspace_role, project_roles, status, created_by, created_at, expires_at, accepted_by, accepted_at]
+      properties:
+        id: {type: string, format: uuid}
+        email: {type: string, format: email}
+        workspace_role: {oneOf: [{$ref: '#/components/schemas/AuthzRoleRef'}, {type: 'null'}]}
+        project_roles: {type: array, items: {$ref: '#/components/schemas/ProjectRole'}}
+        status: {type: string, enum: [pending, expired, revoked, accepted]}
+        created_by: {$ref: '#/components/schemas/PrincipalRef'}
+        created_at: {type: string, format: date-time}
+        expires_at: {type: string, format: date-time}
+        accepted_by: {oneOf: [{$ref: '#/components/schemas/PrincipalRef'}, {type: 'null'}]}
+        accepted_at: {type: [string, 'null'], format: date-time}
+    InviteWrite:
+      type: object
+      required: [email]
+      properties:
+        email: {type: string, format: email}
+        workspace_role_id: {type: string, format: uuid}
+        project_roles:
+          type: array
+          items:
+            type: object
+            required: [project_id, role_id]
+            properties:
+              project_id: {type: string, format: uuid}
+              role_id: {type: string, format: uuid}
+        expires_in_days: {type: integer, minimum: 1, maximum: 90, default: 14}
+    AccessAuditPage:
+      type: object
+      required: [items, next_after]
+      properties:
+        items: {type: array, items: {$ref: '#/components/schemas/AccessAuditEvent'}}
+        next_after: {type: [integer, 'null']}
+    AccessAuditEvent:
+      type: object
+      required: [id, type, at, actor, subject, project, data]
+      properties:
+        id: {type: integer}
+        type: {type: string}
+        at: {type: string, format: date-time}
+        actor: {$ref: '#/components/schemas/PrincipalRef'}
+        subject: {oneOf: [{$ref: '#/components/schemas/PrincipalRef'}, {type: 'null'}]}
+        project: {oneOf: [{type: object, required: [id, key], properties: {id: {type: string, format: uuid}, key: {type: string}}}, {type: 'null'}]}
+        data: {type: object}
     MemberDirectory:
       type: object
-      required: [people, agents, invites, imported]
+      required: [people, agents, invites, imported, owner_count]
       properties:
         people: {type: array, items: {$ref: '#/components/schemas/Member'}}
-        agents: {type: array, items: {type: object}}
-        invites: {type: array, items: {type: object}}
+        agents:
+          type: array
+          items:
+            type: object
+            required: [principal_id, name, has_avatar, workspace_role, key_count, last_seen_at, service]
+            properties:
+              principal_id: {type: string, format: uuid}
+              name: {type: string}
+              has_avatar: {type: boolean}
+              workspace_role: {oneOf: [{$ref: '#/components/schemas/AuthzRoleRef'}, {type: 'null'}]}
+              key_count: {type: integer}
+              last_seen_at: {type: [string, 'null'], format: date-time}
+              service: {type: boolean}
+        invites: {type: array, items: {$ref: '#/components/schemas/Invite'}}
         imported: {type: array, items: {type: object}}
+        owner_count: {type: integer}
     Greeting:
       type: object
       additionalProperties: false

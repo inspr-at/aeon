@@ -16,7 +16,9 @@
 // Suggestions are read-only evidence, never authorization or automatic linking.
 //
 // Links change presentation and future assignment/comment writes only. They do
-// not transfer roles, identities, sessions or access grants. Historical IDs and
+// not transfer roles, identities, sessions or access grants. A linked alias
+// keeps no role binding of its own; authorization is the canonical person's,
+// and unlink may restore a classic workspace binding. Historical IDs and
 // source records remain intact; unlink restores their original presentation.
 // Principals retain classic usernames and optional email for manual matching;
 // OIDC email is read from the bound identity when no principal email is stored.

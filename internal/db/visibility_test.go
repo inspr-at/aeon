@@ -348,7 +348,7 @@ func TestProjectAccessMigrationsRunUnderForcedRLS(t *testing.T) {
 	var guests, events int
 	if err := d.Admin.QueryRow(ctx, `SELECT
 	   (SELECT count(*) FROM role_bindings b JOIN roles r ON r.tenant_id=b.tenant_id AND r.id=b.role_id WHERE b.scope_type='workspace' AND r.key='guest'),
-	   (SELECT count(*) FROM events WHERE type='authz.binding_removed' AND before->>'principal_id'=$1)`, external).Scan(&guests, &events); err != nil {
+	   (SELECT count(*) FROM events WHERE type='binding.removed' AND before->>'principal_id'=$1)`, external).Scan(&guests, &events); err != nil {
 		t.Fatal(err)
 	}
 	if guests != 0 || events != 1 {

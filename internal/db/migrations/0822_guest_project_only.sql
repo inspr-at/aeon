@@ -70,7 +70,7 @@ BEGIN
         LOOP
             DELETE FROM role_bindings WHERE tenant_id = tenant AND id = binding.id;
             INSERT INTO events(tenant_id, actor_principal_id, type, before)
-            VALUES (tenant, aeon_authz_system_actor(tenant), 'authz.binding_removed',
+            VALUES (tenant, aeon_authz_system_actor(tenant), 'binding.removed',
                 jsonb_build_object('principal_id', binding.principal_id, 'scope_type', 'workspace',
                     'project_id', NULL,
                     'role', jsonb_build_object('id', binding.role_id, 'key', binding.key, 'name', binding.name),

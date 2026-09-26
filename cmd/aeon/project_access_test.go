@@ -255,12 +255,20 @@ func TestProjectAccessOverHTTP(t *testing.T) {
 	w.expect(guest, "GET", "/api/nodes/"+w.ids["TB"], "", 403)
 	// Each change is an event on the project, visible with the project only.
 	var changes int
-	if err := w.d.Admin.QueryRow(ctx, `SELECT count(*) FROM events WHERE node_id=$1 AND type IN ('authz.binding_set','authz.binding_removed')`, w.ids["B"]).Scan(&changes); err != nil {
+	if err := w.d.Admin.QueryRow(ctx, `SELECT count(*) FROM events WHERE node_id=$1 AND type IN ('binding.set','binding.removed')`, w.ids["B"]).Scan(&changes); err != nil {
 		t.Fatal(err)
 	}
 	if changes != 2 {
 		t.Errorf("binding events on project B: %d", changes)
 	}
+	// The access audit shows both changes with their project and person.
+	audit := w.expect("owner", "GET", "/api/audit?category=access", "", 200)
+	for _, needle := range []string{`"binding.set"`, `"binding.removed"`, w.ids["B"], w.people["guest"]} {
+		if !strings.Contains(audit, needle) {
+			t.Errorf("access audit lacks %s", needle)
+		}
+	}
+	w.expect(guest, "GET", "/api/audit?category=access", "", 403)
 	w.noLeak(guest, "/api/events after removal", w.expect(guest, "GET", "/api/events?limit=200", "", 200))
 }
 

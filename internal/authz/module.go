@@ -35,6 +35,13 @@ func (m *Module) Mount(mux *http.ServeMux) {
 	Handle(mux, m.pool, "DELETE /api/roles/{id}", "roles.manage", m.deleteRole)
 	Handle(mux, m.pool, "GET /api/members", "members.read", m.members)
 	Handle(mux, m.pool, "PUT /api/members/{principal_id}/workspace-role", "members.manage", m.putWorkspaceRole)
+	Handle(mux, m.pool, "POST /api/members/invites", "members.manage", m.createInvite)
+	Handle(mux, m.pool, "DELETE /api/members/invites/{id}", "members.manage", m.revokeInvite)
+	Handle(mux, m.pool, "POST /api/members/{principal_id}/deactivate", "members.manage", m.deactivate)
+	Handle(mux, m.pool, "POST /api/members/{principal_id}/reactivate", "members.manage", m.reactivate)
+	Handle(mux, m.pool, "POST /api/members/{principal_id}/aliases", "members.manage", m.linkAlias)
+	Handle(mux, m.pool, "DELETE /api/members/{principal_id}/aliases/{from_principal_id}", "members.manage", m.unlinkAlias)
+	Handle(mux, m.pool, "GET /api/audit", "audit.read", m.audit)
 	Handle(mux, m.pool, "GET /api/projects/{projectId}/members", "members.read", m.projectMembers)
 	Handle(mux, m.pool, "PUT /api/projects/{projectId}/members/{principal_id}", "members.manage", m.putProjectMember)
 	Handle(mux, m.pool, "DELETE /api/projects/{projectId}/members/{principal_id}", "members.manage", m.deleteProjectMember)
@@ -58,7 +65,7 @@ func internalFail(w http.ResponseWriter, err error) {
 		apiFail(w, 404, "not_found", "", "Resource not found")
 	case errors.Is(err, ErrForbidden):
 		apiFail(w, 403, "forbidden", "", "Permission denied")
-	case errors.As(err, &pe) && pe.Code == "23514" && strings.Contains(pe.Message, "last active owner"):
+	case lastOwnerViolation(err):
 		apiFail(w, 409, "last_owner", "role_id", "The last active owner cannot be removed")
 	case errors.As(err, &pe) && strings.HasPrefix(pe.Code, "23"):
 		apiFail(w, 409, "conflict", "", "The change conflicts with an existing record")
@@ -441,3 +448,13 @@ func (m *Module) deleteRole(w http.ResponseWriter, r *http.Request) {
 }
 
 var errRoleInUse = errors.New("role in use")
+
+func lastOwnerViolation(err error) bool {
+	var pe *pgconn.PgError
+	return errors.As(err, &pe) && pe.Code == "23514" && strings.Contains(pe.Message, "last active owner")
+}
+
+// grantError is a role whose permissions the actor does not hold.
+type grantError struct{ field string }
+
+func (e grantError) Error() string { return "grant exceeds your permissions" }

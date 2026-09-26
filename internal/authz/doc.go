@@ -36,10 +36,10 @@
 // in the same db.InTenant transaction as the changed rows.
 //
 // New returns an httpapi.Module for /api/authz/permissions, /api/roles,
-// /api/members, /api/me/permissions and /api/projects/{id}/members; cmd/aeon
-// mounts it. Project binding changes append authz.binding_set and
-// authz.binding_removed events on the project node (audit binding.set and
-// binding.removed), so they are visible exactly with the project.
+// /api/members (including invites, deactivation and aliases), /api/audit,
+// /api/me/permissions and /api/projects/{id}/members; cmd/aeon mounts it.
+// Project binding changes append binding.set and binding.removed events on the
+// project node, so they are visible exactly with the project.
 // Every authorizing route must use Handle or Require with a declared registry
 // permission. RoutePermissions names the permission for every current API
 // pattern, including explicit public paths; RequirePattern denies an unknown
