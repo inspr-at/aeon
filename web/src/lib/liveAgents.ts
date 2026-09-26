@@ -13,9 +13,11 @@ export interface LiveAgent {
   session_id?: string; principal_id?: string; name?: string
   harness: Harness; management_mode: 'managed' | 'unmanaged'; role: 'worker' | 'coordinator'
   phase: 'starting' | 'working' | 'stopping'; activity: 'busy' | 'unknown'
-  ticket: NodeSummary | null; since: string; heartbeat_at: string
+  // The bound ticket and the project it lives in now (it may have moved on).
+  ticket: (NodeSummary & { project_id: string }) | null; since: string; heartbeat_at: string
 }
-export interface LivePage { items: LiveAgent[]; at: string; fresh_seconds: number }
+// truncated: more sessions were live than one answer holds (the freshest are listed).
+export interface LivePage { items: LiveAgent[]; at: string; fresh_seconds: number; truncated?: boolean }
 
 // Polling cadence: heartbeats arrive every minute, so 20 seconds keeps a card
 // honest without asking often.
@@ -88,22 +90,29 @@ export function chipText(agents: LiveAgent[]) {
   return { name: who(lead), key: lead.ticket?.key ?? '', more: agents.length - 1 }
 }
 
-// What the live region says when projects start or stop having agents at work:
-// nothing on the first read, one sentence per change, a count when many change.
+// One agent across readings: its session, else (a caller who may not know
+// which agent it is) its harness and start, which a session never changes.
+export const agentKey = (agent: LiveAgent) => agent.session_id ?? `${agent.harness}@${agent.since}`
+
+// What the live region says when agents start or stop working: nothing on the
+// first reading; per project, who started and who stopped (the last one to
+// stop says the project is quiet again); a count when much changes at once.
 export function liveChanges(before: Map<string, LiveAgent[]> | null, after: Map<string, LiveAgent[]>, title: (projectId: string) => string | undefined) {
   if (!before) return ''
   const lines: string[] = []
-  for (const [id, agents] of after) {
-    if (before.get(id)?.length) continue
+  let changed = 0
+  const names = (agents: LiveAgent[]) => agents.length === 1 ? who(agents[0]!) : `${agents.length} agents`
+  for (const id of new Set([...after.keys(), ...before.keys()])) {
     const name = title(id)
     if (!name) continue
-    lines.push(agents.length === 1 ? `${who(agents[0]!)} started working on ${name}.` : `${agents.length} agents started working on ${name}.`)
+    const was = before.get(id) ?? [], now = after.get(id) ?? []
+    const wasKeys = new Set(was.map(agentKey)), nowKeys = new Set(now.map(agentKey))
+    const started = now.filter(agent => !wasKeys.has(agentKey(agent)))
+    const stopped = was.filter(agent => !nowKeys.has(agentKey(agent)))
+    if (started.length || stopped.length) changed++
+    if (started.length) lines.push(`${names(started)} started working on ${name}.`)
+    if (stopped.length) lines.push(now.length ? `${names(stopped)} stopped working on ${name}.` : `No agent is working on ${name} any more.`)
   }
-  for (const [id, agents] of before) {
-    if (!agents.length || after.get(id)?.length) continue
-    const name = title(id)
-    if (name) lines.push(`No agent is working on ${name} any more.`)
-  }
-  if (lines.length > 3) return `Agents changed in ${lines.length} projects.`
+  if (lines.length > 3) return `Agents changed in ${changed} projects.`
   return lines.join(' ')
 }

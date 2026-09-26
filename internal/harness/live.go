@@ -3,8 +3,6 @@
 package harness
 
 import (
-	"context"
-	"errors"
 	"net/http"
 	"time"
 
@@ -18,8 +16,9 @@ import (
 // HEARTBEAT_STALE_MS use.
 const LiveWindow = 2 * time.Minute
 
-// maxLive bounds one answer; a workspace has a handful of live sessions.
-const maxLive = 500
+// maxLive bounds one answer; a workspace has a handful of live sessions. More
+// than this answers the freshest and says it is truncated.
+var maxLive = 500
 
 // LiveAgent is one agent actively working in a project right now (AEON-184):
 // a session that is not stopped, heartbeated within LiveWindow, is starting,
@@ -31,66 +30,80 @@ const maxLive = 500
 // (AEON-171). session_id, the key to the Agents workspace, is present only
 // with harness.read in the workspace, which that workspace requires.
 type LiveAgent struct {
-	ProjectID   string       `json:"project_id"`
-	SessionID   string       `json:"session_id,omitempty"`
-	PrincipalID string       `json:"principal_id,omitempty"`
-	Name        string       `json:"name,omitempty"`
-	Harness     string       `json:"harness"`
-	Management  string       `json:"management_mode"`
-	Role        string       `json:"role"`
-	Phase       string       `json:"phase"`
-	Activity    string       `json:"activity"`
-	Ticket      *NodeSummary `json:"ticket"`
-	Since       time.Time    `json:"since"`
-	HeartbeatAt time.Time    `json:"heartbeat_at"`
+	ProjectID   string      `json:"project_id"`
+	SessionID   string      `json:"session_id,omitempty"`
+	PrincipalID string      `json:"principal_id,omitempty"`
+	Name        string      `json:"name,omitempty"`
+	Harness     string      `json:"harness"`
+	Management  string      `json:"management_mode"`
+	Role        string      `json:"role"`
+	Phase       string      `json:"phase"`
+	Activity    string      `json:"activity"`
+	Ticket      *LiveTicket `json:"ticket"`
+	Since       time.Time   `json:"since"`
+	HeartbeatAt time.Time   `json:"heartbeat_at"`
+}
+
+// LiveTicket is the bound ticket and the project it lives in now, so a link to
+// it is right even on the card of the project the session started in.
+type LiveTicket struct {
+	NodeSummary
+	ProjectID string `json:"project_id"`
 }
 
 // LivePage answers GET /api/harness-sessions/live. At is the server's clock,
-// so a client can show elapsed time without trusting its own.
+// so a client can show elapsed time without trusting its own. Truncated says
+// more sessions were live than one answer holds (the freshest are kept).
 type LivePage struct {
 	Items        []LiveAgent `json:"items"`
 	At           time.Time   `json:"at"`
 	FreshSeconds int         `json:"fresh_seconds"`
+	Truncated    bool        `json:"truncated"`
 }
 
-type liveAccess struct{ name, session bool }
+// liveQuery walks harness_sessions_live_idx (0867) from the freshest heartbeat
+// down to the freshness window: now() is stable, so the window bounds the index
+// range itself, and the LIMIT ends the walk. The predicates match the partial
+// index's so the planner can use it.
+const liveQuery = `SELECT s.id::text,s.project_id::text,s.agent_principal_id::text,coalesce(a.name,''),s.harness,s.management,s.role,s.phase,s.activity,
+       t.id::text,t.key,t.title,t.project_id::text,s.created_at,s.heartbeat_at
+  FROM harness_sessions s
+  LEFT JOIN principals a ON a.tenant_id=s.tenant_id AND a.id=s.agent_principal_id
+  LEFT JOIN nodes t ON t.tenant_id=s.tenant_id AND t.id=s.ticket_node_id AND t.deleted_at IS NULL
+ WHERE s.phase IN ('starting', 'working', 'stopping') AND s.activity <> 'idle' AND s.stopped_at IS NULL
+   AND s.heartbeat_at > now()-make_interval(secs=>$1)
+ ORDER BY s.heartbeat_at DESC,s.id DESC LIMIT $2`
 
 // live reads inside the caller's transaction, so tenant row-level security and
 // project visibility (ADR-003 P2) decide which sessions and tickets exist for
 // it: a project the caller cannot see contributes nothing, not even a count.
+// Who may know which agent is decided from one read of the caller's bindings.
 func (m *Module) live(r *http.Request, tx pgx.Tx, p tenant.Principal) (any, error) {
 	ctx := r.Context()
-	rows, err := tx.Query(ctx, `SELECT s.id::text,s.project_id::text,s.agent_principal_id::text,coalesce(a.name,''),s.harness,s.management,s.role,s.phase,s.activity,
-       t.id::text,t.key,t.title,t.project_id::text,s.created_at,s.heartbeat_at,clock_timestamp()
-  FROM harness_sessions s
-  LEFT JOIN principals a ON a.tenant_id=s.tenant_id AND a.id=s.agent_principal_id
-  LEFT JOIN nodes t ON t.tenant_id=s.tenant_id AND t.id=s.ticket_node_id AND t.deleted_at IS NULL
- WHERE s.stopped_at IS NULL AND s.heartbeat_at>clock_timestamp()-make_interval(secs=>$1)
-   AND s.phase IN ('starting','working','stopping') AND s.activity<>'idle'
- ORDER BY s.created_at,s.id LIMIT $2`, LiveWindow.Seconds(), maxLive)
+	out := LivePage{Items: []LiveAgent{}, FreshSeconds: int(LiveWindow.Seconds())}
+	if err := tx.QueryRow(ctx, `SELECT now()`).Scan(&out.At); err != nil {
+		return nil, err
+	}
+	out.At = out.At.UTC()
+	rows, err := tx.Query(ctx, liveQuery, LiveWindow.Seconds(), maxLive+1)
 	if err != nil {
 		return nil, err
 	}
-	type row struct {
-		agent         LiveAgent
-		ticketProject *string
-	}
-	found := []row{}
-	now := time.Now()
+	found := []LiveAgent{}
 	for rows.Next() {
-		var v row
-		var ticketID, ticketKey, ticketTitle *string
+		var v LiveAgent
+		var ticketID, ticketKey, ticketTitle, ticketProject *string
 		var heartbeat *time.Time
-		if err = rows.Scan(&v.agent.SessionID, &v.agent.ProjectID, &v.agent.PrincipalID, &v.agent.Name, &v.agent.Harness, &v.agent.Management, &v.agent.Role, &v.agent.Phase, &v.agent.Activity,
-			&ticketID, &ticketKey, &ticketTitle, &v.ticketProject, &v.agent.Since, &heartbeat, &now); err != nil {
+		if err = rows.Scan(&v.SessionID, &v.ProjectID, &v.PrincipalID, &v.Name, &v.Harness, &v.Management, &v.Role, &v.Phase, &v.Activity,
+			&ticketID, &ticketKey, &ticketTitle, &ticketProject, &v.Since, &heartbeat); err != nil {
 			rows.Close()
 			return nil, err
 		}
 		if heartbeat != nil {
-			v.agent.HeartbeatAt = *heartbeat
+			v.HeartbeatAt = *heartbeat
 		}
-		if ticketID != nil && ticketKey != nil && ticketTitle != nil {
-			v.agent.Ticket = &NodeSummary{ID: *ticketID, Key: *ticketKey, Title: *ticketTitle}
+		if ticketID != nil && ticketKey != nil && ticketTitle != nil && ticketProject != nil {
+			v.Ticket = &LiveTicket{NodeSummary: NodeSummary{ID: *ticketID, Key: *ticketKey, Title: *ticketTitle}, ProjectID: *ticketProject}
 		}
 		found = append(found, v)
 	}
@@ -99,78 +112,36 @@ func (m *Module) live(r *http.Request, tx pgx.Tx, p tenant.Principal) (any, erro
 	if err != nil {
 		return nil, err
 	}
-	out := LivePage{Items: []LiveAgent{}, At: now.UTC(), FreshSeconds: int(LiveWindow.Seconds())}
+	if len(found) > maxLive {
+		found, out.Truncated = found[:maxLive], true
+	}
 	if len(found) == 0 {
 		return out, nil
 	}
-	workspace, err := accessIn(ctx, tx, p, authz.Scope{})
+	allowed, err := authz.ProjectsTx(ctx, tx, p)
 	if err != nil {
 		return nil, err
 	}
-	perProject := map[string]liveAccess{}
-	accessFor := func(projectID string) (liveAccess, error) {
-		if workspace.name {
-			return workspace, nil
-		}
-		if a, ok := perProject[projectID]; ok {
-			return a, nil
-		}
-		a, err := accessIn(ctx, tx, p, authz.Scope{ProjectID: projectID})
-		if err != nil {
-			return a, err
-		}
-		a.session = workspace.session
-		perProject[projectID] = a
-		return a, nil
-	}
+	// The Agents workspace lists sessions tenant-wide: its key needs harness.read there.
+	openSessions := allowed("harness.read", "")
 	for _, v := range found {
-		projects := []string{v.agent.ProjectID}
+		projects := []string{v.ProjectID}
 		// A ticket moved on to another project takes its agent along; the
 		// ticket row is visible only when that project is.
-		if v.ticketProject != nil && *v.ticketProject != v.agent.ProjectID {
-			projects = append(projects, *v.ticketProject)
+		if v.Ticket != nil && v.Ticket.ProjectID != v.ProjectID {
+			projects = append(projects, v.Ticket.ProjectID)
 		}
 		for _, projectID := range projects {
-			agent := v.agent
+			agent := v
 			agent.ProjectID = projectID
-			access, err := accessFor(projectID)
-			if err != nil {
-				return nil, err
-			}
-			if !access.name {
+			if !allowed("harness.read", projectID) && !allowed("members.read", projectID) {
 				agent.PrincipalID, agent.Name = "", ""
 			}
-			if !access.session {
+			if !openSessions {
 				agent.SessionID = ""
 			}
 			out.Items = append(out.Items, agent)
 		}
 	}
 	return out, nil
-}
-
-// accessIn says whether the caller may know which agent it is (members.read or
-// harness.read, AEON-171) and may open the session (harness.read) in scope.
-func accessIn(ctx context.Context, tx pgx.Tx, p tenant.Principal, scope authz.Scope) (liveAccess, error) {
-	allowed := func(permission string) (bool, error) {
-		err := authz.RequireTx(ctx, tx, p, permission, scope)
-		if err == nil {
-			return true, nil
-		}
-		if errors.Is(err, authz.ErrForbidden) {
-			return false, nil
-		}
-		return false, err
-	}
-	harness, err := allowed("harness.read")
-	if err != nil {
-		return liveAccess{}, err
-	}
-	members := harness
-	if !members {
-		if members, err = allowed("members.read"); err != nil {
-			return liveAccess{}, err
-		}
-	}
-	return liveAccess{name: members, session: harness}, nil
 }

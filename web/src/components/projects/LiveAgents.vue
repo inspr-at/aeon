@@ -6,6 +6,7 @@ import { absoluteTime } from '../../lib/work'
 import { harnessLabel } from '../../lib/agentState'
 import { chipText, elapsedFor, liveSummary, phaseLabel, who, type LiveAgent } from '../../lib/liveAgents'
 import { useLiveAgents } from '../../stores/liveAgents'
+import { useProjects } from '../../stores/projects'
 import AppIcon from '../AppIcon.vue'
 import LiveBot from './LiveBot.vue'
 
@@ -18,6 +19,7 @@ import LiveBot from './LiveBot.vue'
 // a phone robots only).
 const props = withDefaults(defineProps<{ agents: LiveAgent[]; project: { title: string; routeKey: string }; variant?: 'card' | 'row' }>(), { variant: 'card' })
 const live = useLiveAgents()
+const projects = useProjects()
 const id = useId()
 const trigger = ref<HTMLButtonElement>()
 const panel = ref<HTMLElement>()
@@ -38,7 +40,13 @@ const elapsed = computed(() => lead.value ? elapsedFor(lead.value, live.serverNo
 const leadPhase = computed(() => lead.value && lead.value.phase !== 'working' ? phaseLabel(lead.value).toLowerCase() : '')
 const clockFormat = new Intl.DateTimeFormat('en-GB', { hour: '2-digit', minute: '2-digit' })
 const clock = (iso: string) => clockFormat.format(Date.parse(iso))
-const ticketHref = (agent: LiveAgent) => agent.ticket && props.project.routeKey ? `/p/${encodeURIComponent(props.project.routeKey)}/${encodeURIComponent(agent.ticket.key)}` : ''
+// A ticket links into the project it lives in now, which may not be this card's
+// (the agent is listed here because its session started here).
+const ticketHref = (agent: LiveAgent) => {
+  if (!agent.ticket) return ''
+  const routeKey = projects.byId(agent.ticket.project_id)?.routeKey ?? (agent.ticket.project_id === agent.project_id ? props.project.routeKey : '')
+  return routeKey ? `/p/${encodeURIComponent(routeKey)}/${encodeURIComponent(agent.ticket.key)}` : ''
+}
 
 // ---------- Opening ----------
 let openTimer: ReturnType<typeof setTimeout> | undefined
@@ -151,7 +159,7 @@ onBeforeUnmount(() => {
     <Teleport to="body">
       <div
         v-if="open" :id="id" ref="panel" class="live-pop floating pop" :class="{ above }" role="dialog" :aria-label="`Agents working on ${project.title}`"
-        :style="{ transform: `translate(${x}px, ${y}px)` }" @pointerenter="enter" @pointerleave="leave" @focusout="focusOut" @keydown="keydown"
+        :style="{ left: `${x}px`, top: `${y}px` }" @pointerenter="enter" @pointerleave="leave" @focusout="focusOut" @keydown="keydown"
       >
         <p class="pop-head">
           <span class="pulse" aria-hidden="true" />
@@ -223,20 +231,22 @@ onBeforeUnmount(() => {
   .typing i { animation: live-typing 1.2s ease-in-out infinite; }
   .typing i:nth-child(2) { animation-delay: .16s; }
   .typing i:nth-child(3) { animation-delay: .32s; }
-  .live-chip { transition: box-shadow .15s ease, translate .15s ease; }
+  .live-chip { transition: translate .15s ease; }
   .live-chip:hover { translate: 0 -1px; }
 }
 @keyframes live-typing { 0%, 60%, 100% { transform: translateY(0); opacity: .45; } 30% { transform: translateY(-2.5px); opacity: 1; } }
 .live.asleep .typing i { animation-play-state: paused; }
 
 /* ---------- The popover ---------- */
-.live-pop { position: fixed; z-index: 75; top: 0; left: 0; width: min(330px, calc(100vw - 16px)); padding: 8px; }
+/* Placed by left and top (set once when it opens or the page moves); it arrives
+   by transform and opacity only. */
+.live-pop { position: fixed; z-index: 75; width: min(330px, calc(100vw - 16px)); padding: 8px; }
 @media (prefers-reduced-motion: no-preference) {
   .live-pop { animation: live-pop-in .16s cubic-bezier(.2, .7, .2, 1); }
   .live-pop:not(.above) { animation-name: live-pop-in-below; }
 }
-@keyframes live-pop-in { from { opacity: 0; margin-top: 4px; } to { opacity: 1; margin-top: 0; } }
-@keyframes live-pop-in-below { from { opacity: 0; margin-top: -4px; } to { opacity: 1; margin-top: 0; } }
+@keyframes live-pop-in { from { opacity: 0; transform: translateY(4px); } to { opacity: 1; transform: none; } }
+@keyframes live-pop-in-below { from { opacity: 0; transform: translateY(-4px); } to { opacity: 1; transform: none; } }
 .pop-head { display: flex; align-items: center; gap: 8px; padding: 4px 8px 8px; font: 600 11px/1.2 var(--mono); letter-spacing: .08em; text-transform: uppercase; color: var(--ink-2); font-variant-ligatures: none; }
 .pop-project { margin-left: auto; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; max-width: 50%; font: 500 12px/1.2 var(--font); letter-spacing: 0; text-transform: none; color: var(--ink-3); }
 .pulse { position: relative; flex-shrink: 0; width: 7px; height: 7px; border-radius: 50%; background: var(--ok); }
@@ -246,6 +256,8 @@ onBeforeUnmount(() => {
 @keyframes live-pulse { from { transform: scale(1); opacity: .5; } to { transform: scale(2.6); opacity: 0; } }
 .pop-list { display: grid; gap: 4px; margin: 0; padding: 0; list-style: none; }
 .pop-agent { display: grid; gap: 2px; padding: 4px; border-radius: 10px; background: var(--surface-sunken); }
+/* Hover answers at once: no colour or shadow transitions (only the compositor moves things here). */
+.agent-line, .ticket-line { transition: none; }
 .agent-line { display: flex; align-items: center; gap: 10px; min-height: 44px; padding: 4px 6px; border-radius: 8px; color: var(--ink); text-decoration: none; }
 a.agent-line:hover, .ticket-line[href]:hover { background: var(--row-hover); }
 a.agent-line:focus-visible, .ticket-line:focus-visible { outline: none; box-shadow: var(--focus-ring); }

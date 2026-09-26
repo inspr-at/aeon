@@ -6,6 +6,7 @@ import { test, expect, type Page } from '@playwright/test'
 import AxeBuilder from '@axe-core/playwright'
 import { mkdirSync } from 'node:fs'
 import { fixtures, liveAgent, mockWork, watchErrors, type Fixtures, type LiveAgentMock } from './work-fixtures'
+import { domAudit } from './ui-audit-rules'
 
 const HAUSV = '33333333-3333-4333-8333-333333333333'
 const CAMY = '44444444-4444-4444-8444-444444444444'
@@ -38,13 +39,13 @@ function world(live: 'busy' | 'none' = 'busy') {
 }
 function busyAgents(): LiveAgentMock[] {
   return [
-    liveAgent({ project_id: 'p-hausv', session_id: 's-hausv', principal_id: HAUSV, name: 'hausv', ticket: { id: 'n-h1', key: 'HAUSV-887', title: 'Yearly statement preview for tenants' } }, 16),
+    liveAgent({ project_id: 'p-hausv', session_id: 's-hausv', principal_id: HAUSV, name: 'hausv', ticket: { id: 'n-h1', key: 'HAUSV-887', title: 'Yearly statement preview for tenants', project_id: 'p-hausv' } }, 16),
     liveAgent({ project_id: 'p-aeon', session_id: 's-coord', principal_id: COORD, name: 'aeon-coordinator', role: 'coordinator', harness: 'claude' }, 140),
-    liveAgent({ project_id: 'p-aeon', session_id: 's-camy', principal_id: CAMY, name: 'camy', harness: 'codex', ticket: { id: 'n-a184', key: 'AEON-184', title: 'Live agents on project cards and rows' } }, 4),
+    liveAgent({ project_id: 'p-aeon', session_id: 's-camy', principal_id: CAMY, name: 'camy', harness: 'codex', ticket: { id: 'n-a184', key: 'AEON-184', title: 'Live agents on project cards and rows', project_id: 'p-aeon' } }, 4),
     liveAgent({ project_id: 'p-janus', session_id: 's-janus', principal_id: '77777777-7777-4777-8777-777777777777', name: 'janus-session', phase: 'starting', activity: 'unknown' }, 0.5),
-    liveAgent({ project_id: 'p-ops', session_id: 's-ops', principal_id: OPS, name: 'ops', ticket: { id: 'n-o1', key: 'OPS-212', title: 'Rotate the backup keys on csb1' } }, 42),
-    liveAgent({ project_id: 'p-ops', session_id: 's-ops2', principal_id: '88888888-8888-4888-8888-888888888888', name: 'pharos-session', harness: 'claude', ticket: { id: 'n-o2', key: 'OPS-219', title: 'Nightly check for hsb2' } }, 8),
-    liveAgent({ project_id: 'p-ops', session_id: 's-ops3', principal_id: '99999999-9999-4999-8999-999999999999', name: 'grok-scout', harness: 'grok', ticket: { id: 'n-o3', key: 'OPS-220', title: 'Disk usage report' } }, 2),
+    liveAgent({ project_id: 'p-ops', session_id: 's-ops', principal_id: OPS, name: 'ops', ticket: { id: 'n-o1', key: 'OPS-212', title: 'Rotate the backup keys on csb1', project_id: 'p-ops' } }, 42),
+    liveAgent({ project_id: 'p-ops', session_id: 's-ops2', principal_id: '88888888-8888-4888-8888-888888888888', name: 'pharos-session', harness: 'claude', ticket: { id: 'n-o2', key: 'OPS-219', title: 'Nightly check for hsb2', project_id: 'p-ops' } }, 8),
+    liveAgent({ project_id: 'p-ops', session_id: 's-ops3', principal_id: '99999999-9999-4999-8999-999999999999', name: 'grok-scout', harness: 'grok', ticket: { id: 'n-o3', key: 'OPS-220', title: 'Disk usage report', project_id: 'p-ops' } }, 2),
   ]
 }
 const card = (page: Page, key: string) => page.locator(`.card[data-project-id="${key}"]`)
@@ -127,9 +128,24 @@ test('hover and focus show who works on what; an agent opens its session', async
   await expect(page).toHaveURL('/agents/s-camy')
 })
 
+test('a ticket that moved on links to the project it lives in now', async ({ page }) => {
+  const data = world('none')
+  // The session started in Hausverwaltung; its ticket now lives in Janus, so both list it.
+  const moved = { id: 'n-j7', key: 'JANUS-7', title: 'Moved over from Hausverwaltung', project_id: 'p-janus' }
+  data.live.push(liveAgent({ project_id: 'p-hausv', session_id: 's-m', principal_id: HAUSV, name: 'hausv', ticket: moved }, 5), liveAgent({ project_id: 'p-janus', session_id: 's-m', principal_id: HAUSV, name: 'hausv', ticket: moved }, 5))
+  await cards(page, data)
+  for (const [id, title] of [['p-hausv', 'Hausverwaltung'], ['p-janus', 'Janus']] as const) {
+    await card(page, id).locator('.live-chip').click()
+    const pop = page.getByRole('dialog', { name: `Agents working on ${title}` })
+    await expect(pop.getByRole('link', { name: /JANUS-7/ })).toHaveAttribute('href', '/p/JANUS/JANUS-7')
+    await page.keyboard.press('Escape')
+    await expect(pop).toHaveCount(0)
+  }
+})
+
 test('without permission to know the agent the chip still says an agent works', async ({ page }) => {
   const data = world('none')
-  data.live.push(liveAgent({ project_id: 'p-hausv', harness: 'claude', ticket: { id: 'n-h1', key: 'HAUSV-887', title: 'Yearly statement preview' } }, 3))
+  data.live.push(liveAgent({ project_id: 'p-hausv', harness: 'claude', ticket: { id: 'n-h1', key: 'HAUSV-887', title: 'Yearly statement preview', project_id: 'p-hausv' } }, 3))
   await cards(page, data)
   const chip = card(page, 'p-hausv').getByRole('button', { name: '1 agent working: Claude agent on HAUSV-887. Who works on what' })
   await expect(chip).toContainText('Claude agent')
@@ -164,26 +180,63 @@ test('starting, stopping and stale agents: polls every 20 seconds and says what 
   const reads = () => calls.filter(c => c.path === '/api/harness-sessions/live').length
   await expect.poll(reads).toBe(1)
   await expect(page.locator('.live')).toHaveCount(0)
-  data.live.push(liveAgent({ project_id: 'p-janus', session_id: 's-j', principal_id: CAMY, name: 'camy', ticket: { id: 'n-j', key: 'JANUS-9', title: 'Sessions' } }, 1))
+  const news = page.locator('[aria-live="polite"].sr-only')
+  const camy = liveAgent({ project_id: 'p-janus', session_id: 's-j', principal_id: CAMY, name: 'camy', ticket: { id: 'n-j', key: 'JANUS-9', title: 'Sessions', project_id: 'p-janus' } }, 1)
+  const nova = liveAgent({ project_id: 'p-janus', session_id: 's-n', principal_id: OPS, name: 'nova', ticket: null }, 0.2)
+  data.live.push(camy)
   await page.clock.fastForward(20_500)
   await expect.poll(reads).toBe(2)
   await expect(card(page, 'p-janus').locator('.live-chip')).toBeVisible()
-  await expect(page.locator('[aria-live="polite"].sr-only')).toHaveText('camy started working on Janus.')
-  data.live.splice(0)
+  // News settles for a moment before it is said.
+  await expect(news).toHaveText('')
+  await page.clock.fastForward(2_600)
+  await expect(news).toHaveText('camy started working on Janus.')
+  // Within a project too: a second agent joining, one of two leaving, the last one leaving.
+  data.live.push(nova)
   await page.clock.fastForward(20_500)
+  await expect(card(page, 'p-janus').locator('.live-bot')).toHaveCount(2)
+  await page.clock.fastForward(2_600)
+  await expect(news).toHaveText('nova started working on Janus.')
+  data.live.splice(0, 1)
+  await page.clock.fastForward(23_100)
+  await expect(card(page, 'p-janus').locator('.live-bot')).toHaveCount(1)
+  await expect(news).toHaveText('camy stopped working on Janus.')
+  data.live.splice(0)
+  await page.clock.fastForward(23_100)
   await expect(card(page, 'p-janus').locator('.live')).toHaveCount(0)
-  await expect(page.locator('[aria-live="polite"].sr-only')).toHaveText('No agent is working on Janus any more.')
+  await expect(news).toHaveText('No agent is working on Janus any more.')
   // A heartbeat older than two minutes on the server's clock no longer counts.
   data.live.push(liveAgent({ project_id: 'p-site', name: 'late', heartbeat_at: new Date(Date.parse('2026-09-23T12:00:00Z') - 150_000).toISOString() }))
   await page.clock.fastForward(20_500)
-  await expect.poll(reads).toBe(4)
+  await expect.poll(reads).toBe(6)
   await expect(card(page, 'p-site').locator('.live')).toHaveCount(0)
   // A hidden tab asks nothing and catches up when shown again.
   await page.evaluate(() => { Object.defineProperty(document, 'visibilityState', { value: 'hidden', configurable: true }); document.dispatchEvent(new Event('visibilitychange')) })
   await page.clock.fastForward(65_000)
-  expect(reads()).toBe(4)
+  expect(reads()).toBe(6)
   await page.evaluate(() => { Object.defineProperty(document, 'visibilityState', { value: 'visible', configurable: true }); document.dispatchEvent(new Event('visibilitychange')) })
-  await expect.poll(reads).toBe(5)
+  await expect.poll(reads).toBe(7)
+})
+
+test('the UI audit lets a chip share its own link only in its slot', async ({ page }) => {
+  const data = world()
+  data.preferences.projects = { view: 'list' }
+  await mockWork(page, data)
+  await page.goto('/')
+  await expect(row(page, 'p-hausv').locator('.live-chip')).toBeVisible()
+  const overlaps = async () => (await page.evaluate(domAudit)).filter(r => r.kind === 'interactive-overlap' && /live-chip|project-row/.test(`${r.selector} ${r.detail}`))
+  expect(await overlaps()).toEqual([])
+  // Slid over the project's name, the same chip is an overlap again.
+  await page.addStyleTag({ content: '.project-item[data-project-id="p-hausv"] .row-live { right: auto !important; left: 0 !important; }' })
+  const found = await overlaps()
+  expect(found.length, JSON.stringify(found)).toBeGreaterThan(0)
+  // And on a card: over the time, not over the people it hides.
+  await page.getByRole('radio', { name: 'Cards view' }).click()
+  await expect(card(page, 'p-hausv').locator('.live-chip')).toBeVisible()
+  const cardOverlaps = async () => (await page.evaluate(domAudit)).filter(r => r.kind === 'interactive-overlap' && /live-chip|card-link/.test(`${r.selector} ${r.detail}`))
+  expect(await cardOverlaps()).toEqual([])
+  await page.addStyleTag({ content: '.card[data-project-id="p-hausv"] .card-live { left: auto !important; right: 12px !important; max-width: none !important; }' })
+  expect((await cardOverlaps()).length).toBeGreaterThan(0)
 })
 
 test('a server without the read, or a person without access, gets a still page', async ({ page }) => {
@@ -196,24 +249,62 @@ test('a server without the read, or a person without access, gets a still page',
   expect(errors).toEqual([])
 })
 
+// Every animation and transition on live chips, their popover and the cards'
+// auras, read from the styles themselves (keyframes by name), so a short
+// animation that has already finished is still checked.
+function motionProperties() {
+  const keyframes = new Map<string, Set<string>>()
+  const collect = (rules: CSSRuleList) => {
+    for (const rule of rules) {
+      if (rule instanceof CSSKeyframesRule) {
+        const properties = new Set<string>()
+        for (const frame of rule.cssRules) for (let i = 0; i < (frame as CSSKeyframeRule).style.length; i++) properties.add((frame as CSSKeyframeRule).style[i]!)
+        keyframes.set(rule.name, properties)
+      } else if ('cssRules' in rule) collect((rule as CSSGroupingRule).cssRules)
+    }
+  }
+  for (const sheet of document.styleSheets) { try { collect(sheet.cssRules) } catch { /* cross-origin */ } }
+  const COMPOSITOR_PROPS = ['opacity', 'transform', 'translate', 'scale', 'rotate']
+  const animated = new Set<string>(), transitioned = new Set<string>(), animations = new Set<string>()
+  // The chips and popovers entirely; of a live card only its aura (the card's own hover is not new here).
+  const own = [...document.querySelectorAll('span.live, span.live *, .live-pop, .live-pop *')].map(el => [el, [null, '::before', '::after']] as const)
+  const auras = [...document.querySelectorAll('li.card.live')].map(el => [el, ['::before']] as const)
+  for (const [el, pseudos] of [...own, ...auras]) {
+    for (const pseudo of pseudos) {
+      const style = getComputedStyle(el, pseudo)
+      for (const name of style.animationName.split(',').map(n => n.trim()).filter(n => n !== 'none')) {
+        animations.add(name)
+        for (const property of keyframes.get(name) ?? [`unknown keyframes ${name}`]) animated.add(property)
+      }
+      const durations = style.transitionDuration.split(',').map(parseFloat)
+      style.transitionProperty.split(',').map(p => p.trim()).forEach((property, i) => { if ((durations[i] ?? durations[0]!) > 0) transitioned.add(COMPOSITOR_PROPS.includes(property) ? property : `${property} (${el.tagName.toLowerCase()}.${[...el.classList].join('.')}${pseudo ?? ''})`) })
+    }
+  }
+  return { animated: [...animated].sort(), transitioned: [...transitioned].sort(), animations: [...animations].sort() }
+}
+const COMPOSITOR = ['opacity', 'transform', 'translate', 'scale', 'rotate']
+
 test.describe('motion', () => {
   test.use({ reducedMotion: 'no-preference' })
-  test('the robots move on the compositor and out of step', async ({ page }) => {
+  test('the robots, the chip and its details move on the compositor and out of step', async ({ page }) => {
     await cards(page, world())
     const bots = card(page, 'p-ops').locator('.live-bot')
     const names = await bots.first().locator('.bob').evaluate(el => getComputedStyle(el).animationName)
     expect(names).toMatch(/^bot-bob/)
     const lags = await bots.evaluateAll(els => els.map(el => getComputedStyle(el).getPropertyValue('--lag')))
     expect(new Set(lags).size).toBe(3)
-    // Only transforms and opacity animate, in the chips and the cards' auras.
-    const properties = await page.evaluate(() => [...new Set(document.getAnimations().flatMap(a => {
-      const effect = a.effect as KeyframeEffect | null
-      const target = effect?.target as Element | null
-      if (!effect || !target?.closest('.live, li.card.live')) return []
-      return effect.getKeyframes().flatMap(k => Object.keys(k).filter(p => !['offset', 'easing', 'composite', 'computedOffset'].includes(p)))
-    }))].sort())
-    expect(properties.length).toBeGreaterThan(0)
-    expect(properties.every(p => ['opacity', 'transform', 'translate'].includes(p)), properties.join(',')).toBe(true)
+    const closed = await page.evaluate(motionProperties)
+    expect(closed.animations.some(name => name.startsWith('live-aura')), closed.animations.join(',')).toBe(true)
+    // Open the details: their entrance and pulse count too.
+    await card(page, 'p-ops').locator('.live-chip').hover()
+    await expect(page.getByRole('dialog', { name: 'Agents working on Operations' })).toBeVisible()
+    const open = await page.evaluate(motionProperties)
+    expect(open.animations.some(name => name.startsWith('live-pop-in')), open.animations.join(',')).toBe(true)
+    for (const report of [closed, open]) {
+      expect(report.animated.length).toBeGreaterThan(0)
+      expect(report.animated.filter(p => !COMPOSITOR.includes(p)), `animated: ${report.animated.join(',')}`).toEqual([])
+      expect(report.transitioned.filter(p => !COMPOSITOR.includes(p)), `transitioned: ${report.transitioned.join(',')}`).toEqual([])
+    }
   })
 })
 

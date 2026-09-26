@@ -119,7 +119,7 @@ export interface LiveAgentMock {
   project_id: string; session_id?: string; principal_id?: string; name?: string
   harness: 'codex' | 'claude' | 'pi' | 'cursor' | 'grok'; management_mode: 'managed' | 'unmanaged'; role: 'worker' | 'coordinator'
   phase: 'starting' | 'working' | 'stopping'; activity: 'busy' | 'unknown'
-  ticket: { id: string; key: string; title: string } | null; since: string; heartbeat_at: string
+  ticket: { id: string; key: string; title: string; project_id: string } | null; since: string; heartbeat_at: string
 }
 // One live agent on the fixture clock: started `minutes` ago, heartbeat half a minute ago.
 export function liveAgent(fields: Partial<LiveAgentMock> & Pick<LiveAgentMock, 'project_id'>, minutes = 12): LiveAgentMock {

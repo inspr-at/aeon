@@ -100,6 +100,31 @@ export function domAudit(): Raw[] {
     if (r.bottom <= 0 || r.top >= innerHeight || r.right <= 0 || r.left >= innerWidth) return false
     return receivesPointer(el, Math.max(0, Math.min(innerWidth - 1, (r.left + r.right) / 2)), Math.max(0, Math.min(innerHeight - 1, (r.top + r.bottom) / 2)))
   })
+  // A rectangle over any visible text or graphic of a link (hidden and screen-reader-only content aside).
+  // Text is measured where it shows: an ellipsised run is cut to the boxes that clip it.
+  const coversContent = (link: Element, r: DOMRect) => {
+    const visible = (el: Element | null) => !!el && getComputedStyle(el).visibility === 'visible' && !el.closest('.sr-only, [hidden]')
+    const shownPart = (q: DOMRect, from: Element | null) => {
+      let left = q.left, right = q.right, top = q.top, bottom = q.bottom
+      for (let el = from; el && el !== link.parentElement; el = el.parentElement) {
+        const style = getComputedStyle(el)
+        if (style.overflowX === 'visible' && style.overflowY === 'visible') continue
+        const box = el.getBoundingClientRect()
+        left = Math.max(left, box.left); right = Math.min(right, box.right); top = Math.max(top, box.top); bottom = Math.min(bottom, box.bottom)
+      }
+      return { left, right, top, bottom }
+    }
+    const hit = (q: { left: number; right: number; top: number; bottom: number }) => Math.min(r.right, q.right) - Math.max(r.left, q.left) > 1 && Math.min(r.bottom, q.bottom) - Math.max(r.top, q.top) > 1
+    const walker = document.createTreeWalker(link, NodeFilter.SHOW_TEXT)
+    for (let node = walker.nextNode(); node; node = walker.nextNode()) {
+      if (!node.textContent?.trim() || !visible(node.parentElement)) continue
+      const range = document.createRange()
+      range.selectNodeContents(node)
+      if ([...range.getClientRects()].some(q => hit(shownPart(q, node.parentElement)))) return true
+    }
+    return [...link.querySelectorAll('svg, img, [role="img"], progress, .bar')].some(el => visible(el) && hit(shownPart(el.getBoundingClientRect(), el.parentElement)))
+  }
+  const chipInSlot = (chip: Element, link: Element) => link.matches('.item-link') && chip.matches('.live-chip') && chip.closest('.live')?.parentElement === link.parentElement && !coversContent(link, chip.getBoundingClientRect())
   for (let i = 0; i < controls.length; i++) {
     const a = controls[i], ar = a.getBoundingClientRect()
     const label = a.closest('label') ?? (a instanceof HTMLInputElement ? a.labels?.item(0) : null)
@@ -136,8 +161,9 @@ export function domAudit(): Raw[] {
       if (a.contains(b) || b.contains(a) || a.closest('label') === b.closest('label') && a.closest('label')) continue
       // The row link deliberately extends behind its separate action button.
       if ((a.matches('.card-link') || b.matches('.card-link')) && a.parentElement === b.parentElement) continue
-      // A card's or row's live agents chip (AEON-184) sits over its link, beside it in the DOM.
-      if ((a.matches('.item-link') && b.closest('.live')?.parentElement === a.parentElement) || (b.matches('.item-link') && a.closest('.live')?.parentElement === b.parentElement)) continue
+      // A card's or row's live agents chip (AEON-184) may share its own link's box,
+      // in the slot the link leaves empty for it; covering anything the link shows is an overlap.
+      if (chipInSlot(a, b) || chipInSlot(b, a)) continue
       // A scrim and a fixed app edge intentionally cover scrolling content.
       if (a.matches('.sheet-scrim') || b.matches('.sheet-scrim') || a.closest('.app-footer, .app-header') !== b.closest('.app-footer, .app-header') && (a.closest('.app-footer') || b.closest('.app-footer'))) continue
       // Open menus cover the page below; their background controls are not peers.

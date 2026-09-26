@@ -5,6 +5,7 @@ package harness_test
 import (
 	"encoding/json"
 	"sort"
+	"strings"
 	"testing"
 
 	"github.com/inspr-at/aeon/internal/harness"
@@ -145,7 +146,9 @@ func TestLiveAgents(t *testing.T) {
 	}
 	want := func(name string, got []seen, expected ...seen) {
 		t.Helper()
-		sort.Slice(expected, func(i, j int) bool { return expected[i].project+expected[i].phase < expected[j].project+expected[j].phase })
+		sort.Slice(expected, func(i, j int) bool {
+			return expected[i].project+expected[i].phase < expected[j].project+expected[j].phase
+		})
 		if len(got) != len(expected) {
 			t.Fatalf("%s: got %+v want %+v", name, got, expected)
 		}
@@ -163,7 +166,7 @@ func TestLiveAgents(t *testing.T) {
 			if v.SessionID != working || v.PrincipalID != f.agent.ID || v.Name != "worker" || v.Harness != "claude" || v.Management != "unmanaged" || v.Activity != "busy" {
 				t.Fatalf("working agent %+v", v.LiveAgent)
 			}
-			if v.Ticket == nil || v.Ticket.ID != f.ticket || v.Ticket.Key != "HTS-2" || v.Ticket.Title != "Harness ticket" {
+			if v.Ticket == nil || v.Ticket.ID != f.ticket || v.Ticket.Key != "HTS-2" || v.Ticket.Title != "Harness ticket" || v.Ticket.ProjectID != f.project {
 				t.Fatalf("ticket %+v", v.Ticket)
 			}
 			if v.Since.IsZero() || v.HeartbeatAt.IsZero() {
@@ -195,6 +198,12 @@ func TestLiveAgents(t *testing.T) {
 		return err
 	})
 	want("admin after move", summary(live(f.person)), seen{f.project, "working", true, true}, seen{second, "starting", true, true}, seen{second, "working", true, true})
+	// Both listings link the ticket where it lives now.
+	for _, v := range live(f.person) {
+		if v.Phase == "working" && (v.Ticket == nil || v.Ticket.ProjectID != second) {
+			t.Fatalf("moved ticket keeps its old project %+v", v.Ticket)
+		}
+	}
 	moved := live(guest)
 	want("guest after move", summary(moved), seen{f.project, "working", false, false})
 	if moved[0].Ticket != nil {
@@ -203,7 +212,70 @@ func TestLiveAgents(t *testing.T) {
 	// The session itself belongs to the first project, which this member cannot see.
 	want("member after move", summary(live(member)), seen{second, "starting", true, false})
 
+	// One answer is bounded: the freshest heartbeats first, and it says so when it is cut.
+	var page struct {
+		Items     []harness.LiveAgent `json:"items"`
+		Truncated bool                `json:"truncated"`
+	}
+	read := func() {
+		t.Helper()
+		w := f.call(f.person, "GET", "/api/harness-sessions/live", nil, "")
+		expect(t, w, 200)
+		page.Items, page.Truncated = nil, false
+		if err := json.Unmarshal(w.Body.Bytes(), &page); err != nil {
+			t.Fatal(err)
+		}
+	}
+	read()
+	if page.Truncated {
+		t.Fatal("two live sessions reported as truncated")
+	}
+	restore := harness.SetMaxLive(1)
+	read()
+	restore()
+	if !page.Truncated || len(page.Items) != 1 || page.Items[0].SessionID != starting {
+		t.Fatalf("bounded answer %+v truncated=%v", page.Items, page.Truncated)
+	}
+
 	expect(t, f.call(tenant.Principal{}, "GET", "/api/harness-sessions/live", nil, ""), 401)
 	f.key = "invalid"
 	expect(t, f.call(f.agent, "GET", "/api/harness-sessions/live", nil, ""), 403)
+}
+
+// The live read walks its partial index from the freshest heartbeat down to the
+// freshness window, under the caller's row-level security, instead of sorting
+// every open session.
+func TestLiveAgentsUseTheLiveIndex(t *testing.T) {
+	f := fixture(t)
+	for _, p := range []tenant.Principal{f.person, f.agent} {
+		f.tx(t, p, func(tx pgx.Tx) error {
+			if _, err := tx.Exec(t.Context(), `SET LOCAL enable_seqscan=off`); err != nil {
+				return err
+			}
+			rows, err := tx.Query(t.Context(), `EXPLAIN `+harness.LiveQuery, 120.0, 501)
+			if err != nil {
+				return err
+			}
+			defer rows.Close()
+			plan := ""
+			for rows.Next() {
+				var line string
+				if err := rows.Scan(&line); err != nil {
+					return err
+				}
+				plan += line + "\n"
+			}
+			if err := rows.Err(); err != nil {
+				return err
+			}
+			bounded := false
+			for _, line := range strings.Split(plan, "\n") {
+				bounded = bounded || strings.Contains(line, "Index Cond:") && strings.Contains(line, "heartbeat_at >")
+			}
+			if !strings.Contains(plan, "Index Scan using harness_sessions_live_idx") || !bounded || strings.Contains(plan, "Sort") {
+				t.Fatalf("live read does not walk its index:\n%s", plan)
+			}
+			return nil
+		})
+	}
 }

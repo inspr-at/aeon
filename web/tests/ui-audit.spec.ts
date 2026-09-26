@@ -142,9 +142,9 @@ async function installMocks(page: Page, setup: Setup) {
   if (setup === 'live' || setup === 'live-list') {
     data.preferences.projects = { view: setup === 'live' ? 'cards' : 'list' }
     data.live.push(
-      liveAgent({ project_id: 'p-pharos', session_id: 's-live-1', principal_id: '33333333-3333-4333-8333-333333333333', name: 'pharos-session', ticket: { id: 'n-1', key: 'PHAROS-11', title: 'Connect Hetzner Cloud for managed provisioning' } }, 16),
+      liveAgent({ project_id: 'p-pharos', session_id: 's-live-1', principal_id: '33333333-3333-4333-8333-333333333333', name: 'pharos-session', ticket: { id: 'n-1', key: 'PHAROS-11', title: 'Connect Hetzner Cloud for managed provisioning', project_id: 'p-pharos' } }, 16),
       liveAgent({ project_id: 'p-pharos', session_id: 's-live-2', principal_id: '44444444-4444-4444-8444-444444444444', name: 'camy', harness: 'codex', ticket: null }, 3),
-      liveAgent({ project_id: 'p-aeon', harness: 'grok', ticket: { id: 'n-a1', key: 'AEON-1', title: 'Aeon foundation' } }, 40),
+      liveAgent({ project_id: 'p-aeon', harness: 'grok', ticket: { id: 'n-a1', key: 'AEON-1', title: 'Aeon foundation', project_id: 'p-aeon' } }, 40),
     )
   }
   if (setup === 'views') data.views.push(

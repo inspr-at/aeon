@@ -541,14 +541,22 @@ async function drop(event: DragEvent) {
 // Each group keeps its own order: a card is arranged among its group's cards.
 const announcement = ref('')
 function announce(text: string) { announcement.value = ''; void nextTick(() => { announcement.value = text }) }
-// Agents starting or stopping work (AEON-184) are said in the same polite region,
-// once per change; what was already going on when the page opened is not news.
-let liveBefore: Map<string, LiveAgent[]> | null = null
+// Agents starting or stopping work (AEON-184) are said in the same polite region.
+// What was already going on when the page opened is not news; changes settle for
+// a moment first, so a burst is said once and a start undone at once is not said.
+const LIVE_NEWS_SETTLE_MS = 2500
+let liveSaid: Map<string, LiveAgent[]> | null = null
+let liveNewsTimer: ReturnType<typeof setTimeout> | undefined
 watch(() => live.state === 'ready' ? live.byProject : null, after => {
   if (!after) return
-  const news = liveChanges(liveBefore, after, id => store.byId(id)?.title)
-  liveBefore = after
-  if (news) announce(news)
+  if (!liveSaid) { liveSaid = after; return }
+  clearTimeout(liveNewsTimer)
+  liveNewsTimer = setTimeout(() => {
+    const now = live.byProject
+    const news = liveChanges(liveSaid, now, id => store.byId(id)?.title)
+    liveSaid = now
+    if (news) announce(news)
+  }, LIVE_NEWS_SETTLE_MS)
 })
 function sectionOf(id: string) { return sections.value.find(s => s.items.some(p => p.id === id)) }
 // Every project in the order the screen shows them now, the base a new custom order starts from.
@@ -823,7 +831,7 @@ watch(listCard, element => {
   sizer = new ResizeObserver(([entry]) => { listWidth.value = entry!.contentRect.width })
   sizer.observe(element)
 }, { flush: 'post' })
-onBeforeUnmount(() => { if (drag) { drag.ghost?.remove(); release(); drag = null } dropSwallow(); stopFailures(); stopPruning(); clearTimeout(pruneTimer); window.removeEventListener('keydown', keydown); page.value?.removeEventListener('click', clickCapture, true); clearInterval(clock); stopLive?.(); sizer?.disconnect(); phoneQuery.removeEventListener('change', phoneChange) })
+onBeforeUnmount(() => { if (drag) { drag.ghost?.remove(); release(); drag = null } dropSwallow(); stopFailures(); stopPruning(); clearTimeout(pruneTimer); window.removeEventListener('keydown', keydown); page.value?.removeEventListener('click', clickCapture, true); clearInterval(clock); stopLive?.(); clearTimeout(liveNewsTimer); sizer?.disconnect(); phoneQuery.removeEventListener('change', phoneChange) })
 const who = computed(() => session.identity?.tenant.name ?? 'Workspace')
 // One line under the sorts says how to arrange your own order. Touch screens
 // scroll when a card is dragged, so there the card's menu arranges it.

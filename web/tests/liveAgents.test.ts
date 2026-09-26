@@ -1,14 +1,14 @@
 // SPDX-License-Identifier: AGPL-3.0-only
 import { test } from 'node:test'
 import assert from 'node:assert/strict'
-import { byLead, chipText, elapsedFor, groupLive, liveChanges, liveSummary, phrase, sameLive, skewOf, who, type LiveAgent } from '../src/lib/liveAgents.ts'
+import { agentKey, byLead, chipText, elapsedFor, groupLive, liveChanges, liveSummary, phrase, sameLive, skewOf, who, type LiveAgent } from '../src/lib/liveAgents.ts'
 
 const now = Date.parse('2026-09-26T12:00:00Z')
 const ago = (seconds: number) => new Date(now - seconds * 1000).toISOString()
 function agent(fields: Partial<LiveAgent> = {}): LiveAgent {
   return {
     project_id: 'p1', session_id: 's1', principal_id: 'a1', name: 'hausv', harness: 'claude', management_mode: 'unmanaged', role: 'worker',
-    phase: 'working', activity: 'busy', ticket: { id: 't1', key: 'HAUSV-887', title: 'Statements' }, since: ago(16 * 60), heartbeat_at: ago(30), ...fields,
+    phase: 'working', activity: 'busy', ticket: { id: 't1', key: 'HAUSV-887', title: 'Statements', project_id: 'p1' }, since: ago(16 * 60), heartbeat_at: ago(30), ...fields,
   }
 }
 
@@ -62,10 +62,26 @@ test('the live region hears starts and ends, never the first reading', () => {
   assert.equal(liveChanges(new Map(), many, id => id.toUpperCase()), 'Agents changed in 4 projects.')
 })
 
+test('agents joining and leaving a project that stays busy are news too', () => {
+  const title = () => 'Janus'
+  const camy = agent({ session_id: 's-camy', name: 'camy' }), nova = agent({ session_id: 's-nova', name: 'nova' }), rex = agent({ session_id: 's-rex', name: 'rex' })
+  const at = (...agents: LiveAgent[]) => new Map([['p1', agents]])
+  assert.equal(liveChanges(at(camy), at(camy, nova), title), 'nova started working on Janus.')
+  assert.equal(liveChanges(at(camy, nova), at(nova), title), 'camy stopped working on Janus.')
+  assert.equal(liveChanges(at(camy), at(nova, rex), title), '2 agents started working on Janus. camy stopped working on Janus.')
+  // The same agents in another order, or with a new heartbeat, are no news; nor is a start undone before it was said.
+  assert.equal(liveChanges(at(camy, nova), at(agent({ ...nova, heartbeat_at: ago(1) }), camy), title), '')
+  assert.equal(liveChanges(at(camy), at(camy), title), '')
+  // An agent the caller may not name keeps one identity across readings.
+  const nameless = agent({ session_id: undefined, principal_id: undefined, name: undefined })
+  assert.equal(agentKey(nameless), agentKey(agent({ ...nameless, heartbeat_at: ago(2) })))
+  assert.equal(liveChanges(at(nameless), at(agent({ ...nameless, heartbeat_at: ago(2) })), title), '')
+})
+
 test('sameLive ignores heartbeats and notices what the page shows', () => {
   const a = new Map([['p1', [agent()]]])
   assert.ok(sameLive(a, new Map([['p1', [agent({ heartbeat_at: ago(5) })]]])))
-  assert.ok(!sameLive(a, new Map([['p1', [agent({ ticket: { id: 't2', key: 'HAUSV-888', title: 'Other' } })]]])))
+  assert.ok(!sameLive(a, new Map([['p1', [agent({ ticket: { id: 't2', key: 'HAUSV-888', title: 'Other', project_id: 'p1' } })]]])))
   assert.ok(!sameLive(a, new Map([['p1', [agent(), agent({ session_id: 's2' })]]])))
   assert.ok(!sameLive(a, new Map([['p2', [agent()]]])))
   assert.ok(!sameLive(a, new Map()))
