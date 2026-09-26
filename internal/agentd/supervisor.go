@@ -16,7 +16,7 @@ import (
 	"sync"
 	"time"
 
-	"github.com/inspr-at/aeon/internal/localjournal"
+	"github.com/inspr-at/paimos/internal/localjournal"
 )
 
 type Config struct {

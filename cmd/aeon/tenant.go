@@ -11,20 +11,20 @@ import (
 
 	"github.com/jackc/pgx/v5/pgxpool"
 
-	"github.com/inspr-at/aeon/internal/config"
-	"github.com/inspr-at/aeon/internal/db"
-	"github.com/inspr-at/aeon/internal/tenantbootstrap"
+	"github.com/inspr-at/paimos/internal/config"
+	"github.com/inspr-at/paimos/internal/db"
+	"github.com/inspr-at/paimos/internal/tenantbootstrap"
 )
 
 // tenantCommand runs the operator-only tenant bootstrap commands:
 //
-//	aeon tenant create --slug SLUG --name NAME
-//	aeon tenant principal bind-oidc --tenant SLUG --issuer URL --subject SUBJECT --name NAME --role admin|member|customer
+//	paimos tenant create --slug SLUG --name NAME
+//	paimos tenant principal bind-oidc --tenant SLUG --issuer URL --subject SUBJECT --name NAME --role admin|member|customer
 func tenantCommand(args []string, stdout io.Writer) error {
-	const usage = "usage: aeon tenant create --slug SLUG --name NAME | aeon tenant principal bind-oidc --tenant SLUG --issuer URL --subject SUBJECT --name NAME --role admin|member|customer"
+	const usage = "usage: paimos tenant create --slug SLUG --name NAME | paimos tenant principal bind-oidc --tenant SLUG --issuer URL --subject SUBJECT --name NAME --role admin|member|customer"
 	switch {
 	case len(args) > 0 && args[0] == "create":
-		flags := flag.NewFlagSet("aeon tenant create", flag.ContinueOnError)
+		flags := flag.NewFlagSet("paimos tenant create", flag.ContinueOnError)
 		flags.SetOutput(io.Discard)
 		slug := flags.String("slug", "", "tenant slug")
 		name := flags.String("name", "", "tenant name")
@@ -39,7 +39,7 @@ func tenantCommand(args []string, stdout io.Writer) error {
 			return json.NewEncoder(stdout).Encode(map[string]string{"tenant_id": id, "slug": *slug})
 		})
 	case len(args) > 1 && args[0] == "principal" && args[1] == "bind-oidc":
-		flags := flag.NewFlagSet("aeon tenant principal bind-oidc", flag.ContinueOnError)
+		flags := flag.NewFlagSet("paimos tenant principal bind-oidc", flag.ContinueOnError)
 		flags.SetOutput(io.Discard)
 		tenant := flags.String("tenant", "", "tenant slug")
 		issuer := flags.String("issuer", "", "OIDC issuer URL")

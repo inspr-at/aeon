@@ -11,7 +11,7 @@ import (
 	"testing"
 	"time"
 
-	"github.com/inspr-at/aeon/internal/tenant"
+	"github.com/inspr-at/paimos/internal/tenant"
 )
 
 func moveRequest(p tenant.Principal, id, body string, headers ...string) *httptest.ResponseRecorder {

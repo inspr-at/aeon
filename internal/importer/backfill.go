@@ -7,9 +7,10 @@ import (
 	"errors"
 	"fmt"
 
-	"github.com/inspr-at/aeon/internal/db"
 	"github.com/jackc/pgx/v5"
 	"github.com/jackc/pgx/v5/pgxpool"
+
+	"github.com/inspr-at/paimos/internal/db"
 )
 
 // BackfillRelations replays stored import.relation events for one tenant and

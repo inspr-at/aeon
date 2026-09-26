@@ -18,8 +18,8 @@ import (
 	"github.com/jackc/pgx/v5"
 	"github.com/jackc/pgx/v5/pgxpool"
 
-	"github.com/inspr-at/aeon/internal/tenant"
-	"github.com/inspr-at/aeon/internal/tenantbootstrap"
+	"github.com/inspr-at/paimos/internal/tenant"
+	"github.com/inspr-at/paimos/internal/tenantbootstrap"
 )
 
 func TestOIDCTenantSelection(t *testing.T) {

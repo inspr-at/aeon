@@ -15,7 +15,7 @@ import (
 	"path/filepath"
 	"time"
 
-	"github.com/inspr-at/aeon/internal/agentd"
+	"github.com/inspr-at/paimos/internal/agentd"
 )
 
 type Client struct {

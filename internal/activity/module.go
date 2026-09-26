@@ -11,11 +11,12 @@ import (
 	"strings"
 	"unicode/utf8"
 
-	"github.com/inspr-at/aeon/internal/httpapi"
-	"github.com/inspr-at/aeon/internal/tenant"
 	"github.com/jackc/pgx/v5"
 	"github.com/jackc/pgx/v5/pgtype"
 	"github.com/jackc/pgx/v5/pgxpool"
+
+	"github.com/inspr-at/paimos/internal/httpapi"
+	"github.com/inspr-at/paimos/internal/tenant"
 )
 
 type module struct{ pool *pgxpool.Pool }

@@ -1,6 +1,6 @@
 // SPDX-License-Identifier: AGPL-3.0-only
 
-// Package config reads the aeon serve process configuration from the environment.
+// Package config reads the paimos serve process configuration from the environment.
 package config
 
 import (
@@ -12,7 +12,7 @@ import (
 	"strings"
 )
 
-// Config is the process configuration for `aeon serve`.
+// Config is the process configuration for `paimos serve`.
 type Config struct {
 	Addr                string
 	DatabaseURL         string

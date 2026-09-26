@@ -13,8 +13,8 @@ import (
 	"testing"
 	"time"
 
-	"github.com/inspr-at/aeon/internal/agentd"
-	"github.com/inspr-at/aeon/internal/inbox"
+	"github.com/inspr-at/paimos/internal/agentd"
+	"github.com/inspr-at/paimos/internal/inbox"
 )
 
 func TestManagedDeliveryUsesOwnedLocalControl(t *testing.T) {

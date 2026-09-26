@@ -5,9 +5,10 @@ package db_test
 import (
 	"testing"
 
-	"github.com/inspr-at/aeon/internal/db"
-	"github.com/inspr-at/aeon/internal/dbtest"
 	"github.com/jackc/pgx/v5"
+
+	"github.com/inspr-at/paimos/internal/db"
+	"github.com/inspr-at/paimos/internal/dbtest"
 )
 
 // Production runs as a table-owning NOSUPERUSER NOBYPASSRLS role, so FORCE ROW

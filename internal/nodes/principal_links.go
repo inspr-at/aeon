@@ -5,8 +5,9 @@ import (
 	"context"
 	"encoding/json"
 
-	"github.com/inspr-at/aeon/internal/principallink"
 	"github.com/jackc/pgx/v5"
+
+	"github.com/inspr-at/paimos/internal/principallink"
 )
 
 // Canonicalize explicit native assignments before persisting and recording the

@@ -10,11 +10,12 @@ import (
 	"strings"
 	"time"
 
-	"github.com/inspr-at/aeon/internal/approvals"
-	"github.com/inspr-at/aeon/internal/events"
-	"github.com/inspr-at/aeon/internal/plugins"
-	"github.com/inspr-at/aeon/internal/tenant"
 	"github.com/jackc/pgx/v5"
+
+	"github.com/inspr-at/paimos/internal/approvals"
+	"github.com/inspr-at/paimos/internal/events"
+	"github.com/inspr-at/paimos/internal/plugins"
+	"github.com/inspr-at/paimos/internal/tenant"
 )
 
 const handoffColumns = `id::text,project_node_id::text,release_node_id::text,stage,operation,plugin_id,attempt,authority_epoch,journey_revision,state,expires_at,evidence_ceiling,plan_digest,predecessor_digest,context_digest,prerequisite_seal_sha256`

@@ -20,8 +20,8 @@ import (
 	"syscall"
 	"time"
 
-	"github.com/inspr-at/aeon/internal/agentd"
-	"github.com/inspr-at/aeon/internal/agentdwire"
+	"github.com/inspr-at/paimos/internal/agentd"
+	"github.com/inspr-at/paimos/internal/agentdwire"
 )
 
 type enrollment struct {
@@ -45,7 +45,7 @@ func main() {
 
 func run(args []string, out io.Writer) error {
 	if len(args) == 0 {
-		return errors.New("usage: aeon-agentd serve|control")
+		return errors.New("usage: paimos-agentd serve|control")
 	}
 	switch args[0] {
 	case "serve":
@@ -53,7 +53,7 @@ func run(args []string, out io.Writer) error {
 	case "control":
 		return control(args[1:], out)
 	default:
-		return errors.New("usage: aeon-agentd serve|control")
+		return errors.New("usage: paimos-agentd serve|control")
 	}
 }
 

@@ -3,13 +3,14 @@
 package nodes
 
 import (
-	"github.com/inspr-at/aeon/internal/dbtest"
 	"net/http"
 	"strings"
 	"testing"
 
-	"github.com/inspr-at/aeon/internal/db"
 	"github.com/jackc/pgx/v5"
+
+	"github.com/inspr-at/paimos/internal/db"
+	"github.com/inspr-at/paimos/internal/dbtest"
 )
 
 // People in list and project payloads say whether they have a picture, so the

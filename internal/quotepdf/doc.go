@@ -8,7 +8,7 @@
 // Chromium belongs in the Aeon image. The QP5 local linux/amd64 image measured
 // 1.11 GB with `docker image ls`; apk reported 709.5 MiB installed for the
 // runtime's 196 packages. QW1 built the native linux/arm64 image locally,
-// started aeon serve as UID 100 with AEON_ENV=dev against local Postgres, and
+// started paimos serve as UID 100 with AEON_ENV=dev against local Postgres, and
 // rendered three A4 PDFs with TestBundledDocumentRendersA4 using the built web
 // assets inside that running container. At 20 ms sampling, peak summed process
 // VmRSS was 1206712 KiB (1178 MiB) across aeon, the test and Chromium; this

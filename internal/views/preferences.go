@@ -12,8 +12,8 @@ import (
 
 	"github.com/jackc/pgx/v5"
 
-	"github.com/inspr-at/aeon/internal/httpapi"
-	"github.com/inspr-at/aeon/internal/tenant"
+	"github.com/inspr-at/paimos/internal/httpapi"
+	"github.com/inspr-at/paimos/internal/tenant"
 )
 
 // Per-person UI preferences: GET and PUT /api/preferences/{key}. A value is a

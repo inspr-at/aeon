@@ -7,9 +7,9 @@ import (
 	"encoding/json"
 	"fmt"
 
-	"github.com/inspr-at/aeon/internal/plugins/fence"
-	"github.com/inspr-at/aeon/internal/plugins/janus"
-	"github.com/inspr-at/aeon/internal/plugins/pharos"
+	"github.com/inspr-at/paimos/internal/plugins/fence"
+	"github.com/inspr-at/paimos/internal/plugins/janus"
+	"github.com/inspr-at/paimos/internal/plugins/pharos"
 )
 
 // Builtin returns a sealed registry containing Pharos, Janus and any extra

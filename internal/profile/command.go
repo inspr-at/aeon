@@ -9,23 +9,24 @@ import (
 	"fmt"
 	"io"
 
-	"github.com/inspr-at/aeon/internal/attachments"
-	"github.com/inspr-at/aeon/internal/config"
 	"github.com/jackc/pgx/v5/pgxpool"
+
+	"github.com/inspr-at/paimos/internal/attachments"
+	"github.com/inspr-at/paimos/internal/config"
 )
 
-// ImportCommand implements aeon import paimos-profiles. The coordinator wires
+// ImportCommand implements paimos import paimos-profiles. The coordinator wires
 // this function in cmd/aeon/import.go. It reads classic only through GET,
 // previews by default, and changes Aeon only when --apply is provided.
 func ImportCommand(ctx context.Context, args []string, stdout io.Writer) error {
-	flags := flag.NewFlagSet("aeon import paimos-profiles", flag.ContinueOnError)
+	flags := flag.NewFlagSet("paimos import paimos-profiles", flag.ContinueOnError)
 	flags.SetOutput(io.Discard)
 	sourceURL := flags.String("source-url", "", "classic Paimos URL")
 	keyFile := flags.String("api-key-file", "", "bearer key file")
 	tenantSlug := flags.String("tenant", "", "Aeon tenant slug")
 	apply := flags.Bool("apply", false, "write profile changes to Aeon")
 	if err := flags.Parse(args); err != nil || flags.NArg() != 0 || *sourceURL == "" || *keyFile == "" || *tenantSlug == "" {
-		return errors.New("usage: aeon import paimos-profiles --source-url URL --api-key-file FILE --tenant SLUG [--apply]")
+		return errors.New("usage: paimos import paimos-profiles --source-url URL --api-key-file FILE --tenant SLUG [--apply]")
 	}
 	source, err := NewClassicSource(*sourceURL, *keyFile, nil)
 	if err != nil {

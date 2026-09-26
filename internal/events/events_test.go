@@ -15,11 +15,12 @@ import (
 	"testing"
 	"time"
 
-	"github.com/inspr-at/aeon/internal/db"
-	"github.com/inspr-at/aeon/internal/dbtest"
-	"github.com/inspr-at/aeon/internal/httpapi"
-	"github.com/inspr-at/aeon/internal/tenant"
 	"github.com/jackc/pgx/v5"
+
+	"github.com/inspr-at/paimos/internal/db"
+	"github.com/inspr-at/paimos/internal/dbtest"
+	"github.com/inspr-at/paimos/internal/httpapi"
+	"github.com/inspr-at/paimos/internal/tenant"
 )
 
 func fixture(t *testing.T) (*dbtest.DB, tenant.Principal, tenant.Principal) {

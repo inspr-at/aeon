@@ -14,13 +14,14 @@ import (
 	"testing"
 	"time"
 
-	"github.com/inspr-at/aeon/internal/auth"
-	"github.com/inspr-at/aeon/internal/authz"
-	"github.com/inspr-at/aeon/internal/db"
-	"github.com/inspr-at/aeon/internal/dbtest"
-	"github.com/inspr-at/aeon/internal/httpapi"
-	"github.com/inspr-at/aeon/internal/tenant"
 	"github.com/jackc/pgx/v5"
+
+	"github.com/inspr-at/paimos/internal/auth"
+	"github.com/inspr-at/paimos/internal/authz"
+	"github.com/inspr-at/paimos/internal/db"
+	"github.com/inspr-at/paimos/internal/dbtest"
+	"github.com/inspr-at/paimos/internal/httpapi"
+	"github.com/inspr-at/paimos/internal/tenant"
 )
 
 func TestInboxReceipt(t *testing.T) {

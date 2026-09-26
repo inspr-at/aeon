@@ -11,20 +11,20 @@ import (
 
 	"github.com/jackc/pgx/v5/pgxpool"
 
-	"github.com/inspr-at/aeon/internal/attachments"
-	"github.com/inspr-at/aeon/internal/config"
+	"github.com/inspr-at/paimos/internal/attachments"
+	"github.com/inspr-at/paimos/internal/config"
 )
 
 // filesCommand runs the operator-only attachment store checks:
 //
-//	aeon files verify --tenant SLUG
-//	aeon files gc --tenant SLUG [--apply]
+//	paimos files verify --tenant SLUG
+//	paimos files gc --tenant SLUG [--apply]
 func filesCommand(args []string, stdout io.Writer) error {
-	const usage = "usage: aeon files verify --tenant SLUG | aeon files gc --tenant SLUG [--apply]"
+	const usage = "usage: paimos files verify --tenant SLUG | paimos files gc --tenant SLUG [--apply]"
 	if len(args) == 0 || (args[0] != "verify" && args[0] != "gc") {
 		return errors.New(usage)
 	}
-	flags := flag.NewFlagSet("aeon files "+args[0], flag.ContinueOnError)
+	flags := flag.NewFlagSet("paimos files "+args[0], flag.ContinueOnError)
 	flags.SetOutput(io.Discard)
 	tenant := flags.String("tenant", "", "tenant slug")
 	apply := flags.Bool("apply", false, "gc only: delete instead of listing")

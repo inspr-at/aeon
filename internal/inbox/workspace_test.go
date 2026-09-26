@@ -5,16 +5,17 @@ package inbox
 import (
 	"encoding/json"
 	"fmt"
-	"github.com/inspr-at/aeon/internal/dbtest"
 	"net/http"
 	"net/http/httptest"
 	"strings"
 	"sync"
 	"testing"
 
-	"github.com/inspr-at/aeon/internal/db"
-	"github.com/inspr-at/aeon/internal/tenant"
 	"github.com/jackc/pgx/v5"
+
+	"github.com/inspr-at/paimos/internal/db"
+	"github.com/inspr-at/paimos/internal/dbtest"
+	"github.com/inspr-at/paimos/internal/tenant"
 )
 
 func workspaceCall(m *messaging, p tenant.Principal, method, path, body string, headers http.Header) *httptest.ResponseRecorder {

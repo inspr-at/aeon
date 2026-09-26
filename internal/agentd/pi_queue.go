@@ -9,7 +9,7 @@ import (
 	"path/filepath"
 	"unicode/utf8"
 
-	"github.com/inspr-at/aeon/internal/localjournal"
+	"github.com/inspr-at/paimos/internal/localjournal"
 )
 
 // piHeldQueue is private vendor state. It is never projected to AEON or

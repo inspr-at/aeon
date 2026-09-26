@@ -14,7 +14,7 @@ import (
 	"testing"
 	"time"
 
-	"github.com/inspr-at/aeon/internal/tenant"
+	"github.com/inspr-at/paimos/internal/tenant"
 )
 
 func TestClassifyTicketsAndTagMessages(t *testing.T) {
@@ -163,7 +163,7 @@ func TestBuildWithGitHubEvidence(t *testing.T) {
 		switch {
 		case r.URL.Path == "/repos/inspr-at/aeon/releases":
 			_ = json.NewEncoder(w).Encode([]map[string]any{
-				{"tag_name": "v260923143005.0.0", "html_url": "https://github.com/inspr-at/aeon/releases/tag/v260923143005.0.0", "published_at": "2026-09-23T14:36:00Z", "draft": false,
+				{"tag_name": "v260923143005.0.0", "html_url": "https://github.com/inspr-at/paimos/releases/tag/v260923143005.0.0", "published_at": "2026-09-23T14:36:00Z", "draft": false,
 					"body": "aeon-agentd …\n\nContainer: ghcr.io/inspr-at/aeon:260923143005.0.0\nDigest: sha256:" + strings.Repeat("ab", 32)},
 				{"tag_name": "v260923134631.0.0", "html_url": "https://example/r2", "published_at": "2026-09-23T13:52:00Z", "draft": false, "body": "no digest here"},
 			})

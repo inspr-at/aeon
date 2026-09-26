@@ -6,9 +6,10 @@ import (
 	"fmt"
 	"testing"
 
-	"github.com/inspr-at/aeon/internal/db"
-	"github.com/inspr-at/aeon/internal/dbtest"
 	"github.com/jackc/pgx/v5"
+
+	"github.com/inspr-at/paimos/internal/db"
+	"github.com/inspr-at/paimos/internal/dbtest"
 )
 
 // Every migration from 0500 onward runs against existing tenant data under

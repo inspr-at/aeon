@@ -8,9 +8,10 @@ import (
 	"strings"
 	"testing"
 
-	"github.com/inspr-at/aeon/internal/harness"
-	"github.com/inspr-at/aeon/internal/tenant"
 	"github.com/jackc/pgx/v5"
+
+	"github.com/inspr-at/paimos/internal/harness"
+	"github.com/inspr-at/paimos/internal/tenant"
 )
 
 // AEON-184: the Projects page asks once which agents are working where. Only

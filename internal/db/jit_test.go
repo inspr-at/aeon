@@ -6,8 +6,8 @@ import (
 	"context"
 	"testing"
 
-	"github.com/inspr-at/aeon/internal/db"
-	"github.com/inspr-at/aeon/internal/dbtest"
+	"github.com/inspr-at/paimos/internal/db"
+	"github.com/inspr-at/paimos/internal/dbtest"
 )
 
 // Aeon's sessions run without JIT compilation (it cost ~310 ms per tree query on

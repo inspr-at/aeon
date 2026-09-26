@@ -11,8 +11,8 @@ import (
 
 	"github.com/jackc/pgx/v5"
 
-	"github.com/inspr-at/aeon/internal/authz"
-	"github.com/inspr-at/aeon/internal/tenant"
+	"github.com/inspr-at/paimos/internal/authz"
+	"github.com/inspr-at/paimos/internal/tenant"
 )
 
 func presentedSecret(r *http.Request) (prefix, secret string, ok bool) {

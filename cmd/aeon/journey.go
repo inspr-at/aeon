@@ -8,7 +8,7 @@ import (
 
 	"github.com/jackc/pgx/v5/pgxpool"
 
-	"github.com/inspr-at/aeon/internal/journey"
+	"github.com/inspr-at/paimos/internal/journey"
 )
 
 // journeyCommand is operator-only. These mutations have no HTTP route.

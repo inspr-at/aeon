@@ -1,7 +1,7 @@
 // SPDX-License-Identifier: AGPL-3.0-only
 package attachments
 
-import "github.com/inspr-at/aeon/internal/plugins"
+import "github.com/inspr-at/paimos/internal/plugins"
 
 // Plugin declares attachments to the compiled plugin registry. The coordinator
 // passes this constructor to plugins.Builtin; the HTTP module mounts separately.

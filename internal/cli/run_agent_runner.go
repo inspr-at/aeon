@@ -18,7 +18,7 @@ import (
 	"sync/atomic"
 	"time"
 
-	"github.com/inspr-at/aeon/internal/agentd"
+	"github.com/inspr-at/paimos/internal/agentd"
 )
 
 var localToolRE = regexp.MustCompile(`^[A-Za-z0-9_.*:-]+$`)

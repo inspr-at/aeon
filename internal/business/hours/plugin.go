@@ -4,8 +4,9 @@ package hours
 
 import (
 	"context"
-	"github.com/inspr-at/aeon/internal/plugins"
-	"github.com/inspr-at/aeon/internal/plugins/fence"
+
+	"github.com/inspr-at/paimos/internal/plugins"
+	"github.com/inspr-at/paimos/internal/plugins/fence"
 )
 
 const PluginID = "business_hours"

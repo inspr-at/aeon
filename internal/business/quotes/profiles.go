@@ -20,9 +20,10 @@ import (
 	"strconv"
 	"strings"
 
-	"github.com/inspr-at/aeon/internal/attachments"
-	"github.com/inspr-at/aeon/internal/plugins/fence"
 	"github.com/jackc/pgx/v5"
+
+	"github.com/inspr-at/paimos/internal/attachments"
+	"github.com/inspr-at/paimos/internal/plugins/fence"
 )
 
 // Profiles are part of the existing business_quotes module and compiled

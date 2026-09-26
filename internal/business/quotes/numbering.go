@@ -9,13 +9,14 @@ import (
 	"regexp"
 	"time"
 
-	"github.com/inspr-at/aeon/internal/authz"
-	"github.com/inspr-at/aeon/internal/db"
-	"github.com/inspr-at/aeon/internal/plugins"
-	"github.com/inspr-at/aeon/internal/plugins/fence"
-	"github.com/inspr-at/aeon/internal/tenant"
 	"github.com/jackc/pgx/v5"
 	"github.com/jackc/pgx/v5/pgxpool"
+
+	"github.com/inspr-at/paimos/internal/authz"
+	"github.com/inspr-at/paimos/internal/db"
+	"github.com/inspr-at/paimos/internal/plugins"
+	"github.com/inspr-at/paimos/internal/plugins/fence"
+	"github.com/inspr-at/paimos/internal/tenant"
 )
 
 var legacyCustomerNumber = regexp.MustCompile(`^K[0-9]{2}-[0-9]{3,}$`)

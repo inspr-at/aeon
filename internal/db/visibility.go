@@ -6,8 +6,9 @@ import (
 	"context"
 	"strings"
 
-	"github.com/inspr-at/aeon/internal/tenant"
 	"github.com/jackc/pgx/v5"
+
+	"github.com/inspr-at/paimos/internal/tenant"
 )
 
 // VisibleProjectsSetting is the per-transaction project visibility that the

@@ -7,9 +7,9 @@ import (
 	"net/http"
 	"time"
 
-	"github.com/inspr-at/aeon/internal/agentruns"
-	"github.com/inspr-at/aeon/internal/auth"
-	"github.com/inspr-at/aeon/internal/tenant"
+	"github.com/inspr-at/paimos/internal/agentruns"
+	"github.com/inspr-at/paimos/internal/auth"
+	"github.com/inspr-at/paimos/internal/tenant"
 )
 
 const (

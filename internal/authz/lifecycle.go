@@ -7,8 +7,9 @@ import (
 	"net/http"
 	"strings"
 
-	"github.com/inspr-at/aeon/internal/db"
 	"github.com/jackc/pgx/v5"
+
+	"github.com/inspr-at/paimos/internal/db"
 )
 
 func (m *Module) deactivate(w http.ResponseWriter, r *http.Request) {

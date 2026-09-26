@@ -26,7 +26,7 @@ import (
 	"strings"
 	"unicode/utf8"
 
-	aeon "github.com/inspr-at/aeon"
+	aeon "github.com/inspr-at/paimos"
 )
 
 // Schema is the identifier every brand file carries.

@@ -13,8 +13,8 @@ import (
 	"testing"
 	"time"
 
-	"github.com/inspr-at/aeon/internal/agentd"
-	"github.com/inspr-at/aeon/internal/client"
+	"github.com/inspr-at/paimos/internal/agentd"
+	"github.com/inspr-at/paimos/internal/client"
 )
 
 func TestLocalRunnerFakeCommandReportsBack(t *testing.T) {

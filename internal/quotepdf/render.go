@@ -18,14 +18,14 @@ import (
 	"strings"
 	"time"
 
-	"github.com/inspr-at/aeon/internal/attachments"
-	"github.com/inspr-at/aeon/internal/db"
-	"github.com/jackc/pgx/v5"
-	"github.com/jackc/pgx/v5/pgxpool"
-
 	"github.com/chromedp/cdproto/page"
 	cdpruntime "github.com/chromedp/cdproto/runtime"
 	"github.com/chromedp/chromedp"
+	"github.com/jackc/pgx/v5"
+	"github.com/jackc/pgx/v5/pgxpool"
+
+	"github.com/inspr-at/paimos/internal/attachments"
+	"github.com/inspr-at/paimos/internal/db"
 )
 
 const RendererVersion = "aeon-quote-document-1"

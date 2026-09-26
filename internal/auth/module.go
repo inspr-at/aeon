@@ -17,10 +17,10 @@ import (
 	"github.com/jackc/pgx/v5/pgxpool"
 	"golang.org/x/oauth2"
 
-	"github.com/inspr-at/aeon/internal/authz"
-	"github.com/inspr-at/aeon/internal/db"
-	"github.com/inspr-at/aeon/internal/httpapi"
-	"github.com/inspr-at/aeon/internal/tenant"
+	"github.com/inspr-at/paimos/internal/authz"
+	"github.com/inspr-at/paimos/internal/db"
+	"github.com/inspr-at/paimos/internal/httpapi"
+	"github.com/inspr-at/paimos/internal/tenant"
 )
 
 // Module serves /api/auth, /api/me and /api/agent-keys, and resolves the caller.

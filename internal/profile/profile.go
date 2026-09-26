@@ -2,7 +2,7 @@
 // Package profile provides tenant-scoped personal profiles and avatar endpoints.
 // The coordinator mounts New(pool, store) as an httpapi.Module and registers
 // UndoHandlers() with events.WithUndoHandlers. ProfileImporter is the CLI entry
-// point the coordinator wires to "aeon import paimos-profiles".
+// point the coordinator wires to "paimos import paimos-profiles".
 package profile
 
 import (
@@ -14,20 +14,21 @@ import (
 	"net/http"
 	"regexp"
 	"strings"
+	"time"
 	"unicode"
 	"unicode/utf8"
 
-	"github.com/inspr-at/aeon/internal/attachments"
-	"github.com/inspr-at/aeon/internal/db"
-	"github.com/inspr-at/aeon/internal/events"
-	"github.com/inspr-at/aeon/internal/httpapi"
-	"github.com/inspr-at/aeon/internal/tenant"
 	"github.com/jackc/pgx/v5"
 	"github.com/jackc/pgx/v5/pgconn"
 	"github.com/jackc/pgx/v5/pgtype"
 	"github.com/jackc/pgx/v5/pgxpool"
 	"golang.org/x/text/language"
-	"time"
+
+	"github.com/inspr-at/paimos/internal/attachments"
+	"github.com/inspr-at/paimos/internal/db"
+	"github.com/inspr-at/paimos/internal/events"
+	"github.com/inspr-at/paimos/internal/httpapi"
+	"github.com/inspr-at/paimos/internal/tenant"
 )
 
 var shortNameRE = regexp.MustCompile(`^[a-z0-9._-]{2,24}$`)

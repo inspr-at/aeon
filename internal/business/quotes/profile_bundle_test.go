@@ -11,10 +11,11 @@ import (
 	"strings"
 	"testing"
 
-	"github.com/inspr-at/aeon/internal/db"
-	"github.com/inspr-at/aeon/internal/dbtest"
-	"github.com/inspr-at/aeon/internal/importer/offers"
 	"github.com/jackc/pgx/v5"
+
+	"github.com/inspr-at/paimos/internal/db"
+	"github.com/inspr-at/paimos/internal/dbtest"
+	"github.com/inspr-at/paimos/internal/importer/offers"
 )
 
 func TestProfileBundleApplyAndDraftAssignment(t *testing.T) {

@@ -20,7 +20,7 @@ import (
 	"os"
 	"path/filepath"
 
-	"github.com/inspr-at/aeon/internal/business/quotes"
+	"github.com/inspr-at/paimos/internal/business/quotes"
 )
 
 func main() {

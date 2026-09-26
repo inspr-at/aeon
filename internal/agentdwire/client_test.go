@@ -13,7 +13,7 @@ import (
 	"testing"
 	"time"
 
-	"github.com/inspr-at/aeon/internal/agentd"
+	"github.com/inspr-at/paimos/internal/agentd"
 )
 
 func TestAuthenticatedLocalControl(t *testing.T) {

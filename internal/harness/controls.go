@@ -6,9 +6,10 @@ import (
 	"net/http"
 	"time"
 
-	"github.com/inspr-at/aeon/internal/tenant"
-	"github.com/inspr-at/aeon/internal/workorders"
 	"github.com/jackc/pgx/v5"
+
+	"github.com/inspr-at/paimos/internal/tenant"
+	"github.com/inspr-at/paimos/internal/workorders"
 )
 
 type Control struct {

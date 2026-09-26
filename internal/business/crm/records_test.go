@@ -4,14 +4,15 @@ package crm
 import (
 	"encoding/json"
 	"fmt"
-	"github.com/inspr-at/aeon/internal/dbtest"
 	"net/http/httptest"
 	"strings"
 	"testing"
 
-	"github.com/inspr-at/aeon/internal/db"
-	"github.com/inspr-at/aeon/internal/tenant"
 	"github.com/jackc/pgx/v5"
+
+	"github.com/inspr-at/paimos/internal/db"
+	"github.com/inspr-at/paimos/internal/dbtest"
+	"github.com/inspr-at/paimos/internal/tenant"
 )
 
 func jsonRequest(t *testing.T, f fixture, p tenant.Principal, method, path string, body any) *httptest.ResponseRecorder {

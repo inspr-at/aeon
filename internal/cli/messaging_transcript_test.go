@@ -15,7 +15,7 @@ import (
 	"strings"
 	"testing"
 
-	"github.com/inspr-at/aeon/internal/inbox"
+	"github.com/inspr-at/paimos/internal/inbox"
 )
 
 func TestMessagingCommandTranscripts(t *testing.T) {

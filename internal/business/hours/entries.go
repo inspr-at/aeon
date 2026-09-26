@@ -10,10 +10,11 @@ import (
 	"strings"
 	"time"
 
-	"github.com/inspr-at/aeon/internal/events"
-	"github.com/inspr-at/aeon/internal/tenant"
-	"github.com/inspr-at/aeon/internal/workorders"
 	"github.com/jackc/pgx/v5"
+
+	"github.com/inspr-at/paimos/internal/events"
+	"github.com/inspr-at/paimos/internal/tenant"
+	"github.com/inspr-at/paimos/internal/workorders"
 )
 
 const entryColumns = `id::text,period_id::text,principal_id::text,node_id::text,cost_unit_node_id::text,source,agent_run_id::text,started_at,ended_at,duration_seconds,rate_amount::text,currency,amount::text,note,updated_at`

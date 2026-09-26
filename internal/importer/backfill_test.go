@@ -5,8 +5,8 @@ import (
 	"context"
 	"testing"
 
-	"github.com/inspr-at/aeon/internal/db"
-	"github.com/inspr-at/aeon/internal/dbtest"
+	"github.com/inspr-at/paimos/internal/db"
+	"github.com/inspr-at/paimos/internal/dbtest"
 )
 
 func TestBackfillRelationsRequiresInput(t *testing.T) {

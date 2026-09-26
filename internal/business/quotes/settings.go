@@ -11,8 +11,9 @@ import (
 	"regexp"
 	"time"
 
-	"github.com/inspr-at/aeon/internal/plugins/fence"
 	"github.com/jackc/pgx/v5"
+
+	"github.com/inspr-at/paimos/internal/plugins/fence"
 )
 
 type quoteSettings struct {

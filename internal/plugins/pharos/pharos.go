@@ -11,7 +11,7 @@ import (
 	"strings"
 	"time"
 
-	"github.com/inspr-at/aeon/internal/plugins/fence"
+	"github.com/inspr-at/paimos/internal/plugins/fence"
 )
 
 const (

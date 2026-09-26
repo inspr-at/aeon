@@ -13,7 +13,7 @@ The next generation of Paimos: agents first, voice first, multi-tenant, hybrid h
 ## Layout
 
 ```
-cmd/aeon/            single binary: `aeon serve` and later the CLI
+cmd/aeon/            single binary: `paimos serve` and later the CLI
 internal/            Go packages (config, db, migrate, tenant, auth, httpapi, events, …)
 internal/db/migrations/  numbered SQL migrations, embedded
 api/openapi.yaml     the contract; change it first, then code

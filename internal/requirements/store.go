@@ -10,9 +10,10 @@ import (
 	"errors"
 	"fmt"
 
-	"github.com/inspr-at/aeon/internal/events"
-	"github.com/inspr-at/aeon/internal/tenant"
 	"github.com/jackc/pgx/v5"
+
+	"github.com/inspr-at/paimos/internal/events"
+	"github.com/inspr-at/paimos/internal/tenant"
 )
 
 // Digest fingerprints current requirement content, accepted breakdown identity,

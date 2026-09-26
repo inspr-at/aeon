@@ -7,7 +7,7 @@ on:
       - "v*"
 
 permissions:
-  # write: attach aeon-agentd and aeon-cli binaries and SHA256SUMS to the GitHub release
+  # write: attach paimos-agentd and aeon-cli binaries and SHA256SUMS to the GitHub release
   contents: write
   packages: write
   attestations: write
@@ -49,7 +49,7 @@ jobs:
 
       # CGO off, -trimpath, and the same -X as the server image (Dockerfile).
       # The coordinate is the version field of version.json, already matched to the tag.
-      - name: Build aeon-agentd
+      - name: Build paimos-agentd
         env:
           VERSION: ${{ steps.version.outputs.version }}
         run: |
@@ -60,14 +60,14 @@ jobs:
             exit 1
           fi
           mkdir -p dist
-          ldflags="-X github.com/inspr-at/aeon/internal/version.Version=${version}"
+          ldflags="-X github.com/inspr-at/paimos/internal/version.Version=${version}"
           for pair in darwin/arm64 darwin/amd64 linux/amd64; do
             goos="${pair%/*}"
             goarch="${pair#*/}"
             CGO_ENABLED=0 GOOS="$goos" GOARCH="$goarch" go build \
               -trimpath \
               -ldflags "$ldflags" \
-              -o "dist/aeon-agentd-${goos}-${goarch}" \
+              -o "dist/paimos-agentd-${goos}-${goarch}" \
               ./cmd/aeon-agentd
           done
           for pair in darwin/arm64 darwin/amd64 linux/amd64 linux/arm64; do
@@ -82,9 +82,9 @@ jobs:
           (
             cd dist
             sha256sum \
-              aeon-agentd-darwin-arm64 \
-              aeon-agentd-darwin-amd64 \
-              aeon-agentd-linux-amd64 \
+              paimos-agentd-darwin-arm64 \
+              paimos-agentd-darwin-amd64 \
+              paimos-agentd-linux-amd64 \
               aeon-cli-darwin-arm64 \
               aeon-cli-darwin-amd64 \
               aeon-cli-linux-amd64 \
@@ -123,7 +123,7 @@ jobs:
           platforms: linux/amd64
           provenance: mode=max
           tags: ghcr.io/inspr-at/aeon:${{ steps.version.outputs.version }}
-          # -X github.com/inspr-at/aeon/internal/version.Version=<version without v>
+          # -X github.com/inspr-at/paimos/internal/version.Version=<version without v>
           build-args: |
             VERSION=${{ steps.version.outputs.version }}
 
@@ -135,7 +135,7 @@ jobs:
             echo "ghcr.io/inspr-at/aeon@${{ steps.push.outputs.digest }}"
           } >> "$GITHUB_STEP_SUMMARY"
 
-      - name: Attach aeon-agentd to the GitHub release
+      - name: Attach paimos-agentd to the GitHub release
         env:
           GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
           VERSION: ${{ steps.version.outputs.version }}
@@ -144,7 +144,7 @@ jobs:
           set -euo pipefail
           tag="v${VERSION}"
           notes="$(printf '%s\n' \
-            "aeon-agentd ${VERSION} for darwin-arm64, darwin-amd64 and linux-amd64." \
+            "paimos-agentd ${VERSION} for darwin-arm64, darwin-amd64 and linux-amd64." \
             "aeon-cli ${VERSION} for darwin-arm64, darwin-amd64, linux-amd64 and linux-arm64." \
             "Install aeon-cli as aeon. A symlink named paimos selects the paimos-compatible CLI (PAIMOS_URL)." \
             "Verify SHA256SUMS before installing." \
@@ -153,9 +153,9 @@ jobs:
             "Digest: ${DIGEST}")"
           if gh release view "$tag" >/dev/null 2>&1; then
             gh release upload "$tag" \
-              dist/aeon-agentd-darwin-arm64 \
-              dist/aeon-agentd-darwin-amd64 \
-              dist/aeon-agentd-linux-amd64 \
+              dist/paimos-agentd-darwin-arm64 \
+              dist/paimos-agentd-darwin-amd64 \
+              dist/paimos-agentd-linux-amd64 \
               dist/aeon-cli-darwin-arm64 \
               dist/aeon-cli-darwin-amd64 \
               dist/aeon-cli-linux-amd64 \
@@ -164,9 +164,9 @@ jobs:
               --clobber
           else
             gh release create "$tag" \
-              dist/aeon-agentd-darwin-arm64 \
-              dist/aeon-agentd-darwin-amd64 \
-              dist/aeon-agentd-linux-amd64 \
+              dist/paimos-agentd-darwin-arm64 \
+              dist/paimos-agentd-darwin-amd64 \
+              dist/paimos-agentd-linux-amd64 \
               dist/aeon-cli-darwin-arm64 \
               dist/aeon-cli-darwin-amd64 \
               dist/aeon-cli-linux-amd64 \

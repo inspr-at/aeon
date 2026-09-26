@@ -4,18 +4,19 @@ package crm
 import (
 	"context"
 	"encoding/json"
-	"github.com/inspr-at/aeon/internal/dbtest"
 	"net/http"
 	"strings"
 	"testing"
 
-	"github.com/inspr-at/aeon/internal/db"
-	"github.com/inspr-at/aeon/internal/events"
-	"github.com/inspr-at/aeon/internal/httpapi"
-	"github.com/inspr-at/aeon/internal/modelregistry"
-	"github.com/inspr-at/aeon/internal/plugins"
-	"github.com/inspr-at/aeon/internal/plugins/fence"
 	"github.com/jackc/pgx/v5"
+
+	"github.com/inspr-at/paimos/internal/db"
+	"github.com/inspr-at/paimos/internal/dbtest"
+	"github.com/inspr-at/paimos/internal/events"
+	"github.com/inspr-at/paimos/internal/httpapi"
+	"github.com/inspr-at/paimos/internal/modelregistry"
+	"github.com/inspr-at/paimos/internal/plugins"
+	"github.com/inspr-at/paimos/internal/plugins/fence"
 )
 
 type fakeNoteGenerator func(context.Context, modelregistry.Profile, NotePrompt) (NoteGeneration, error)

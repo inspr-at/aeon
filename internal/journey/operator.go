@@ -15,10 +15,10 @@ import (
 	"github.com/jackc/pgx/v5"
 	"github.com/jackc/pgx/v5/pgxpool"
 
-	"github.com/inspr-at/aeon/internal/db"
-	"github.com/inspr-at/aeon/internal/operatoractor"
-	"github.com/inspr-at/aeon/internal/tenant"
-	"github.com/inspr-at/aeon/internal/tenantbootstrap"
+	"github.com/inspr-at/paimos/internal/db"
+	"github.com/inspr-at/paimos/internal/operatoractor"
+	"github.com/inspr-at/paimos/internal/tenant"
+	"github.com/inspr-at/paimos/internal/tenantbootstrap"
 )
 
 const operatorUsage = "usage: aeon journey mark-disposable --tenant SLUG --project KEY | aeon journey seed --tenant SLUG --project KEY --to-stage build|candidate|deploy [--production --confirm-project KEY]"

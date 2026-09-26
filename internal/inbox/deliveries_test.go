@@ -5,12 +5,13 @@ package inbox
 import (
 	"errors"
 	"fmt"
-	"github.com/inspr-at/aeon/internal/dbtest"
 	"testing"
 
-	"github.com/inspr-at/aeon/internal/db"
-	"github.com/inspr-at/aeon/internal/tenant"
 	"github.com/jackc/pgx/v5"
+
+	"github.com/inspr-at/paimos/internal/db"
+	"github.com/inspr-at/paimos/internal/dbtest"
+	"github.com/inspr-at/paimos/internal/tenant"
 )
 
 func TestMessagingAtomicRollbackAndProjectBoundary(t *testing.T) {

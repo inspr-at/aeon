@@ -7,10 +7,11 @@ import (
 	"errors"
 	"reflect"
 
-	"github.com/inspr-at/aeon/internal/authz"
-	"github.com/inspr-at/aeon/internal/events"
-	"github.com/inspr-at/aeon/internal/tenant"
 	"github.com/jackc/pgx/v5"
+
+	"github.com/inspr-at/paimos/internal/authz"
+	"github.com/inspr-at/paimos/internal/events"
+	"github.com/inspr-at/paimos/internal/tenant"
 )
 
 // journeyTicketSnapshot keeps the ticket ID even when its membership is

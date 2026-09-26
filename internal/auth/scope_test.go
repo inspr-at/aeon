@@ -18,9 +18,10 @@ import (
 	"strings"
 	"testing"
 
-	"github.com/inspr-at/aeon/internal/authz"
-	"github.com/inspr-at/aeon/internal/tenant"
 	"github.com/jackc/pgx/v5"
+
+	"github.com/inspr-at/paimos/internal/authz"
+	"github.com/inspr-at/paimos/internal/tenant"
 )
 
 // Agent keys reach shared project groups (AEON-136) through the views scope,

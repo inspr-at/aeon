@@ -14,7 +14,7 @@ import (
 	"strings"
 	"syscall"
 
-	"github.com/inspr-at/aeon/internal/inbox"
+	"github.com/inspr-at/paimos/internal/inbox"
 )
 
 var messagingAddressRE = regexp.MustCompile(`^(paimos|codex|claude|pi|cursor|grok|grok_bot):[a-z][a-z0-9_-]{0,63}$`)

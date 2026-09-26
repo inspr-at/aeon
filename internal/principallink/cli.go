@@ -11,11 +11,11 @@ import (
 	"github.com/jackc/pgx/v5/pgxpool"
 )
 
-// Run handles arguments following `aeon principal`. The coordinator supplies
+// Run handles arguments following `paimos principal`. The coordinator supplies
 // the operator pool and owns configuration, migration and process exit status.
 func Run(ctx context.Context, pool *pgxpool.Pool, args []string, out io.Writer) error {
 	if len(args) == 0 || (args[0] != "link" && args[0] != "unlink") {
-		return errors.New("usage: aeon principal link|unlink --tenant SLUG --from ID_OR_NAME [--to ID_OR_NAME] [--suggest]")
+		return errors.New("usage: paimos principal link|unlink --tenant SLUG --from ID_OR_NAME [--to ID_OR_NAME] [--suggest]")
 	}
 	fs := flag.NewFlagSet("principal "+args[0], flag.ContinueOnError)
 	fs.SetOutput(io.Discard)

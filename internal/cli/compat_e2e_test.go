@@ -22,16 +22,16 @@ import (
 
 	"github.com/jackc/pgx/v5"
 
-	"github.com/inspr-at/aeon/internal/activity"
-	"github.com/inspr-at/aeon/internal/auth"
-	"github.com/inspr-at/aeon/internal/db"
-	"github.com/inspr-at/aeon/internal/dbtest"
-	"github.com/inspr-at/aeon/internal/harness"
-	"github.com/inspr-at/aeon/internal/httpapi"
-	"github.com/inspr-at/aeon/internal/inbox"
-	"github.com/inspr-at/aeon/internal/modelregistry"
-	"github.com/inspr-at/aeon/internal/nodes"
-	"github.com/inspr-at/aeon/internal/search"
+	"github.com/inspr-at/paimos/internal/activity"
+	"github.com/inspr-at/paimos/internal/auth"
+	"github.com/inspr-at/paimos/internal/db"
+	"github.com/inspr-at/paimos/internal/dbtest"
+	"github.com/inspr-at/paimos/internal/harness"
+	"github.com/inspr-at/paimos/internal/httpapi"
+	"github.com/inspr-at/paimos/internal/inbox"
+	"github.com/inspr-at/paimos/internal/modelregistry"
+	"github.com/inspr-at/paimos/internal/nodes"
+	"github.com/inspr-at/paimos/internal/search"
 )
 
 func TestUnsupportedCompatCommands(t *testing.T) {

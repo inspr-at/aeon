@@ -14,25 +14,25 @@ import (
 
 	"github.com/jackc/pgx/v5/pgxpool"
 
-	"github.com/inspr-at/aeon/internal/auth"
-	"github.com/inspr-at/aeon/internal/authz"
+	"github.com/inspr-at/paimos/internal/auth"
+	"github.com/inspr-at/paimos/internal/authz"
 )
 
 // agentKeyCommand runs the operator-only agent key commands:
 //
-//	aeon agent-key create --tenant SLUG --name AGENT --out-file PATH [--scopes a,b] [--expires 720h] [--workspace-role ROLEKEY]
-//	aeon agent-key create --tenant SLUG --principal-id UUID --out-file PATH [--name LABEL] [--scopes a,b]
-//	aeon agent-key revoke --tenant SLUG --id KEY_ID
-//	aeon agent-key journey-gates --tenant SLUG --id KEY_ID --add requirements,build,candidate,deploy
+//	paimos agent-key create --tenant SLUG --name AGENT --out-file PATH [--scopes a,b] [--expires 720h] [--workspace-role ROLEKEY]
+//	paimos agent-key create --tenant SLUG --principal-id UUID --out-file PATH [--name LABEL] [--scopes a,b]
+//	paimos agent-key revoke --tenant SLUG --id KEY_ID
+//	paimos agent-key journey-gates --tenant SLUG --id KEY_ID --add requirements,build,candidate,deploy
 //
 // The token is written only to --out-file (created with mode 0600, never
 // overwritten) and is never printed.
 func agentKeyCommand(args []string, stdout io.Writer) error {
-	const usage = "usage: aeon agent-key create --tenant SLUG (--name AGENT | --principal-id UUID) --out-file PATH [--scopes a,b] [--expires DURATION] [--workspace-role ROLEKEY] [--project KEY --project-role ROLEKEY]... | aeon agent-key revoke --tenant SLUG --id KEY_ID | aeon agent-key journey-gates --tenant SLUG --id KEY_ID --add shape,requirements,build,candidate,deploy,access"
+	const usage = "usage: paimos agent-key create --tenant SLUG (--name AGENT | --principal-id UUID) --out-file PATH [--scopes a,b] [--expires DURATION] [--workspace-role ROLEKEY] [--project KEY --project-role ROLEKEY]... | paimos agent-key revoke --tenant SLUG --id KEY_ID | paimos agent-key journey-gates --tenant SLUG --id KEY_ID --add shape,requirements,build,candidate,deploy,access"
 	if len(args) == 0 || (args[0] != "create" && args[0] != "revoke" && args[0] != "journey-gates") {
 		return errors.New(usage)
 	}
-	flags := flag.NewFlagSet("aeon agent-key "+args[0], flag.ContinueOnError)
+	flags := flag.NewFlagSet("paimos agent-key "+args[0], flag.ContinueOnError)
 	flags.SetOutput(io.Discard)
 	tenantSlug := flags.String("tenant", "", "tenant slug")
 	name := flags.String("name", "", "agent or key name")

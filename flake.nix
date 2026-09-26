@@ -34,7 +34,7 @@
             # Go tests need Postgres (AEON_TEST_DATABASE_URL) and run outside this sandbox.
             doCheck = false;
             ldflags = [
-              "-X github.com/inspr-at/aeon/internal/version.Version=${version}"
+              "-X github.com/inspr-at/paimos/internal/version.Version=${version}"
             ];
             env.CGO_ENABLED = 0;
           };
@@ -59,7 +59,7 @@
               '';
               meta = {
                 description = "PAIMOS AEON client; paimos-compatible when invoked as paimos";
-                homepage = "https://github.com/inspr-at/aeon";
+                homepage = "https://github.com/inspr-at/paimos";
                 inherit license;
                 mainProgram = "aeon";
                 platforms = systems;
@@ -73,7 +73,7 @@
               subPackages = [ "cmd/aeon-agentd" ];
               meta = {
                 description = "PAIMOS AEON local harness supervisor";
-                homepage = "https://github.com/inspr-at/aeon";
+                homepage = "https://github.com/inspr-at/paimos";
                 inherit license;
                 mainProgram = "aeon-agentd";
                 platforms = systems;

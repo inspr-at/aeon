@@ -3,8 +3,8 @@
 // Package tenantbootstrap is the operator-only CLI backend for a second
 // tenant. The coordinator wires these commands into cmd/aeon:
 //
-//	aeon tenant create --slug SLUG --name NAME
-//	aeon tenant principal bind-oidc --tenant SLUG --issuer URL \
+//	paimos tenant create --slug SLUG --name NAME
+//	paimos tenant principal bind-oidc --tenant SLUG --issuer URL \
 //	    --subject SUBJECT --name NAME --role admin|member|customer
 //
 // Create and BindOIDC return stable IDs for machine-readable command output.

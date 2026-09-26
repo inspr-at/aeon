@@ -5,8 +5,8 @@ package greetings
 import (
 	"context"
 
-	"github.com/inspr-at/aeon/internal/plugins"
-	"github.com/inspr-at/aeon/internal/plugins/fence"
+	"github.com/inspr-at/paimos/internal/plugins"
+	"github.com/inspr-at/paimos/internal/plugins/fence"
 )
 
 // ManifestPlugin declares the optional welcome panel to the compiled plugin

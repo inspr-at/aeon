@@ -6,19 +6,20 @@ import (
 	"context"
 	"encoding/json"
 
-	"github.com/inspr-at/aeon/internal/principallink"
 	"github.com/jackc/pgx/v5"
+
+	"github.com/inspr-at/paimos/internal/principallink"
 )
 
 const (
-	evNodeCreated = "node.created"
-	evNodeUpdated = "node.updated"
-	evNodeMoved   = "node.moved"
+	evNodeCreated      = "node.created"
+	evNodeUpdated      = "node.updated"
+	evNodeMoved        = "node.moved"
 	evNodeProjectMoved = "node.project_moved"
-	evNodeDeleted = "node.deleted"
-	evKindCreated = "kind.created"
-	evKindUpdated = "kind.updated"
-	evKindDeleted = "kind.deleted"
+	evNodeDeleted      = "node.deleted"
+	evKindCreated      = "kind.created"
+	evKindUpdated      = "kind.updated"
+	evKindDeleted      = "kind.deleted"
 )
 
 // Event is one append-only change. Before and After are complete resource

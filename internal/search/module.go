@@ -7,8 +7,8 @@ import (
 
 	"github.com/jackc/pgx/v5/pgxpool"
 
-	"github.com/inspr-at/aeon/internal/embedding"
-	"github.com/inspr-at/aeon/internal/httpapi"
+	"github.com/inspr-at/paimos/internal/embedding"
+	"github.com/inspr-at/paimos/internal/httpapi"
 )
 
 // Module serves GET /api/search. New returns it as an httpapi.Module.

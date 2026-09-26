@@ -5,13 +5,13 @@ package relations
 import (
 	"encoding/json"
 	"fmt"
-	"github.com/inspr-at/aeon/internal/dbtest"
 	"testing"
 
 	"github.com/jackc/pgx/v5"
 
-	"github.com/inspr-at/aeon/internal/business/crm"
-	"github.com/inspr-at/aeon/internal/db"
+	"github.com/inspr-at/paimos/internal/business/crm"
+	"github.com/inspr-at/paimos/internal/db"
+	"github.com/inspr-at/paimos/internal/dbtest"
 )
 
 func TestCRMRelationKindsDirectionAndUndo(t *testing.T) {

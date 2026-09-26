@@ -8,8 +8,9 @@ import (
 	"fmt"
 	"time"
 
-	"github.com/inspr-at/aeon/internal/tenant"
 	"github.com/jackc/pgx/v5"
+
+	"github.com/inspr-at/paimos/internal/tenant"
 )
 
 // Event is the public durable event representation. IDs are tenant-local.

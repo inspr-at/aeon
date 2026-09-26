@@ -46,6 +46,7 @@
 //     latter is an authenticated
 //     admin person's approval of an exact period-entry digest, not an R2
 //     agent permission grant. Telemetry cannot approve its own time.
+//
 // No business plugin declares a runtime integration or background job in R4.
 // All operations also check the caller role, referenced resource kinds and
 // tenant, expected revision or digest, and a matching installation. Every
@@ -114,27 +115,28 @@
 //
 // Second-tenant bootstrap is an operator-only CLI and ordinary tenant-admin
 // API sequence, not a migration that seeds a business tenant automatically:
-//   1. aeon tenant create --slug augmentoring --name Augmentoring
-//   2. aeon tenant principal bind-oidc --tenant augmentoring --issuer <issuer>
-//      --subject <operator-subject> --name <name> --role admin
-//   3. GET /auth/login?tenant=augmentoring, then GET /me; the signed OIDC state
-//      fixes the tenant and issuer+subject must resolve to the mapped principal.
-//   4. GET /plugins to obtain the four compiled manifest digests. PUT
-//      /plugins/business_costs/installation,
-//      /plugins/business_crm/installation,
-//      /plugins/business_quotes/installation and
-//      /plugins/business_hours/installation with
-//      enabled=true, each exact digest and its manifest permission subset.
-//   5. GET /kinds, then POST /kinds for each missing manifest kind:
-//      cost_unit (Cost unit, CU), organisation (Organisation, ORG), contact
-//      (Contact, CON), quote (Quote, QUO). Each call includes slug, label,
-//      short_prefix, icon, allowed_child_kinds and field_schema. Imported
-//      cost_unit already present is reused, never rekeyed.
-//   6. For a customer who will approve an offer, provision a tenant person
-//      with aeon tenant principal bind-oidc --tenant augmentoring --issuer
-//      <issuer> --subject <customer-subject> --name <name> --role customer;
-//      create a contact node via POST /nodes and a contact_for organisation
-//      link via POST /relations, then POST /crm/contacts/{contactId}/principals.
+//  1. paimos tenant create --slug augmentoring --name Augmentoring
+//  2. paimos tenant principal bind-oidc --tenant augmentoring --issuer <issuer>
+//     --subject <operator-subject> --name <name> --role admin
+//  3. GET /auth/login?tenant=augmentoring, then GET /me; the signed OIDC state
+//     fixes the tenant and issuer+subject must resolve to the mapped principal.
+//  4. GET /plugins to obtain the four compiled manifest digests. PUT
+//     /plugins/business_costs/installation,
+//     /plugins/business_crm/installation,
+//     /plugins/business_quotes/installation and
+//     /plugins/business_hours/installation with
+//     enabled=true, each exact digest and its manifest permission subset.
+//  5. GET /kinds, then POST /kinds for each missing manifest kind:
+//     cost_unit (Cost unit, CU), organisation (Organisation, ORG), contact
+//     (Contact, CON), quote (Quote, QUO). Each call includes slug, label,
+//     short_prefix, icon, allowed_child_kinds and field_schema. Imported
+//     cost_unit already present is reused, never rekeyed.
+//  6. For a customer who will approve an offer, provision a tenant person
+//     with paimos tenant principal bind-oidc --tenant augmentoring --issuer
+//     <issuer> --subject <customer-subject> --name <name> --role customer;
+//     create a contact node via POST /nodes and a contact_for organisation
+//     link via POST /relations, then POST /crm/contacts/{contactId}/principals.
+//
 // Tenant creation allocates the UUID before db.InTenant and inserts tenants
 // inside that transaction; kind-seeding triggers retain their own setting.
 // OIDC identity upsert, principal binding and membership lookup use a target
@@ -162,26 +164,28 @@
 // owned code is copied into this public repository.
 //
 // Parallel build packages, with disjoint file ownership:
-//   A. Cost units: internal/business/costunits/*.go and
-//      web/src/views/business/CostUnitsView.vue; owns rate endpoints and the
-//      business_costs manifest constructor. Consumes 0400.
-//   B. CRM: internal/business/crm/*.go, internal/relations R4 type support and
-//      web/src/views/business/CRMView.vue; owns contact binding, graph kind
-//      checks and business_crm manifest constructor. Consumes 0401.
-//   C. Quotes: internal/business/quotes/*.go and
-//      web/src/views/business/QuotesView.vue; owns quote
-//      endpoints, rendering and business_quotes manifest constructor. Consumes
-//      0402; no other builder edits its Go package or view files.
-//   D. Hours: internal/business/hours/*.go and
-//      web/src/views/business/HoursView.vue; owns time APIs,
-//      telemetry conversion and business_hours manifest constructor. Consumes
-//      0403.
-//   E. Tenant/PMA: internal/tenantbootstrap/*.go, internal/auth/* tenant
-//      selection, internal/importer/* PMA adapter, and associated tests;
-//      owns CLI behavior design but does not edit cmd/aeon itself.
-//   F. Business shell: web/src/views/business/BusinessHome.vue and
-//      web/src/components/business/*; owns navigation/presentation shared by
-//      the views, never edits another package's view or Go code.
+//
+//	A. Cost units: internal/business/costunits/*.go and
+//	   web/src/views/business/CostUnitsView.vue; owns rate endpoints and the
+//	   business_costs manifest constructor. Consumes 0400.
+//	B. CRM: internal/business/crm/*.go, internal/relations R4 type support and
+//	   web/src/views/business/CRMView.vue; owns contact binding, graph kind
+//	   checks and business_crm manifest constructor. Consumes 0401.
+//	C. Quotes: internal/business/quotes/*.go and
+//	   web/src/views/business/QuotesView.vue; owns quote
+//	   endpoints, rendering and business_quotes manifest constructor. Consumes
+//	   0402; no other builder edits its Go package or view files.
+//	D. Hours: internal/business/hours/*.go and
+//	   web/src/views/business/HoursView.vue; owns time APIs,
+//	   telemetry conversion and business_hours manifest constructor. Consumes
+//	   0403.
+//	E. Tenant/PMA: internal/tenantbootstrap/*.go, internal/auth/* tenant
+//	   selection, internal/importer/* PMA adapter, and associated tests;
+//	   owns CLI behavior design but does not edit cmd/aeon itself.
+//	F. Business shell: web/src/views/business/BusinessHome.vue and
+//	   web/src/components/business/*; owns navigation/presentation shared by
+//	   the views, never edits another package's view or Go code.
+//
 // Contract worker owns api/openapi.yaml, migrations 0400-0403, this doc.go and
 // contract_test.go.
 // Builders consume the contract and do not independently edit shared OpenAPI
@@ -215,10 +219,12 @@
 // No offer is emailed by finalization.
 //
 // P3 document JSON schema v1 (exact wire names; OpenAPI QuoteDocument):
-//   schema_version=1, minimum_writer_version=1; title, subtitle, project_ref,
-//   offer_date and valid_until (YYYY-MM-DD local calendar dates), currency
-//   (three uppercase letters); sender, recipient, legal and layout objects;
-//   sections and positions ordered arrays; net_total_cents server-computed.
+//
+//	schema_version=1, minimum_writer_version=1; title, subtitle, project_ref,
+//	offer_date and valid_until (YYYY-MM-DD local calendar dates), currency
+//	(three uppercase letters); sender, recipient, legal and layout objects;
+//	sections and positions ordered arrays; net_total_cents server-computed.
+//
 // sender is a tenant-settings snapshot with company, street, postal_code,
 // city, country, register_no, register_court, email, phone, website, uid,
 // bank_name, iban, bic, contact_person, plus optional file/hash references.

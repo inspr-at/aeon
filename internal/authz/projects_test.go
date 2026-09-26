@@ -6,9 +6,10 @@ import (
 	"errors"
 	"testing"
 
-	"github.com/inspr-at/aeon/internal/db"
-	"github.com/inspr-at/aeon/internal/tenant"
 	"github.com/jackc/pgx/v5"
+
+	"github.com/inspr-at/paimos/internal/db"
+	"github.com/inspr-at/paimos/internal/tenant"
 )
 
 // ProjectsTx decides from one read of the bindings exactly what RequireTx

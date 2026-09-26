@@ -6,8 +6,8 @@ import (
 	"log/slog"
 	"net/http"
 
-	"github.com/inspr-at/aeon/internal/brand"
-	"github.com/inspr-at/aeon/internal/version"
+	"github.com/inspr-at/paimos/internal/brand"
+	"github.com/inspr-at/paimos/internal/version"
 )
 
 type healthBody struct {

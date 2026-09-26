@@ -14,11 +14,12 @@ import (
 	"testing/fstest"
 	"time"
 
-	"github.com/inspr-at/aeon/internal/brand"
-	"github.com/inspr-at/aeon/internal/db"
-	"github.com/inspr-at/aeon/internal/dbtest"
-	"github.com/inspr-at/aeon/internal/version"
 	"github.com/jackc/pgx/v5"
+
+	"github.com/inspr-at/paimos/internal/brand"
+	"github.com/inspr-at/paimos/internal/db"
+	"github.com/inspr-at/paimos/internal/dbtest"
+	"github.com/inspr-at/paimos/internal/version"
 )
 
 type moduleFunc func(*http.ServeMux)

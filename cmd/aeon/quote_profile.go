@@ -9,11 +9,12 @@ import (
 	"fmt"
 	"io"
 
-	"github.com/inspr-at/aeon/internal/business/quotes"
-	"github.com/inspr-at/aeon/internal/config"
-	"github.com/inspr-at/aeon/internal/db"
-	"github.com/inspr-at/aeon/internal/tenantbootstrap"
 	"github.com/jackc/pgx/v5/pgxpool"
+
+	"github.com/inspr-at/paimos/internal/business/quotes"
+	"github.com/inspr-at/paimos/internal/config"
+	"github.com/inspr-at/paimos/internal/db"
+	"github.com/inspr-at/paimos/internal/tenantbootstrap"
 )
 
 // quoteProfileApply is the operator entry point for an offline document

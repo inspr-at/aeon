@@ -15,7 +15,7 @@ import (
 	"sync"
 	"time"
 
-	"github.com/inspr-at/aeon/internal/localjournal"
+	"github.com/inspr-at/paimos/internal/localjournal"
 )
 
 func operationContext(ctx context.Context) (context.Context, context.CancelFunc) {

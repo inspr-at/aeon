@@ -9,7 +9,7 @@ import (
 	"strings"
 	"testing"
 
-	"github.com/inspr-at/aeon/internal/events"
+	"github.com/inspr-at/paimos/internal/events"
 )
 
 func TestBulkChangeSkipsWithReasonsAndUndoesAsOne(t *testing.T) {

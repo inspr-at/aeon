@@ -6,9 +6,9 @@ import (
 	"context"
 	"testing"
 
-	"github.com/inspr-at/aeon/internal/plugins"
-	"github.com/inspr-at/aeon/internal/plugins/fence"
-	"github.com/inspr-at/aeon/internal/tenant"
+	"github.com/inspr-at/paimos/internal/plugins"
+	"github.com/inspr-at/paimos/internal/plugins/fence"
+	"github.com/inspr-at/paimos/internal/tenant"
 )
 
 func TestPluginDeclaration(t *testing.T) {

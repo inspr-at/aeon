@@ -9,10 +9,11 @@ import (
 	"io/fs"
 	"sort"
 
-	"github.com/inspr-at/aeon/internal/config"
-	"github.com/inspr-at/aeon/internal/linkvault"
 	"github.com/jackc/pgx/v5"
 	"github.com/jackc/pgx/v5/pgxpool"
+
+	"github.com/inspr-at/paimos/internal/config"
+	"github.com/inspr-at/paimos/internal/linkvault"
 )
 
 // migrationLock is the session advisory-lock key held for one migration run.

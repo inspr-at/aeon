@@ -5,7 +5,6 @@ package auth
 import (
 	"bytes"
 	"encoding/json"
-	"github.com/inspr-at/aeon/internal/dbtest"
 	"log/slog"
 	"net/http"
 	"net/http/httptest"
@@ -18,11 +17,12 @@ import (
 	"github.com/jackc/pgx/v5"
 	"golang.org/x/oauth2"
 
-	"github.com/inspr-at/aeon/internal/db"
-	"github.com/inspr-at/aeon/internal/events"
-	"github.com/inspr-at/aeon/internal/httpapi"
-	"github.com/inspr-at/aeon/internal/principallink"
-	"github.com/inspr-at/aeon/internal/tenant"
+	"github.com/inspr-at/paimos/internal/db"
+	"github.com/inspr-at/paimos/internal/dbtest"
+	"github.com/inspr-at/paimos/internal/events"
+	"github.com/inspr-at/paimos/internal/httpapi"
+	"github.com/inspr-at/paimos/internal/principallink"
+	"github.com/inspr-at/paimos/internal/tenant"
 )
 
 func TestMeDevMode(t *testing.T) {

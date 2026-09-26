@@ -9,10 +9,11 @@ import (
 	"net/http"
 	"time"
 
-	"github.com/inspr-at/aeon/internal/db"
-	"github.com/inspr-at/aeon/internal/events"
-	"github.com/inspr-at/aeon/internal/tenant"
 	"github.com/jackc/pgx/v5"
+
+	"github.com/inspr-at/paimos/internal/db"
+	"github.com/inspr-at/paimos/internal/events"
+	"github.com/inspr-at/paimos/internal/tenant"
 )
 
 // DeliveryWork is returned only to the authenticated recipient. TargetRef is

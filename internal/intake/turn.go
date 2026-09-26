@@ -9,7 +9,7 @@ import (
 
 	"github.com/jackc/pgx/v5"
 
-	"github.com/inspr-at/aeon/internal/tenant"
+	"github.com/inspr-at/paimos/internal/tenant"
 )
 
 func (m *Module) addTurn(w http.ResponseWriter, r *http.Request) {

@@ -8,7 +8,7 @@ import (
 	"net/http"
 	"time"
 
-	"github.com/inspr-at/aeon/internal/tenant"
+	"github.com/inspr-at/paimos/internal/tenant"
 )
 
 func (s *seeder) hours() error {

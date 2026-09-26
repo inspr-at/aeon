@@ -7,7 +7,7 @@ The git tag is `v` plus the `version` field, for example `v260926064658.0.0`. `s
 Development builds leave the linker version at `dev`. A release build sets:
 
 ```
--X github.com/inspr-at/aeon/internal/version.Version=<version>
+-X github.com/inspr-at/paimos/internal/version.Version=<version>
 ```
 
 with `CGO_ENABLED=0` and `-trimpath`. The server image uses the same linker setting (`Dockerfile`).
@@ -35,7 +35,7 @@ The gate needs Docker. It is a release check, not the day-to-day `just test` run
 | Asset | Where |
 | --- | --- |
 | Server image | `ghcr.io/inspr-at/aeon:<version>`, linux/amd64, provenance enabled |
-| `aeon-cli-darwin-arm64`, `aeon-cli-darwin-amd64`, `aeon-cli-linux-amd64`, `aeon-cli-linux-arm64` | GitHub release for the `v` tag. Install the file as `aeon`. A symlink named `paimos` selects paimos mode. |
+| `aeon-cli-darwin-arm64`, `aeon-cli-darwin-amd64`, `aeon-cli-linux-amd64`, `aeon-cli-linux-arm64` | GitHub release for the `v` tag. Install the file as `paimos`. A symlink named `paimos` selects paimos mode. |
 | `aeon-agentd-darwin-arm64`, `aeon-agentd-darwin-amd64`, `aeon-agentd-linux-amd64` | Same GitHub release. There is no linux/arm64 agentd asset. |
 | `SHA256SUMS` | Same GitHub release, covering the CLI and agentd files above. Check it with `sha256sum -c` or `shasum -a 256 -c` before installing. |
 | Flake | `flake.nix` in this repository. `packages.<system>.aeon` is the CLI plus a `paimos` symlink. `packages.<system>.aeon-agentd` is the supervisor. The version is the `version` field of `version.json`. |
