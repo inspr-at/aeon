@@ -377,6 +377,8 @@ func (m *Module) ProcessNext(ctx context.Context, tenantID string) (bool, error)
 	if !uuidPattern.MatchString(tenantID) {
 		return false, errors.New("invalid tenant")
 	}
+	// A system job: it confirms quotes of every project (ADR-003 P2).
+	ctx = db.AllProjects(ctx, "quote confirmation job")
 	var j Job
 	claimed := false
 	var err error

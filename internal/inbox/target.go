@@ -61,7 +61,7 @@ func (m *module) handleListTargets(w http.ResponseWriter, r *http.Request) {
 
 func (m *module) listTargets(ctx context.Context, p tenant.Principal) ([]Target, error) {
 	items := []Target{}
-	err := db.InTenant(ctx, m.pool, p.TenantID, func(tx pgx.Tx) error {
+	err := db.InTenant(tenant.WithPrincipal(ctx, p), m.pool, p.TenantID, func(tx pgx.Tx) error {
 		rows, err := tx.Query(ctx, `SELECT id::text, principal_id::text, kind, webhook_url, enabled, created_at
 			FROM inbox_delivery_targets
 			WHERE principal_id = $1::uuid
@@ -135,7 +135,7 @@ func (m *module) handleCreateTarget(w http.ResponseWriter, r *http.Request) {
 
 func (m *module) createTarget(ctx context.Context, p tenant.Principal, principalID, kind string, webhook *string) (Target, error) {
 	var out Target
-	err := db.InTenant(ctx, m.pool, p.TenantID, func(tx pgx.Tx) error {
+	err := db.InTenant(tenant.WithPrincipal(ctx, p), m.pool, p.TenantID, func(tx pgx.Tx) error {
 		var present bool
 		if err := tx.QueryRow(ctx, `SELECT EXISTS(SELECT 1 FROM principals WHERE id = $1::uuid)`, principalID).Scan(&present); err != nil {
 			return err
@@ -189,7 +189,7 @@ func (m *module) handleDeleteTarget(w http.ResponseWriter, r *http.Request) {
 }
 
 func (m *module) disableTarget(ctx context.Context, p tenant.Principal, id string) error {
-	return db.InTenant(ctx, m.pool, p.TenantID, func(tx pgx.Tx) error {
+	return db.InTenant(tenant.WithPrincipal(ctx, p), m.pool, p.TenantID, func(tx pgx.Tx) error {
 		item, err := scanTarget(tx.QueryRow(ctx, `SELECT id::text, principal_id::text, kind, webhook_url, enabled, created_at
 			FROM inbox_delivery_targets WHERE id = $1::uuid FOR UPDATE`, id))
 		if errors.Is(err, pgx.ErrNoRows) {

@@ -171,6 +171,9 @@ func (m *Module) members(w http.ResponseWriter, r *http.Request) {
 	reply(w, 200, out)
 }
 
+// errGuestWorkspace: Guest is a project-only role (ADR-003 P2).
+var errGuestWorkspace = errors.New("guest is a project role")
+
 func (m *Module) putWorkspaceRole(w http.ResponseWriter, r *http.Request) {
 	p := actor(r)
 	id := r.PathValue("principal_id")
@@ -205,6 +208,9 @@ func (m *Module) putWorkspaceRole(w http.ResponseWriter, r *http.Request) {
 			targetRole, err := roleTx(r.Context(), tx, *roleID)
 			if err != nil {
 				return err
+			}
+			if targetRole.Builtin && targetRole.Key == "guest" {
+				return errGuestWorkspace
 			}
 			if err := canGrantTx(r.Context(), tx, p, targetRole.Permissions); err != nil {
 				return err
@@ -262,6 +268,10 @@ func (m *Module) putWorkspaceRole(w http.ResponseWriter, r *http.Request) {
 	})
 	if errors.Is(err, errAliasTarget) {
 		apiFail(w, 409, "conflict", "principal_id", "An alias uses the person's role")
+		return
+	}
+	if errors.Is(err, errGuestWorkspace) {
+		apiFail(w, 400, "project_only_role", "role_id", "Guest is a project role; grant it on a project instead")
 		return
 	}
 	if err != nil {

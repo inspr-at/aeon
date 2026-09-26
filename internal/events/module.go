@@ -122,7 +122,8 @@ type page struct {
 
 func (m *module) read(ctx context.Context, p tenant.Principal, node string, after int64, limit int) (page, error) {
 	result := page{Items: make([]Event, 0)}
-	err := db.InTenant(ctx, m.pool, p.TenantID, func(tx pgx.Tx) error {
+	// Read as the reader: row-level security shows its projects only.
+	err := db.InTenant(tenant.WithPrincipal(ctx, p), m.pool, p.TenantID, func(tx pgx.Tx) error {
 		// Quote events use the quote-scoped collaboration stream, which rechecks
 		// resource access and plugin installation. Never expose them on the
 		// tenant-wide list or stream, even when node_id is supplied.
@@ -207,7 +208,7 @@ func (m *module) handleUndo(w http.ResponseWriter, r *http.Request) {
 		if err != nil {
 			return err
 		}
-		if e.ActorPrincipalID != p.ID && authz.RequireTx(r.Context(), tx, p, "events.undo_other", authz.Scope{}) != nil {
+		if e.ActorPrincipalID != p.ID && authz.RequireTx(r.Context(), tx, p, "events.undo_other", authz.RouteScope(r.Context())) != nil {
 			return ErrForbidden
 		}
 		fn := m.undo[e.Type]

@@ -48,7 +48,7 @@ func setup(t *testing.T) *fixture {
 	f.other = tenant.Principal{ID: uuid(), TenantID: tid, Kind: tenant.Agent}
 	f.foreign = tenant.Principal{ID: uuid(), TenantID: uuid(), Kind: tenant.Person}
 	for _, p := range []tenant.Principal{f.person, f.foreign} {
-		err := db.InTenant(t.Context(), f.d.Admin, p.TenantID, func(tx pgx.Tx) error {
+		err := db.InTenant(dbtest.Seed(t.Context()), f.d.Admin, p.TenantID, func(tx pgx.Tx) error {
 			_, err := tx.Exec(t.Context(), `INSERT INTO tenants(id,slug,name) VALUES($1,$2,'P2.3 tests')`, p.TenantID, "work-"+p.TenantID)
 			return err
 		})
@@ -62,6 +62,10 @@ func setup(t *testing.T) *fixture {
 			return err
 		})
 	}
+	// Handlers see project data only through a binding (ADR-003 P2).
+	dbtest.BindRole(t, f.d, tid, f.person.ID, "admin")
+	dbtest.BindRole(t, f.d, tid, f.agent.ID, "member")
+	dbtest.BindRole(t, f.d, tid, f.other.ID, "member")
 	f.profile = uuid()
 	f.tx(t, f.person, func(tx pgx.Tx) error {
 		_, err := tx.Exec(t.Context(), `INSERT INTO model_profiles(tenant_id,id,slug,version,harness,family,model,effort,tier) VALUES($1,$2,'test','1','codex','openai','requested-test-model','high','strong')`, tid, f.profile)
@@ -74,7 +78,7 @@ func setup(t *testing.T) *fixture {
 }
 func (f *fixture) tx(t *testing.T, p tenant.Principal, fn func(pgx.Tx) error) {
 	t.Helper()
-	if err := db.InTenant(t.Context(), f.d.App, p.TenantID, fn); err != nil {
+	if err := db.InTenant(dbtest.Seed(t.Context()), f.d.App, p.TenantID, fn); err != nil {
 		t.Fatal(err)
 	}
 }
@@ -500,7 +504,7 @@ func TestClaimRejectsStaleProbeAndReplacedGeneration(t *testing.T) {
 
 func TestCreationRollsBackWhenEventCannotBeWritten(t *testing.T) {
 	f := setup(t)
-	err := db.InTenant(t.Context(), f.d.Admin, f.person.TenantID, func(tx pgx.Tx) error {
+	err := db.InTenant(dbtest.Seed(t.Context()), f.d.Admin, f.person.TenantID, func(tx pgx.Tx) error {
 		_, err := tx.Exec(t.Context(), `CREATE FUNCTION reject_work_event() RETURNS trigger LANGUAGE plpgsql AS $$ BEGIN
 		 IF NEW.type='work_order.created' THEN RAISE EXCEPTION 'test event failure' USING ERRCODE='XX000'; END IF;
 		 RETURN NEW; END; $$`)

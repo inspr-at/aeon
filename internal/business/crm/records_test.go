@@ -4,6 +4,7 @@ package crm
 import (
 	"encoding/json"
 	"fmt"
+	"github.com/inspr-at/aeon/internal/dbtest"
 	"net/http/httptest"
 	"strings"
 	"testing"
@@ -32,7 +33,7 @@ func TestManualCustomerContactPrimaryAndTenantIsolation(t *testing.T) {
 	if c.ID == "" || c.CustomerNo != nil || c.BillingAddress == nil || c.BillingAddress.City != "Graz" || c.AnnualRevenueMinor == nil || *c.AnnualRevenueMinor != 12345 {
 		t.Fatalf("customer %+v", c)
 	}
-	err := db.InTenant(t.Context(), f.db.App, f.other.TenantID, func(tx pgx.Tx) error {
+	err := db.InTenant(dbtest.Seed(t.Context()), f.db.App, f.other.TenantID, func(tx pgx.Tx) error {
 		_, e := tx.Exec(t.Context(), `UPDATE plugin_installations SET permissions=array_append(permissions,'views.provide') WHERE plugin_id=$1`, ID)
 		return e
 	})
@@ -116,7 +117,7 @@ func TestCustomerRevisionNoteDraftAndProjectLink(t *testing.T) {
 	}
 	expect(t, request(f.handler, f.admin, "POST", "/api/crm/organisations/"+c.ID+"/note-rewrite/"+draft.ID+"/apply", ""), 409)
 	var project string
-	e := db.InTenant(t.Context(), f.db.App, f.admin.TenantID, func(tx pgx.Tx) error {
+	e := db.InTenant(dbtest.Seed(t.Context()), f.db.App, f.admin.TenantID, func(tx pgx.Tx) error {
 		return tx.QueryRow(t.Context(), `INSERT INTO nodes(tenant_id,kind_id,key,title) SELECT $1,id,'PRJ-1','Project' FROM node_kinds WHERE slug='project' RETURNING id::text`, f.admin.TenantID).Scan(&project)
 	})
 	if e != nil {
@@ -125,7 +126,7 @@ func TestCustomerRevisionNoteDraftAndProjectLink(t *testing.T) {
 	w = jsonRequest(t, f, f.admin, "PUT", "/api/crm/projects/"+project+"/customer", map[string]any{"organisation_node_id": c.ID})
 	expect(t, w, 200)
 	var attachment string
-	e = db.InTenant(t.Context(), f.db.App, f.admin.TenantID, func(tx pgx.Tx) error {
+	e = db.InTenant(dbtest.Seed(t.Context()), f.db.App, f.admin.TenantID, func(tx pgx.Tx) error {
 		return tx.QueryRow(t.Context(), `INSERT INTO attachments(tenant_id,node_id,sha256,name,content_type,size,created_by) VALUES($1::uuid,$2::uuid,$3,'agreement.pdf','application/pdf',1,$4::uuid) RETURNING id::text`, f.admin.TenantID, project, strings.Repeat("a", 64), f.admin.ID).Scan(&attachment)
 	})
 	if e != nil {

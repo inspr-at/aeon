@@ -76,7 +76,7 @@ func (m *Module) RunJob(ctx context.Context, p tenant.Principal, pluginID, jobID
 	if runErr == nil && result.Outcome == "succeeded" {
 		outcome = "succeeded"
 	}
-	return m.inTenant(ctx, p.TenantID, func(tx pgx.Tx) error {
+	return m.inTenant(tenant.WithPrincipal(ctx, p), p.TenantID, func(tx pgx.Tx) error {
 		_, err := m.appendEvent(ctx, tx, p, events.Change{
 			Type: eventJobRan,
 			After: map[string]string{

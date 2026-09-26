@@ -205,8 +205,8 @@ func serveListener(ctx context.Context, cfg config.Config, ln net.Listener) erro
 		Web:   webFS,
 		Modules: []httpapi.Module{
 			authMod,
-			// ADR-003: permissions, roles, members, invites and access audit.
-			// P1 shipped with it unmounted, so /api/me/permissions answered 403.
+			// ADR-003: permissions, roles, members, project members, invites and
+			// access audit. P1 shipped with it unmounted, so /api/me/permissions answered 403.
 			authz.New(pool),
 			nodes.New(pool, nodes.SQLWriter{}),
 			relations.New(pool),

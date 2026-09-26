@@ -49,7 +49,7 @@ func TestKnowledgeClassicSlugBackfill(t *testing.T) {
 	fieldsOf := func(key string) map[string]any {
 		t.Helper()
 		var raw []byte
-		if err := db.InTenant(ctx, d.App, tid, func(tx pgx.Tx) error {
+		if err := db.InTenant(dbtest.Seed(ctx), d.App, tid, func(tx pgx.Tx) error {
 			return tx.QueryRow(ctx, `SELECT fields FROM nodes WHERE tenant_id=$1 AND key=$2`, tid, key).Scan(&raw)
 		}); err != nil {
 			t.Fatal(err)
@@ -69,7 +69,7 @@ func TestKnowledgeClassicSlugBackfill(t *testing.T) {
 
 	// Rewind the guideline to what the importer wrote before AEON-138: no slug or
 	// metadata outside fields.classic, and that shape as the last import baseline.
-	if err := db.InTenant(ctx, d.Admin, tid, func(tx pgx.Tx) error {
+	if err := db.InTenant(dbtest.Seed(ctx), d.Admin, tid, func(tx pgx.Tx) error {
 		_, err := tx.Exec(ctx, `
 			WITH old AS (SELECT to_jsonb(n) AS snap FROM nodes n WHERE tenant_id=$1 AND key='KS-201'),
 			     upd AS (UPDATE nodes SET fields=fields-'slug'-'metadata' WHERE tenant_id=$1 AND key='KS-201' RETURNING *)
@@ -97,7 +97,7 @@ func TestKnowledgeClassicSlugBackfill(t *testing.T) {
 	}
 	base := importEvents()
 	for range 2 {
-		if err := db.InTenant(ctx, d.Admin, tid, func(tx pgx.Tx) error { _, err := tx.Exec(ctx, string(migration)); return err }); err != nil {
+		if err := db.InTenant(dbtest.Seed(ctx), d.Admin, tid, func(tx pgx.Tx) error { _, err := tx.Exec(ctx, string(migration)); return err }); err != nil {
 			t.Fatal(err)
 		}
 	}

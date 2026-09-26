@@ -213,7 +213,7 @@ func ApplyProfileBundle(ctx context.Context, pool *pgxpool.Pool, tenantID, actor
 		paths = append(paths, p)
 	}
 	sort.Strings(paths)
-	err := db.InTenant(ctx, pool, tenantID, func(tx pgx.Tx) error {
+	err := db.InTenant(db.AllProjects(ctx, "quote profile bundle"), pool, tenantID, func(tx pgx.Tx) error {
 		if apply {
 			// Settings PATCH takes this same tenant lock. It also serializes
 			// this command's default change with concurrent profile applies.

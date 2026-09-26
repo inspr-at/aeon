@@ -22,7 +22,7 @@ func TestAccessInvitesLifecycleAliasesAndAudit(t *testing.T) {
 	d := dbtest.Open(t)
 	ctx := t.Context()
 	var tid string
-	if err := db.InTenant(ctx, d.App, "00000000-0000-0000-0000-000000000000", func(tx pgx.Tx) error {
+	if err := db.InTenant(dbtest.Seed(ctx), d.App, "00000000-0000-0000-0000-000000000000", func(tx pgx.Tx) error {
 		return tx.QueryRow(ctx, `INSERT INTO tenants(slug,name) VALUES('p3-access','P3 access') RETURNING id::text`).Scan(&tid)
 	}); err != nil {
 		t.Fatal(err)
@@ -31,7 +31,7 @@ func TestAccessInvitesLifecycleAliasesAndAudit(t *testing.T) {
 	admin := tenant.Principal{TenantID: tid, Kind: tenant.Person, Roles: []string{"admin"}, Name: "Bea Admin"}
 	member := tenant.Principal{TenantID: tid, Kind: tenant.Person, Roles: []string{"member"}, Name: "Cam Member"}
 	classic := tenant.Principal{TenantID: tid, Kind: tenant.Person, Roles: []string{"reviewer"}, Name: "cam-classic"}
-	if err := db.InTenant(ctx, d.App, tid, func(tx pgx.Tx) error {
+	if err := db.InTenant(dbtest.Seed(ctx), d.App, tid, func(tx pgx.Tx) error {
 		for _, p := range []*tenant.Principal{&owner, &admin, &member, &classic} {
 			if err := tx.QueryRow(ctx, `INSERT INTO principals(tenant_id,kind,name,email,roles) VALUES($1::uuid,'person',$2,$3,$4) RETURNING id::text`, tid, p.Name, strings.ToLower(strings.Fields(p.Name)[0])+"@example.com", p.Roles).Scan(&p.ID); err != nil {
 				return err
@@ -45,7 +45,7 @@ func TestAccessInvitesLifecycleAliasesAndAudit(t *testing.T) {
 		t.Fatal(err)
 	}
 	var projectID string
-	if err := db.InTenant(ctx, d.App, tid, func(tx pgx.Tx) error {
+	if err := db.InTenant(dbtest.Seed(ctx), d.App, tid, func(tx pgx.Tx) error {
 		return tx.QueryRow(ctx, `SELECT id::text FROM nodes WHERE tenant_id=$1::uuid AND key='PRJ-1'`, tid).Scan(&projectID)
 	}); err != nil {
 		t.Fatal(err)
@@ -54,7 +54,8 @@ func TestAccessInvitesLifecycleAliasesAndAudit(t *testing.T) {
 		dbtest.BindLegacy(t, d, tid, p.ID)
 	}
 	// Give the classic identity its own binding, which linking must remove.
-	if _, err := d.Admin.Exec(ctx, `INSERT INTO role_bindings(tenant_id,principal_id,role_id,scope_type) SELECT $1::uuid,$2::uuid,id,'workspace' FROM roles WHERE tenant_id=$1::uuid AND key='guest' ON CONFLICT DO NOTHING`, tid, classic.ID); err != nil {
+	// (Guest is a project-only role since ADR-003 P2, so use Viewer.)
+	if _, err := d.Admin.Exec(ctx, `INSERT INTO role_bindings(tenant_id,principal_id,role_id,scope_type) SELECT $1::uuid,$2::uuid,id,'workspace' FROM roles WHERE tenant_id=$1::uuid AND key='viewer' ON CONFLICT DO NOTHING`, tid, classic.ID); err != nil {
 		t.Fatal(err)
 	}
 	mux := http.NewServeMux()
@@ -71,7 +72,7 @@ func TestAccessInvitesLifecycleAliasesAndAudit(t *testing.T) {
 	roleOf := func(key string) string {
 		t.Helper()
 		var id string
-		if err := db.InTenant(ctx, d.App, tid, func(tx pgx.Tx) error {
+		if err := db.InTenant(dbtest.Seed(ctx), d.App, tid, func(tx pgx.Tx) error {
 			return tx.QueryRow(ctx, `SELECT id::text FROM roles WHERE tenant_id=$1::uuid AND key=$2`, tid, key).Scan(&id)
 		}); err != nil {
 			t.Fatal(err)
@@ -137,7 +138,7 @@ func TestAccessInvitesLifecycleAliasesAndAudit(t *testing.T) {
 	}
 	var limited tenant.Principal
 	limited.TenantID, limited.Kind, limited.Name = tid, tenant.Person, "Limited"
-	if err := db.InTenant(ctx, d.App, tid, func(tx pgx.Tx) error {
+	if err := db.InTenant(dbtest.Seed(ctx), d.App, tid, func(tx pgx.Tx) error {
 		if err := tx.QueryRow(ctx, `INSERT INTO principals(tenant_id,kind,name) VALUES($1::uuid,'person','Limited') RETURNING id::text`, tid).Scan(&limited.ID); err != nil {
 			return err
 		}
@@ -180,7 +181,7 @@ func TestAccessInvitesLifecycleAliasesAndAudit(t *testing.T) {
 	if strings.Contains(listed.Body.String(), token) {
 		t.Fatal("invite token leaked into the directory")
 	}
-	if err := db.InTenant(ctx, d.App, tid, func(tx pgx.Tx) error {
+	if err := db.InTenant(dbtest.Seed(ctx), d.App, tid, func(tx pgx.Tx) error {
 		var identity string
 		if err := tx.QueryRow(ctx, `INSERT INTO identities(issuer,subject,email) VALUES('https://id.example','mismatch','other@example.com') RETURNING id::text`).Scan(&identity); err != nil {
 			return err
@@ -215,7 +216,7 @@ func TestAccessInvitesLifecycleAliasesAndAudit(t *testing.T) {
 	if !strings.Contains(expired.Body.String(), `"status":"expired"`) {
 		t.Fatalf("expired invite missing %s", expired.Body.String())
 	}
-	if err := db.InTenant(ctx, d.App, tid, func(tx pgx.Tx) error {
+	if err := db.InTenant(dbtest.Seed(ctx), d.App, tid, func(tx pgx.Tx) error {
 		var identity string
 		if err := tx.QueryRow(ctx, `INSERT INTO identities(issuer,subject,email) VALUES('https://id.example','expired','new.person@example.com') RETURNING id::text`).Scan(&identity); err != nil {
 			return err
@@ -240,7 +241,7 @@ func TestAccessInvitesLifecycleAliasesAndAudit(t *testing.T) {
 	}
 	projectToken := mustQuery(t, projectInvite.JoinURL, "invite")
 	var enrolled tenant.Principal
-	if err := db.InTenant(ctx, d.App, tid, func(tx pgx.Tx) error {
+	if err := db.InTenant(dbtest.Seed(ctx), d.App, tid, func(tx pgx.Tx) error {
 		var identity string
 		if err := tx.QueryRow(ctx, `INSERT INTO identities(issuer,subject,email) VALUES('https://id.example','guest','guest.only@example.com') RETURNING id::text`).Scan(&identity); err != nil {
 			return err
@@ -265,8 +266,38 @@ func TestAccessInvitesLifecycleAliasesAndAudit(t *testing.T) {
 		t.Fatal(err)
 	}
 
+	// ADR-003 P2: the enrolled guest sees exactly the invited project, and
+	// Guest cannot be invited for the workspace, nor Owner for a project.
+	var seen []string
+	if err := db.InTenant(tenant.WithPrincipal(ctx, enrolled), d.App, tid, func(tx pgx.Tx) error {
+		rows, err := tx.Query(ctx, `SELECT id::text FROM nodes`)
+		if err != nil {
+			return err
+		}
+		defer rows.Close()
+		for rows.Next() {
+			var id string
+			if err := rows.Scan(&id); err != nil {
+				return err
+			}
+			seen = append(seen, id)
+		}
+		return rows.Err()
+	}); err != nil {
+		t.Fatal(err)
+	}
+	if len(seen) != 1 || seen[0] != projectID {
+		t.Fatalf("invited guest sees %v, want only %s", seen, projectID)
+	}
+	if rec := call("POST", "/api/members/invites", `{"email":"ws.guest@example.com","workspace_role_id":"`+guestRole+`"}`, owner); rec.Code != 400 || !strings.Contains(rec.Body.String(), "project_only_role") {
+		t.Fatalf("workspace guest invite %d %s", rec.Code, rec.Body.String())
+	}
+	if rec := call("POST", "/api/members/invites", `{"email":"proj.owner@example.com","project_roles":[{"project_id":"`+projectID+`","role_id":"`+ownerRole+`"}]}`, owner); rec.Code != 400 {
+		t.Fatalf("project owner invite %d %s", rec.Code, rec.Body.String())
+	}
+
 	var identityID string
-	if err := db.InTenant(ctx, d.App, tid, func(tx pgx.Tx) error {
+	if err := db.InTenant(dbtest.Seed(ctx), d.App, tid, func(tx pgx.Tx) error {
 		if err := tx.QueryRow(ctx, `INSERT INTO identities(issuer,subject,email) VALUES('https://id.example','cam','cam@example.com') RETURNING id::text`).Scan(&identityID); err != nil {
 			return err
 		}
@@ -308,7 +339,7 @@ func TestAccessInvitesLifecycleAliasesAndAudit(t *testing.T) {
 		t.Fatalf("aliases %+v", linkedMember.Aliases)
 	}
 	var aliasBindings int
-	if err := db.InTenant(ctx, d.App, tid, func(tx pgx.Tx) error {
+	if err := db.InTenant(dbtest.Seed(ctx), d.App, tid, func(tx pgx.Tx) error {
 		return tx.QueryRow(ctx, `SELECT count(*) FROM role_bindings WHERE principal_id=$1::uuid`, classic.ID).Scan(&aliasBindings)
 	}); err != nil || aliasBindings != 0 {
 		t.Fatalf("alias kept %d bindings (%v)", aliasBindings, err)
@@ -360,7 +391,7 @@ func TestAccessInvitesLifecycleAliasesAndAudit(t *testing.T) {
 	if rec := call("GET", "/api/audit", "", owner); rec.Code != 400 {
 		t.Fatalf("missing category %d", rec.Code)
 	}
-	if err := db.InTenant(ctx, d.App, tid, func(tx pgx.Tx) error {
+	if err := db.InTenant(dbtest.Seed(ctx), d.App, tid, func(tx pgx.Tx) error {
 		for i := 0; i < 60; i++ {
 			if _, err := tx.Exec(ctx, `INSERT INTO events(tenant_id,actor_principal_id,type,after) VALUES($1::uuid,$2::uuid,'invite.revoked',$3::jsonb)`, tid, owner.ID, `{"email":"page@example.com"}`); err != nil {
 				return err

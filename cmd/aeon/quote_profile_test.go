@@ -23,7 +23,7 @@ func TestQuoteProfileOperatorCommand(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if err := db.InTenant(ctx, database.App, tenantID, func(tx pgx.Tx) error {
+	if err := db.InTenant(dbtest.Seed(ctx), database.App, tenantID, func(tx pgx.Tx) error {
 		_, err := tx.Exec(ctx, `INSERT INTO quote_settings(tenant_id,revision,numbering_time_zone,default_currency,sender,defaults,layout,updated_by_principal_id) SELECT $1::uuid,1,'Europe/Vienna','EUR','{}'::jsonb,'{}'::jsonb,'{}'::jsonb,id FROM principals WHERE kind='agent' AND name='Tenant bootstrap'`, tenantID)
 		return err
 	}); err != nil {

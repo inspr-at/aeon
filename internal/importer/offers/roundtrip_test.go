@@ -64,7 +64,7 @@ func TestImportedDraftRoundTrip(t *testing.T) {
 	}
 	reg.Seal()
 	var adminID string
-	if err := db.InTenant(ctx, database.App, tenantID, func(tx pgx.Tx) error {
+	if err := db.InTenant(dbtest.Seed(ctx), database.App, tenantID, func(tx pgx.Tx) error {
 		if _, err := tx.Exec(ctx, `INSERT INTO tenants(id,slug,name) VALUES($1::uuid,'fx3-test','FX3 test')`, tenantID); err != nil {
 			return err
 		}
@@ -176,7 +176,7 @@ func TestImportedDraftRoundTrip(t *testing.T) {
 		}
 		// Simulate the pre-fix imported row, including its import event, then
 		// exercise the operator repair twice and save the repaired draft.
-		if err := db.InTenant(ctx, database.App, tenantID, func(tx pgx.Tx) error {
+		if err := db.InTenant(dbtest.Seed(ctx), database.App, tenantID, func(tx pgx.Tx) error {
 			if _, err := tx.Exec(ctx, `UPDATE quote_drafts SET document=jsonb_set(document,'{sections,0,nodes,0,marker_x_mm}','3'::jsonb) WHERE quote_node_id=$1::uuid`, mapping.NodeID); err != nil {
 				return err
 			}

@@ -75,6 +75,8 @@ func LinkTx(ctx context.Context, tx pgx.Tx, tenantID, from, to, actorID, eventLi
 }
 
 func (s *Service) change(ctx context.Context, slug, from, to string) (Result, error) {
+	// Operator CLI, no principal: workspace rows only (ADR-003 P2).
+	ctx = db.NoProjects(ctx, "principal link")
 	var result Result
 	if strings.TrimSpace(from) == "" {
 		return result, errors.New("from is required")

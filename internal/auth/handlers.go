@@ -16,6 +16,7 @@ import (
 	"github.com/jackc/pgx/v5"
 	"golang.org/x/oauth2"
 
+	"github.com/inspr-at/aeon/internal/db"
 	"github.com/inspr-at/aeon/internal/httpapi"
 	"github.com/inspr-at/aeon/internal/tenant"
 )
@@ -84,6 +85,9 @@ func (m *Module) callbackFailure(w http.ResponseWriter, r *http.Request, code, r
 }
 
 func (m *Module) handleCallback(w http.ResponseWriter, r *http.Request) {
+	// Sign-in touches only workspace rows; a cookie already present must not
+	// change what it sees (ADR-003 P2).
+	r = r.WithContext(db.NoProjects(r.Context(), "sign-in"))
 	q := r.URL.Query()
 	fail := func(code, reason string) { m.callbackFailure(w, r, code, reason) }
 	switch q.Get("error") {
@@ -213,6 +217,9 @@ func (m *Module) handleMe(w http.ResponseWriter, r *http.Request) {
 }
 
 func (m *Module) handleDevLogin(w http.ResponseWriter, r *http.Request) {
+	// Sign-in touches only workspace rows; a cookie already present must not
+	// change what it sees (ADR-003 P2).
+	r = r.WithContext(db.NoProjects(r.Context(), "sign-in"))
 	if !m.cfg.Dev() {
 		http.NotFound(w, r)
 		return

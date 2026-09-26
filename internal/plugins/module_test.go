@@ -419,7 +419,7 @@ func installsVisible(t *testing.T, pool *pgxpool.Pool, tenantID string) int {
 	if tenantID == "" {
 		err = pool.QueryRow(t.Context(), `SELECT count(*) FROM plugin_installations`).Scan(&n)
 	} else {
-		err = db.InTenant(t.Context(), pool, tenantID, func(tx pgx.Tx) error {
+		err = db.InTenant(dbtest.Seed(t.Context()), pool, tenantID, func(tx pgx.Tx) error {
 			return tx.QueryRow(t.Context(), `SELECT count(*) FROM plugin_installations`).Scan(&n)
 		})
 	}

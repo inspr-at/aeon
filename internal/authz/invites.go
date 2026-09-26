@@ -56,6 +56,11 @@ var (
 
 type roleMissing struct{ field string }
 
+// roleScopeError is a role that cannot be granted at the requested scope.
+type roleScopeError struct{ field, reason string }
+
+func (e roleScopeError) Error() string { return e.reason }
+
 func (e roleMissing) Error() string { return "role missing" }
 
 func (m *Module) createInvite(w http.ResponseWriter, r *http.Request) {
@@ -120,13 +125,22 @@ func (m *Module) createInvite(w http.ResponseWriter, r *http.Request) {
 			return err
 		}
 		if body.WorkspaceRoleID != nil {
-			if _, err := grantRole(r.Context(), tx, p, *body.WorkspaceRoleID, "workspace_role_id"); err != nil {
+			role, err := grantRole(r.Context(), tx, p, *body.WorkspaceRoleID, "workspace_role_id")
+			if err != nil {
 				return err
+			}
+			// Guest is a project-only role (ADR-003 P2).
+			if role.Builtin && role.Key == "guest" {
+				return roleScopeError{field: "workspace_role_id", reason: "Guest is a project role; invite to a project instead"}
 			}
 		}
 		for _, item := range body.ProjectRoles {
-			if _, err := grantRole(r.Context(), tx, p, item.RoleID, "project_roles"); err != nil {
+			role, err := grantRole(r.Context(), tx, p, item.RoleID, "project_roles")
+			if err != nil {
 				return err
+			}
+			if !projectRoleAllowed(role) {
+				return roleScopeError{field: "project_roles", reason: "Owner and Customer are workspace roles; choose a project role"}
 			}
 			if err := requireProject(r.Context(), tx, p.TenantID, item.ProjectID); err != nil {
 				return err
@@ -259,6 +273,7 @@ func refuseActiveMember(ctx context.Context, tx pgx.Tx, tenantID, email string) 
 func writeInviteErr(w http.ResponseWriter, err error) {
 	var ge grantError
 	var missing roleMissing
+	var scope roleScopeError
 	switch {
 	case errors.As(err, &ge):
 		apiFail(w, 403, "forbidden", ge.field, "You cannot grant a role with permissions you do not hold")
@@ -268,6 +283,8 @@ func writeInviteErr(w http.ResponseWriter, err error) {
 		apiFail(w, 400, "invalid", "project_roles", "Choose a project in this workspace")
 	case errors.As(err, &missing):
 		apiFail(w, 400, "invalid", missing.field, "Choose a role in this workspace")
+	case errors.As(err, &scope):
+		apiFail(w, 400, "project_only_role", scope.field, scope.reason)
 	default:
 		internalFail(w, err)
 	}

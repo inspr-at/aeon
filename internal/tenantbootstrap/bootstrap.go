@@ -52,6 +52,8 @@ func Create(ctx context.Context, pool *pgxpool.Pool, slug, name string) (string,
 	if err != nil {
 		return "", err
 	}
+	// Operator CLI, no principal: workspace rows only (ADR-003 P2).
+	ctx = db.NoProjects(ctx, "tenant bootstrap")
 	err = db.InTenant(ctx, pool, id, func(tx pgx.Tx) error {
 		if _, err := tx.Exec(ctx, `INSERT INTO tenants(id,slug,name) VALUES($1::uuid,$2,$3)`, id, slug, name); err != nil {
 			return fmt.Errorf("create tenant: %w", err)
@@ -84,6 +86,7 @@ func BindOIDC(ctx context.Context, pool *pgxpool.Pool, slug, issuer, subject, na
 		return "", fmt.Errorf("resolve tenant: %w", err)
 	}
 	var principalID string
+	ctx = db.NoProjects(ctx, "tenant bootstrap")
 	err = db.InTenant(ctx, pool, id, func(tx pgx.Tx) error {
 		actor, err := bootstrapActor(ctx, tx, id)
 		if err != nil {

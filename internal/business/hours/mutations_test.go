@@ -325,7 +325,7 @@ func TestCorrectionTenantReferences(t *testing.T) {
 	period := f.period(f.member)
 	e := f.entry(period)
 	var foreign string
-	err := db.InTenant(t.Context(), f.database.App, f.other.TenantID, func(tx pgx.Tx) error {
+	err := db.InTenant(dbtest.Seed(t.Context()), f.database.App, f.other.TenantID, func(tx pgx.Tx) error {
 		return tx.QueryRow(t.Context(), `INSERT INTO nodes(tenant_id,kind_id,key,title) SELECT $1,id,'PRJ-1','Foreign' FROM node_kinds WHERE slug='project' RETURNING id::text`, f.other.TenantID).Scan(&foreign)
 	})
 	if err != nil {

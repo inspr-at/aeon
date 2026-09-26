@@ -122,6 +122,14 @@ func caller(r *http.Request) (tenant.Principal, error) {
 	return p, nil
 }
 func person(p tenant.Principal) bool { return p.Kind == tenant.Person }
+
+// portalContext serves the routes a customer may call (read, version, export,
+// accept). A customer sees no project and no workspace node, so these reads
+// run with every project visible; canReadQuote and the acceptance checks
+// authorize the caller against the quote's recipient first (ADR-003 P2).
+func portalContext(r *http.Request) context.Context {
+	return db.AllProjects(r.Context(), "quote portal")
+}
 func (m *Module) allow(r *http.Request, p tenant.Principal) bool {
 	return authz.RequirePattern(authz.BindPool(tenant.WithPrincipal(r.Context(), p), m.pool), r.Pattern, authz.Scope{}) == nil
 }
@@ -444,7 +452,7 @@ func (m *Module) get(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	var out quote
-	e = m.tx(r.Context(), p, fence.PermViewsProvide, false, func(tx pgx.Tx) error {
+	e = m.tx(portalContext(r), p, fence.PermViewsProvide, false, func(tx pgx.Tx) error {
 		var err error
 		out, err = readQuote(r.Context(), tx, id, false)
 		if err != nil {

@@ -13,6 +13,7 @@ import (
 	"strings"
 	"time"
 
+	"github.com/inspr-at/aeon/internal/authz"
 	"github.com/inspr-at/aeon/internal/business/crm"
 	"github.com/inspr-at/aeon/internal/db"
 	"github.com/inspr-at/aeon/internal/events"
@@ -68,6 +69,8 @@ func failure(w http.ResponseWriter, err error) {
 		writeError(w, 409, "conflict", err.Error())
 	case errors.Is(err, errGraph):
 		writeError(w, 409, "conflict", "relation kind or direction is not allowed")
+	case errors.Is(err, errForbiddenRelation):
+		writeError(w, 403, "forbidden", "linking and unlinking need the permission in both items' projects")
 	case errors.Is(err, events.ErrConflict):
 		writeError(w, 409, "conflict", "relation conflicts with current state")
 	case errors.As(err, &pe) && (pe.Code == "23505" || pe.Code == "40001" || pe.Code == "40P01"):
@@ -158,6 +161,10 @@ func (m *module) create(w http.ResponseWriter, r *http.Request) {
 		if err := lockNodes(r.Context(), tx, p, source, target); err != nil {
 			return err
 		}
+		// Linking writes into both ends' projects (ADR-003 P2).
+		if err := requireOnEnds(r.Context(), tx, p, "relations.write", source, target); err != nil {
+			return err
+		}
 		if err := enforceGraph(r.Context(), tx, p.TenantID, source, target, input.Type); err != nil {
 			return err
 		}
@@ -191,6 +198,15 @@ func (m *module) delete(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	err := db.InTenant(r.Context(), m.pool, p.TenantID, func(tx pgx.Tx) error {
+		// Unlinking changes both ends, so it needs relations.delete in both
+		// items' projects, as linking needs relations.write (ADR-003 P2).
+		var source, target string
+		if err := tx.QueryRow(r.Context(), `SELECT source_node_id::text,target_node_id::text FROM node_relations WHERE tenant_id=$1 AND id=$2 FOR UPDATE`, p.TenantID, id).Scan(&source, &target); err != nil {
+			return err
+		}
+		if err := requireOnEnds(r.Context(), tx, p, "relations.delete", source, target); err != nil {
+			return err
+		}
 		result, err := scanRelation(tx.QueryRow(r.Context(), `DELETE FROM node_relations WHERE tenant_id=$1 AND id=$2
     RETURNING id::text,source_node_id::text,target_node_id::text,type,created_at`, p.TenantID, id))
 		if err != nil {
@@ -284,4 +300,23 @@ func (m *module) list(w http.ResponseWriter, r *http.Request) {
 		result.NextCursor = &next
 	}
 	httpapi.WriteJSON(w, 200, result)
+}
+
+var errForbiddenRelation = errors.New("relation not permitted")
+
+func requireOnEnds(ctx context.Context, tx pgx.Tx, p tenant.Principal, permission string, ids ...string) error {
+	for _, id := range ids {
+		var project *string
+		if err := tx.QueryRow(ctx, `SELECT project_id::text FROM nodes WHERE id=$1::uuid`, id).Scan(&project); err != nil {
+			return err
+		}
+		scope := authz.Scope{}
+		if project != nil {
+			scope.ProjectID = *project
+		}
+		if authz.RequireTx(ctx, tx, p, permission, scope) != nil {
+			return errForbiddenRelation
+		}
+	}
+	return nil
 }

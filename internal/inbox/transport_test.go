@@ -3,6 +3,7 @@
 package inbox
 
 import (
+	"github.com/inspr-at/aeon/internal/dbtest"
 	"strings"
 	"testing"
 
@@ -70,7 +71,7 @@ func TestReceiverDeliveryClaimCompleteAndCursor(t *testing.T) {
 		t.Fatal("redacted ledger leaked private delivery fields")
 	}
 	var cursor int64
-	err = db.InTenant(t.Context(), w.db.App, w.agent.TenantID, func(tx pgx.Tx) error {
+	err = db.InTenant(dbtest.Seed(t.Context()), w.db.App, w.agent.TenantID, func(tx pgx.Tx) error {
 		return tx.QueryRow(t.Context(), `SELECT last_event_id FROM inbox_message_cursors WHERE project_id=$1::uuid AND principal_id=$2::uuid AND address=$3 AND adapter='codex'`, project, w.agent.ID, in.To).Scan(&cursor)
 	})
 	if err != nil || cursor != msg.SentEventID {
@@ -94,7 +95,7 @@ func TestCompatAckResolvesInboxIDAndProject(t *testing.T) {
 		}
 	}
 	var ackCount int
-	err := db.InTenant(t.Context(), w.db.App, w.agent.TenantID, func(tx pgx.Tx) error {
+	err := db.InTenant(dbtest.Seed(t.Context()), w.db.App, w.agent.TenantID, func(tx pgx.Tx) error {
 		return tx.QueryRow(t.Context(), `SELECT count(*) FROM events WHERE type='inbox.acked' AND after->>'id'=(SELECT inbox_message_id::text FROM inbox_compat_messages WHERE id=$1::uuid)`, msg.ID).Scan(&ackCount)
 	})
 	if err != nil || ackCount != 1 {

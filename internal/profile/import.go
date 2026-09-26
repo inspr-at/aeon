@@ -123,6 +123,8 @@ func (job ProfileImporter) Run(ctx context.Context, tenantSlug string, apply boo
 	if job.Pool == nil || job.Source == nil || tenantSlug == "" {
 		return report, errors.New("pool, source and tenant slug required")
 	}
+	// Operator CLI, no principal: profiles are workspace rows (ADR-003 P2).
+	ctx = db.NoProjects(ctx, "classic profile import")
 	// tenants is the one global table; keep even this lookup inside InTenant.
 	var tenantID string
 	err := db.InTenant(ctx, job.Pool, "00000000-0000-0000-0000-000000000000", func(tx pgx.Tx) error {

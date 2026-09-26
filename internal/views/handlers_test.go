@@ -26,6 +26,9 @@ func TestViewsShareReadOwnerWriteAndAppendEvents(t *testing.T) {
 	if err := db.Admin.QueryRow(ctx, `INSERT INTO principals (tenant_id, kind, name) VALUES ($1, 'agent', 'other') RETURNING id::text`, tenantID).Scan(&otherID); err != nil {
 		t.Fatal(err)
 	}
+	// Views outside a project are workspace rows (ADR-003 P2): members see them.
+	dbtest.BindRole(t, db, tenantID, ownerID, "member")
+	dbtest.BindRole(t, db, tenantID, otherID, "member")
 	if err := db.Admin.QueryRow(ctx, `INSERT INTO tenants (slug, name) VALUES ('views-foreign', 'Foreign') RETURNING id::text`).Scan(&foreignTenantID); err != nil {
 		t.Fatal(err)
 	}

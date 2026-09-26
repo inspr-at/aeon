@@ -19,7 +19,14 @@ import (
 var ErrForbidden = errors.New("permission denied")
 var ErrNoStore = errors.New("authorization store missing")
 
-type Scope struct{ ProjectID string }
+// Scope says where a permission is evaluated. The workspace binding always
+// counts. ProjectID adds that project's binding. AnyProject adds every project
+// binding and is used only for routes whose data project row-level security
+// confines to the caller's visible projects (ProjectFilteredRoutes).
+type Scope struct {
+	ProjectID  string
+	AnyProject bool
+}
 type RoleRef struct {
 	ID   string `json:"id"`
 	Key  string `json:"key"`
@@ -37,6 +44,9 @@ type ProjectGrant struct {
 type Effective struct {
 	Workspace Grant         `json:"workspace"`
 	Project   *ProjectGrant `json:"project"`
+	// anyProject is the workspace set plus every project binding's
+	// project-grantable and self-service permissions.
+	anyProject []string
 }
 
 type poolKey struct{}
@@ -63,7 +73,7 @@ func Require(ctx context.Context, permission string, scope Scope) error {
 	if err != nil {
 		return err
 	}
-	return permitEffective(p, permission, effective)
+	return permitEffective(p, permission, effective, scope)
 }
 
 func requireTx(ctx context.Context, tx pgx.Tx, p tenant.Principal, permission string, scope Scope) error {
@@ -74,7 +84,25 @@ func requireTx(ctx context.Context, tx pgx.Tx, p tenant.Principal, permission st
 	if err != nil {
 		return err
 	}
-	return permitEffective(p, permission, effective)
+	return permitEffective(p, permission, effective, scope)
+}
+
+// RequireInProjects decides permission in each listed project separately; ""
+// stands for the workspace (a node outside every project). A write that
+// changes several projects, such as a move or its undo, needs the permission
+// in every one of them, never just in the project its route was decided in.
+func RequireInProjects(ctx context.Context, tx pgx.Tx, p tenant.Principal, permission string, projectIDs ...string) error {
+	seen := map[string]bool{}
+	for _, id := range projectIDs {
+		if seen[id] {
+			continue
+		}
+		seen[id] = true
+		if err := requireTx(ctx, tx, p, permission, Scope{ProjectID: id}); err != nil {
+			return err
+		}
+	}
+	return nil
 }
 
 // RequireTx makes a decision inside an existing db.InTenant transaction. It
@@ -83,10 +111,13 @@ func RequireTx(ctx context.Context, tx pgx.Tx, p tenant.Principal, permission st
 	return requireTx(ctx, tx, p, permission, scope)
 }
 
-func permitEffective(p tenant.Principal, permission string, effective Effective) error {
+func permitEffective(p tenant.Principal, permission string, effective Effective, scope Scope) error {
 	allowed := contains(effective.Workspace.Permissions, permission)
 	if effective.Project != nil {
 		allowed = allowed || contains(effective.Project.Permissions, permission)
+	}
+	if scope.AnyProject {
+		allowed = allowed || contains(effective.anyProject, permission)
 	}
 	if !allowed {
 		return ErrForbidden
@@ -128,6 +159,12 @@ func Load(ctx context.Context, pool *pgxpool.Pool, p tenant.Principal, projectID
 
 // loadTx lets access mutations recheck grants in the same tenant transaction
 // that writes the binding. It also works when the pool has one connection.
+//
+// A project binding grants only the permissions of its role that the registry
+// allows at project scope; workspace-only permissions (members, roles, keys,
+// settings, ...) never come from a project binding. For AnyProject routes the
+// self-service permissions (own profile, own access) of a project role count
+// too, so a project-only Guest can load their own profile.
 func loadTx(ctx context.Context, tx pgx.Tx, p tenant.Principal, projectID string) (Effective, error) {
 	result := Effective{Workspace: Grant{Permissions: []string{}}}
 	if projectID != "" {
@@ -149,12 +186,12 @@ func loadTx(ctx context.Context, tx pgx.Tx, p tenant.Principal, projectID string
           FROM role_bindings b JOIN roles r ON r.tenant_id=b.tenant_id AND r.id=b.role_id
           LEFT JOIN role_permissions rp ON rp.tenant_id=r.tenant_id AND rp.role_id=r.id
 		  WHERE b.tenant_id=$1::uuid AND b.principal_id=$2::uuid
-            AND (b.scope_type='workspace' OR b.scope_type='project' AND b.scope_id=$3::uuid)
-		  ORDER BY b.scope_type,rp.permission`, p.TenantID, bindingID, nullUUID(projectID))
+		  ORDER BY b.scope_type,b.scope_id,rp.permission`, p.TenantID, bindingID)
 	if err != nil {
 		return Effective{}, err
 	}
 	defer rows.Close()
+	anyProject := []string{}
 	for rows.Next() {
 		var scopeType, scopeID, id, key, name string
 		var builtin bool
@@ -163,31 +200,37 @@ func loadTx(ctx context.Context, tx pgx.Tx, p tenant.Principal, projectID string
 			return Effective{}, err
 		}
 		ref := &RoleRef{ID: id, Key: key, Name: name}
-		var target *Grant
-		if scopeType == "workspace" {
-			target = &result.Workspace
-		} else if result.Project != nil && scopeID == projectID {
-			result.Project.Role = ref
-		}
-		if target != nil {
-			target.Role = ref
-		}
 		perms := []string{}
 		if builtin {
 			perms = builtinPermissions(key)
 		} else if perm != nil {
 			perms = []string{*perm}
 		}
-		if target != nil {
-			target.Permissions = append(target.Permissions, perms...)
-		} else if result.Project != nil && scopeID == projectID {
-			result.Project.Permissions = append(result.Project.Permissions, perms...)
+		if scopeType == "workspace" {
+			result.Workspace.Role = ref
+			result.Workspace.Permissions = append(result.Workspace.Permissions, perms...)
+			continue
+		}
+		for _, key := range perms {
+			if ProjectGrantable(key) || selfPermission(key) {
+				anyProject = append(anyProject, key)
+			}
+		}
+		if result.Project != nil && scopeID == projectID {
+			result.Project.Role = ref
+			for _, key := range perms {
+				if ProjectGrantable(key) {
+					result.Project.Permissions = append(result.Project.Permissions, key)
+				}
+			}
 		}
 	}
 	if err := rows.Err(); err != nil {
 		return Effective{}, err
 	}
+	rows.Close()
 	result.Workspace.Permissions = unique(result.Workspace.Permissions)
+	result.anyProject = unique(append(anyProject, result.Workspace.Permissions...))
 	if result.Project != nil {
 		result.Project.Permissions = unique(append(result.Project.Permissions, result.Workspace.Permissions...))
 	}
@@ -201,8 +244,35 @@ func loadTx(ctx context.Context, tx pgx.Tx, p tenant.Principal, projectID string
 		if result.Project != nil && ceiling.Project != nil {
 			result.Project.Permissions = intersect(result.Project.Permissions, ceiling.Project.Permissions)
 		}
+		result.anyProject = intersect(result.anyProject, ceiling.anyProject)
 	}
 	return result, nil
+}
+
+// ProjectGrantable reports whether a registry permission may be granted by a
+// project binding.
+func ProjectGrantable(key string) bool {
+	p, ok := Lookup(key)
+	if !ok {
+		return false
+	}
+	for _, at := range p.GrantableAt {
+		if at == "project" {
+			return true
+		}
+	}
+	return false
+}
+
+// selfPermission names the workspace-only permissions a project role still
+// needs to use its projects: the caller's own profile and effective access,
+// and reading node kinds (tenant configuration every node view renders).
+func selfPermission(key string) bool {
+	switch key {
+	case "authz.read", "profile.read", "profile.write", "profile.portal_read", "profile.portal_write", "kinds.read":
+		return true
+	}
+	return false
 }
 
 func intersect(grants, ceiling []string) []string {
@@ -245,7 +315,12 @@ func Handle(mux *http.ServeMux, pool *pgxpool.Pool, pattern, permission string, 
 		panic("undeclared permission: " + permission)
 	}
 	mux.HandleFunc(pattern, func(w http.ResponseWriter, r *http.Request) {
-		scope := Scope{ProjectID: r.PathValue("projectId")}
+		// Decide in the scope the authorization middleware chose (a project
+		// the route targets, or any project for ProjectFilteredRoutes).
+		scope := RouteScope(r.Context())
+		if scope == (Scope{}) {
+			scope = Scope{ProjectID: r.PathValue("projectId")}
+		}
 		ctx := BindPool(r.Context(), pool)
 		if err := Require(ctx, permission, scope); err != nil {
 			httpapi.WriteJSON(w, http.StatusForbidden, map[string]any{"error": "permission denied", "code": "forbidden", "reason": err.Error()})

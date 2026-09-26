@@ -20,14 +20,14 @@ func TestInviteAcceptanceRequiresVerifiedMatchingEmail(t *testing.T) {
 	d := dbtest.Open(t)
 	ctx := t.Context()
 	var tid, ownerID, roleID string
-	if err := db.InTenant(ctx, d.App, "00000000-0000-0000-0000-000000000000", func(tx pgx.Tx) error {
+	if err := db.InTenant(dbtest.Seed(ctx), d.App, "00000000-0000-0000-0000-000000000000", func(tx pgx.Tx) error {
 		return tx.QueryRow(ctx, `INSERT INTO tenants(slug,name) VALUES('invite-oidc','Invite') RETURNING id::text`).Scan(&tid)
 	}); err != nil {
 		t.Fatal(err)
 	}
 	token := "verified-invite-token-0123456789abcd"
 	sum := sha256.Sum256([]byte(token))
-	if err := db.InTenant(ctx, d.App, tid, func(tx pgx.Tx) error {
+	if err := db.InTenant(dbtest.Seed(ctx), d.App, tid, func(tx pgx.Tx) error {
 		if err := tx.QueryRow(ctx, `INSERT INTO principals(tenant_id,kind,name,roles) VALUES($1::uuid,'person','Owner',ARRAY['super_admin']) RETURNING id::text`, tid).Scan(&ownerID); err != nil {
 			return err
 		}
@@ -84,7 +84,7 @@ func TestInviteAcceptanceRequiresVerifiedMatchingEmail(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if err := db.InTenant(ctx, d.App, tid, func(tx pgx.Tx) error {
+	if err := db.InTenant(dbtest.Seed(ctx), d.App, tid, func(tx pgx.Tx) error {
 		var status, role string
 		if err := tx.QueryRow(ctx, `SELECT CASE WHEN i.accepted_at IS NOT NULL THEN 'accepted' ELSE 'open' END, r.key
 			FROM invites i JOIN role_bindings b ON b.tenant_id=i.tenant_id AND b.principal_id=i.accepted_by AND b.scope_type='workspace'
@@ -107,13 +107,13 @@ func TestAgentKeyPrincipalScopeAndCeiling(t *testing.T) {
 	var tid string
 	owner := tenant.Principal{Kind: tenant.Person, Name: "Owner"}
 	limited := tenant.Principal{Kind: tenant.Person, Name: "Limited"}
-	if err := db.InTenant(ctx, d.App, "00000000-0000-0000-0000-000000000000", func(tx pgx.Tx) error {
+	if err := db.InTenant(dbtest.Seed(ctx), d.App, "00000000-0000-0000-0000-000000000000", func(tx pgx.Tx) error {
 		return tx.QueryRow(ctx, `INSERT INTO tenants(slug,name) VALUES('keys','Keys') RETURNING id::text`).Scan(&tid)
 	}); err != nil {
 		t.Fatal(err)
 	}
 	owner.TenantID, limited.TenantID = tid, tid
-	if err := db.InTenant(ctx, d.App, tid, func(tx pgx.Tx) error {
+	if err := db.InTenant(dbtest.Seed(ctx), d.App, tid, func(tx pgx.Tx) error {
 		if err := tx.QueryRow(ctx, `INSERT INTO principals(tenant_id,kind,name,roles) VALUES($1::uuid,'person','Owner',ARRAY['super_admin']) RETURNING id::text`, tid).Scan(&owner.ID); err != nil {
 			return err
 		}

@@ -8,6 +8,7 @@ import (
 	"errors"
 	"reflect"
 
+	"github.com/inspr-at/aeon/internal/authz"
 	"github.com/inspr-at/aeon/internal/events"
 	"github.com/inspr-at/aeon/internal/tenant"
 	"github.com/jackc/pgx/v5"
@@ -52,6 +53,16 @@ func undoProjectMove(ctx context.Context, tx pgx.Tx, p tenant.Principal, e event
 	if !reflect.DeepEqual(currentJourney, after.Journey) {
 		return events.Change{}, events.ErrConflict
 	}
+	// The undo rewrites journey rows of both projects (ADR-003 P2).
+	var journeyProjects []string
+	for _, j := range []*journeyMembership{before.Journey, after.Journey} {
+		if j != nil {
+			journeyProjects = append(journeyProjects, j.ProjectID)
+		}
+	}
+	if err := authz.RequireInProjects(ctx, tx, p, "nodes.move", journeyProjects...); err != nil {
+		return events.Change{}, events.ErrForbidden
+	}
 	restored, err := restoreMovedNode(ctx, tx, p, before.Node, after.Node)
 	if err != nil {
 		return events.Change{}, err
@@ -88,9 +99,22 @@ func undoProjectMove(ctx context.Context, tx pgx.Tx, p tenant.Principal, e event
 		After:  projectMoveSnapshot{Node: restored, Journey: before.Journey}}, nil
 }
 
+// restoreMovedNode moves a node back to its former parent. Like a move, the
+// undo needs nodes.move in every project it changes: where the node is now and
+// where it returns to (ADR-003 P2). An event's author or a project's admin
+// cannot reverse a move into a project where they hold less.
 func restoreMovedNode(ctx context.Context, tx pgx.Tx, p tenant.Principal, before, after nodeJSON) (nodeJSON, error) {
 	current, err := loadNode(ctx, tx, after.ID, true)
 	if err != nil {
+		if errors.Is(err, pgx.ErrNoRows) {
+			return nodeJSON{}, events.ErrConflict
+		}
+		return nodeJSON{}, err
+	}
+	if err := requireMove(ctx, tx, p, after.ID, before.ParentID); err != nil {
+		if errors.Is(err, errMoveForbidden) {
+			return nodeJSON{}, events.ErrForbidden
+		}
 		if errors.Is(err, pgx.ErrNoRows) {
 			return nodeJSON{}, events.ErrConflict
 		}

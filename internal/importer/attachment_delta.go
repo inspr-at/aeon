@@ -38,7 +38,7 @@ func ImportAttachmentDelta(ctx context.Context, pool *pgxpool.Pool, store attach
 				return report, fmt.Errorf("issue %d attachment missing id", issueID)
 			}
 			var attachmentID, oldHash string
-			err := db.InTenant(ctx, pool, tenantID, func(tx pgx.Tx) error {
+			err := db.InTenant(db.AllProjects(ctx, "classic importer"), pool, tenantID, func(tx pgx.Tx) error {
 				return tx.QueryRow(ctx, `SELECT id::text,sha256 FROM attachments WHERE tenant_id=$1 AND source_id=$2 AND source_attachment_id=$3`, tenantID, snap.SourceID, classicID).Scan(&attachmentID, &oldHash)
 			})
 			if errors.Is(err, pgx.ErrNoRows) {
@@ -68,7 +68,7 @@ func ImportAttachmentDelta(ctx context.Context, pool *pgxpool.Pool, store attach
 			}
 			updated := false
 			conflict := false
-			err = db.InTenant(ctx, pool, tenantID, func(tx pgx.Tx) error {
+			err = db.InTenant(db.AllProjects(ctx, "classic importer"), pool, tenantID, func(tx pgx.Tx) error {
 				if _, err := tx.Exec(ctx, `SELECT pg_advisory_xact_lock(hashtextextended($1,43))`, tenantID+":"+snap.SourceID+":"+strconv.FormatInt(classicID, 10)); err != nil {
 					return err
 				}

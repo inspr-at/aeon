@@ -5,6 +5,7 @@ package stagehandoff
 import (
 	"bytes"
 	"encoding/json"
+	"github.com/inspr-at/aeon/internal/dbtest"
 	"net/http"
 	"net/http/httptest"
 	"testing"
@@ -18,7 +19,7 @@ import (
 func TestClassicBatchAliasBuiltEvidence(t *testing.T) {
 	m, p, project, release, _ := fixture(t)
 	var handoffID string
-	err := db.InTenant(t.Context(), m.pool, p.TenantID, func(tx pgx.Tx) error {
+	err := db.InTenant(dbtest.Seed(t.Context()), m.pool, p.TenantID, func(tx pgx.Tx) error {
 		if _, err := tx.Exec(t.Context(), `UPDATE journey_releases SET access_required=false WHERE release_node_id=$1::uuid`, release); err != nil {
 			return err
 		}
@@ -81,7 +82,7 @@ func TestClassicBatchAliasBuiltEvidence(t *testing.T) {
 		t.Fatalf("unknown alias: %d %s", w.Code, w.Body.String())
 	}
 	var evidence, events int
-	err = db.InTenant(t.Context(), m.pool, p.TenantID, func(tx pgx.Tx) error {
+	err = db.InTenant(dbtest.Seed(t.Context()), m.pool, p.TenantID, func(tx pgx.Tx) error {
 		if err := tx.QueryRow(t.Context(), `SELECT count(*) FROM stage_handoff_build_evidence WHERE handoff_id=$1::uuid`, handoffID).Scan(&evidence); err != nil {
 			return err
 		}

@@ -53,7 +53,7 @@ func newQuoteFixture(t *testing.T, tenantID, slug string) *quoteFixture {
 	}
 	reg.Seal()
 	ids := map[string]string{}
-	e = db.InTenant(ctx, database.App, tenantID, func(tx pgx.Tx) error {
+	e = db.InTenant(dbtest.Seed(ctx), database.App, tenantID, func(tx pgx.Tx) error {
 		if _, err := tx.Exec(ctx, `INSERT INTO tenants(id,slug,name) VALUES($1::uuid,$2,'Quote delete test')`, tenantID, slug); err != nil {
 			return err
 		}
@@ -131,7 +131,7 @@ func (f *quoteFixture) call(actor, method, path, body string) (int, map[string]a
 func (f *quoteFixture) lastEvent(node, typ string) int64 {
 	f.t.Helper()
 	var id int64
-	err := db.InTenant(context.Background(), f.database.App, f.tenantID, func(tx pgx.Tx) error {
+	err := db.InTenant(dbtest.Seed(context.Background()), f.database.App, f.tenantID, func(tx pgx.Tx) error {
 		return tx.QueryRow(context.Background(), `SELECT id FROM events WHERE node_id=$1::uuid AND type=$2 AND undo_of IS NULL ORDER BY id DESC LIMIT 1`, node, typ).Scan(&id)
 	})
 	if err != nil {
@@ -267,7 +267,7 @@ func TestDeleteNeverIssuedDraftUndoArchiveAndDuplicate(t *testing.T) {
 		t.Fatalf("issued delete %d %v", status, body)
 	}
 	// The database refuses it too, whatever the caller.
-	err := db.InTenant(context.Background(), f.database.App, f.tenantID, func(tx pgx.Tx) error {
+	err := db.InTenant(dbtest.Seed(context.Background()), f.database.App, f.tenantID, func(tx pgx.Tx) error {
 		_, err := tx.Exec(context.Background(), `UPDATE business_quotes SET deleted_at=now(),deleted_by_principal_id=$2::uuid WHERE quote_node_id=$1::uuid`, issuedID, f.ids["admin"])
 		return err
 	})

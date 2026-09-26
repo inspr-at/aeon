@@ -48,7 +48,7 @@ func TestLexicalPaginationFiltersAndTenants(t *testing.T) {
 	insertNode(t, d.App, tenantA, doneID, "PAI-6", "project", "Sharedtoken project", "body", "done")
 	insertNode(t, d.App, tenantA, gone, "PAI-7", "project", "Alpha signal", "Alpha signal", "open")
 	insertNode(t, d.App, tenantB, bNode, "PAI-1", "project", "Alpha signal", "Alpha signal", "open")
-	if err := db.InTenant(ctx, d.App, tenantA, func(tx pgx.Tx) error {
+	if err := db.InTenant(dbtest.Seed(ctx), d.App, tenantA, func(tx pgx.Tx) error {
 		_, err := tx.Exec(ctx, `UPDATE nodes SET deleted_at = now() WHERE id = $1`, gone)
 		return err
 	}); err != nil {
@@ -58,8 +58,8 @@ func TestLexicalPaginationFiltersAndTenants(t *testing.T) {
 	mod := New(d.App, nil)
 	mux := http.NewServeMux()
 	mod.Mount(mux)
-	ada := tenant.Principal{ID: "cccccccc-cccc-4ccc-8ccc-ccccccccccc1", TenantID: tenantA, Kind: tenant.Person, Name: "Ada"}
-	bob := tenant.Principal{ID: "dddddddd-dddd-4ddd-8ddd-ddddddddddd2", TenantID: tenantB, Kind: tenant.Person, Name: "Bob"}
+	ada := seedPerson(t, d, tenantA, "cccccccc-cccc-4ccc-8ccc-ccccccccccc1", "Ada")
+	bob := seedPerson(t, d, tenantB, "dddddddd-dddd-4ddd-8ddd-ddddddddddd2", "Bob")
 
 	var cursor string
 	var seen []string
@@ -145,7 +145,7 @@ func TestHybridMaskFallbackAndWorker(t *testing.T) {
 	vec[0] = 1
 	provider := fixedProvider{model: "test-model", vec: vec}
 	hash := embedding.ContentHash("zzzzunique", "vector body")
-	if err := db.InTenant(ctx, d.App, tenantA, func(tx pgx.Tx) error {
+	if err := db.InTenant(dbtest.Seed(ctx), d.App, tenantA, func(tx pgx.Tx) error {
 		_, err := tx.Exec(ctx, `
 			INSERT INTO node_embeddings (tenant_id, node_id, model, content_hash, embedding)
 			VALUES ($1, $2, 'test-model', $3, $4::real[]::halfvec(1536))`,
@@ -157,14 +157,14 @@ func TestHybridMaskFallbackAndWorker(t *testing.T) {
 
 	mux := http.NewServeMux()
 	New(d.App, provider).Mount(mux)
-	ada := tenant.Principal{ID: "cccccccc-cccc-4ccc-8ccc-ccccccccccc1", TenantID: tenantA, Kind: tenant.Person, Name: "Ada"}
+	ada := seedPerson(t, d, tenantA, "cccccccc-cccc-4ccc-8ccc-ccccccccccc1", "Ada")
 	status, raw := call(mux, &ada, "/api/search?q=neverlexicalmatch")
 	page := mustOK(t, status, raw)
 	if len(page.Items) != 0 {
 		t.Fatalf("queued job exposed vector %+v", page.Items)
 	}
 
-	if err := db.InTenant(ctx, d.App, tenantA, func(tx pgx.Tx) error {
+	if err := db.InTenant(dbtest.Seed(ctx), d.App, tenantA, func(tx pgx.Tx) error {
 		_, err := tx.Exec(ctx, `DELETE FROM node_embedding_jobs WHERE node_id = $1`, nodeID)
 		return err
 	}); err != nil {
@@ -194,7 +194,7 @@ func TestHybridMaskFallbackAndWorker(t *testing.T) {
 	if err != nil || n != 1 {
 		t.Fatalf("worker %d %v", n, err)
 	}
-	if err := db.InTenant(ctx, d.App, tenantA, func(tx pgx.Tx) error {
+	if err := db.InTenant(dbtest.Seed(ctx), d.App, tenantA, func(tx pgx.Tx) error {
 		var jobs int
 		if err := tx.QueryRow(ctx, `SELECT count(*) FROM node_embedding_jobs`).Scan(&jobs); err != nil {
 			return err
@@ -252,6 +252,17 @@ func mustOK(t *testing.T, status int, raw string) pageBody {
 	return decodePage(t, raw)
 }
 
+// seedPerson stores a workspace member: search shows only what the caller's
+// bindings make visible (ADR-003 P2).
+func seedPerson(t *testing.T, d *dbtest.DB, tenantID, id, name string) tenant.Principal {
+	t.Helper()
+	if _, err := d.Admin.Exec(t.Context(), `INSERT INTO principals (tenant_id, id, kind, name) VALUES ($1, $2, 'person', $3)`, tenantID, id, name); err != nil {
+		t.Fatal(err)
+	}
+	dbtest.BindRole(t, d, tenantID, id, "member")
+	return tenant.Principal{ID: id, TenantID: tenantID, Kind: tenant.Person, Name: name}
+}
+
 func seedTenant(t *testing.T, d *dbtest.DB, id, slug string) {
 	t.Helper()
 	if _, err := d.Admin.Exec(t.Context(), `INSERT INTO tenants (id, slug, name) VALUES ($1, $2, $3)`, id, slug, slug); err != nil {
@@ -261,7 +272,7 @@ func seedTenant(t *testing.T, d *dbtest.DB, id, slug string) {
 
 func insertNode(t *testing.T, pool *pgxpool.Pool, tenant, id, key, slug, title, body, state string) {
 	t.Helper()
-	err := db.InTenant(t.Context(), pool, tenant, func(tx pgx.Tx) error {
+	err := db.InTenant(dbtest.Seed(t.Context()), pool, tenant, func(tx pgx.Tx) error {
 		tag, err := tx.Exec(t.Context(), `
 			INSERT INTO nodes (tenant_id, id, key, kind_id, title, body, state)
 			SELECT $1, $2, $3, k.id, $4, $5, $6
@@ -283,7 +294,7 @@ func insertNode(t *testing.T, pool *pgxpool.Pool, tenant, id, key, slug, title, 
 func kindBySlug(t *testing.T, pool *pgxpool.Pool, tenant, slug string) string {
 	t.Helper()
 	var id string
-	err := db.InTenant(t.Context(), pool, tenant, func(tx pgx.Tx) error {
+	err := db.InTenant(dbtest.Seed(t.Context()), pool, tenant, func(tx pgx.Tx) error {
 		return tx.QueryRow(t.Context(), `SELECT id::text FROM node_kinds WHERE slug = $1`, slug).Scan(&id)
 	})
 	if err != nil {

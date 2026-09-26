@@ -19,13 +19,13 @@ func TestRolesNoEscalationAndBuiltinImmutability(t *testing.T) {
 	d := dbtest.Open(t)
 	ctx := t.Context()
 	var tid, ownerID, adminID, builtinID, ownerRoleID string
-	err := db.InTenant(ctx, d.App, "00000000-0000-0000-0000-000000000000", func(tx pgx.Tx) error {
+	err := db.InTenant(dbtest.Seed(ctx), d.App, "00000000-0000-0000-0000-000000000000", func(tx pgx.Tx) error {
 		return tx.QueryRow(ctx, `INSERT INTO tenants(slug,name) VALUES('az1-roles','AZ1 roles') RETURNING id::text`).Scan(&tid)
 	})
 	if err != nil {
 		t.Fatal(err)
 	}
-	err = db.InTenant(ctx, d.App, tid, func(tx pgx.Tx) error {
+	err = db.InTenant(dbtest.Seed(ctx), d.App, tid, func(tx pgx.Tx) error {
 		for _, item := range []struct {
 			id         *string
 			name, role string

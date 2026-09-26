@@ -67,7 +67,7 @@ func (w *world) principal(tenantOrSlug, name, role string) tenant.Principal {
 func (w *world) project(tenantID, key, title string) string {
 	w.t.Helper()
 	var id string
-	err := db.InTenant(w.t.Context(), w.db.App, tenantID, func(tx pgx.Tx) error {
+	err := db.InTenant(dbtest.Seed(w.t.Context()), w.db.App, tenantID, func(tx pgx.Tx) error {
 		return tx.QueryRow(w.t.Context(), `INSERT INTO nodes (tenant_id, key, kind_id, title, state) SELECT $1::uuid, $2, id, $3, 'active' FROM node_kinds WHERE slug = 'project' RETURNING id::text`, tenantID, key, title).Scan(&id)
 	})
 	if err != nil {
@@ -268,7 +268,7 @@ func TestSharedGroupsAreAdminWritesAndTenantScoped(t *testing.T) {
 		t.Fatalf("cross-tenant undo = %d", status)
 	}
 	var rows int
-	if err := db.InTenant(t.Context(), w.db.App, w.stranger.TenantID, func(tx pgx.Tx) error {
+	if err := db.InTenant(dbtest.Seed(t.Context()), w.db.App, w.stranger.TenantID, func(tx pgx.Tx) error {
 		return tx.QueryRow(t.Context(), `SELECT (SELECT count(*) FROM project_groups) + (SELECT count(*) FROM project_group_members)`).Scan(&rows)
 	}); err != nil || rows != 0 {
 		t.Fatalf("RLS leaked %d rows (%v)", rows, err)
@@ -315,7 +315,7 @@ func TestDeletedProjectsLeaveSharedGroups(t *testing.T) {
 	w := setup(t)
 	status, body := w.call(w.admin, http.MethodPost, "/api/project-groups", fmt.Sprintf(`{"name":"Clients","project_ids":[%q,%q]}`, w.projects[0], w.projects[1]))
 	want[result](t, status, body, http.StatusCreated)
-	if err := db.InTenant(t.Context(), w.db.App, w.admin.TenantID, func(tx pgx.Tx) error {
+	if err := db.InTenant(dbtest.Seed(t.Context()), w.db.App, w.admin.TenantID, func(tx pgx.Tx) error {
 		_, err := tx.Exec(t.Context(), `UPDATE nodes SET deleted_at = now() WHERE id = $1::uuid`, w.projects[1])
 		return err
 	}); err != nil {

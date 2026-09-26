@@ -66,15 +66,27 @@ func AcceptInvite(ctx context.Context, tx pgx.Tx, tenantID, identityID, email, n
 		return tenant.Principal{}, ErrNoInvite
 	}
 	if workspaceRole != nil {
-		if _, err := grantRole(ctx, tx, inviter, *workspaceRole, "workspace_role_id"); err != nil {
+		role, err := grantRole(ctx, tx, inviter, *workspaceRole, "workspace_role_id")
+		if err != nil {
 			return tenant.Principal{}, ErrNoInvite
 		}
+		// Guest is a project-only role (ADR-003 P2): an older invite that
+		// names it for the workspace grants no workspace binding.
+		if role.Builtin && role.Key == "guest" {
+			workspaceRole = nil
+		}
 	}
+	allowed := grants[:0]
 	for _, g := range grants {
-		if _, err := grantRole(ctx, tx, inviter, g.role, "project_roles"); err != nil {
+		role, err := grantRole(ctx, tx, inviter, g.role, "project_roles")
+		if err != nil {
 			return tenant.Principal{}, ErrNoInvite
 		}
+		if projectRoleAllowed(role) {
+			allowed = append(allowed, g)
+		}
 	}
+	grants = allowed
 	var person tenant.Principal
 	person, err = scanNewPerson(ctx, tx, tenantID, identityID, display, email)
 	if err != nil {

@@ -5,6 +5,7 @@ package nodes
 import (
 	"encoding/json"
 	"github.com/inspr-at/aeon/internal/db"
+	"github.com/inspr-at/aeon/internal/dbtest"
 	"github.com/jackc/pgx/v5"
 	"net/http"
 	"net/http/httptest"
@@ -199,7 +200,7 @@ func TestList6000Performance(t *testing.T) {
 	project := kindBySlug(t, p, "project")
 	ticket := kindBySlug(t, p, "ticket")
 	root := mustNode(t, p, `{"kind_id":"`+project.ID+`","title":"Large project"}`)
-	err := db.InTenant(t.Context(), appPool, p.TenantID, func(tx pgx.Tx) error {
+	err := db.InTenant(dbtest.Seed(t.Context()), appPool, p.TenantID, func(tx pgx.Tx) error {
 		_, err := tx.Exec(t.Context(), `INSERT INTO nodes (tenant_id,key,kind_id,title,fields,state,parent_id,position)
             SELECT $1::uuid,'PERF-'||g,$2::uuid,'Item '||g,
                 jsonb_build_object('priority',CASE g%3 WHEN 0 THEN 'high' WHEN 1 THEN 'medium' ELSE 'low' END),
@@ -212,7 +213,7 @@ func TestList6000Performance(t *testing.T) {
 	}
 	// Importer writes refresh statistics after the bulk transaction; exercise
 	// the same plan here so row estimates cannot hide a slow recursive walk.
-	if err := db.InTenant(t.Context(), appPool, p.TenantID, func(tx pgx.Tx) error {
+	if err := db.InTenant(dbtest.Seed(t.Context()), appPool, p.TenantID, func(tx pgx.Tx) error {
 		_, err := tx.Exec(t.Context(), `ANALYZE nodes`)
 		return err
 	}); err != nil {
@@ -264,7 +265,7 @@ func TestList6000Performance(t *testing.T) {
 			{"node_list", listQuerySQL, listArgs},
 			{"node_facets", facetQuerySQL, facetArgs},
 		} {
-			err := db.InTenant(t.Context(), appPool, p.TenantID, func(tx pgx.Tx) error {
+			err := db.InTenant(dbtest.Seed(t.Context()), appPool, p.TenantID, func(tx pgx.Tx) error {
 				rows, err := tx.Query(t.Context(), "EXPLAIN (ANALYZE, BUFFERS) "+plan.sql, plan.args...)
 				if err != nil {
 					return err
@@ -299,7 +300,7 @@ func TestProjectSummaryRecentPeople(t *testing.T) {
 	ctx := t.Context()
 	var ids = map[string]string{}
 	var quiet string
-	err := db.InTenant(ctx, appPool, p.TenantID, func(tx pgx.Tx) error {
+	err := db.InTenant(dbtest.Seed(ctx), appPool, p.TenantID, func(tx pgx.Tx) error {
 		// A project nobody touched (inserted without an event).
 		if err := tx.QueryRow(ctx, `INSERT INTO nodes (tenant_id, key, kind_id, title) VALUES ($1, 'QUI-1', $2, 'Quiet') RETURNING id::text`, p.TenantID, project.ID).Scan(&quiet); err != nil {
 			return err

@@ -17,6 +17,7 @@ import (
 	"github.com/jackc/pgx/v5/pgtype"
 
 	"github.com/inspr-at/aeon/internal/authz"
+	"github.com/inspr-at/aeon/internal/db"
 	"github.com/inspr-at/aeon/internal/events"
 	"github.com/inspr-at/aeon/internal/tenant"
 	"github.com/inspr-at/aeon/internal/tenantbootstrap"
@@ -57,6 +58,10 @@ func (m *Module) tenantBySlug(ctx context.Context, slug string) (string, error) 
 // tenant. A bootstrap email may create the original tenant admin, but cannot
 // enroll itself in any additional tenant.
 func (m *Module) resolveOIDCPerson(ctx context.Context, tenantID, slug, issuer, subject, email, name string, emailVerified bool, inviteToken string) (tenant.Principal, string, error) {
+	// Sign-in is system code, not a caller's read: accepting an invite checks
+	// that each invited project still exists, so it sees every project
+	// (ADR-003 P2). Nothing read here is returned to the browser.
+	ctx = db.AllProjects(ctx, "sign-in and invite acceptance")
 	var p tenant.Principal
 	var identityID string
 	err := m.inTenant(ctx, m.pool, tenantID, func(tx pgx.Tx) error {

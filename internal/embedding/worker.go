@@ -127,6 +127,8 @@ func (w *Worker) tenantIDs(ctx context.Context) ([]string, error) {
 }
 
 func (w *Worker) processTenant(ctx context.Context, tenantID string) (int, error) {
+	// The worker embeds every project's nodes for search (ADR-003 P2).
+	ctx = db.AllProjects(ctx, "embedding worker")
 	model := strings.TrimSpace(w.provider.Model())
 	if model == "" || len(model) > 200 {
 		return 0, errors.New("embedding model is not configured")

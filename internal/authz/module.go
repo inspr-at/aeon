@@ -42,6 +42,9 @@ func (m *Module) Mount(mux *http.ServeMux) {
 	Handle(mux, m.pool, "POST /api/members/{principal_id}/aliases", "members.manage", m.linkAlias)
 	Handle(mux, m.pool, "DELETE /api/members/{principal_id}/aliases/{from_principal_id}", "members.manage", m.unlinkAlias)
 	Handle(mux, m.pool, "GET /api/audit", "audit.read", m.audit)
+	Handle(mux, m.pool, "GET /api/projects/{projectId}/members", "members.read", m.projectMembers)
+	Handle(mux, m.pool, "PUT /api/projects/{projectId}/members/{principal_id}", "members.manage", m.putProjectMember)
+	Handle(mux, m.pool, "DELETE /api/projects/{projectId}/members/{principal_id}", "members.manage", m.deleteProjectMember)
 }
 
 func reply(w http.ResponseWriter, status int, v any) {

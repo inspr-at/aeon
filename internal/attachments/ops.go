@@ -98,7 +98,7 @@ func references(ctx context.Context, pool *pgxpool.Pool, tenantID string) (map[s
 		return nil, errors.New("invalid tenant")
 	}
 	refs := map[string]bool{}
-	err := db.InTenant(ctx, pool, tenantID, func(tx pgx.Tx) error {
+	err := db.InTenant(db.AllProjects(ctx, "attachment files verify and gc"), pool, tenantID, func(tx pgx.Tx) error {
 		rows, err := tx.Query(ctx, `SELECT sha256,content_type FROM attachments WHERE tenant_id=$1`, tenantID)
 		if err != nil {
 			return err
@@ -165,7 +165,7 @@ func GC(ctx context.Context, pool *pgxpool.Pool, store Store, tenantID string, a
 		if apply {
 			if !spool {
 				var referenced bool
-				if err := db.InTenant(ctx, pool, tenantID, func(tx pgx.Tx) error {
+				if err := db.InTenant(db.AllProjects(ctx, "attachment files verify and gc"), pool, tenantID, func(tx pgx.Tx) error {
 					return tx.QueryRow(ctx, `SELECT EXISTS(SELECT 1 FROM attachments WHERE tenant_id=$1 AND sha256=$2)`, tenantID, hash).Scan(&referenced)
 				}); err != nil {
 					return err

@@ -89,7 +89,7 @@ func ReformatLegacyCustomerNumber(ctx context.Context, pool *pgxpool.Pool, regis
 	}
 	m := &Module{pool: pool, registry: registry}
 	var result string
-	err := db.InTenant(ctx, pool, p.TenantID, func(tx pgx.Tx) error {
+	err := db.InTenant(tenant.WithPrincipal(ctx, p), pool, p.TenantID, func(tx pgx.Tx) error {
 		if err := m.enabled(ctx, tx, p.TenantID, fence.PermNodesContribute, true); err != nil {
 			return err
 		}

@@ -38,7 +38,7 @@ func TestImportedProjectKeyBackfill(t *testing.T) {
 	var baseEvents int
 	read := func() {
 		t.Helper()
-		if err := db.InTenant(ctx, d.App, tenantID, func(tx pgx.Tx) error {
+		if err := db.InTenant(dbtest.Seed(ctx), d.App, tenantID, func(tx pgx.Tx) error {
 			return tx.QueryRow(ctx, `SELECT coalesce(n.fields->>'project_key',''),n.updated_at::text,
 				(SELECT count(*) FROM events e WHERE e.tenant_id=n.tenant_id AND e.node_id=n.id AND e.type='import.node_updated')
 				FROM nodes n WHERE n.tenant_id=$1 AND n.key='PRJ-1'`, tenantID).Scan(&key, &beforeTime, &baseEvents)
@@ -51,7 +51,7 @@ func TestImportedProjectKeyBackfill(t *testing.T) {
 		t.Fatalf("imported project key = %q, want PK", key)
 	}
 	// Restore the old importer shape and make it the last import baseline.
-	if err := db.InTenant(ctx, d.Admin, tenantID, func(tx pgx.Tx) error {
+	if err := db.InTenant(dbtest.Seed(ctx), d.Admin, tenantID, func(tx pgx.Tx) error {
 		_, err := tx.Exec(ctx, `
 			WITH old AS (SELECT to_jsonb(n) AS snap FROM nodes n WHERE tenant_id=$1 AND key='PRJ-1'),
 			     upd AS (UPDATE nodes SET fields=fields-'project_key' WHERE tenant_id=$1 AND key='PRJ-1' RETURNING *)
@@ -68,7 +68,7 @@ func TestImportedProjectKeyBackfill(t *testing.T) {
 	}
 	unchangedTime, eventCount := beforeTime, baseEvents
 	for range 2 {
-		if err := db.InTenant(ctx, d.Admin, tenantID, func(tx pgx.Tx) error {
+		if err := db.InTenant(dbtest.Seed(ctx), d.Admin, tenantID, func(tx pgx.Tx) error {
 			_, err := tx.Exec(ctx, string(migration))
 			return err
 		}); err != nil {

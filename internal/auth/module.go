@@ -130,7 +130,21 @@ func (m *Module) Middleware(next http.Handler) http.Handler {
 			// and the exact route permission are checked inside the tenant.
 			if kind != credAgent || r.Method != http.MethodGet || r.URL.Path != "/api/me" {
 				ctx := authz.BindPool(r.Context(), m.pool)
-				permissionErr := authz.RequirePattern(ctx, r.Pattern, projectScope(r))
+				scope := projectScope(r)
+				permissionErr := authz.RequirePattern(ctx, r.Pattern, scope)
+				// The workspace binding decides first; it is the whole answer for
+				// every workspace member. A caller without it may still act through
+				// a project binding, in the project the route targets (ADR-003 P2).
+				if errors.Is(permissionErr, authz.ErrForbidden) && scope.ProjectID == "" {
+					resolved, ok, err := authz.ResolveRouteScope(ctx, m.pool, r.Pattern, r.URL.Path)
+					if err != nil {
+						permissionErr = err
+					} else if ok {
+						scope = resolved
+						permissionErr = authz.RequirePattern(ctx, r.Pattern, scope)
+					}
+				}
+				ctx = authz.WithRouteScope(ctx, scope)
 				if permissionErr != nil && r.Pattern == "GET /api/people/{principalId}/avatar/{size}" && p.Kind == tenant.Person {
 					parts := strings.Split(strings.Trim(r.URL.Path, "/"), "/")
 					if len(parts) == 5 && parts[2] == p.ID {

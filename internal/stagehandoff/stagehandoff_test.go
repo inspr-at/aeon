@@ -41,7 +41,7 @@ func TestHandoffInstallationBoundary(t *testing.T) {
 			if pin == "" {
 				pin = plug.Manifest.DigestSHA256
 			}
-			err := db.InTenant(ctx, m.pool, p.TenantID, func(tx pgx.Tx) error {
+			err := db.InTenant(dbtest.Seed(ctx), m.pool, p.TenantID, func(tx pgx.Tx) error {
 				if _, err := tx.Exec(ctx, `UPDATE plugin_installations SET enabled=$1,manifest_digest_sha256=$2,permissions=$3 WHERE plugin_id='janus'`, tc.enabled, pin, tc.permissions); err != nil {
 					return err
 				}
@@ -60,7 +60,7 @@ func TestHandoffInstallationBoundary(t *testing.T) {
 			}
 		})
 	}
-	if err := db.InTenant(ctx, m.pool, p.TenantID, func(tx pgx.Tx) error {
+	if err := db.InTenant(dbtest.Seed(ctx), m.pool, p.TenantID, func(tx pgx.Tx) error {
 		for _, plugin := range []string{"pharos", "missing"} {
 			ok, err := plugins.Enabled(ctx, tx, m.registry, p.TenantID, plugin, "deploy")
 			if err != nil || ok {
@@ -86,7 +86,7 @@ func TestHandoffInstallationBoundary(t *testing.T) {
 func TestExistingHandoffCanFinishAfterPluginDisable(t *testing.T) {
 	m, p, project, release, bearer := fixture(t)
 	ctx := t.Context()
-	err := db.InTenant(ctx, m.pool, p.TenantID, func(tx pgx.Tx) error {
+	err := db.InTenant(dbtest.Seed(ctx), m.pool, p.TenantID, func(tx pgx.Tx) error {
 		h, err := m.create(ctx, tx, p, RequestWrite{ProjectNodeID: project, ReleaseNodeID: release, Stage: "access", Operation: "prepare", ExpectedJourneyRevision: 1, IdempotencyKey: "before-disable"}, "janus", []string{"authorization", "credential_handoff"}, "")
 		if err != nil {
 			return err
@@ -129,7 +129,7 @@ func fixture(t *testing.T) (*Module, tenant.Principal, string, string, string) {
 	m := &Module{pool: fresh.App, registry: registry, launchChecks: testLaunchChecks{}}
 	var p tenant.Principal
 	var project, release string
-	err = db.InTenant(ctx, fresh.App, tenantID, func(tx pgx.Tx) error {
+	err = db.InTenant(dbtest.Seed(ctx), fresh.App, tenantID, func(tx pgx.Tx) error {
 		p.TenantID = tenantID
 		p.Kind = tenant.Agent
 		if err := tx.QueryRow(ctx, `INSERT INTO principals(tenant_id,kind,name) VALUES($1::uuid,'agent','Worker') RETURNING id::text`, tenantID).Scan(&p.ID); err != nil {
@@ -137,6 +137,13 @@ func fixture(t *testing.T) (*Module, tenant.Principal, string, string, string) {
 		}
 		var human string
 		if err := tx.QueryRow(ctx, `INSERT INTO principals(tenant_id,kind,name,roles) VALUES($1::uuid,'person','Human',ARRAY['admin']) RETURNING id::text`, tenantID).Scan(&human); err != nil {
+			return err
+		}
+		// The worker sees project data only through a binding (ADR-003 P2).
+		if err := dbtest.BindLegacyTx(ctx, tx, tenantID, human); err != nil {
+			return err
+		}
+		if _, err := tx.Exec(ctx, `INSERT INTO role_bindings(tenant_id,principal_id,role_id,scope_type) SELECT $1::uuid,$2::uuid,id,'workspace' FROM roles WHERE tenant_id=$1::uuid AND key='member'`, tenantID, p.ID); err != nil {
 			return err
 		}
 		var projectKind, releaseKind string
@@ -192,7 +199,7 @@ func TestPrepareHandoffFencingAndEvidence(t *testing.T) {
 	ctx := context.Background()
 	in := RequestWrite{ProjectNodeID: project, ReleaseNodeID: release, Stage: "access", Operation: "prepare", ExpectedJourneyRevision: 1, IdempotencyKey: "prepare-1"}
 	var h Handoff
-	err := db.InTenant(ctx, m.pool, p.TenantID, func(tx pgx.Tx) error {
+	err := db.InTenant(dbtest.Seed(ctx), m.pool, p.TenantID, func(tx pgx.Tx) error {
 		var err error
 		h, err = m.create(ctx, tx, p, in, "janus", []string{"authorization", "credential_handoff"}, "")
 		return err
@@ -203,7 +210,7 @@ func TestPrepareHandoffFencingAndEvidence(t *testing.T) {
 	if h.Attempt != 1 || h.AuthorityEpoch != 1 || h.PrerequisiteSealSHA256 == "" {
 		t.Fatalf("bad handoff: %+v", h)
 	}
-	err = db.InTenant(ctx, m.pool, p.TenantID, func(tx pgx.Tx) error {
+	err = db.InTenant(dbtest.Seed(ctx), m.pool, p.TenantID, func(tx pgx.Tx) error {
 		same, err := m.create(ctx, tx, p, in, "janus", []string{"authorization", "credential_handoff"}, "")
 		if err != nil {
 			return err
@@ -218,34 +225,34 @@ func TestPrepareHandoffFencingAndEvidence(t *testing.T) {
 	}
 	yes := true
 	e1 := EvidenceWrite{Sequence: 1, Kind: "authorization", Outcome: "satisfied", ObservedAt: time.Now().UTC().Truncate(time.Microsecond), AuthorityEpoch: h.AuthorityEpoch, Authorized: &yes}
-	err = db.InTenant(ctx, m.pool, p.TenantID, func(tx pgx.Tx) error { _, err := m.appendEvidence(ctx, tx, p, bearer, h.ID, e1); return err })
+	err = db.InTenant(dbtest.Seed(ctx), m.pool, p.TenantID, func(tx pgx.Tx) error { _, err := m.appendEvidence(ctx, tx, p, bearer, h.ID, e1); return err })
 	if err != nil {
 		t.Fatal(err)
 	}
-	err = db.InTenant(ctx, m.pool, p.TenantID, func(tx pgx.Tx) error { _, err := m.appendEvidence(ctx, tx, p, bearer, h.ID, e1); return err })
+	err = db.InTenant(dbtest.Seed(ctx), m.pool, p.TenantID, func(tx pgx.Tx) error { _, err := m.appendEvidence(ctx, tx, p, bearer, h.ID, e1); return err })
 	if err != nil {
 		t.Fatalf("exact replay: %v", err)
 	}
 	divergent := e1
 	no := false
 	divergent.Authorized = &no
-	err = db.InTenant(ctx, m.pool, p.TenantID, func(tx pgx.Tx) error { _, err := m.appendEvidence(ctx, tx, p, bearer, h.ID, divergent); return err })
+	err = db.InTenant(dbtest.Seed(ctx), m.pool, p.TenantID, func(tx pgx.Tx) error { _, err := m.appendEvidence(ctx, tx, p, bearer, h.ID, divergent); return err })
 	var apiErr *apiError
 	if !errors.As(err, &apiErr) || apiErr.code != 409 {
 		t.Fatalf("divergent replay: %v", err)
 	}
 	e2 := EvidenceWrite{Sequence: 2, Kind: "credential_handoff", Outcome: "satisfied", ObservedAt: time.Now().UTC().Truncate(time.Microsecond), AuthorityEpoch: h.AuthorityEpoch, CredentialReady: &yes}
-	err = db.InTenant(ctx, m.pool, p.TenantID, func(tx pgx.Tx) error { _, err := m.appendEvidence(ctx, tx, p, bearer, h.ID, e2); return err })
+	err = db.InTenant(dbtest.Seed(ctx), m.pool, p.TenantID, func(tx pgx.Tx) error { _, err := m.appendEvidence(ctx, tx, p, bearer, h.ID, e2); return err })
 	if err != nil {
 		t.Fatal(err)
 	}
 	r := ResultWrite{Outcome: "succeeded", TerminalSequence: 2, AuthorityEpoch: h.AuthorityEpoch, PrerequisiteSealSHA256: h.PrerequisiteSealSHA256}
-	err = db.InTenant(ctx, m.pool, p.TenantID, func(tx pgx.Tx) error { _, err := m.close(ctx, tx, p, bearer, h.ID, r); return err })
+	err = db.InTenant(dbtest.Seed(ctx), m.pool, p.TenantID, func(tx pgx.Tx) error { _, err := m.close(ctx, tx, p, bearer, h.ID, r); return err })
 	if err != nil {
 		t.Fatal(err)
 	}
 	var eventCount int
-	err = db.InTenant(ctx, m.pool, p.TenantID, func(tx pgx.Tx) error {
+	err = db.InTenant(dbtest.Seed(ctx), m.pool, p.TenantID, func(tx pgx.Tx) error {
 		return tx.QueryRow(ctx, `SELECT count(*) FROM events WHERE type LIKE 'stage_handoff.%'`).Scan(&eventCount)
 	})
 	if err != nil {
@@ -254,7 +261,7 @@ func TestPrepareHandoffFencingAndEvidence(t *testing.T) {
 	if eventCount != 4 {
 		t.Fatalf("events=%d, want 4", eventCount)
 	}
-	err = db.InTenant(ctx, m.pool, p.TenantID, func(tx pgx.Tx) error {
+	err = db.InTenant(dbtest.Seed(ctx), m.pool, p.TenantID, func(tx pgx.Tx) error {
 		var state string
 		if err := tx.QueryRow(ctx, `SELECT state FROM stage_handoffs WHERE id=$1::uuid`, h.ID).Scan(&state); err != nil {
 			return err
@@ -289,7 +296,7 @@ func TestRegistryRejectsInvalidManifests(t *testing.T) {
 func TestPharosAdmissionAndTenantFence(t *testing.T) {
 	m, p, project, release, bearer := fixture(t)
 	ctx := context.Background()
-	err := db.InTenant(ctx, m.pool, p.TenantID, func(tx pgx.Tx) error {
+	err := db.InTenant(dbtest.Seed(ctx), m.pool, p.TenantID, func(tx pgx.Tx) error {
 		var human string
 		if err := tx.QueryRow(ctx, `SELECT id::text FROM principals WHERE kind='person' LIMIT 1`).Scan(&human); err != nil {
 			return err
@@ -338,7 +345,7 @@ func TestPharosAdmissionAndTenantFence(t *testing.T) {
 	}
 	prepareRequest := RequestWrite{ProjectNodeID: project, ReleaseNodeID: release, Stage: "access", Operation: "prepare", ExpectedJourneyRevision: 1, IdempotencyKey: "prepare-before-deploy"}
 	var prepare Handoff
-	err = db.InTenant(ctx, m.pool, p.TenantID, func(tx pgx.Tx) error {
+	err = db.InTenant(dbtest.Seed(ctx), m.pool, p.TenantID, func(tx pgx.Tx) error {
 		var err error
 		prepare, err = m.create(ctx, tx, p, prepareRequest, "janus", []string{"authorization", "credential_handoff"}, "")
 		return err
@@ -348,12 +355,12 @@ func TestPharosAdmissionAndTenantFence(t *testing.T) {
 	}
 	yes := true
 	for _, e := range []EvidenceWrite{{Sequence: 1, Kind: "authorization", Outcome: "satisfied", ObservedAt: time.Now().UTC(), AuthorityEpoch: prepare.AuthorityEpoch, Authorized: &yes}, {Sequence: 2, Kind: "credential_handoff", Outcome: "satisfied", ObservedAt: time.Now().UTC(), AuthorityEpoch: prepare.AuthorityEpoch, CredentialReady: &yes}} {
-		err = db.InTenant(ctx, m.pool, p.TenantID, func(tx pgx.Tx) error { _, err := m.appendEvidence(ctx, tx, p, bearer, prepare.ID, e); return err })
+		err = db.InTenant(dbtest.Seed(ctx), m.pool, p.TenantID, func(tx pgx.Tx) error { _, err := m.appendEvidence(ctx, tx, p, bearer, prepare.ID, e); return err })
 		if err != nil {
 			t.Fatal(err)
 		}
 	}
-	err = db.InTenant(ctx, m.pool, p.TenantID, func(tx pgx.Tx) error {
+	err = db.InTenant(dbtest.Seed(ctx), m.pool, p.TenantID, func(tx pgx.Tx) error {
 		_, err := m.close(ctx, tx, p, bearer, prepare.ID, ResultWrite{Outcome: "succeeded", TerminalSequence: 2, AuthorityEpoch: prepare.AuthorityEpoch, PrerequisiteSealSHA256: prepare.PrerequisiteSealSHA256})
 		return err
 	})
@@ -362,7 +369,7 @@ func TestPharosAdmissionAndTenantFence(t *testing.T) {
 	}
 	in := RequestWrite{ProjectNodeID: project, ReleaseNodeID: release, Stage: "deploy", Operation: "deploy", ExpectedJourneyRevision: 1, IdempotencyKey: "deploy-1"}
 	var h Handoff
-	err = db.InTenant(ctx, m.pool, p.TenantID, func(tx pgx.Tx) error {
+	err = db.InTenant(dbtest.Seed(ctx), m.pool, p.TenantID, func(tx pgx.Tx) error {
 		var err error
 		h, err = m.create(ctx, tx, p, in, "pharos", []string{"deployment"}, "deploy")
 		return err
@@ -372,7 +379,7 @@ func TestPharosAdmissionAndTenantFence(t *testing.T) {
 	}
 	a := Artifact{VersionScheme: "inspr-calendar-v2", Version: "260923000000.0.0", ReleaseChannel: "stable", ReleaseSequence: 1, DigestSHA256: emptyDigest, CommitDigest: "commit", ManifestCoordinate: "manifest", ManifestDigestSHA256: emptyDigest}
 	e := EvidenceWrite{Sequence: 1, Kind: "deployment", Outcome: "succeeded", ObservedAt: time.Now().UTC(), AuthorityEpoch: h.AuthorityEpoch, Workflow: stringPtr("deploy"), Environment: stringPtr("production"), Artifact: &a}
-	err = db.InTenant(ctx, m.pool, p.TenantID, func(tx pgx.Tx) error { _, err := m.appendEvidence(ctx, tx, p, bearer, h.ID, e); return err })
+	err = db.InTenant(dbtest.Seed(ctx), m.pool, p.TenantID, func(tx pgx.Tx) error { _, err := m.appendEvidence(ctx, tx, p, bearer, h.ID, e); return err })
 	var apiErr *apiError
 	if !errors.As(err, &apiErr) || apiErr.code != 409 {
 		t.Fatalf("launch without admission: %v", err)
@@ -392,11 +399,11 @@ func TestPharosAdmissionAndTenantFence(t *testing.T) {
 	if err := m.ConsumeLaunch(ctx, p, bearer, admission.ID); !errors.As(err, &apiErr) || apiErr.code != 409 {
 		t.Fatalf("double consume: %v", err)
 	}
-	err = db.InTenant(ctx, m.pool, p.TenantID, func(tx pgx.Tx) error { _, err := m.appendEvidence(ctx, tx, p, bearer, h.ID, e); return err })
+	err = db.InTenant(dbtest.Seed(ctx), m.pool, p.TenantID, func(tx pgx.Tx) error { _, err := m.appendEvidence(ctx, tx, p, bearer, h.ID, e); return err })
 	if err != nil {
 		t.Fatal(err)
 	}
-	err = db.InTenant(ctx, m.pool, p.TenantID, func(tx pgx.Tx) error {
+	err = db.InTenant(dbtest.Seed(ctx), m.pool, p.TenantID, func(tx pgx.Tx) error {
 		_, err := m.close(ctx, tx, p, bearer, h.ID, ResultWrite{Outcome: "succeeded", TerminalSequence: 1, AuthorityEpoch: h.AuthorityEpoch, PrerequisiteSealSHA256: h.PrerequisiteSealSHA256})
 		return err
 	})
@@ -405,7 +412,7 @@ func TestPharosAdmissionAndTenantFence(t *testing.T) {
 	}
 	verifyRequest := RequestWrite{ProjectNodeID: project, ReleaseNodeID: release, Stage: "deploy", Operation: "verify", ExpectedJourneyRevision: 2, IdempotencyKey: "verify-1"}
 	var verification Handoff
-	err = db.InTenant(ctx, m.pool, p.TenantID, func(tx pgx.Tx) error {
+	err = db.InTenant(dbtest.Seed(ctx), m.pool, p.TenantID, func(tx pgx.Tx) error {
 		var err error
 		verification, err = m.create(ctx, tx, p, verifyRequest, "pharos", []string{"verification"}, "deploy")
 		return err
@@ -414,21 +421,21 @@ func TestPharosAdmissionAndTenantFence(t *testing.T) {
 		t.Fatal(err)
 	}
 	verificationEvidence := EvidenceWrite{Sequence: 1, Kind: "verification", Outcome: "succeeded", ObservedAt: time.Now().UTC(), AuthorityEpoch: verification.AuthorityEpoch, Workflow: stringPtr("verify"), Environment: stringPtr("production"), Artifact: &a}
-	err = db.InTenant(ctx, m.pool, p.TenantID, func(tx pgx.Tx) error {
+	err = db.InTenant(dbtest.Seed(ctx), m.pool, p.TenantID, func(tx pgx.Tx) error {
 		_, err := m.appendEvidence(ctx, tx, p, bearer, verification.ID, verificationEvidence)
 		return err
 	})
 	if err != nil {
 		t.Fatal(err)
 	}
-	err = db.InTenant(ctx, m.pool, p.TenantID, func(tx pgx.Tx) error {
+	err = db.InTenant(dbtest.Seed(ctx), m.pool, p.TenantID, func(tx pgx.Tx) error {
 		_, err := m.close(ctx, tx, p, bearer, verification.ID, ResultWrite{Outcome: "succeeded", TerminalSequence: 1, AuthorityEpoch: verification.AuthorityEpoch, PrerequisiteSealSHA256: verification.PrerequisiteSealSHA256})
 		return err
 	})
 	if err != nil {
 		t.Fatal(err)
 	}
-	err = db.InTenant(ctx, m.pool, p.TenantID, func(tx pgx.Tx) error {
+	err = db.InTenant(dbtest.Seed(ctx), m.pool, p.TenantID, func(tx pgx.Tx) error {
 		var state string
 		var revision int64
 		if err := tx.QueryRow(ctx, `SELECT state FROM journey_releases WHERE release_node_id=$1::uuid`, release).Scan(&state); err != nil {
@@ -447,7 +454,7 @@ func TestPharosAdmissionAndTenantFence(t *testing.T) {
 	}
 	applyRequest := RequestWrite{ProjectNodeID: project, ReleaseNodeID: release, Stage: "access", Operation: "apply", ExpectedJourneyRevision: 3, IdempotencyKey: "apply-1"}
 	var apply Handoff
-	err = db.InTenant(ctx, m.pool, p.TenantID, func(tx pgx.Tx) error {
+	err = db.InTenant(dbtest.Seed(ctx), m.pool, p.TenantID, func(tx pgx.Tx) error {
 		var err error
 		apply, err = m.create(ctx, tx, p, applyRequest, "janus", []string{"authorization", "credential_handoff"}, "access")
 		return err
@@ -456,19 +463,19 @@ func TestPharosAdmissionAndTenantFence(t *testing.T) {
 		t.Fatal(err)
 	}
 	for _, e := range []EvidenceWrite{{Sequence: 1, Kind: "authorization", Outcome: "satisfied", ObservedAt: time.Now().UTC(), AuthorityEpoch: apply.AuthorityEpoch, Authorized: &yes}, {Sequence: 2, Kind: "credential_handoff", Outcome: "satisfied", ObservedAt: time.Now().UTC(), AuthorityEpoch: apply.AuthorityEpoch, CredentialReady: &yes}} {
-		err = db.InTenant(ctx, m.pool, p.TenantID, func(tx pgx.Tx) error { _, err := m.appendEvidence(ctx, tx, p, bearer, apply.ID, e); return err })
+		err = db.InTenant(dbtest.Seed(ctx), m.pool, p.TenantID, func(tx pgx.Tx) error { _, err := m.appendEvidence(ctx, tx, p, bearer, apply.ID, e); return err })
 		if err != nil {
 			t.Fatal(err)
 		}
 	}
-	err = db.InTenant(ctx, m.pool, p.TenantID, func(tx pgx.Tx) error {
+	err = db.InTenant(dbtest.Seed(ctx), m.pool, p.TenantID, func(tx pgx.Tx) error {
 		_, err := m.close(ctx, tx, p, bearer, apply.ID, ResultWrite{Outcome: "succeeded", TerminalSequence: 2, AuthorityEpoch: apply.AuthorityEpoch, PrerequisiteSealSHA256: apply.PrerequisiteSealSHA256})
 		return err
 	})
 	if err != nil {
 		t.Fatal(err)
 	}
-	err = db.InTenant(ctx, m.pool, p.TenantID, func(tx pgx.Tx) error {
+	err = db.InTenant(dbtest.Seed(ctx), m.pool, p.TenantID, func(tx pgx.Tx) error {
 		var state string
 		if err := tx.QueryRow(ctx, `SELECT state FROM journey_releases WHERE release_node_id=$1::uuid`, release).Scan(&state); err != nil {
 			return err
@@ -481,7 +488,7 @@ func TestPharosAdmissionAndTenantFence(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	err = db.InTenant(ctx, m.pool, p.TenantID, func(tx pgx.Tx) error {
+	err = db.InTenant(dbtest.Seed(ctx), m.pool, p.TenantID, func(tx pgx.Tx) error {
 		replayed, err := m.create(ctx, tx, p, in, "pharos", []string{"deployment"}, "deploy")
 		if err != nil {
 			return err
@@ -495,7 +502,7 @@ func TestPharosAdmissionAndTenantFence(t *testing.T) {
 		t.Fatal(err)
 	}
 	otherTenant := "00000000-0000-0000-0000-000000000001"
-	err = db.InTenant(ctx, m.pool, otherTenant, func(tx pgx.Tx) error { _, err := loadHandoff(ctx, tx, h.ID, false); return err })
+	err = db.InTenant(dbtest.Seed(ctx), m.pool, otherTenant, func(tx pgx.Tx) error { _, err := loadHandoff(ctx, tx, h.ID, false); return err })
 	if !errors.Is(err, pgx.ErrNoRows) {
 		t.Fatalf("cross-tenant handoff visible: %v", err)
 	}
@@ -512,7 +519,7 @@ func TestNewAttemptRevokesOldAuthority(t *testing.T) {
 	ctx := context.Background()
 	request := RequestWrite{ProjectNodeID: project, ReleaseNodeID: release, Stage: "access", Operation: "prepare", ExpectedJourneyRevision: 1, IdempotencyKey: "first"}
 	var first, second Handoff
-	err := db.InTenant(ctx, m.pool, p.TenantID, func(tx pgx.Tx) error {
+	err := db.InTenant(dbtest.Seed(ctx), m.pool, p.TenantID, func(tx pgx.Tx) error {
 		var err error
 		first, err = m.create(ctx, tx, p, request, "janus", []string{"authorization", "credential_handoff"}, "")
 		return err
@@ -521,7 +528,7 @@ func TestNewAttemptRevokesOldAuthority(t *testing.T) {
 		t.Fatal(err)
 	}
 	request.IdempotencyKey = "second"
-	err = db.InTenant(ctx, m.pool, p.TenantID, func(tx pgx.Tx) error {
+	err = db.InTenant(dbtest.Seed(ctx), m.pool, p.TenantID, func(tx pgx.Tx) error {
 		var err error
 		second, err = m.create(ctx, tx, p, request, "janus", []string{"authorization", "credential_handoff"}, "")
 		return err
@@ -534,7 +541,7 @@ func TestNewAttemptRevokesOldAuthority(t *testing.T) {
 	}
 	yes := true
 	e := EvidenceWrite{Sequence: 1, Kind: "authorization", Outcome: "satisfied", ObservedAt: time.Now().UTC(), AuthorityEpoch: first.AuthorityEpoch, Authorized: &yes}
-	err = db.InTenant(ctx, m.pool, p.TenantID, func(tx pgx.Tx) error { _, err := m.appendEvidence(ctx, tx, p, bearer, first.ID, e); return err })
+	err = db.InTenant(dbtest.Seed(ctx), m.pool, p.TenantID, func(tx pgx.Tx) error { _, err := m.appendEvidence(ctx, tx, p, bearer, first.ID, e); return err })
 	var apiErr *apiError
 	if !errors.As(err, &apiErr) || apiErr.code != 409 {
 		t.Fatalf("old reporter was not fenced: %v", err)

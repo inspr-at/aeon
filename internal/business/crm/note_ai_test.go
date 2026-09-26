@@ -4,6 +4,7 @@ package crm
 import (
 	"context"
 	"encoding/json"
+	"github.com/inspr-at/aeon/internal/dbtest"
 	"net/http"
 	"strings"
 	"testing"
@@ -39,7 +40,7 @@ func installNoteFake(t *testing.T, f *fixture, generator NoteGenerator) {
 
 func enableNoteTool(t *testing.T, f fixture) {
 	t.Helper()
-	err := db.InTenant(t.Context(), f.db.App, f.admin.TenantID, func(tx pgx.Tx) error {
+	err := db.InTenant(dbtest.Seed(t.Context()), f.db.App, f.admin.TenantID, func(tx pgx.Tx) error {
 		_, err := tx.Exec(t.Context(), `UPDATE plugin_installations SET permissions=array_append(permissions,$1) WHERE plugin_id=$2`, fence.PermToolsInvoke, ID)
 		return err
 	})
@@ -51,7 +52,7 @@ func enableNoteTool(t *testing.T, f fixture) {
 func routeNoteModel(t *testing.T, f fixture) string {
 	t.Helper()
 	var id string
-	err := db.InTenant(t.Context(), f.db.App, f.admin.TenantID, func(tx pgx.Tx) error {
+	err := db.InTenant(dbtest.Seed(t.Context()), f.db.App, f.admin.TenantID, func(tx pgx.Tx) error {
 		if err := tx.QueryRow(t.Context(), `INSERT INTO model_profiles(tenant_id,slug,version,harness,family,model,effort,tier)
 			VALUES($1::uuid,'fake-scout','1','codex','openai','fake-model','medium','fast') RETURNING id::text`, f.admin.TenantID).Scan(&id); err != nil {
 			return err
@@ -154,7 +155,7 @@ func TestAINoteRejectsRevisionRaceAfterGeneration(t *testing.T) {
 		t.Fatal(err)
 	}
 	installNoteFake(t, &f, fakeNoteGenerator(func(ctx context.Context, _ modelregistry.Profile, _ NotePrompt) (NoteGeneration, error) {
-		err := db.InTenant(ctx, f.db.App, f.admin.TenantID, func(tx pgx.Tx) error {
+		err := db.InTenant(dbtest.Seed(ctx), f.db.App, f.admin.TenantID, func(tx pgx.Tx) error {
 			_, err := tx.Exec(ctx, `UPDATE nodes SET fields=jsonb_set(fields,'{customer_notes}',to_jsonb('Changed meanwhile'::text),true) WHERE id=$1::uuid`, c.ID)
 			return err
 		})
