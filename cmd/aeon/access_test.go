@@ -1,0 +1,99 @@
+// SPDX-License-Identifier: AGPL-3.0-only
+package main
+
+import (
+	"bytes"
+	"encoding/json"
+	"os"
+	"path/filepath"
+	"strings"
+	"testing"
+
+	"github.com/inspr-at/aeon/internal/db"
+	"github.com/inspr-at/aeon/internal/dbtest"
+	"github.com/jackc/pgx/v5"
+)
+
+func TestAgentProjectRoleFlags(t *testing.T) {
+	for _, tc := range []struct {
+		projects, roles projectFlags
+		count           int
+	}{
+		{projectFlags{"A-1", "B-1"}, projectFlags{"guest", "member"}, 2},
+		{projectFlags{"A-1=guest,B-1=member"}, nil, 2},
+	} {
+		pairs, err := agentProjectRoles(tc.projects, tc.roles)
+		if err != nil || len(pairs) != tc.count {
+			t.Fatalf("pairs=%+v err=%v", pairs, err)
+		}
+	}
+	if _, err := agentProjectRoles(projectFlags{"A-1"}, projectFlags{"guest", "member"}); err == nil {
+		t.Fatal("unmatched project role accepted")
+	}
+}
+
+func TestOperatorCLIKeyCreateAndAccess(t *testing.T) {
+	d := dbtest.Open(t)
+	ctx := t.Context()
+	t.Setenv("AEON_DATABASE_URL", d.AppURL)
+	t.Setenv("AEON_ENV", "dev")
+	var tid string
+	if err := db.InTenant(dbtest.Seed(ctx), d.App, "00000000-0000-0000-0000-000000000000", func(tx pgx.Tx) error {
+		return tx.QueryRow(ctx, `INSERT INTO tenants(slug,name) VALUES('ab1-cli','AB1 CLI') RETURNING id::text`).Scan(&tid)
+	}); err != nil {
+		t.Fatal(err)
+	}
+	if err := db.InTenant(dbtest.Seed(ctx), d.App, tid, func(tx pgx.Tx) error {
+		_, err := tx.Exec(ctx, `INSERT INTO nodes(tenant_id,key,kind_id,title,state)
+			SELECT $1::uuid,'JANUS-1',id,'Janus','active' FROM node_kinds WHERE tenant_id=$1::uuid AND slug='project'`, tid)
+		return err
+	}); err != nil {
+		t.Fatal(err)
+	}
+	file := filepath.Join(t.TempDir(), "agent-key")
+	var stdout bytes.Buffer
+	badFile := filepath.Join(t.TempDir(), "invalid-key")
+	if err := agentKeyCommand([]string{"create", "--tenant", "ab1-cli", "--name", "invalid-worker", "--out-file", badFile, "--project", "JANUS-1", "--project-role", "owner"}, &stdout); err == nil {
+		t.Fatal("workspace owner role accepted on project")
+	}
+	if _, err := os.Stat(badFile); !os.IsNotExist(err) {
+		t.Fatalf("invalid role created a key file: %v", err)
+	}
+	if err := agentKeyCommand([]string{"create", "--tenant", "ab1-cli", "--name", "janus-worker", "--out-file", file, "--scopes", "nodes:read", "--project", "JANUS-1", "--project-role", "guest"}, &stdout); err != nil {
+		t.Fatal(err)
+	}
+	var created struct {
+		PrincipalID string `json:"principal_id"`
+	}
+	if err := json.Unmarshal(stdout.Bytes(), &created); err != nil || created.PrincipalID == "" {
+		t.Fatalf("key metadata: %v", err)
+	}
+	if strings.Contains(stdout.String(), "aeon_") {
+		t.Fatal("key token appeared on stdout")
+	}
+	info, err := os.Stat(file)
+	if err != nil || info.Mode().Perm() != 0o600 {
+		t.Fatalf("key file mode: %v %v", info, err)
+	}
+	var bound int
+	if err := db.InTenant(dbtest.Seed(ctx), d.App, tid, func(tx pgx.Tx) error {
+		return tx.QueryRow(ctx, `SELECT count(*) FROM role_bindings WHERE principal_id=$1::uuid AND scope_type='project'`, created.PrincipalID).Scan(&bound)
+	}); err != nil || bound != 1 {
+		t.Fatalf("key project binding: %d %v", bound, err)
+	}
+	stdout.Reset()
+	if err := accessCommand([]string{"bind", "--tenant", "ab1-cli", "--principal", "janus-worker", "--project", "JANUS-1", "--role", "guest"}, &stdout); err != nil {
+		t.Fatal(err)
+	}
+	stdout.Reset()
+	if err := accessCommand([]string{"unbind", "--tenant", "ab1-cli", "--principal", created.PrincipalID, "--project", "JANUS-1"}, &stdout); err != nil {
+		t.Fatal(err)
+	}
+	var setEvents, removeEvents int
+	if err := db.InTenant(dbtest.Seed(ctx), d.App, tid, func(tx pgx.Tx) error {
+		return tx.QueryRow(ctx, `SELECT count(*) FILTER (WHERE type='binding.set'), count(*) FILTER (WHERE type='binding.removed')
+			FROM events WHERE actor_principal_id=$1::uuid`, created.PrincipalID).Scan(&setEvents, &removeEvents)
+	}); err != nil || setEvents != 1 || removeEvents != 1 {
+		t.Fatalf("binding events set=%d removed=%d err=%v", setEvents, removeEvents, err)
+	}
+}

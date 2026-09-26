@@ -144,8 +144,7 @@ func projectFail(w http.ResponseWriter, err error) {
 // members.manage on the project and that the actor holds every permission the
 // role would grant there.
 func (m *Module) authorizeProjectMutation(ctx context.Context, tx pgx.Tx, p tenant.Principal, projectID string, grants []string) error {
-	var id string
-	if err := tx.QueryRow(ctx, `SELECT id::text FROM tenants WHERE id=$1::uuid FOR UPDATE`, p.TenantID).Scan(&id); err != nil {
+	if err := lockProjectMutation(ctx, tx, p.TenantID); err != nil {
 		return err
 	}
 	if err := requireTx(ctx, tx, p, "members.manage", Scope{ProjectID: projectID}); err != nil {
@@ -159,6 +158,19 @@ func (m *Module) authorizeProjectMutation(ctx context.Context, tx pgx.Tx, p tena
 		if !contains(own.Project.Permissions, key) {
 			return ErrForbidden
 		}
+	}
+	return nil
+}
+
+// lockProjectMutation serializes project bindings with other membership
+// changes in the tenant. The advisory lock also covers operator CLI calls.
+func lockProjectMutation(ctx context.Context, tx pgx.Tx, tenantID string) error {
+	if _, err := tx.Exec(ctx, `SELECT pg_advisory_xact_lock(hashtextextended($1::text, 0))`, tenantID); err != nil {
+		return err
+	}
+	var id string
+	if err := tx.QueryRow(ctx, `SELECT id::text FROM tenants WHERE id=$1::uuid FOR UPDATE`, tenantID).Scan(&id); err != nil {
+		return err
 	}
 	return nil
 }
@@ -214,18 +226,37 @@ func (m *Module) putProjectMember(w http.ResponseWriter, r *http.Request) {
 	}
 	var out ProjectBinding
 	err := db.InTenant(r.Context(), m.pool, p.TenantID, func(tx pgx.Tx) error {
-		ctx := r.Context()
-		projectKey, _, err := projectNodeTx(ctx, tx, projectID)
-		if err != nil {
-			return err
+		var err error
+		out, err = m.setProjectBindingTx(r.Context(), tx, p, projectID, principalID, roleID, false)
+		return err
+	})
+	if err != nil {
+		projectFail(w, err)
+		return
+	}
+	reply(w, 200, out)
+}
+
+// setProjectBindingTx is the common HTTP/operator store path. The operator
+// actor is the bound principal, matching operator agent-key events.
+func (m *Module) setProjectBindingTx(ctx context.Context, tx pgx.Tx, p tenant.Principal, projectID, principalID, roleID string, operator bool) (ProjectBinding, error) {
+	var out ProjectBinding
+	projectKey, _, err := projectNodeTx(ctx, tx, projectID)
+	if err != nil {
+		return out, err
+	}
+	role, err := roleTx(ctx, tx, roleID)
+	if err != nil {
+		return out, err
+	}
+	if !projectRoleAllowed(role) {
+		return out, errProjectRole
+	}
+	if operator {
+		if err := lockProjectMutation(ctx, tx, p.TenantID); err != nil {
+			return out, err
 		}
-		role, err := roleTx(ctx, tx, roleID)
-		if err != nil {
-			return err
-		}
-		if !projectRoleAllowed(role) {
-			return errProjectRole
-		}
+	} else {
 		grants := []string{}
 		for _, key := range role.Permissions {
 			if ProjectGrantable(key) {
@@ -233,41 +264,39 @@ func (m *Module) putProjectMember(w http.ResponseWriter, r *http.Request) {
 			}
 		}
 		if err := m.authorizeProjectMutation(ctx, tx, p, projectID, grants); err != nil {
-			return err
+			return out, err
 		}
-		if err := bindableTx(ctx, tx, p.TenantID, principalID); err != nil {
-			return err
-		}
-		var before *bindingSnapshot
-		var priorID, priorKey, priorName *string
-		err = tx.QueryRow(ctx, `SELECT r.id::text,r.key,r.name FROM role_bindings b JOIN roles r ON r.tenant_id=b.tenant_id AND r.id=b.role_id
+	}
+	if err := bindableTx(ctx, tx, p.TenantID, principalID); err != nil {
+		return out, err
+	}
+	var before *bindingSnapshot
+	var priorID, priorKey, priorName *string
+	err = tx.QueryRow(ctx, `SELECT r.id::text,r.key,r.name FROM role_bindings b JOIN roles r ON r.tenant_id=b.tenant_id AND r.id=b.role_id
 		  WHERE b.tenant_id=$1::uuid AND b.principal_id=$2::uuid AND b.scope_type='project' AND b.scope_id=$3::uuid FOR UPDATE OF b`,
-			p.TenantID, principalID, projectID).Scan(&priorID, &priorKey, &priorName)
-		if err != nil && !errors.Is(err, pgx.ErrNoRows) {
-			return err
-		}
-		if priorID != nil {
-			before = &bindingSnapshot{PrincipalID: principalID, ScopeType: "project", ProjectID: projectID, ProjectKey: projectKey, Role: &RoleRef{ID: *priorID, Key: *priorKey, Name: *priorName}}
-		}
-		if err := tx.QueryRow(ctx, `INSERT INTO role_bindings(tenant_id,principal_id,role_id,scope_type,scope_id)
+		p.TenantID, principalID, projectID).Scan(&priorID, &priorKey, &priorName)
+	if err != nil && !errors.Is(err, pgx.ErrNoRows) {
+		return out, err
+	}
+	if priorID != nil {
+		before = &bindingSnapshot{PrincipalID: principalID, ScopeType: "project", ProjectID: projectID, ProjectKey: projectKey, Role: &RoleRef{ID: *priorID, Key: *priorKey, Name: *priorName}}
+	}
+	if err := tx.QueryRow(ctx, `INSERT INTO role_bindings(tenant_id,principal_id,role_id,scope_type,scope_id)
 		  VALUES($1::uuid,$2::uuid,$3::uuid,'project',$4::uuid)
 		  ON CONFLICT (tenant_id,principal_id,scope_id) WHERE scope_type='project' DO UPDATE SET role_id=EXCLUDED.role_id
 		  RETURNING id::text,created_at`, p.TenantID, principalID, roleID, projectID).Scan(&out.ID, &out.CreatedAt); err != nil {
-			return err
-		}
-		out.PrincipalID, out.ProjectID, out.ScopeType = principalID, projectID, "project"
-		out.Role = RoleRef{ID: role.ID, Key: role.Key, Name: role.Name}
-		if priorID != nil && *priorID == roleID {
-			return nil
-		}
-		after := bindingSnapshot{PrincipalID: principalID, ScopeType: "project", ProjectID: projectID, ProjectKey: projectKey, Role: &out.Role}
-		return appendProjectEvent(ctx, tx, p, projectID, "binding.set", before, after)
-	})
-	if err != nil {
-		projectFail(w, err)
-		return
+		return out, err
 	}
-	reply(w, 200, out)
+	out.PrincipalID, out.ProjectID, out.ScopeType = principalID, projectID, "project"
+	out.Role = RoleRef{ID: role.ID, Key: role.Key, Name: role.Name}
+	if priorID != nil && *priorID == roleID {
+		return out, nil
+	}
+	after := bindingSnapshot{PrincipalID: principalID, ScopeType: "project", ProjectID: projectID, ProjectKey: projectKey, Role: &out.Role}
+	if operator {
+		p.ID = principalID
+	}
+	return out, appendProjectEvent(ctx, tx, p, projectID, "binding.set", before, after)
 }
 
 func (m *Module) deleteProjectMember(w http.ResponseWriter, r *http.Request) {
@@ -278,35 +307,7 @@ func (m *Module) deleteProjectMember(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	err := db.InTenant(r.Context(), m.pool, p.TenantID, func(tx pgx.Tx) error {
-		ctx := r.Context()
-		projectKey, _, err := projectNodeTx(ctx, tx, projectID)
-		if err != nil {
-			return err
-		}
-		if err := m.authorizeProjectMutation(ctx, tx, p, projectID, nil); err != nil {
-			return err
-		}
-		var roleID, roleKey, roleName string
-		err = tx.QueryRow(ctx, `DELETE FROM role_bindings b USING roles r
-		  WHERE b.tenant_id=$1::uuid AND b.principal_id=$2::uuid AND b.scope_type='project' AND b.scope_id=$3::uuid
-		    AND r.tenant_id=b.tenant_id AND r.id=b.role_id
-		  RETURNING r.id::text,r.key,r.name`, p.TenantID, principalID, projectID).Scan(&roleID, &roleKey, &roleName)
-		if errors.Is(err, pgx.ErrNoRows) {
-			var opens bool
-			if err := tx.QueryRow(ctx, `SELECT EXISTS (SELECT 1 FROM role_bindings b WHERE b.tenant_id=$1::uuid AND b.principal_id=$2::uuid
-			  AND b.scope_type='workspace' AND aeon_role_reads_nodes(b.tenant_id,b.role_id,'workspace'))`, p.TenantID, principalID).Scan(&opens); err != nil {
-				return err
-			}
-			if opens {
-				return errViaWorkspace
-			}
-			return errNoSuchBinding
-		}
-		if err != nil {
-			return err
-		}
-		before := bindingSnapshot{PrincipalID: principalID, ScopeType: "project", ProjectID: projectID, ProjectKey: projectKey, Role: &RoleRef{ID: roleID, Key: roleKey, Name: roleName}}
-		return appendProjectEvent(ctx, tx, p, projectID, "binding.removed", before, nil)
+		return m.removeProjectBindingTx(r.Context(), tx, p, projectID, principalID, false)
 	})
 	if err != nil {
 		projectFail(w, err)
@@ -314,4 +315,42 @@ func (m *Module) deleteProjectMember(w http.ResponseWriter, r *http.Request) {
 	}
 	w.Header().Set("Cache-Control", "no-store")
 	w.WriteHeader(204)
+}
+
+func (m *Module) removeProjectBindingTx(ctx context.Context, tx pgx.Tx, p tenant.Principal, projectID, principalID string, operator bool) error {
+	projectKey, _, err := projectNodeTx(ctx, tx, projectID)
+	if err != nil {
+		return err
+	}
+	if operator {
+		if err := lockProjectMutation(ctx, tx, p.TenantID); err != nil {
+			return err
+		}
+	} else if err := m.authorizeProjectMutation(ctx, tx, p, projectID, nil); err != nil {
+		return err
+	}
+	var roleID, roleKey, roleName string
+	err = tx.QueryRow(ctx, `DELETE FROM role_bindings b USING roles r
+		  WHERE b.tenant_id=$1::uuid AND b.principal_id=$2::uuid AND b.scope_type='project' AND b.scope_id=$3::uuid
+		    AND r.tenant_id=b.tenant_id AND r.id=b.role_id
+		  RETURNING r.id::text,r.key,r.name`, p.TenantID, principalID, projectID).Scan(&roleID, &roleKey, &roleName)
+	if errors.Is(err, pgx.ErrNoRows) {
+		var opens bool
+		if err := tx.QueryRow(ctx, `SELECT EXISTS (SELECT 1 FROM role_bindings b WHERE b.tenant_id=$1::uuid AND b.principal_id=$2::uuid
+			  AND b.scope_type='workspace' AND aeon_role_reads_nodes(b.tenant_id,b.role_id,'workspace'))`, p.TenantID, principalID).Scan(&opens); err != nil {
+			return err
+		}
+		if opens {
+			return errViaWorkspace
+		}
+		return errNoSuchBinding
+	}
+	if err != nil {
+		return err
+	}
+	before := bindingSnapshot{PrincipalID: principalID, ScopeType: "project", ProjectID: projectID, ProjectKey: projectKey, Role: &RoleRef{ID: roleID, Key: roleKey, Name: roleName}}
+	if operator {
+		p.ID = principalID
+	}
+	return appendProjectEvent(ctx, tx, p, projectID, "binding.removed", before, nil)
 }
