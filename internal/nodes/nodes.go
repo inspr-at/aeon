@@ -451,6 +451,10 @@ func (m *Module) moveNode(ctx context.Context, p tenant.Principal, id string, pa
 				return err
 			}
 		}
+		journeyBefore, err := subtreeJourneyTickets(ctx, tx, id)
+		if err != nil {
+			return err
+		}
 		siblings, err := loadSiblings(ctx, tx, parentID)
 		if err != nil {
 			return err
@@ -474,7 +478,16 @@ func (m *Module) moveNode(ctx context.Context, p tenant.Principal, id string, pa
 		if scanErr != nil {
 			return dbErr("move node", scanErr)
 		}
-		if err := m.record(ctx, tx, p.ID, &loaded.ID, evNodeMoved, current, loaded); err != nil {
+		changedBefore, changedAfter, err := movedJourneyTickets(ctx, tx, journeyBefore)
+		if err != nil {
+			return err
+		}
+		var beforeEvent, afterEvent any = current, loaded
+		if len(changedBefore) > 0 {
+			beforeEvent = movedNodeSnapshot{nodeJSON: current, JourneyTickets: changedBefore}
+			afterEvent = movedNodeSnapshot{nodeJSON: loaded, JourneyTickets: changedAfter}
+		}
+		if err := m.record(ctx, tx, p.ID, &loaded.ID, evNodeMoved, beforeEvent, afterEvent); err != nil {
 			return err
 		}
 		node = loaded
