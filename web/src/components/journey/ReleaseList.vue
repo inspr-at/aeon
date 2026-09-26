@@ -41,13 +41,15 @@ const shown = computed(() => all.value || !props.limit ? newest.value : newest.v
 </template>
 
 <style scoped>
-.release-list { display: grid; gap: 6px; }
+.release-list { display: grid; grid-template-columns: minmax(0, 1fr); min-width: 0; gap: 6px; }
+.j-timeline, .what { grid-template-columns: minmax(0, 1fr); min-width: 0; }
+.j-timeline > li { min-width: 0; }
 .pick { padding: 2px 6px; margin: -2px -6px; border: 0; border-radius: 8px; background: transparent; text-align: left; cursor: pointer; }
 .pick:hover { background: var(--row-hover); }
 .pick:focus-visible { box-shadow: var(--focus-ring); }
 li.sel .pick { background: var(--row-selected); }
 .line { display: flex; align-items: center; flex-wrap: wrap; gap: 4px 8px; min-width: 0; }
-.line b { font-weight: 600; color: var(--ink); }
+.line b { min-width: 0; overflow-wrap: anywhere; font-weight: 600; color: var(--ink); }
 .ver { min-height: 0; font-size: 11.5px; }
 .ver-text, .key { font-size: 11px; color: var(--ink-3); }
 .more { justify-self: start; }

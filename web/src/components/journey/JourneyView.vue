@@ -277,7 +277,12 @@ onBeforeUnmount(() => { window.removeEventListener('keydown', keydown); clearInt
 
 <style scoped>
 /* Wide screens: the journey keeps a readable width, aligned with the header. */
-.journey-view { display: grid; gap: 16px; max-width: 1760px; padding: 4px 0 8px; }
+.journey-view { display: grid; grid-template-columns: minmax(0, 1fr); min-width: 0; gap: 16px; max-width: 1760px; padding: 4px 0 8px; container: journey / inline-size; }
+/* A docked ticket narrows the journey without narrowing the viewport. Keep
+   both cards readable by responding to the space the stage actually has. */
+@container journey (max-width: 800px) {
+  .journey-view :deep(.j-grid) { grid-template-columns: minmax(0, 1fr); }
+}
 .stage-head { display: flex; align-items: flex-end; gap: 18px; min-width: 0; padding: 4px 2px 0; }
 .stage-t { display: grid; gap: 4px; min-width: 0; }
 .stage-t h2 { font-size: 26px; font-weight: 300; letter-spacing: -.02em; }
