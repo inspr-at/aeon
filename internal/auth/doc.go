@@ -4,6 +4,16 @@
 // outer, deny-by-default key-scope ceiling before any module handler runs.
 // Module handlers still check principal kind, resource ownership and live grants.
 //
+// KX1 key expiry/rotation uses the existing New(cfg, pool) httpapi.Module;
+// no new plugin manifest or coordinator wiring is needed. POST /api/agent-keys
+// accepts rotate_key_id plus an optional future expires_at after confirmation.
+// The replacement keeps the old agent, label and scopes, subject to the actor's
+// current grants and agent role rules. Creation and revocation share one
+// db.InTenant transaction and append safe before/after audit snapshots. A
+// revoked key cannot be rotated twice; an expired key may be replaced. Only
+// the successful response carries the replacement secret. No timer rotates
+// keys and no event, list response or snapshot includes secrets or hashes.
+//
 // Agent route-to-scope table (GET and HEAD are reads unless noted):
 //
 //	/api/projects, /api/nodes, /api/node-keys, /api/kinds:

@@ -5,6 +5,7 @@
 import { api } from './api.ts'
 import { learnPictures } from './avatar.ts'
 import { sessionGone } from './authz.ts'
+import type { AgentKey } from './settings.ts'
 
 export type Risk = 'low' | 'medium' | 'high'
 export type Scope = 'workspace' | 'project'
@@ -95,6 +96,16 @@ export async function getAudit(): Promise<{ items: AuditEvent[]; complete: boole
 export interface AgentKeyCreated { id: string; token: string; prefix: string; name: string; expires_at: string | null }
 export const createAgentKey = (agent: PrincipalRef, expiresAt: string | null, scopes: string[]) => call<AgentKeyCreated>('/agent-keys', 'POST', { principal_id: agent.principal_id, name: agent.name, scopes, ...(expiresAt ? { expires_at: expiresAt } : {}) })
 export const revokeAgentKey = (keyId: string) => call<void>(`/agent-keys/${id(keyId)}`, 'DELETE')
+// One confirmed request commits the replacement and revocation together.
+export const rotateAgentKey = (keyId: string, expiresAt: string | null) => call<AgentKeyCreated>('/agent-keys', 'POST', { rotate_key_id: keyId, expires_at: expiresAt })
+
+export function keyExpiry(key: Pick<AgentKey, 'expires_at' | 'revoked_at'>, now = Date.now()): { label: string; soon: boolean } {
+  if (!key.expires_at) return { label: 'Never', soon: false }
+  const remaining = Date.parse(key.expires_at) - now
+  if (remaining <= 0) return { label: 'Expired', soon: false }
+  const days = Math.ceil(remaining / 86_400_000)
+  return { label: remaining < 86_400_000 ? 'In less than a day' : `In ${days} ${days === 1 ? 'day' : 'days'}`, soon: !key.revoked_at && remaining < 14 * 86_400_000 }
+}
 
 // ---------- Agent key scopes ----------
 // What a key may call: registry permissions marked agent_grantable (contract v2

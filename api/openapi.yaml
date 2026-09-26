@@ -461,8 +461,8 @@ paths:
                 $ref: "#/components/schemas/Error"
     post:
       operationId: createAgentKey
-      summary: Create an agent key and return its secret once
-      description: Pass principal_id to mint a key for an existing agent. name alone still finds or creates an agent, for older clients. Scopes are stored in dot notation; colon input is normalized. A key never receives a permission the creator does not hold, and never a permission that is not agent_grantable. Requires keys.manage.
+      summary: Create or rotate an agent key and return its secret once
+      description: Pass principal_id to mint a key for an existing agent. name alone still finds or creates an agent, for older clients. For confirmed manual rotation, pass rotate_key_id and expires_at only; the server copies the old key's agent, name and scopes, creates the replacement and revokes the old key in one tenant transaction with audit events. Rotation may replace an expired key but never a revoked key. No automatic rotation occurs. Scopes are stored in dot notation; colon input is normalized. A key never receives a permission the creator does not hold, and never a permission that is not agent_grantable. The agent's current role ceiling and the actor's grant rules apply to rotation too. Requires a person with keys.manage.
       security:
         - session: []
         - agentKey: []
@@ -472,7 +472,12 @@ paths:
           application/json:
             schema:
               type: object
+              additionalProperties: false
               properties:
+                rotate_key_id:
+                  type: string
+                  format: uuid
+                  description: Key to replace after user confirmation. Mutually exclusive with name, principal_id and scopes. The old key stops working when the replacement is created.
                 name:
                   type: string
                   description: Agent name when principal_id is omitted; otherwise the key's label
@@ -485,8 +490,9 @@ paths:
                   items:
                     type: string
                 expires_at:
-                  type: string
+                  type: [string, "null"]
                   format: date-time
+                  description: Future expiry for the new key; omitted or null means never. The UI defaults to 90 days and offers 30, 90, 365 days or never. Rotation uses this new expiry, not the old date.
       responses:
         "201":
           description: Key created. token is shown only in this response.
@@ -512,6 +518,10 @@ paths:
             application/json:
               schema:
                 $ref: "#/components/schemas/Error"
+        "404":
+          description: Agent or rotation key not found in this tenant
+        "409":
+          description: Rotation key was already revoked or rotated
   /agent-keys/{id}:
     delete:
       operationId: revokeAgentKey

@@ -42,6 +42,8 @@ async function revoke(key: AgentKey) {
   catch (e) { toast(problem(e, 'The key stays active'), { tone: 'error' }) }
 }
 const newKey = ref<Agent | null>(null)
+const rotateKey = ref<AgentKey | undefined>()
+function showKeySheet(agent: Agent, key?: AgentKey) { rotateKey.value = key; newKey.value = agent }
 async function created() { await Promise.all([loadKeys(), access.load(true)]); if (newKey.value) open.value = new Set(open.value).add(newKey.value.principal_id) }
 const picker = ref<{ agent: Agent; anchor: HTMLElement } | null>(null)
 const busy = ref(false)
@@ -83,9 +85,9 @@ onMounted(loadKeys)
         <div v-if="open.has(agent.principal_id)" :id="`keys-${agent.principal_id}`" class="keys">
           <p v-if="keysError" class="set-note error" role="alert"><AppIcon name="alert" :size="14" />{{ keysError }}<button type="button" class="btn sm" @click="loadKeys">Try again</button></p>
           <div v-else-if="!keys" class="set-skeleton" role="status" aria-label="Loading keys"><span class="skeleton" /></div>
-          <KeysTable v-else-if="keysOf(agent).length" :keys="keysOf(agent)" :revocable="manageKeys" @revoke="revoke" />
+          <KeysTable v-else-if="keysOf(agent).length" :keys="keysOf(agent)" :revocable="manageKeys" :rotatable="manageKeys" @revoke="revoke" @rotate="showKeySheet(agent, $event)" />
           <p v-else class="empty">No keys yet.</p>
-          <button type="button" class="btn sm" @click="newKey = agent"><AppIcon name="plus" :size="13" />New key</button>
+          <button type="button" class="btn sm" @click="showKeySheet(agent)"><AppIcon name="plus" :size="13" />New key</button>
         </div>
       </li>
     </ul>
@@ -110,7 +112,7 @@ onMounted(loadKeys)
       v-if="picker" :anchor="picker.anchor" :subject="picker.agent.name" :roles="access.roles" :current="picker.agent.workspace_role?.id ?? null" :registry="access.registry"
       :mine="myPermissions()" scope="workspace" allow-none none-label="No role" :busy="busy" :can-apply="can('members.manage')" :error="roleError" @choose="chooseRole" @close="picker = null"
     />
-    <NewKeySheet v-if="newKey" :agent="newKey" @close="newKey = null" @created="created" />
+    <NewKeySheet v-if="newKey" :agent="newKey" :rotate-key="rotateKey" @close="newKey = null" @created="created" />
   </div>
 </template>
 
@@ -124,7 +126,9 @@ onMounted(loadKeys)
 .a-name { font-size: 13.5px; font-weight: 600; color: var(--ink); overflow-wrap: anywhere; }
 .a-name.mono { font-size: 12.5px; }
 .a-seen { font-size: 12px; color: var(--ink-3); }
-.role-btn, .keys-btn { display: inline-flex; align-items: center; gap: 6px; height: 28px; padding: 0 8px; border: 0; border-radius: 8px; background: transparent; color: var(--ink); font-size: 13px; font-weight: 600; white-space: nowrap; }
+.a-role { display: flex; align-items: center; }
+.role-btn svg, .keys-btn svg { display: block; flex-shrink: 0; }
+.role-btn, .keys-btn { display: inline-flex; align-items: center; gap: 6px; height: 28px; padding: 0 8px; border: 0; border-radius: 8px; background: transparent; color: var(--ink); font-size: 13px; line-height: 20px; font-weight: 600; white-space: nowrap; }
 .keys-btn { justify-self: end; font-weight: 500; color: var(--ink-2); }
 .keys-btn svg:first-child { color: var(--ink-3); }
 @media (hover: hover) { .role-btn:hover, .keys-btn:hover { background: var(--surface-raised); box-shadow: inset 0 0 0 1px var(--line-2); } }

@@ -1,7 +1,8 @@
 <!-- SPDX-License-Identifier: AGPL-3.0-only -->
 <script setup lang="ts">
 import { computed, nextTick, ref, watch } from 'vue'
-import { AccessError, type Agent, type AgentKeyCreated, agentScopeCeiling, COORDINATOR_SCOPES, createAgentKey, groupPermissions, keyScopes, lostPermission, MAX_KEY_SCOPES, permissionLabel } from '../../lib/access'
+import { AccessError, type Agent, type AgentKeyCreated, agentScopeCeiling, COORDINATOR_SCOPES, createAgentKey, groupPermissions, keyHint, keyScopes, lostPermission, MAX_KEY_SCOPES, permissionLabel, rotateAgentKey } from '../../lib/access'
+import type { AgentKey } from '../../lib/settings'
 import { can, myPermissions } from '../../lib/authz'
 import { useAccess } from '../../stores/access'
 import { absoluteTime } from '../../lib/work'
@@ -12,9 +13,10 @@ import { problem } from './accessText'
 // A new key for an agent: what it may call (its scopes; none means nothing) and
 // how long it works. It never does more than the agent's role allows. Its secret
 // is shown once, here, to copy into the agent's configuration.
-const props = defineProps<{ agent: Agent }>()
+const props = defineProps<{ agent: Agent; rotateKey?: AgentKey }>()
 const emit = defineEmits<{ close: []; created: [] }>()
-const LIFETIMES = [{ days: 30, label: '30 days' }, { days: 90, label: '90 days' }, { days: 365, label: 'A year' }, { days: 0, label: 'Until revoked' }]
+const LIFETIMES = [{ days: 30, label: '30 days' }, { days: 90, label: '90 days' }, { days: 365, label: '365 days' }, { days: 0, label: 'Never' }]
+const expiryAfter = (lifetimeDays: number) => new Date(Math.floor(Date.now() / 1000) * 1000 + lifetimeDays * 86_400_000).toISOString()
 const days = ref(90)
 const busy = ref(false)
 const error = ref('')
@@ -28,7 +30,7 @@ const mine = computed(() => myPermissions())
 const ceiling = computed(() => agentScopeCeiling(props.agent, access.roles))
 const held = computed(() => new Set([...mine.value].filter(k => !ceiling.value || ceiling.value.has(k))))
 // When my permissions or the agent's role shrink, scopes no longer allowed leave the selection.
-watch(held, now => { const kept = [...scopes.value].filter(k => now.has(k)); if (kept.length !== scopes.value.size) scopes.value = new Set(kept) })
+watch(held, now => { if (props.rotateKey) return; const kept = [...scopes.value].filter(k => now.has(k)); if (kept.length !== scopes.value.size) scopes.value = new Set(kept) })
 const why = (key: string) => !mine.value.has(key) ? 'you do not hold this' : `beyond ${props.agent.name}’s role${role.value ? ` (${role.value})` : ''}`
 const available = computed(() => keyScopes(access.registry))
 const groups = computed(() => {
@@ -45,22 +47,34 @@ const scopeProblem = computed(() => !scopes.value.size ? 'Choose at least one th
   : scopes.value.size > MAX_KEY_SCOPES ? `A key holds at most ${MAX_KEY_SCOPES} scopes; clear ${scopes.value.size - MAX_KEY_SCOPES}.` : '')
 const copied = ref(false)
 const role = computed(() => props.agent.workspace_role?.name)
+const rotationProblem = computed(() => props.rotateKey?.scopes.some(k => !held.value.has(k))
+  ? 'The original scopes exceed what you or this agent’s role may grant. Rotation keeps those scopes, so it cannot continue.' : '')
+function chooseLifetime(event: KeyboardEvent) {
+  const step = event.key === 'ArrowRight' || event.key === 'ArrowDown' ? 1 : event.key === 'ArrowLeft' || event.key === 'ArrowUp' ? -1 : 0
+  if (!step && event.key !== 'Home' && event.key !== 'End') return
+  event.preventDefault()
+  const index = event.key === 'Home' ? 0 : event.key === 'End' ? LIFETIMES.length - 1 : (LIFETIMES.findIndex(l => l.days === days.value) + step + LIFETIMES.length) % LIFETIMES.length
+  days.value = LIFETIMES[index]!.days
+  const target = event.currentTarget as HTMLElement
+  target.parentElement?.querySelectorAll<HTMLButtonElement>('[role=radio]')[index]?.focus()
+}
 async function create() {
+  if (busy.value) return
   if (!allowed.value) { error.value = lostPermission('keys.manage'); return }
   tried.value = true
-  if (scopeProblem.value) { document.getElementById('key-scopes')?.focus(); return }
+  if (props.rotateKey ? rotationProblem.value : scopeProblem.value) { document.getElementById('key-scopes')?.focus(); return }
   // Only scopes I may give go on the key.
-  if ([...scopes.value].some(k => !held.value.has(k))) { scopes.value = new Set([...scopes.value].filter(k => held.value.has(k))); error.value = 'Some scopes are no longer yours to give and were cleared; check the list and create again.'; return }
+  if (!props.rotateKey && [...scopes.value].some(k => !held.value.has(k))) { scopes.value = new Set([...scopes.value].filter(k => held.value.has(k))); error.value = 'Some scopes are no longer yours to give and were cleared; check the list and create again.'; return }
   busy.value = true
   error.value = ''
   try {
-    const expires = days.value ? new Date(Date.now() + days.value * 86_400_000).toISOString() : null
-    created.value = await createAgentKey(props.agent, expires, [...scopes.value])
+    const expires = days.value ? expiryAfter(days.value) : null
+    created.value = props.rotateKey ? await rotateAgentKey(props.rotateKey.id, expires) : await createAgentKey(props.agent, expires, [...scopes.value])
     emit('created')
     await nextTick()
     document.querySelector<HTMLElement>('.token-copy')?.focus()
   } catch (e) {
-    error.value = e instanceof AccessError && e.status === 403 ? `The key was not created: it may only do what both you and ${props.agent.name}’s role may.` : problem(e, 'The key was not created')
+    error.value = e instanceof AccessError && e.status === 403 ? `The key was not created: it may only do what both you and ${props.agent.name}’s role may.` : problem(e, props.rotateKey ? 'Rotation could not be confirmed; reload the key list before trying again' : 'The key was not created')
   }
   finally { busy.value = false }
 }
@@ -68,16 +82,24 @@ async function copy() { if (!created.value) return; try { await navigator.clipbo
 </script>
 
 <template>
-  <AccessSheet :title="created ? 'Key ready' : `New key for ${agent.name}`" size="center" @close="busy || emit('close')">
+  <AccessSheet :title="created ? 'Key ready' : `${rotateKey ? 'Rotate key' : 'New key'} for ${agent.name}`" size="center" @close="busy || emit('close')">
     <div v-if="!created" class="body">
-      <p class="note"><AppIcon name="shield" :size="14" /><span>The key does only what you tick below, and never more than {{ agent.name }}’s role{{ role ? ` (${role})` : '' }} allows. Revoking it stops it at once.</span></p>
+      <p v-if="rotateKey" class="note"><AppIcon name="refresh" :size="14" /><span>Rotate {{ keyHint(rotateKey.prefix) }}: create a replacement with the same scopes and revoke the old key immediately when you confirm. Copy the new key into {{ agent.name }}’s configuration to reconnect it.</span></p>
+      <p v-else class="note"><AppIcon name="shield" :size="14" /><span>The key does only what you tick below, and never more than {{ agent.name }}’s role{{ role ? ` (${role})` : '' }} allows. Revoking it stops it at once.</span></p>
       <fieldset class="lifetimes">
-        <legend class="label">Works for</legend>
-        <div class="seg" role="radiogroup" aria-label="Key works for">
-          <button v-for="l in LIFETIMES" :key="l.days" type="button" role="radio" :aria-checked="days === l.days" :data-autofocus="days === l.days ? '' : undefined" @click="days = l.days">{{ l.label }}</button>
+        <legend class="label">Expires after</legend>
+        <div class="seg" role="radiogroup" aria-label="Key expires after">
+          <button v-for="l in LIFETIMES" :key="l.days" type="button" role="radio" :aria-checked="days === l.days" :tabindex="days === l.days ? 0 : -1" :disabled="busy" @keydown="chooseLifetime" :data-autofocus="days === l.days ? '' : undefined" @click="days = l.days">{{ l.label }}</button>
         </div>
       </fieldset>
-      <fieldset id="key-scopes" class="scopes" tabindex="-1" :aria-invalid="tried && !!scopeProblem" :aria-describedby="tried && scopeProblem ? 'key-scopes-error' : undefined">
+      <p class="expiry-note">Keys do not rotate automatically. {{ days ? `This key expires ${absoluteTime(expiryAfter(days))}. Rotate it before expiry and update its consumers.` : 'This key works until you revoke or rotate it.' }}</p>
+      <div v-if="rotateKey" class="rotation-scopes">
+        <p class="label">Scopes kept</p>
+        <ul v-if="rotateKey.scopes.length"><li v-for="scope in rotateKey.scopes" :key="scope" class="mono">{{ scope }}</li></ul>
+        <p v-else class="expiry-note">None; this key grants no access.</p>
+        <p v-if="rotationProblem" class="field-error" role="alert">{{ rotationProblem }}</p>
+      </div>
+      <fieldset v-else id="key-scopes" class="scopes" tabindex="-1" :aria-invalid="tried && !!scopeProblem" :aria-describedby="tried && scopeProblem ? 'key-scopes-error' : undefined">
         <legend class="label">What it may do <span class="count">{{ scopes.size }} chosen, at most {{ MAX_KEY_SCOPES }}</span></legend>
         <div class="presets">
           <label class="search-field find">
@@ -101,7 +123,7 @@ async function copy() { if (!created.value) return; try { await navigator.clipbo
       <p v-if="error" class="set-note error" role="alert"><AppIcon name="alert" :size="14" />{{ error }}</p>
     </div>
     <div v-else class="body">
-      <p class="once"><AppIcon name="info" :size="14" /><span>This key is shown only now. Copy it into {{ agent.name }}’s configuration; afterwards only its prefix, aeon_{{ created.prefix }}_…, is shown.{{ created.expires_at ? ` It works until ${absoluteTime(created.expires_at)}.` : '' }}</span></p>
+      <p class="once"><AppIcon name="info" :size="14" /><span>This key is shown only now. Copy it into {{ agent.name }}’s configuration; afterwards only its prefix, aeon_{{ created.prefix }}_…, is shown.{{ created.expires_at ? ` It works until ${absoluteTime(created.expires_at)}.` : ' It never expires.' }}{{ rotateKey ? ' The old key is now revoked.' : '' }}</span></p>
       <div class="token">
         <input class="field mono" readonly :value="created.token" aria-label="New agent key" @focus="($event.target as HTMLInputElement).select()" />
         <button type="button" class="btn primary token-copy" data-session-keep @click="copy"><AppIcon :name="copied ? 'check' : 'copy'" :size="14" />{{ copied ? 'Copied' : 'Copy key' }}</button>
@@ -110,7 +132,7 @@ async function copy() { if (!created.value) return; try { await navigator.clipbo
     <template #foot>
       <template v-if="!created">
         <button type="button" class="btn" :disabled="busy" @click="emit('close')">Cancel</button>
-        <button type="button" class="btn primary" :disabled="busy || !allowed" :data-tip="allowed ? undefined : lostPermission('keys.manage')" @click="create"><AppIcon name="key" :size="13" />{{ busy ? 'Creating…' : 'Create key' }}</button>
+        <button type="button" class="btn primary" :disabled="busy || !allowed || !!rotationProblem" :data-tip="allowed ? undefined : lostPermission('keys.manage')" @click="create"><AppIcon name="key" :size="13" />{{ busy ? (rotateKey ? 'Rotating…' : 'Creating…') : (rotateKey ? 'Rotate key' : 'Create key') }}</button>
       </template>
       <button v-else type="button" class="btn primary" data-session-keep @click="emit('close')">Done</button>
     </template>
@@ -118,6 +140,9 @@ async function copy() { if (!created.value) return; try { await navigator.clipbo
 </template>
 
 <style scoped>
+.expiry-note { font-size: 12.5px; line-height: 1.5; color: var(--ink-2); }
+.rotation-scopes { display: grid; gap: 8px; }
+.rotation-scopes ul { margin: 0; padding-left: 18px; font-size: 12px; overflow-wrap: anywhere; }
 .body { display: grid; gap: 14px; }
 .note, .once { display: grid; grid-template-columns: 14px 1fr; gap: 8px; padding: 10px 12px; border-radius: 10px; background: var(--surface-2); font-size: 13px; line-height: 1.5; color: var(--ink-2); }
 .note svg, .once svg { margin-top: 3px; color: var(--teal-ink); }
