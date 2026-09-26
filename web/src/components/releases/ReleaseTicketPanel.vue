@@ -1,8 +1,8 @@
 <!-- SPDX-License-Identifier: AGPL-3.0-only -->
 <script setup lang="ts">
-import { computed, nextTick, ref, watch } from 'vue'
+import { computed, nextTick, onBeforeUnmount, ref, watch } from 'vue'
 import { listNodes, type ListItem } from '../../lib/api'
-import { can } from '../../lib/authz'
+import { can, onAccessChange } from '../../lib/authz'
 import { confirmAction } from '../../lib/confirm'
 import { EMPTY_FILTERS, WORK_KINDS } from '../../lib/ticketList'
 import { normalKey, resolveTicketKeys, ticketRef } from '../../lib/ticketLinks'
@@ -30,6 +30,8 @@ const project = computed(() => projectId.value ? projects.byId(projectId.value) 
 const list = useTicketList(projectId, ref(EMPTY_FILTERS))
 
 // ---------- The ticket ----------
+// Each resolution has a generation: an access or identity change starts a new
+// one, and an answer from an older one never shows (it was asked as someone else).
 const item = ref<ListItem | null>(null)
 const resolving = ref(false)
 const error = ref('')
@@ -37,29 +39,40 @@ let generation = 0
 async function resolve() {
   const key = current.value
   const request = ++generation
+  const stale = () => request !== generation
   item.value = null
   error.value = ''
   resolving.value = true
   try {
     if (ticketRef(key) === undefined) await resolveTicketKeys([key])
+    if (stale()) return
     const found = ticketRef(key)
     if (!found) throw new Error(`${key} is not a ticket in this workspace.`)
     await projects.load()
+    if (stale()) return
     const page = await listNodes({ within: found.projectId, q: found.key, sort: 'key', limit: 50 })
-    if (request !== generation) return
+    if (stale()) return
     const hit = page.items.find(row => row.key === found.key)
     if (!hit) throw new Error(`${found.key} could not be found.`)
     item.value = hit
   } catch (e) {
-    if (request === generation) error.value = e instanceof Error ? e.message : 'The ticket could not be loaded.'
+    if (!stale()) error.value = e instanceof Error ? e.message : 'The ticket could not be loaded.'
   } finally {
-    if (request === generation) resolving.value = false
+    if (!stale()) resolving.value = false
   }
 }
 watch(current, resolve, { immediate: true })
-// Access changed (another person or workspace, a lost project): the cached key
-// went or now answers differently, so the ticket is resolved again from scratch.
-watch(() => ticketRef(current.value)?.id ?? null, (id, before) => { if (id !== before && !resolving.value) void resolve() })
+// Another person, workspace or an ended session: whatever is shown or on its way
+// goes, and the ticket is resolved again as the new caller. The same person's
+// access asked again only restarts a resolution still on its way; a shown ticket
+// stays until the keys asked again say otherwise (below).
+const stopAccess = onAccessChange(change => { if (change === 'reset' || resolving.value) void resolve() })
+onBeforeUnmount(stopAccess)
+// The key asked again answers differently (a lost project, a moved ticket).
+// Its own first answer (unknown to known) and a reset (handled above) do not count.
+watch(() => { const found = ticketRef(current.value); return found === undefined ? undefined : found?.id ?? null }, (now, before) => {
+  if (before !== undefined && now !== undefined && now !== before) void resolve()
+})
 
 // ---------- Who may do what, and to whom ----------
 const scope = computed(() => projectId.value ?? undefined)

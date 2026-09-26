@@ -155,6 +155,39 @@ test('another person or workspace starts without the earlier answers', async ({ 
   expect(calls.filter(call => call.path === '/api/nodes/lookup' && call.query.has('keys')).length).toBe(asked)
 })
 
+test('a ticket still on its way when the person or workspace changes never shows', async ({ page }) => {
+  await page.setViewportSize({ width: 1440, height: 900 })
+  const { history } = await open(page)
+  // The panel's request for the ticket is slow; the answer (for the former caller) comes last.
+  let held = 0
+  await page.route('**/api/nodes?*', async route => {
+    if (!new URL(route.request().url()).searchParams.has('q')) return route.fallback()
+    held++
+    await new Promise(resolve => setTimeout(resolve, 1500))
+    return route.fallback().catch(() => {})
+  })
+  // Record the title if it is ever shown in a ticket panel, however briefly.
+  await page.evaluate(title => {
+    const w = window as unknown as { staleShown: boolean }
+    w.staleShown = false
+    new MutationObserver(() => { if (document.querySelector('.ticket-ws')?.textContent?.includes(title)) w.staleShown = true })
+      .observe(document.body, { subtree: true, childList: true, characterData: true })
+  }, TITLE)
+  await chips(page).getByRole('link', { name: `PHAROS-11: ${TITLE}` }).click()
+  await expect(panel(page).getByRole('status', { name: 'Loading ticket' })).toBeVisible()
+  await expect.poll(() => held).toBe(1)
+  // Now someone else, in another workspace that has no such ticket; a navigation refreshes the session.
+  await answerNothing(page)
+  await page.route('**/api/me', route => route.fulfill({ json: { principal: { id: '33333333-3333-4333-8333-333333333333', name: 'Ola Nordmann', kind: 'person', roles: ['member'] }, tenant: { id: 't2', name: 'Other Studio' } } }))
+  await sheet(page).getByRole('listbox', { name: 'Releases, newest first' }).getByRole('option').nth(2).click()
+  await expect(page).toHaveURL(`/releases/${history.releases[2].version}`)
+  await expect(panel(page).getByRole('heading', { name: 'This ticket could not be opened' })).toBeVisible()
+  // The held answer lands after this; it must not show.
+  await page.waitForTimeout(2000)
+  await expect(panel(page).getByRole('heading', { name: 'This ticket could not be opened' })).toBeVisible()
+  expect(await page.evaluate(() => (window as unknown as { staleShown: boolean }).staleShown)).toBe(false)
+})
+
 test('a toast raised in the panel stays visible and actionable after the history closes', async ({ page }) => {
   await page.setViewportSize({ width: 1440, height: 900 })
   const { calls } = await open(page)
