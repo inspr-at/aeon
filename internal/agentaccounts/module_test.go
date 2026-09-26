@@ -383,6 +383,70 @@ func TestAccountPoolRoutingAndLedger(t *testing.T) {
 	}
 }
 
+func TestAllowanceProvisionalWithoutMeasuredUnit(t *testing.T) {
+	reset(t)
+	admin := makePrincipal(t, "alpha", "person", "Ada", []string{"admin"})
+	runner := addPrincipal(t, admin.TenantID, "agent", "runner", nil)
+	token := issueKey(t, runner, []string{"account.manage", "run.claim"})
+	mod := accountsMod()
+	var account Account
+	callStatus(t, mod, &runner, token, http.MethodPost, "/api/agent-accounts", `{"account_key":"local","harness":"codex","daemon_id":"daemon","label":"Codex"}`, http.StatusCreated, &account)
+	callStatus(t, mod, &runner, token, http.MethodPost, "/api/agent-accounts/"+account.ID+"/probe", `{"daemon_id":"daemon","daemon_generation":"g1","available":true}`, http.StatusOK, nil)
+	start, end := time.Now().Add(-time.Minute).UTC(), time.Now().Add(time.Hour).UTC()
+	for _, unit := range []string{"requests", "cost_micros"} {
+		var window Window
+		callStatus(t, mod, &admin, "", http.MethodPost, "/api/agent-accounts/"+account.ID+"/windows", windowBody(start, end, unit, 100, "unrestricted"), http.StatusCreated, &window)
+		if !window.Provisional {
+			t.Fatalf("new %s window claimed measured usage", unit)
+		}
+	}
+	runID := insertRun(t, admin, runner, codexProfile(t, admin))
+	mustRoute(t, mod, runner, token, runID, "daemon", []Account{account}, map[string]int64{"requests": 1, "cost_micros": 10})
+	err := db.InTenant(dbtest.Seed(t.Context()), appPool, admin.TenantID, func(tx pgx.Tx) error {
+		if _, err := tx.Exec(t.Context(), `INSERT INTO run_telemetry (tenant_id, run_id, sequence, kind, turn_count_delta)
+			VALUES ($1::uuid, $2::uuid, 1, 'turn', 1)`, admin.TenantID, runID); err != nil {
+			return err
+		}
+		return Settle(t.Context(), tx, runner, runID)
+	})
+	if err != nil {
+		t.Fatalf("settle: %v", err)
+	}
+	var accounts []Account
+	callStatus(t, mod, &admin, "", http.MethodGet, "/api/agent-accounts", "", http.StatusOK, &accounts)
+	if len(accounts) != 1 || len(accounts[0].Windows) != 2 {
+		t.Fatalf("account windows: %+v", accounts)
+	}
+	for _, w := range accounts[0].Windows {
+		switch w.Unit {
+		case "requests":
+			if w.Provisional || w.Used != 1 {
+				t.Fatalf("measured request window: %+v", w)
+			}
+		case "cost_micros":
+			if !w.Provisional || w.Used != 0 {
+				t.Fatalf("unmeasured cost window: %+v", w)
+			}
+		}
+	}
+	err = db.InTenant(dbtest.Seed(t.Context()), appPool, admin.TenantID, func(tx pgx.Tx) error {
+		if _, err := tx.Exec(t.Context(), `INSERT INTO run_telemetry (tenant_id, run_id, sequence, kind, cost_micros_delta)
+			VALUES ($1::uuid, $2::uuid, 2, 'usage', 7)`, admin.TenantID, runID); err != nil {
+			return err
+		}
+		return Settle(t.Context(), tx, runner, runID)
+	})
+	if err != nil {
+		t.Fatalf("late measured cost: %v", err)
+	}
+	callStatus(t, mod, &admin, "", http.MethodGet, "/api/agent-accounts", "", http.StatusOK, &accounts)
+	for _, w := range accounts[0].Windows {
+		if w.Unit == "cost_micros" && (w.Provisional || w.Used != 7) {
+			t.Fatalf("measured cost window: %+v", w)
+		}
+	}
+}
+
 func TestRankDrainGrantAndStaleProbe(t *testing.T) {
 	reset(t)
 	admin := makePrincipal(t, "alpha", "person", "Ada", []string{"admin"})

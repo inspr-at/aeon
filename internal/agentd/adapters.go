@@ -127,6 +127,7 @@ func (p *codexProcess) Control(ctx context.Context, op, text string) error {
 		if err != nil || json.Unmarshal(raw, &result) != nil || result.TurnID != p.turnID {
 			return errors.New("Codex steer acknowledgement mismatch")
 		}
+		p.observe(AdapterEvent{Kind: "turn", TurnCountDelta: 1})
 		return nil
 	}
 	if op == "interrupt" {
@@ -148,6 +149,7 @@ func (a *CodexAdapter) Start(ctx context.Context, r StartRequest, observe func(A
 		return nil, err
 	}
 	cp := &codexProcess{wireProcess: p, done: make(chan bool, 1)}
+	var inputTokens, outputTokens int64
 	p.setOnEvent(func(raw json.RawMessage) {
 		method, _, model := eventProbe(raw)
 		if model != "" {
@@ -158,6 +160,31 @@ func (a *CodexAdapter) Start(ctx context.Context, r StartRequest, observe func(A
 		}
 		if method == "item/started" {
 			observe(AdapterEvent{Kind: "tool"})
+		}
+		if method == "thread/tokenUsage/updated" {
+			var frame struct {
+				Params struct {
+					ThreadID   string `json:"threadId"`
+					TokenUsage struct {
+						Total struct {
+							InputTokens  *int64 `json:"inputTokens"`
+							OutputTokens *int64 `json:"outputTokens"`
+						} `json:"total"`
+					} `json:"tokenUsage"`
+				} `json:"params"`
+			}
+			if json.Unmarshal(raw, &frame) == nil && frame.Params.ThreadID == p.threadID &&
+				frame.Params.TokenUsage.Total.InputTokens != nil && frame.Params.TokenUsage.Total.OutputTokens != nil {
+				input := *frame.Params.TokenUsage.Total.InputTokens
+				output := *frame.Params.TokenUsage.Total.OutputTokens
+				if input >= inputTokens && output >= outputTokens {
+					delta := AdapterEvent{Kind: "usage", InputTokensDelta: cumulativeDelta(input, &inputTokens),
+						OutputTokensDelta: cumulativeDelta(output, &outputTokens)}
+					if delta.InputTokensDelta != 0 || delta.OutputTokensDelta != 0 {
+						observe(delta)
+					}
+				}
+			}
 		}
 	})
 	fail := func(e error) (Process, error) { _ = p.Stop(context.Background()); return nil, e }
@@ -205,7 +232,7 @@ func (a *CodexAdapter) Start(ctx context.Context, r StartRequest, observe func(A
 		return fail(errors.New("Codex turn start failed"))
 	}
 	p.turnID = turn.Turn.ID
-	observe(AdapterEvent{Kind: "turn"})
+	observe(AdapterEvent{Kind: "turn", TurnCountDelta: 1})
 	return cp, nil
 }
 
@@ -244,6 +271,9 @@ func (p *piProcess) Control(ctx context.Context, op, text string) error {
 			return errors.New("Pi delivery is held")
 		}
 		_, err := p.request(ctx, "pi", "prompt", map[string]any{"message": text, "streamingBehavior": "steer"})
+		if err == nil {
+			p.observe(AdapterEvent{Kind: "turn", TurnCountDelta: 1})
+		}
 		return err
 	case "interrupt":
 		if len(held) > 0 {
@@ -284,11 +314,13 @@ func (p *piProcess) Control(ctx context.Context, op, text string) error {
 			if _, err := p.request(ctx, "pi", "prompt", map[string]any{"message": message, "streamingBehavior": "steer"}); err != nil {
 				return err
 			}
+			p.observe(AdapterEvent{Kind: "turn", TurnCountDelta: 1})
 		}
 		for _, message := range held[0].FollowUp {
 			if _, err := p.request(ctx, "pi", "prompt", map[string]any{"message": message, "streamingBehavior": "followUp"}); err != nil {
 				return err
 			}
+			p.observe(AdapterEvent{Kind: "turn", TurnCountDelta: 1})
 		}
 		return p.queue.Delete(q.RunID)
 	default:
@@ -360,7 +392,7 @@ func (a *PiAdapter) Start(ctx context.Context, r StartRequest, observe func(Adap
 		_ = p.Stop(context.Background())
 		return nil, err
 	}
-	observe(AdapterEvent{Kind: "turn", EffectiveModel: r.Profile.Model, ModelEvidence: "vendor_reported"})
+	observe(AdapterEvent{Kind: "turn", TurnCountDelta: 1, EffectiveModel: r.Profile.Model, ModelEvidence: "vendor_reported"})
 	return pp, nil
 }
 
@@ -436,12 +468,23 @@ func (a *CursorAdapter) Start(ctx context.Context, r StartRequest, observe func(
 		return nil, err
 	}
 	cp := &cursorProcess{wireProcess: p, done: make(chan struct{})}
+	var costMicros int64
 	p.setOnEvent(func(raw json.RawMessage) {
 		var frame struct {
 			ID     json.RawMessage `json:"id"`
 			Method string          `json:"method"`
 			Result json.RawMessage `json:"result"`
 			Error  json.RawMessage `json:"error"`
+			Params struct {
+				SessionID string `json:"sessionId"`
+				Update    struct {
+					SessionUpdate string `json:"sessionUpdate"`
+					Cost          *struct {
+						Amount   json.RawMessage `json:"amount"`
+						Currency string          `json:"currency"`
+					} `json:"cost"`
+				} `json:"update"`
+			} `json:"params"`
 		}
 		if json.Unmarshal(raw, &frame) != nil {
 			return
@@ -458,8 +501,14 @@ func (a *CursorAdapter) Start(ctx context.Context, r StartRequest, observe func(
 			return
 		}
 		method := frame.Method
-		if method == "session/update" {
-			observe(AdapterEvent{Kind: "turn"})
+		if method == "session/update" && frame.Params.SessionID == p.sessionID &&
+			frame.Params.Update.SessionUpdate == "usage_update" && frame.Params.Update.Cost != nil &&
+			frame.Params.Update.Cost.Currency == "USD" {
+			if current, ok := usdMicros(frame.Params.Update.Cost.Amount); ok {
+				if delta := cumulativeDelta(current, &costMicros); delta > 0 {
+					observe(AdapterEvent{Kind: "usage", CostMicrosDelta: delta})
+				}
+			}
 		} else if method == "session/request_permission" {
 			cp.finish(errors.New("Cursor ACP decision requires local operator"))
 			go func() {
@@ -500,6 +549,7 @@ func (a *CursorAdapter) Start(ctx context.Context, r StartRequest, observe func(
 	if err := p.send(map[string]any{"jsonrpc": "2.0", "id": id, "method": "session/prompt", "params": map[string]any{"sessionId": p.sessionID, "prompt": []map[string]string{{"type": "text", "text": r.Prompt}}}}); err != nil {
 		return fail(err)
 	}
+	observe(AdapterEvent{Kind: "turn", TurnCountDelta: 1})
 	return cp, nil
 }
 
@@ -602,12 +652,16 @@ func (a *ClaudeAdapter) Start(ctx context.Context, r StartRequest, observe func(
 		return nil, err
 	}
 	cp := &claudeProcess{wireProcess: p, assetDir: dir, ready: make(chan error, 1), controls: map[string]chan bool{}}
+	var inputTokens, outputTokens, costMicros int64
 	p.setOnEvent(func(raw json.RawMessage) {
 		var frame struct {
-			Kind           string `json:"kind"`
-			CorrelationID  string `json:"correlation_id"`
-			EffectiveModel string `json:"effective_model"`
-			ModelEvidence  string `json:"model_evidence_status"`
+			Kind           string          `json:"kind"`
+			CorrelationID  string          `json:"correlation_id"`
+			EffectiveModel string          `json:"effective_model"`
+			ModelEvidence  string          `json:"model_evidence_status"`
+			InputTokens    int64           `json:"input_tokens_total"`
+			OutputTokens   int64           `json:"output_tokens_total"`
+			CostUSD        json.RawMessage `json:"cost_usd_total"`
 		}
 		if json.Unmarshal(raw, &frame) != nil {
 			return
@@ -619,8 +673,20 @@ func (a *ClaudeAdapter) Start(ctx context.Context, r StartRequest, observe func(
 			case cp.ready <- nil:
 			default:
 			}
-		case "turn_started", "turn_completed":
-			observe(AdapterEvent{Kind: "turn"})
+		case "turn_started":
+			observe(AdapterEvent{Kind: "turn", TurnCountDelta: 1})
+		case "usage":
+			if frame.InputTokens < inputTokens || frame.OutputTokens < outputTokens {
+				break
+			}
+			ev := AdapterEvent{Kind: "usage", InputTokensDelta: cumulativeDelta(frame.InputTokens, &inputTokens),
+				OutputTokensDelta: cumulativeDelta(frame.OutputTokens, &outputTokens)}
+			if cost, ok := usdMicros(frame.CostUSD); ok {
+				ev.CostMicrosDelta = cumulativeDelta(cost, &costMicros)
+			}
+			if ev.InputTokensDelta > 0 || ev.OutputTokensDelta > 0 || ev.CostMicrosDelta > 0 {
+				observe(ev)
+			}
 		case "tool_started":
 			observe(AdapterEvent{Kind: "tool"})
 		case "control_applied", "control_failed":

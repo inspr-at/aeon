@@ -94,10 +94,18 @@ func attachWindows(ctx context.Context, tx pgx.Tx, accounts []Account) ([]Accoun
 		return accounts, nil
 	}
 	rows, err := tx.Query(ctx, `
-		SELECT id::text, account_id::text, starts_at, ends_at, unit, allowance, used, reserved,
-		       pace_model, burst_ratio::float8
-		FROM account_allowance_windows
-		ORDER BY account_id, starts_at, id`)
+		SELECT w.id::text, w.account_id::text, w.starts_at, w.ends_at, w.unit,
+		       w.allowance, w.used, w.reserved, w.pace_model, w.burst_ratio::float8,
+		       NOT EXISTS (
+		           SELECT 1 FROM account_reservations r
+		           WHERE r.tenant_id = w.tenant_id AND r.window_id = w.id AND r.state = 'settled'
+		       ) OR EXISTS (
+		           SELECT 1 FROM account_reservations r
+		           WHERE r.tenant_id = w.tenant_id AND r.window_id = w.id
+		             AND r.state = 'settled' AND r.actual_units = 0
+		       ) AS provisional
+		FROM account_allowance_windows w
+		ORDER BY w.account_id, w.starts_at, w.id`)
 	if err != nil {
 		return nil, err
 	}
@@ -105,7 +113,7 @@ func attachWindows(ctx context.Context, tx pgx.Tx, accounts []Account) ([]Accoun
 	byAccount := map[string][]Window{}
 	for rows.Next() {
 		var w Window
-		if err := rows.Scan(&w.ID, &w.AccountID, &w.StartsAt, &w.EndsAt, &w.Unit, &w.Allowance, &w.Used, &w.Reserved, &w.PaceModel, &w.BurstRatio); err != nil {
+		if err := rows.Scan(&w.ID, &w.AccountID, &w.StartsAt, &w.EndsAt, &w.Unit, &w.Allowance, &w.Used, &w.Reserved, &w.PaceModel, &w.BurstRatio, &w.Provisional); err != nil {
 			return nil, err
 		}
 		byAccount[w.AccountID] = append(byAccount[w.AccountID], w)
@@ -381,6 +389,7 @@ func createWindow(ctx context.Context, tx pgx.Tx, p tenant.Principal, accountID 
 	if err != nil {
 		return Window{}, err
 	}
+	w.Provisional = true // No reservation has measured usage in a new window.
 	if err := writeEvent(ctx, tx, p, evWindow, nil, w); err != nil {
 		return Window{}, err
 	}
