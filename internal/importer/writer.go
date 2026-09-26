@@ -224,15 +224,12 @@ func (w PostgresWriter) Write(ctx context.Context, s Snapshot, tenantSlug string
 	if err != nil {
 		return r, err
 	}
-	// Refresh planner statistics only after the import commits. Large imports
-	// otherwise leave list and project queries planning against pre-import row
-	// counts until autovacuum happens to analyze them.
-	if err := db.InTenant(db.AllProjects(ctx, "classic importer"), w.Pool, tenantID, func(tx pgx.Tx) error {
-		_, err := tx.Exec(ctx, `ANALYZE nodes, node_kinds, node_relations, node_key_counters,
+	// ANALYZE uses the owning role after the write transaction commits. It is
+	// database-wide maintenance, not a tenant data query, and cannot see the
+	// just-written rows while the import transaction is still open.
+	if _, err := w.Pool.Exec(ctx, `ANALYZE nodes, node_kinds, node_relations, node_key_counters,
             principals, identities, events, event_counters,
-            journey_projects, journey_releases, journey_tickets`)
-		return err
-	}); err != nil {
+            journey_projects, journey_releases, journey_tickets`); err != nil {
 		return r, fmt.Errorf("analyze imported tables: %w", err)
 	}
 	return r, nil

@@ -410,13 +410,6 @@ func (m *Module) listNodes(ctx context.Context, tenantID string, q listQuery) (n
 	}
 	page := nodePage{Items: []listItem{}}
 	err := m.tx(ctx, tenantID, func(ctx context.Context, tx pgx.Tx) error {
-		if q.Within != nil || (q.ParentSet && q.Descendants) {
-			// A wide imported root can make Postgres choose a sequential scan
-			// for every recursive child lookup, including the leaf probes.
-			if _, err := tx.Exec(ctx, `SET LOCAL enable_seqscan=off`); err != nil {
-				return dbErr("list planner", err)
-			}
-		}
 		var anchor any
 		if mark != nil {
 			anchor = mark.ID
@@ -516,15 +509,16 @@ const assigneeJoin = ` LEFT JOIN LATERAL (
         (n.fields->'classic'->>'source_id')||':'||(n.fields->'classic'->>'assignee_id') AS classic_subject
     OFFSET 0
 ) aref ON true
-LEFT JOIN LATERAL (
-    SELECT coalesce(target.id,person.id) AS id,coalesce(target.name,person.name) AS name FROM principals person
-    LEFT JOIN principals target ON target.tenant_id=person.tenant_id AND target.id=person.linked_to
-    LEFT JOIN identities identity ON identity.id=person.identity_id
-    WHERE person.tenant_id=n.tenant_id AND (
-        person.id::text = aref.native
-        OR (aref.classic_only AND identity.issuer='paimos-classic' AND identity.subject=aref.classic_subject)
-    ) LIMIT 1
-) assignee ON true `
+LEFT JOIN principals native_person ON native_person.tenant_id=n.tenant_id
+    AND native_person.id=CASE WHEN aref.native ~ '^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$' THEN aref.native::uuid END
+LEFT JOIN identities classic_identity ON aref.classic_only
+    AND classic_identity.issuer='paimos-classic' AND classic_identity.subject=aref.classic_subject
+LEFT JOIN principals classic_person ON classic_person.tenant_id=n.tenant_id
+    AND classic_person.identity_id=classic_identity.id
+LEFT JOIN principals assignee_target ON assignee_target.tenant_id=n.tenant_id
+    AND assignee_target.id=coalesce(native_person.linked_to,classic_person.linked_to)
+LEFT JOIN LATERAL (SELECT coalesce(assignee_target.id,native_person.id,classic_person.id) AS id,
+    coalesce(assignee_target.name,native_person.name,classic_person.name) AS name) assignee ON true `
 
 // Label and tag expressions over a node n. Native fields win, also an
 // explicit null; imported work falls back to its classic copy.
@@ -542,7 +536,7 @@ const tagElems = `(SELECT btrim(CASE jsonb_typeof(t) WHEN 'string' THEN t#>>'{}'
 // lower-cased tag names of n, without blanks.
 const tagNamesSQL = `(SELECT coalesce(array_agg(lower(e.name)),ARRAY[]::text[]) FROM ` + tagElems + ` e WHERE coalesce(e.name,'')<>'')`
 
-func listFilterSQL(q listQuery) (string, []any) {
+func listFilterSQL(q listQuery, sortFields bool) (string, []any) {
 	// One tenant transaction supplies RLS to every table in the CTE.
 	array := func(values []string) []string {
 		if values == nil {
@@ -603,9 +597,11 @@ func listFilterSQL(q listQuery) (string, []any) {
 			}
 		}
 		epicCTE = `, epic_members(id, epic_id) AS (
-        SELECT c.id, e.id FROM nodes e JOIN node_kinds ek ON ek.id=e.kind_id AND ek.tenant_id=e.tenant_id AND ek.slug='epic'
+        SELECT c.id, e.id FROM node_kinds ek CROSS JOIN LATERAL (
+            SELECT id,tenant_id FROM nodes WHERE tenant_id=ek.tenant_id AND kind_id=ek.id AND deleted_at IS NULL OFFSET 0
+        ) e
         CROSS JOIN LATERAL (SELECT id FROM nodes WHERE tenant_id=e.tenant_id AND parent_id=e.id AND deleted_at IS NULL OFFSET 0) c
-        WHERE e.tenant_id=current_setting('aeon.tenant_id')::uuid AND e.deleted_at IS NULL
+        WHERE ek.tenant_id=current_setting('aeon.tenant_id')::uuid AND ek.slug='epic'
           AND (` + arg(all) + `::bool OR e.id::text=ANY(` + arg(ids) + `::text[]))
           AND ($7::uuid IS NULL OR e.id IN (SELECT id FROM scope))
         UNION ALL SELECT c.id, m.epic_id FROM epic_members m CROSS JOIN LATERAL (
@@ -644,7 +640,14 @@ func listFilterSQL(q listQuery) (string, []any) {
 		}
 	}
 	from, scopeCondition := "nodes n", ""
+	scopeRoot := `coalesce($7::uuid, CASE WHEN $8::bool AND $10::bool THEN $9::uuid ELSE NULL::uuid END)`
+	scopeSeed := ""
 	if q.Within != nil || (q.ParentSet && q.Descendants) {
+		if q.Within != nil {
+			scopeSeed = ` AND id=$7::uuid`
+		} else {
+			scopeSeed = ` AND id=$9::uuid`
+		}
 		// Drive scoped lists from the tree. A membership subquery can rescan
 		// every scope ID for every candidate when the bulk-import statistics
 		// change, while a lateral ID lookup stays bounded per tree row.
@@ -659,14 +662,20 @@ func listFilterSQL(q listQuery) (string, []any) {
 	} else if q.ParentSet {
 		scopeCondition = ` AND n.parent_id IS NOT DISTINCT FROM $9::uuid`
 	}
+	projection := ""
+	if sortFields {
+		projection = `n.key,n.title,n.body,n.position,n.created_at,n.updated_at,
+            coalesce(n.fields->>'priority','') AS priority_raw,`
+	}
 	return `WITH RECURSIVE scope(id) AS (
-        SELECT id FROM nodes WHERE tenant_id=current_setting('aeon.tenant_id')::uuid AND deleted_at IS NULL AND id=coalesce($7::uuid, CASE WHEN $8::bool AND $10::bool THEN $9::uuid ELSE NULL::uuid END)
+        SELECT id FROM nodes WHERE tenant_id=current_setting('aeon.tenant_id')::uuid AND deleted_at IS NULL AND id=` + scopeRoot + scopeSeed + `
         UNION ALL SELECT c.id FROM scope s CROSS JOIN LATERAL (
             SELECT id FROM nodes WHERE tenant_id=current_setting('aeon.tenant_id')::uuid AND parent_id=s.id AND deleted_at IS NULL
             ORDER BY updated_at DESC OFFSET 0
         ) c
-    )` + epicCTE + `, filtered AS (
-        SELECT n.id,assignee.id::text AS assignee_id,n.state,k.slug AS kind_slug,
+    )` + epicCTE + `, filtered AS MATERIALIZED (
+		SELECT n.id,` + projection + `
+            assignee.id::text AS assignee_id,n.state,k.slug AS kind_slug,
             coalesce(nullif(n.fields->>'priority',''),'none') AS priority FROM ` + from + ` JOIN node_kinds k ON k.id=n.kind_id AND k.tenant_id=n.tenant_id ` + assigneeJoin + `
         WHERE n.deleted_at IS NULL
         AND ($1::uuid IS NULL OR n.kind_id=$1::uuid)
@@ -685,7 +694,7 @@ func listOrder(q listQuery) string {
 	parts := []string{}
 	if q.Q != "" {
 		// Key prefixes lead, then title matches, then matches in the description only.
-		parts = append(parts, "CASE WHEN n.key ILIKE $6::text||'%' THEN 0 WHEN n.body ILIKE '%'||$6::text||'%' AND n.title NOT ILIKE '%'||$6::text||'%' AND n.key NOT ILIKE '%'||$6::text||'%' THEN 2 ELSE 1 END ASC")
+		parts = append(parts, "CASE WHEN f.key ILIKE $6::text||'%' THEN 0 WHEN f.body ILIKE '%'||$6::text||'%' AND f.title NOT ILIKE '%'||$6::text||'%' AND f.key NOT ILIKE '%'||$6::text||'%' THEN 2 ELSE 1 END ASC")
 	}
 	for _, key := range q.Sort {
 		dir := "ASC"
@@ -694,21 +703,21 @@ func listOrder(q listQuery) string {
 		}
 		switch key.Name {
 		case "key":
-			parts = append(parts, `regexp_replace(n.key,'-[0-9]+$','') `+dir, `substring(n.key from '-([0-9]+)$')::numeric `+dir)
+			parts = append(parts, `regexp_replace(f.key,'-[0-9]+$','') `+dir, `substring(f.key from '-([0-9]+)$')::numeric `+dir)
 		case "state":
-			parts = append(parts, `CASE WHEN n.state IN ('new','backlog','in_progress','active','qa','accepted','delivered','done','cancelled','archived') THEN 0 ELSE 1 END ASC`, `CASE n.state WHEN 'new' THEN 0 WHEN 'backlog' THEN 1 WHEN 'in_progress' THEN 2 WHEN 'active' THEN 2 WHEN 'qa' THEN 3 WHEN 'accepted' THEN 4 WHEN 'delivered' THEN 5 WHEN 'done' THEN 6 WHEN 'cancelled' THEN 7 WHEN 'archived' THEN 8 ELSE 9 END `+dir, "n.state "+dir)
+			parts = append(parts, `CASE WHEN f.state IN ('new','backlog','in_progress','active','qa','accepted','delivered','done','cancelled','archived') THEN 0 ELSE 1 END ASC`, `CASE f.state WHEN 'new' THEN 0 WHEN 'backlog' THEN 1 WHEN 'in_progress' THEN 2 WHEN 'active' THEN 2 WHEN 'qa' THEN 3 WHEN 'accepted' THEN 4 WHEN 'delivered' THEN 5 WHEN 'done' THEN 6 WHEN 'cancelled' THEN 7 WHEN 'archived' THEN 8 ELSE 9 END `+dir, "f.state "+dir)
 		case "priority":
-			parts = append(parts, `CASE coalesce(nullif(n.fields->>'priority',''),'none') WHEN 'high' THEN 0 WHEN 'medium' THEN 1 WHEN 'low' THEN 2 WHEN 'none' THEN 3 ELSE 4 END `+dir, `coalesce(n.fields->>'priority','') `+dir)
+			parts = append(parts, `CASE f.priority WHEN 'high' THEN 0 WHEN 'medium' THEN 1 WHEN 'low' THEN 2 WHEN 'none' THEN 3 ELSE 4 END `+dir, `f.priority_raw `+dir)
 		case "kind":
-			parts = append(parts, "k.slug "+dir)
+			parts = append(parts, "f.kind_slug "+dir)
 		case "assignee":
 			// Unassigned work comes last in both directions.
 			parts = append(parts, "ap.name IS NULL ASC", "lower(ap.name) "+dir, "ap.id "+dir)
 		default:
-			parts = append(parts, "n."+key.Name+" "+dir)
+			parts = append(parts, "f."+key.Name+" "+dir)
 		}
 	}
-	return strings.Join(append(parts, "n.id ASC"), ",")
+	return strings.Join(append(parts, "f.id ASC"), ",")
 }
 func sortsBy(q listQuery, name string) bool {
 	for _, key := range q.Sort {
@@ -719,14 +728,14 @@ func sortsBy(q listQuery, name string) bool {
 	return false
 }
 func listSQL(q listQuery, anchor any) (string, []any) {
-	prefix, args := listFilterSQL(q)
+	prefix, args := listFilterSQL(q, true)
 	args = append(args, anchor, q.Limit+1)
 	anchorArg, limitArg := fmt.Sprintf("$%d", len(args)-1), fmt.Sprintf("$%d", len(args))
 	people := ""
 	if sortsBy(q, "assignee") {
-		people = ` LEFT JOIN principals ap ON ap.tenant_id=n.tenant_id AND ap.id=f.assignee_id::uuid`
+		people = ` LEFT JOIN principals ap ON ap.tenant_id=current_setting('aeon.tenant_id')::uuid AND ap.id=f.assignee_id::uuid`
 	}
-	sql := prefix + `, ordered AS (SELECT n.id,row_number() OVER (ORDER BY ` + listOrder(q) + `) AS rn FROM filtered f JOIN nodes n ON n.id=f.id JOIN node_kinds k ON k.id=n.kind_id` + people + `),
+	sql := prefix + `, ordered AS (SELECT f.id,row_number() OVER (ORDER BY ` + listOrder(q) + `) AS rn FROM filtered f` + people + `),
     selected AS (SELECT id,rn FROM ordered WHERE rn>coalesce((SELECT rn FROM ordered WHERE id=` + anchorArg + `::uuid),0) ORDER BY rn LIMIT ` + limitArg + `)
     SELECT ` + nodeCols + `,k.slug,k.label,nullif(n.fields->>'priority',''),assignee.id::text,assignee.name,
            ` + hasAvatar("assignee.id") + `,
@@ -758,7 +767,7 @@ func listSQL(q listQuery, anchor any) (string, []any) {
 	return sql, args
 }
 func facetSQL(q listQuery) (string, []any) {
-	prefix, args := listFilterSQL(q)
+	prefix, args := listFilterSQL(q, false)
 	args = append(args, q.FacetNames)
 	names := fmt.Sprintf("$%d", len(args))
 	want := func(name string) bool {
