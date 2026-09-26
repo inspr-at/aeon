@@ -21,6 +21,7 @@ import { mockQuoteEditor, QUOTE_ID } from './quote-inspector-fixtures'
 import { knowledgeWorld, mockKnowledge } from './knowledge-fixtures'
 import { groupsWorld, mockProjectGroups } from './project-groups-fixtures'
 import { JONAS as ACCESS_JONAS, ME as ACCESS_ME, accessWorld, mockAccess } from './access-fixtures'
+import { mockEffectivePermissions } from './authz-fixtures'
 
 type Finding = Raw & { id: string; route: string; state: string; viewport: string; theme: string; screenshot: string }
 type Setup = 'default' | 'editor' | 'journey' | 'public' | 'signed-out' | 'groups' | 'cards' | 'views'
@@ -155,7 +156,7 @@ async function installMocks(page: Page, setup: Setup) {
   await mockKnowledge(page, knowledgeWorld())
   await mockReleases(page, history)
   if (setup === 'editor') await mockQuoteEditor(page)
-  await mockAccess(page, accessWorld())
+  await mockAccess(page, accessWorld(), { also: mockEffectivePermissions('admin').workspace.permissions })
 }
 
 

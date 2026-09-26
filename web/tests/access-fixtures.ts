@@ -145,7 +145,9 @@ const has = (world: AccessWorld, principal: string, permission: string) => {
 }
 const mine = (world: AccessWorld) => new Set(world.roles.find(r => r.id === world.people.find(p => p.principal_id === world.me)?.workspace_role)?.permissions ?? [])
 
-export async function mockAccess(page: Page, world: AccessWorld) {
+// also: permissions granted besides the fixture role's, for suites that mock the
+// whole app (the UI audit passes P1's admin set so non-Access screens stay reachable).
+export async function mockAccess(page: Page, world: AccessWorld, options: { also?: string[] } = {}) {
   let nextId = 1000
   const event = (type: string, before: unknown, after: unknown) => world.events.push({ id: world.events.length + 1, actor_principal_id: world.me, type, before, after, at: new Date(now + world.events.length * 1000).toISOString() })
   const fail = (route: Route, status: number, code: string, reason: string, field?: string) => route.fulfill({ status, json: { error: reason, code, reason, ...(field ? { field } : {}) } })
@@ -173,7 +175,7 @@ export async function mockAccess(page: Page, world: AccessWorld) {
       const projectId = url.searchParams.get('project_id')
       const binding = projectId ? world.bindings.find(b => b.principal_id === world.me && b.project_id === projectId) : undefined
       return route.fulfill({ json: {
-        workspace: { role: roleRef(me.workspace_role), permissions: me.status === 'active' ? [...mine(world)] : [] },
+        workspace: { role: roleRef(me.workspace_role), permissions: me.status === 'active' ? [...new Set([...mine(world), ...(options.also ?? [])])] : [] },
         project: projectId ? { id: projectId, role: roleRef(binding?.role_id ?? null), permissions: binding ? world.roles.find(r => r.id === binding.role_id)!.permissions : [] } : null,
       } })
     }
