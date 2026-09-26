@@ -21,6 +21,69 @@ import (
 
 const digest = "0123456789abcdef0123456789abcdef0123456789abcdef0123456789abcdef"
 
+func TestJourneyStageGateLiveTracksRevocationAndExpiry(t *testing.T) {
+	f := newFixture(t)
+	project := f.node(t, "project", "PRJ-101", "Gate project")
+	if err := db.InTenant(dbtest.Seed(t.Context()), f.db.App, f.tenant, func(tx pgx.Tx) error {
+		_, err := tx.Exec(t.Context(), `INSERT INTO journey_projects(tenant_id,project_node_id) VALUES($1::uuid,$2::uuid)`, f.tenant, project)
+		return err
+	}); err != nil {
+		t.Fatal(err)
+	}
+	release := f.release(t, project, "REL-102", 1)
+	path := "/api/projects/" + project + "/journey"
+	stage := func(t *testing.T) journey.JourneyStage {
+		t.Helper()
+		response := f.do(f.person, http.MethodGet, path, "")
+		if response.Code != http.StatusOK || !strings.Contains(response.Body.String(), `"gate_live":`) {
+			t.Fatalf("journey response: %d %s", response.Code, response.Body.String())
+		}
+		var view journey.Journey
+		if err := json.Unmarshal(response.Body.Bytes(), &view); err != nil {
+			t.Fatal(err)
+		}
+		for _, item := range view.Stages {
+			if item.Key == "deploy" {
+				return item
+			}
+		}
+		t.Fatal("deploy stage missing")
+		return journey.JourneyStage{}
+	}
+	if got := stage(t); got.GateApprovalID != nil || got.GateLive {
+		t.Fatalf("absent gate: %+v", got)
+	}
+	approval := f.grant(t, f.agent.ID, f.person.ID, journey.ScopeDeploy, release)
+	change := func(query string, args ...any) {
+		t.Helper()
+		if err := db.InTenant(dbtest.Seed(t.Context()), f.db.App, f.tenant, func(tx pgx.Tx) error {
+			_, err := tx.Exec(t.Context(), query, args...)
+			return err
+		}); err != nil {
+			t.Fatal(err)
+		}
+	}
+	change(`INSERT INTO journey_gates(tenant_id,project_node_id,release_node_id,gate,approval_request_id) VALUES($1::uuid,$2::uuid,$3::uuid,'deploy',$4::uuid)`, f.tenant, project, release, approval)
+	if got := stage(t); got.GateApprovalID == nil || *got.GateApprovalID != approval || !got.GateLive {
+		t.Fatalf("live gate: %+v", got)
+	}
+	change(`UPDATE agent_permission_grants SET revoked_at=now() WHERE approval_request_id=$1::uuid`, approval)
+	if got := stage(t); got.GateApprovalID == nil || *got.GateApprovalID != approval || got.GateLive {
+		t.Fatalf("revoked gate: %+v", got)
+	}
+	change(`UPDATE agent_permission_grants SET revoked_at=NULL WHERE approval_request_id=$1::uuid`, approval)
+	newer := f.grant(t, f.agent.ID, f.person.ID, journey.ScopeDeploy, release)
+	change(`INSERT INTO journey_gates(tenant_id,project_node_id,release_node_id,gate,approval_request_id) VALUES($1::uuid,$2::uuid,$3::uuid,'deploy',$4::uuid)`, f.tenant, project, release, newer)
+	change(`UPDATE agent_permission_grants SET revoked_at=now() WHERE approval_request_id=$1::uuid`, newer)
+	if got := stage(t); got.GateApprovalID == nil || *got.GateApprovalID != newer || !got.GateLive {
+		t.Fatalf("older live gate with newer revoked history: %+v", got)
+	}
+	change(`UPDATE agent_permission_grants SET valid_until=now()-interval '1 second' WHERE approval_request_id=$1::uuid`, approval)
+	if got := stage(t); got.GateApprovalID == nil || *got.GateApprovalID != newer || got.GateLive {
+		t.Fatalf("expired gate: %+v", got)
+	}
+}
+
 func TestJourneyActions(t *testing.T) {
 	f := newFixture(t)
 	project := f.node(t, "project", "PRJ-1", "Garden")

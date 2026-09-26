@@ -1,0 +1,167 @@
+{
+ "schema_version": 1,
+ "minimum_writer_version": 2,
+ "title": "Modernisierung der Hallensteuerung",
+ "subtitle": "Konzept, Umsetzung und Inbetriebnahme in zwei Etappen",
+ "project_ref": "PRJ-2026-014",
+ "offer_date": "2026-09-21",
+ "valid_until": "2026-10-21",
+ "currency": "EUR",
+ "sender": {
+  "company": "Ihr Unternehmen",
+  "street": "Musterweg 1",
+  "postal_code": "8010",
+  "city": "Graz",
+  "country": "Österreich",
+  "email": "office@beispiel.invalid",
+  "contact_person": "Alex Beispiel"
+ },
+ "recipient": {
+  "name": "Beispiel Stahl GmbH",
+  "address": "Werkstraße 12\n8020 Graz",
+  "contact": "Dana Beispiel",
+  "country": "Österreich",
+  "customer_no": "K-10042"
+ },
+ "legal": {
+  "intro": "Vielen Dank für Ihre Anfrage. Gerne bieten wir Ihnen die folgenden Leistungen an.",
+  "accept_text": "Hiermit nehmen wir das Angebot an.",
+  "vat_note": "Alle Beträge verstehen sich zuzüglich der gesetzlichen Umsatzsteuer.",
+  "payment_terms": "30 Tage netto ab Rechnungsdatum.",
+  "discount_note": "Kein Rabatt vereinbart."
+ },
+ "layout": {},
+ "sections": [
+  {
+   "id": "5a3e0000-0000-4000-8000-000000000003",
+   "heading": "Ausgangslage",
+   "body": "Die bestehende Steuerung der Produktionshalle ist über fünfzehn Jahre gewachsen und soll auf eine einheitliche Plattform gebracht werden.\nZiel ist ein Betrieb ohne Stillstand, mit klarer Dokumentation für Ihr Team.",
+   "nodes": [
+    {
+     "id": "5a3e0000-0000-4000-8000-000000000101",
+     "kind": "paragraph",
+     "text": "Die bestehende Steuerung der Produktionshalle ist über fünfzehn Jahre gewachsen und soll auf eine einheitliche Plattform gebracht werden."
+    },
+    {
+     "id": "5a3e0000-0000-4000-8000-000000000102",
+     "kind": "paragraph",
+     "text": "Ziel ist ein Betrieb ohne Stillstand, mit klarer Dokumentation für Ihr Team."
+    }
+   ]
+  },
+  {
+   "id": "5a3e0000-0000-4000-8000-000000000008",
+   "heading": "Leistungsumfang",
+   "body": "Wir gehen in drei Schritten vor:\nBestandsaufnahme vor Ort und Abstimmung der Anforderungen\nUmsetzung in zwei Etappen mit gemeinsamer Abnahme\nSchulung des Teams und Übergabe der Dokumentation",
+   "nodes": [
+    {
+     "id": "5a3e0000-0000-4000-8000-000000000104",
+     "kind": "paragraph",
+     "text": "Wir gehen in drei Schritten vor:"
+    },
+    {
+     "id": "5a3e0000-0000-4000-8000-000000000105",
+     "kind": "item",
+     "text": "Bestandsaufnahme vor Ort und Abstimmung der Anforderungen",
+     "depth": 0,
+     "marker": "disc"
+    },
+    {
+     "id": "5a3e0000-0000-4000-8000-000000000106",
+     "kind": "item",
+     "text": "Umsetzung in zwei Etappen mit gemeinsamer Abnahme",
+     "depth": 0,
+     "marker": "disc"
+    },
+    {
+     "id": "5a3e0000-0000-4000-8000-000000000107",
+     "kind": "item",
+     "text": "Schulung des Teams und Übergabe der Dokumentation",
+     "depth": 0,
+     "marker": "disc"
+    }
+   ]
+  },
+  {
+   "id": "5a3e0000-0000-4000-8000-000000000010",
+   "heading": "Termine",
+   "body": "Start in der Kalenderwoche nach Auftragserteilung, Abschluss innerhalb von zehn Wochen.",
+   "nodes": [
+    {
+     "id": "5a3e0000-0000-4000-8000-000000000109",
+     "kind": "paragraph",
+     "text": "Start in der Kalenderwoche nach Auftragserteilung, Abschluss innerhalb von zehn Wochen."
+    }
+   ]
+  }
+ ],
+ "positions": [
+  {
+   "id": "5a3e0000-0000-4000-8000-000000000300",
+   "pricing_source": "manual",
+   "short_text": "Bestandsaufnahme",
+   "long_text": "Begehung, Interviews und Aufnahme der bestehenden Anlagen",
+   "quantity": "2",
+   "unit_label": "Tag",
+   "unit_price_cents": 96000,
+   "total_cents": 192000,
+   "currency": "EUR"
+  },
+  {
+   "id": "5a3e0000-0000-4000-8000-000000000301",
+   "pricing_source": "manual",
+   "short_text": "Konzept",
+   "long_text": "Zielbild, Etappenplan und Abnahmekriterien",
+   "quantity": "3",
+   "unit_label": "Tag",
+   "unit_price_cents": 96000,
+   "total_cents": 288000,
+   "currency": "EUR"
+  },
+  {
+   "id": "5a3e0000-0000-4000-8000-000000000302",
+   "pricing_source": "manual",
+   "short_text": "Umsetzung Etappe 1",
+   "long_text": "Steuerung der Hallen A und B",
+   "quantity": "64",
+   "unit_label": "Stunde",
+   "unit_price_cents": 11800,
+   "total_cents": 755200,
+   "currency": "EUR"
+  },
+  {
+   "id": "5a3e0000-0000-4000-8000-000000000303",
+   "pricing_source": "manual",
+   "short_text": "Umsetzung Etappe 2",
+   "long_text": "Steuerung der Halle C und der Außenanlagen",
+   "quantity": "48",
+   "unit_label": "Stunde",
+   "unit_price_cents": 11800,
+   "total_cents": 566400,
+   "currency": "EUR"
+  },
+  {
+   "id": "5a3e0000-0000-4000-8000-000000000304",
+   "pricing_source": "manual",
+   "short_text": "Inbetriebnahme",
+   "long_text": "Begleitung vor Ort, Protokoll und Übergabe",
+   "quantity": "1",
+   "unit_label": "Pauschale",
+   "unit_price_cents": 180000,
+   "total_cents": 180000,
+   "currency": "EUR"
+  },
+  {
+   "id": "5a3e0000-0000-4000-8000-000000000305",
+   "pricing_source": "manual",
+   "short_text": "Schulung",
+   "long_text": "Zwei Termine für das Betriebsteam",
+   "quantity": "2",
+   "unit_label": "Termin",
+   "unit_price_cents": 64000,
+   "total_cents": 128000,
+   "currency": "EUR"
+  }
+ ],
+ "net_total_cents": 2109600
+}

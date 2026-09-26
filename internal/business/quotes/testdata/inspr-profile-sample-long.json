@@ -1,0 +1,323 @@
+{
+ "schema_version": 1,
+ "minimum_writer_version": 2,
+ "title": "Modernisierung der Hallensteuerung",
+ "subtitle": "Konzept, Umsetzung und Inbetriebnahme in zwei Etappen",
+ "project_ref": "PRJ-2026-014",
+ "offer_date": "2026-09-21",
+ "valid_until": "2026-10-21",
+ "currency": "EUR",
+ "sender": {
+  "company": "Ihr Unternehmen",
+  "street": "Musterweg 1",
+  "postal_code": "8010",
+  "city": "Graz",
+  "country": "Österreich",
+  "email": "office@beispiel.invalid",
+  "contact_person": "Alex Beispiel"
+ },
+ "recipient": {
+  "name": "Beispiel Stahl GmbH",
+  "address": "Werkstraße 12\n8020 Graz",
+  "contact": "Dana Beispiel",
+  "country": "Österreich",
+  "customer_no": "K-10042"
+ },
+ "legal": {
+  "intro": "Vielen Dank für Ihre Anfrage. Gerne bieten wir Ihnen die folgenden Leistungen an.",
+  "accept_text": "Hiermit nehmen wir das Angebot an.",
+  "vat_note": "Alle Beträge verstehen sich zuzüglich der gesetzlichen Umsatzsteuer.",
+  "payment_terms": "30 Tage netto ab Rechnungsdatum.",
+  "discount_note": "Kein Rabatt vereinbart."
+ },
+ "layout": {},
+ "sections": [
+  {
+   "id": "5a3e0000-0000-4000-8001-000000000003",
+   "heading": "Ausgangslage",
+   "body": "Die bestehende Steuerung der Produktionshalle ist über fünfzehn Jahre gewachsen und soll auf eine einheitliche Plattform gebracht werden. Mehrere Anlagenteile werden heute über getrennte Oberflächen bedient, Störungen lassen sich nur vor Ort nachvollziehen.\nZiel ist ein Betrieb ohne Stillstand, mit klarer Dokumentation für Ihr Team und einer Übergabe, die ohne uns weitergeführt werden kann.",
+   "nodes": [
+    {
+     "id": "5a3e0000-0000-4000-8001-000000000101",
+     "kind": "paragraph",
+     "text": "Die bestehende Steuerung der Produktionshalle ist über fünfzehn Jahre gewachsen und soll auf eine einheitliche Plattform gebracht werden. Mehrere Anlagenteile werden heute über getrennte Oberflächen bedient, Störungen lassen sich nur vor Ort nachvollziehen."
+    },
+    {
+     "id": "5a3e0000-0000-4000-8001-000000000102",
+     "kind": "paragraph",
+     "text": "Ziel ist ein Betrieb ohne Stillstand, mit klarer Dokumentation für Ihr Team und einer Übergabe, die ohne uns weitergeführt werden kann."
+    }
+   ]
+  },
+  {
+   "id": "5a3e0000-0000-4000-8001-000000000008",
+   "heading": "Leistungsumfang",
+   "body": "Wir gehen in drei Schritten vor:\nBestandsaufnahme vor Ort und Abstimmung der Anforderungen mit Betrieb und Instandhaltung\nUmsetzung in zwei Etappen mit gemeinsamer Abnahme nach jeder Etappe\nSchulung des Teams und Übergabe der vollständigen Dokumentation",
+   "nodes": [
+    {
+     "id": "5a3e0000-0000-4000-8001-000000000104",
+     "kind": "paragraph",
+     "text": "Wir gehen in drei Schritten vor:"
+    },
+    {
+     "id": "5a3e0000-0000-4000-8001-000000000105",
+     "kind": "item",
+     "text": "Bestandsaufnahme vor Ort und Abstimmung der Anforderungen mit Betrieb und Instandhaltung",
+     "depth": 0,
+     "marker": "disc"
+    },
+    {
+     "id": "5a3e0000-0000-4000-8001-000000000106",
+     "kind": "item",
+     "text": "Umsetzung in zwei Etappen mit gemeinsamer Abnahme nach jeder Etappe",
+     "depth": 0,
+     "marker": "disc"
+    },
+    {
+     "id": "5a3e0000-0000-4000-8001-000000000107",
+     "kind": "item",
+     "text": "Schulung des Teams und Übergabe der vollständigen Dokumentation",
+     "depth": 0,
+     "marker": "disc"
+    }
+   ]
+  },
+  {
+   "id": "5a3e0000-0000-4000-8001-000000000010",
+   "heading": "Vorgehen",
+   "body": "Jede Etappe beginnt mit einem kurzen Abstimmungstermin und endet mit einer Abnahme anhand der vereinbarten Kriterien. Änderungen am Umfang besprechen wir vorab und halten sie schriftlich fest.",
+   "nodes": [
+    {
+     "id": "5a3e0000-0000-4000-8001-000000000109",
+     "kind": "paragraph",
+     "text": "Jede Etappe beginnt mit einem kurzen Abstimmungstermin und endet mit einer Abnahme anhand der vereinbarten Kriterien. Änderungen am Umfang besprechen wir vorab und halten sie schriftlich fest."
+    }
+   ]
+  },
+  {
+   "id": "5a3e0000-0000-4000-8001-000000000012",
+   "heading": "Termine",
+   "body": "Start in der Kalenderwoche nach Auftragserteilung, Abschluss innerhalb von zehn Wochen. Arbeiten an laufenden Anlagen planen wir gemeinsam mit Ihnen außerhalb der Produktionszeiten.",
+   "nodes": [
+    {
+     "id": "5a3e0000-0000-4000-8001-000000000111",
+     "kind": "paragraph",
+     "text": "Start in der Kalenderwoche nach Auftragserteilung, Abschluss innerhalb von zehn Wochen. Arbeiten an laufenden Anlagen planen wir gemeinsam mit Ihnen außerhalb der Produktionszeiten."
+    }
+   ]
+  },
+  {
+   "id": "5a3e0000-0000-4000-8001-000000000014",
+   "heading": "Zahlungsbedingungen",
+   "body": "30 Tage netto ab Rechnungsdatum. Wir verrechnen je Etappe nach erfolgter Abnahme.",
+   "nodes": [
+    {
+     "id": "5a3e0000-0000-4000-8001-000000000113",
+     "kind": "paragraph",
+     "text": "30 Tage netto ab Rechnungsdatum. Wir verrechnen je Etappe nach erfolgter Abnahme."
+    }
+   ]
+  }
+ ],
+ "positions": [
+  {
+   "id": "5a3e0000-0000-4000-8001-000000000300",
+   "pricing_source": "manual",
+   "short_text": "Bestandsaufnahme",
+   "long_text": "Begehung, Interviews und Aufnahme der bestehenden Anlagen",
+   "quantity": "2",
+   "unit_label": "Tag",
+   "unit_price_cents": 96000,
+   "total_cents": 192000,
+   "currency": "EUR"
+  },
+  {
+   "id": "5a3e0000-0000-4000-8001-000000000301",
+   "pricing_source": "manual",
+   "short_text": "Konzept",
+   "long_text": "Zielbild, Etappenplan und Abnahmekriterien",
+   "quantity": "3",
+   "unit_label": "Tag",
+   "unit_price_cents": 96000,
+   "total_cents": 288000,
+   "currency": "EUR"
+  },
+  {
+   "id": "5a3e0000-0000-4000-8001-000000000302",
+   "pricing_source": "manual",
+   "short_text": "Schnittstellenanalyse",
+   "long_text": "Prüfung der bestehenden Feldbusse und der Anbindung an das Leitsystem",
+   "quantity": "1.5",
+   "unit_label": "Tag",
+   "unit_price_cents": 96000,
+   "total_cents": 144000,
+   "currency": "EUR"
+  },
+  {
+   "id": "5a3e0000-0000-4000-8001-000000000303",
+   "pricing_source": "manual",
+   "short_text": "Umsetzung Etappe 1",
+   "long_text": "Steuerung der Hallen A und B, einschließlich Anpassung der Visualisierung",
+   "quantity": "64",
+   "unit_label": "Stunde",
+   "unit_price_cents": 11800,
+   "total_cents": 755200,
+   "currency": "EUR"
+  },
+  {
+   "id": "5a3e0000-0000-4000-8001-000000000304",
+   "pricing_source": "manual",
+   "short_text": "Test Etappe 1",
+   "long_text": "Funktionstest mit Protokoll, gemeinsam mit der Instandhaltung",
+   "quantity": "12",
+   "unit_label": "Stunde",
+   "unit_price_cents": 11800,
+   "total_cents": 141600,
+   "currency": "EUR"
+  },
+  {
+   "id": "5a3e0000-0000-4000-8001-000000000305",
+   "pricing_source": "manual",
+   "short_text": "Umsetzung Etappe 2",
+   "long_text": "Steuerung der Halle C und der Außenanlagen",
+   "quantity": "48",
+   "unit_label": "Stunde",
+   "unit_price_cents": 11800,
+   "total_cents": 566400,
+   "currency": "EUR"
+  },
+  {
+   "id": "5a3e0000-0000-4000-8001-000000000306",
+   "pricing_source": "manual",
+   "short_text": "Test Etappe 2",
+   "long_text": "Funktionstest mit Protokoll und Nachbesserung offener Punkte",
+   "quantity": "10",
+   "unit_label": "Stunde",
+   "unit_price_cents": 11800,
+   "total_cents": 118000,
+   "currency": "EUR"
+  },
+  {
+   "id": "5a3e0000-0000-4000-8001-000000000307",
+   "pricing_source": "manual",
+   "short_text": "Inbetriebnahme",
+   "long_text": "Begleitung vor Ort, Protokoll und Übergabe",
+   "quantity": "1",
+   "unit_label": "Pauschale",
+   "unit_price_cents": 180000,
+   "total_cents": 180000,
+   "currency": "EUR"
+  },
+  {
+   "id": "5a3e0000-0000-4000-8001-000000000308",
+   "pricing_source": "manual",
+   "short_text": "Dokumentation",
+   "long_text": "Betriebs- und Wartungsdokumentation, Schaltpläne und Parameterlisten",
+   "quantity": "1",
+   "unit_label": "Pauschale",
+   "unit_price_cents": 140000,
+   "total_cents": 140000,
+   "currency": "EUR"
+  },
+  {
+   "id": "5a3e0000-0000-4000-8001-000000000309",
+   "pricing_source": "manual",
+   "short_text": "Schulung",
+   "long_text": "Zwei Termine für das Betriebsteam",
+   "quantity": "2",
+   "unit_label": "Termin",
+   "unit_price_cents": 64000,
+   "total_cents": 128000,
+   "currency": "EUR"
+  },
+  {
+   "id": "5a3e0000-0000-4000-8001-000000000310",
+   "pricing_source": "manual",
+   "short_text": "Schulung Instandhaltung",
+   "long_text": "Ein vertiefender Termin für die Instandhaltung",
+   "quantity": "1",
+   "unit_label": "Termin",
+   "unit_price_cents": 64000,
+   "total_cents": 64000,
+   "currency": "EUR"
+  },
+  {
+   "id": "5a3e0000-0000-4000-8001-000000000311",
+   "pricing_source": "manual",
+   "short_text": "Reisekosten",
+   "long_text": "Anfahrten nach Aufwand, pauschal abgegolten",
+   "quantity": "8",
+   "unit_label": "Anfahrt",
+   "unit_price_cents": 9000,
+   "total_cents": 72000,
+   "currency": "EUR"
+  },
+  {
+   "id": "5a3e0000-0000-4000-8001-000000000312",
+   "pricing_source": "manual",
+   "short_text": "Rufbereitschaft",
+   "long_text": "Erreichbarkeit in den ersten vier Wochen nach Inbetriebnahme",
+   "quantity": "4",
+   "unit_label": "Woche",
+   "unit_price_cents": 45000,
+   "total_cents": 180000,
+   "currency": "EUR"
+  },
+  {
+   "id": "5a3e0000-0000-4000-8001-000000000313",
+   "pricing_source": "manual",
+   "short_text": "Projektleitung",
+   "long_text": "Abstimmung, Berichte und Abnahmen über die gesamte Laufzeit",
+   "quantity": "10",
+   "unit_label": "Woche",
+   "unit_price_cents": 38000,
+   "total_cents": 380000,
+   "currency": "EUR"
+  },
+  {
+   "id": "5a3e0000-0000-4000-8001-000000000314",
+   "pricing_source": "manual",
+   "short_text": "Datensicherung",
+   "long_text": "Einrichtung der Sicherung für Parameter und Programme",
+   "quantity": "1",
+   "unit_label": "Pauschale",
+   "unit_price_cents": 60000,
+   "total_cents": 60000,
+   "currency": "EUR"
+  },
+  {
+   "id": "5a3e0000-0000-4000-8001-000000000315",
+   "pricing_source": "manual",
+   "short_text": "Fernwartung",
+   "long_text": "Einrichtung eines gesicherten Zugangs für die Instandhaltung",
+   "quantity": "1",
+   "unit_label": "Pauschale",
+   "unit_price_cents": 48000,
+   "total_cents": 48000,
+   "currency": "EUR"
+  },
+  {
+   "id": "5a3e0000-0000-4000-8001-000000000316",
+   "pricing_source": "manual",
+   "short_text": "Abnahme",
+   "long_text": "Gemeinsame Schlussabnahme mit Protokoll",
+   "quantity": "1",
+   "unit_label": "Termin",
+   "unit_price_cents": 64000,
+   "total_cents": 64000,
+   "currency": "EUR"
+  },
+  {
+   "id": "5a3e0000-0000-4000-8001-000000000317",
+   "pricing_source": "manual",
+   "short_text": "Nachbetreuung",
+   "long_text": "Zwei Termine nach sechs und zwölf Wochen Betrieb",
+   "quantity": "2",
+   "unit_label": "Termin",
+   "unit_price_cents": 64000,
+   "total_cents": 128000,
+   "currency": "EUR"
+  }
+ ],
+ "net_total_cents": 3649200
+}

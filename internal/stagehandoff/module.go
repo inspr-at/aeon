@@ -291,7 +291,7 @@ func authorizeHandoffRead(ctx context.Context, tx pgx.Tx, p tenant.Principal, h 
 
 func principalRoutedTo(ctx context.Context, tx pgx.Tx, p tenant.Principal, plugin string) (bool, error) {
 	var name, kind, status string
-	err := tx.QueryRow(ctx, `SELECT name, kind, status FROM principals WHERE id=$1::uuid`, p.ID).Scan(&name, &kind, &status)
+	err := tx.QueryRow(ctx, `SELECT name, kind, status FROM principals WHERE id=$1::uuid AND tenant_id=$2::uuid FOR SHARE`, p.ID, p.TenantID).Scan(&name, &kind, &status)
 	if errors.Is(err, pgx.ErrNoRows) {
 		return false, nil
 	}

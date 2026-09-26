@@ -24,6 +24,13 @@ var migrationFiles embed.FS
 // migrate applies each unrecorded SQL file in its own transaction.
 // A later call skips files already listed in schema_migrations.
 func migrate(ctx context.Context, pool *pgxpool.Pool) error {
+	return MigrateWithHook(ctx, pool, nil)
+}
+
+// MigrateWithHook runs pending migrations and calls before just before each
+// file. Migration tests use it to populate an older schema; production passes
+// no hook through migrate.
+func MigrateWithHook(ctx context.Context, pool *pgxpool.Pool, before func(string) error) error {
 	conn, err := pool.Acquire(ctx)
 	if err != nil {
 		return fmt.Errorf("migration connection: %w", err)
@@ -61,6 +68,11 @@ func migrate(ctx context.Context, pool *pgxpool.Pool) error {
 	for _, name := range names {
 		if applied[name] {
 			continue
+		}
+		if before != nil {
+			if err := before(name); err != nil {
+				return fmt.Errorf("before %s: %w", name, err)
+			}
 		}
 		if name == "0771_quote_link_drop_plaintext.sql" {
 			if err := migratePublicLinkTokens(ctx, pool); err != nil {

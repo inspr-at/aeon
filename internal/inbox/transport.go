@@ -160,6 +160,9 @@ func (m *messaging) claim(ctx context.Context, p tenant.Principal, project strin
 				return err
 			}
 			targetID, priorFallback = fallbackID, "not_steerable"
+			if err := retargetReceipt(ctx, tx, id, *targetID); err != nil {
+				return err
+			}
 			if err := tx.QueryRow(ctx, `SELECT adapter,target_kind,maximum_level,sealed_target FROM inbox_message_targets WHERE id=$1::uuid AND principal_id=$2::uuid`, *targetID, p.ID).Scan(&adapter, &kind, &maximum, &sealed); err != nil {
 				return err
 			}
@@ -309,6 +312,13 @@ func (m *messaging) complete(ctx context.Context, p tenant.Principal, project st
 				return err
 			}
 		}
+		confirmed, _, err := confirmedReceiptTarget(ctx, tx, messageID)
+		if err != nil {
+			return err
+		}
+		if err := advanceReceipt(ctx, tx, p, messageID, "handed_off", in.EffectiveLevel, "", confirmed); err != nil {
+			return err
+		}
 		return tx.QueryRow(ctx, `SELECT id::text,message_id::text,target_id::text,fallback_target_id::text,state,reason,attempts,COALESCE(effective_level,''),fallback_reason FROM inbox_message_deliveries WHERE id=$1::uuid`, in.ID).Scan(&out.ID, &out.MessageID, &out.TargetID, &out.FallbackTargetID, &out.State, &out.Reason, &out.Attempts, &out.EffectiveLevel, &out.FallbackReason)
 	})
 	return out, err
@@ -365,8 +375,10 @@ func (m *messaging) unavailableDelivery(w http.ResponseWriter, r *http.Request) 
 		if _, err := tx.Exec(r.Context(), `UPDATE inbox_message_deliveries SET effective_target_id=$2::uuid,lease_token=NULL,lease_until=NULL,fallback_reason=$3 WHERE id=$1::uuid`, in.ID, *fallback, in.FallbackReason); err != nil {
 			return err
 		}
-		_, err = events.Append(r.Context(), tx, p, events.Change{Type: "inbox.delivery_rerouted", After: map[string]any{"delivery_id": in.ID, "target_id": *fallback, "reason": in.FallbackReason}})
-		return err
+		if _, err = events.Append(r.Context(), tx, p, events.Change{Type: "inbox.delivery_rerouted", After: map[string]any{"delivery_id": in.ID, "target_id": *fallback, "reason": in.FallbackReason}}); err != nil {
+			return err
+		}
+		return retargetReceipt(r.Context(), tx, in.ID, *fallback)
 	})
 	if err != nil {
 		messagingFailure(w, err)
