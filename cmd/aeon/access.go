@@ -16,7 +16,7 @@ import (
 	"github.com/jackc/pgx/v5/pgxpool"
 )
 
-const accessUsage = "usage: aeon access bind --tenant SLUG --principal NAME|ID --project KEY --role ROLEKEY | aeon access unbind --tenant SLUG --principal NAME|ID --project KEY"
+const accessUsage = "usage: aeon access bind --tenant SLUG --principal NAME|ID (--project KEY --role ROLEKEY | --workspace-role ROLEKEY) | aeon access unbind --tenant SLUG --principal NAME|ID (--project KEY | --workspace-role)"
 
 // accessCommand is host-only and uses the operator database connection.
 func accessCommand(args []string, stdout io.Writer) error {
@@ -29,7 +29,16 @@ func accessCommand(args []string, stdout io.Writer) error {
 	principal := flags.String("principal", "", "principal name or UUID")
 	project := flags.String("project", "", "project key")
 	role := flags.String("role", "", "role key")
-	if err := flags.Parse(args[1:]); err != nil || flags.NArg() != 0 || *tenantSlug == "" || *principal == "" || *project == "" || args[0] == "bind" && *role == "" || args[0] == "unbind" && *role != "" {
+	var workspaceRole string
+	var workspaceUnbind bool
+	if args[0] == "bind" {
+		flags.StringVar(&workspaceRole, "workspace-role", "", "workspace role key")
+	} else {
+		flags.BoolVar(&workspaceUnbind, "workspace-role", false, "remove workspace role")
+	}
+	if err := flags.Parse(args[1:]); err != nil || flags.NArg() != 0 || *tenantSlug == "" || *principal == "" ||
+		args[0] == "bind" && ((*project != "" && (*role == "" || workspaceRole != "")) || (*project == "" && (*role != "" || workspaceRole == ""))) ||
+		args[0] == "unbind" && (*role != "" || (*project == "") == !workspaceUnbind) {
 		return errors.New(accessUsage)
 	}
 	return withPool(func(ctx context.Context, pool *pgxpool.Pool) error {
@@ -38,11 +47,23 @@ func accessCommand(args []string, stdout io.Writer) error {
 			return err
 		}
 		if args[0] == "bind" {
+			if workspaceRole != "" {
+				if err := authz.OperatorBindWorkspaceRole(ctx, pool, tenantID, *principal, workspaceRole); err != nil {
+					return err
+				}
+				return json.NewEncoder(stdout).Encode(map[string]string{"principal": *principal, "workspace_role": workspaceRole, "status": "bound"})
+			}
 			bindings, err := authz.OperatorBindProjects(ctx, pool, tenantID, *principal, []authz.ProjectRolePair{{Project: *project, Role: *role}})
 			if err != nil {
 				return err
 			}
 			return json.NewEncoder(stdout).Encode(bindings[0])
+		}
+		if workspaceUnbind {
+			if err := authz.OperatorUnbindWorkspaceRole(ctx, pool, tenantID, *principal); err != nil {
+				return err
+			}
+			return json.NewEncoder(stdout).Encode(map[string]string{"principal": *principal, "workspace_role": "", "status": "unbound"})
 		}
 		if err := authz.OperatorUnbindProject(ctx, pool, tenantID, *principal, *project); err != nil {
 			return err

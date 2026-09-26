@@ -133,6 +133,81 @@ func TestOperatorProjectBindingsUseRLSStoreAndEvents(t *testing.T) {
 	}
 }
 
+func TestOperatorWorkspaceBindingsUseHTTPStoreAndProtectOwner(t *testing.T) {
+	d := dbtest.Open(t)
+	ctx := t.Context()
+	var tid, other, agentID, ownerID, foreignID string
+	if err := db.InTenant(dbtest.Seed(ctx), d.App, "00000000-0000-0000-0000-000000000000", func(tx pgx.Tx) error {
+		if err := tx.QueryRow(ctx, `INSERT INTO tenants(slug,name) VALUES('ab1-workspace','AB1 Workspace') RETURNING id::text`).Scan(&tid); err != nil {
+			return err
+		}
+		return tx.QueryRow(ctx, `INSERT INTO tenants(slug,name) VALUES('ab1-workspace-other','Other') RETURNING id::text`).Scan(&other)
+	}); err != nil {
+		t.Fatal(err)
+	}
+	if err := db.InTenant(dbtest.Seed(ctx), d.App, other, func(tx pgx.Tx) error {
+		return tx.QueryRow(ctx, `INSERT INTO principals(tenant_id,kind,name) VALUES($1::uuid,'agent','foreign') RETURNING id::text`, other).Scan(&foreignID)
+	}); err != nil {
+		t.Fatal(err)
+	}
+	if err := db.InTenant(dbtest.Seed(ctx), d.App, tid, func(tx pgx.Tx) error {
+		if err := tx.QueryRow(ctx, `INSERT INTO principals(tenant_id,kind,name) VALUES($1::uuid,'agent','worker') RETURNING id::text`, tid).Scan(&agentID); err != nil {
+			return err
+		}
+		return tx.QueryRow(ctx, `INSERT INTO principals(tenant_id,kind,name) VALUES($1::uuid,'person','Owner') RETURNING id::text`, tid).Scan(&ownerID)
+	}); err != nil {
+		t.Fatal(err)
+	}
+	dbtest.BindRole(t, d, tid, ownerID, "owner")
+	for _, key := range []string{"owner", "guest"} {
+		if err := OperatorValidateWorkspaceRole(ctx, d.App, tid, key); err == nil {
+			t.Fatalf("%s passed preflight", key)
+		}
+		if err := OperatorBindWorkspaceRole(ctx, d.App, tid, agentID, key); err == nil {
+			t.Fatalf("%s bound to agent", key)
+		}
+	}
+	if err := OperatorBindWorkspaceRole(ctx, d.App, tid, foreignID, "member"); err == nil {
+		t.Fatal("foreign principal bound")
+	}
+	if err := OperatorUnbindWorkspaceRole(ctx, d.App, tid, ownerID); !lastOwnerViolation(err) {
+		t.Fatalf("last owner changed: %v", err)
+	}
+	if err := OperatorBindWorkspaceRole(ctx, d.App, tid, agentID, "member"); err != nil {
+		t.Fatal(err)
+	}
+	if err := OperatorBindWorkspaceRole(ctx, d.App, tid, agentID, "member"); err != nil {
+		t.Fatal(err)
+	}
+	operatorID := assertOperator(t, d, tid)
+	check := func(want int, role string) {
+		t.Helper()
+		var count, attributed int
+		var boundRole *string
+		if err := db.InTenant(dbtest.Seed(ctx), d.App, tid, func(tx pgx.Tx) error {
+			return tx.QueryRow(ctx, `SELECT count(*),count(*) FILTER (WHERE actor_principal_id=$2::uuid),
+				(SELECT r.key FROM role_bindings b JOIN roles r ON r.tenant_id=b.tenant_id AND r.id=b.role_id
+				 WHERE b.tenant_id=$1::uuid AND b.principal_id=$3::uuid AND b.scope_type='workspace')
+				FROM events WHERE tenant_id=$1::uuid AND type='authz.workspace_role_changed'`, tid, operatorID, agentID).Scan(&count, &attributed, &boundRole)
+		}); err != nil || count != want || attributed != want || role == "" && boundRole != nil || role != "" && (boundRole == nil || *boundRole != role) {
+			t.Fatalf("workspace state role=%v events=%d attributed=%d want=%s/%d err=%v", boundRole, count, attributed, role, want, err)
+		}
+	}
+	check(1, "member")
+	if err := OperatorUnbindWorkspaceRole(ctx, d.App, tid, agentID); err != nil {
+		t.Fatal(err)
+	}
+	if err := OperatorUnbindWorkspaceRole(ctx, d.App, tid, agentID); err != nil {
+		t.Fatal(err)
+	}
+	check(2, "")
+	// Customer is a workspace role under the same rule as the HTTP path.
+	if err := OperatorBindWorkspaceRole(ctx, d.App, tid, agentID, "customer"); err != nil {
+		t.Fatal(err)
+	}
+	check(3, "customer")
+}
+
 func assertOperator(t *testing.T, d *dbtest.DB, tid string) string {
 	t.Helper()
 	var id string
