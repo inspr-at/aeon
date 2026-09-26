@@ -39,3 +39,15 @@ release-check:
 # Release history manifest (inspr.release-history.v1) embedded in the server; reads the local tags.
 release-history:
     go run ./internal/releasehistory/generate -repo . -repository inspr-at/aeon -offline
+
+# Pack the neutral INSPR quote document profile (AEON-155) into the reproducible
+# tar that `aeon quote-profile apply --bundle -` reads; prints its SHA-256.
+quote-profile-inspr out="dist/quote-profile-inspr.tar":
+    go run ./internal/business/quotes/profiletar -src internal/business/quotes/profiles/inspr -out {{out}}
+
+# Apply the INSPR profile to a test tenant and print its sample quotes as PDFs and
+# page PNGs (needs `just db-up`, `just web-check` and Playwright's Chromium).
+quote-profile-inspr-samples out="tmp/quote-profile-inspr":
+    mkdir -p {{out}}
+    AEON_TEST_DATABASE_URL="{{db_url}}" AEON_PROFILE_SAMPLE_DIR="$(cd {{out}} && pwd)" go test -count=1 -run TestINSPRProfileAppliesAndRendersSampleQuote ./internal/business/quotes/
+    for f in {{out}}/*.pdf; do pdftoppm -r 110 -png "$f" "${f%.pdf}"; done
