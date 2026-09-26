@@ -23,6 +23,8 @@ async function axe(page: Page) {
 }
 
 test('the Knowledge tab groups by kind, filters, searches the text and moves with keys', async ({ page }) => {
+  // Below the docking width an entry opens on its own page (wide screens: knowledge-dock.spec.ts).
+  await page.setViewportSize({ width: 1100, height: 800 })
   const errors = watchErrors(page)
   const { calls } = await open(page, '/p/PHAROS')
   await page.getByRole('radio', { name: 'Knowledge' }).click()
@@ -118,7 +120,7 @@ test('an entry reads with a table of contents, anchors, how agents read it and w
 })
 
 test('editing saves against the version read, warns before a rename and undoes it', async ({ page }) => {
-  const { calls } = await open(page, entry)
+  const { calls, world } = await open(page, entry)
   await expect(page.locator('.e-body')).toBeVisible()
   await page.keyboard.press('e')
   const form = page.getByRole('form', { name: 'Edit deploy-release' })
@@ -142,6 +144,7 @@ test('editing saves against the version read, warns before a rename and undoes i
   await expect(page.getByRole('navigation', { name: 'On this page' })).toHaveCount(0)
   // Undo from the toast brings the old slug, text and status back.
   await page.getByRole('button', { name: 'Undo' }).click()
+  await expect.poll(() => world.entries.find(item => item.id === 'k-deploy')?.slug).toBe('deploy-release')
   await expect(page).toHaveURL('/p/PHAROS/knowledge/runbook/deploy-release')
   await expect(page.getByRole('heading', { name: 'Canary on csb1' })).toBeVisible()
   await expect(page.locator('.e-note.proposed')).toHaveCount(0)
@@ -241,7 +244,9 @@ test('the palette finds knowledge by its words and leads to the tab and the sear
   await expect(knowledge).toHaveText([/Deploy a release to production.*runbook\/deploy-release/])
   await expect(palette.getByRole('option', { name: /Search all knowledge for “rollback”/ })).toBeVisible()
   await page.keyboard.press('Enter')
-  await expect(page).toHaveURL(entry)
+  // Wide, the entry opens docked beside its project's list.
+  await expect(page).toHaveURL('/p/PHAROS/knowledge?entry=runbook/deploy-release')
+  await expect(page.getByRole('complementary', { name: 'Runbook: Deploy a release to production' })).toBeVisible()
   await page.keyboard.press('Control+k')
   await page.keyboard.type('new knowledge')
   await palette.getByRole('option', { name: /New knowledge entry in PHAROS/ }).click()

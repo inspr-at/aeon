@@ -1,7 +1,7 @@
 // SPDX-License-Identifier: AGPL-3.0-only
 import { test } from 'node:test'
 import assert from 'node:assert/strict'
-import { buildTimeline, canWrite, commentEditable, describeChange, parseWorkerMarker } from '../src/lib/activity.ts'
+import { buildTimeline, commentEditable, describeChange, parseWorkerMarker } from '../src/lib/activity.ts'
 import type { ActivityItem } from '../src/lib/api.ts'
 
 const mba = { id: 'p-1', name: 'mba' }, mira = { id: 'p-2', name: 'Mira' }
@@ -47,14 +47,11 @@ test('changes read in product words', () => {
   assert.equal(describeChange({ field: 'parent', from: 'a', to: 'b' }).label, 'moved it to another parent')
 })
 
-test('own comments stay editable for 15 minutes; viewers are read-only', () => {
+test('own comments stay editable for 15 minutes', () => {
   const now = Date.parse(at(14))
   assert.equal(commentEditable({ at: at(0), author: { id: 'p-1' } }, 'p-1', now), true)
   assert.equal(commentEditable({ at: at(0), author: { id: 'p-1' } }, 'p-1', Date.parse(at(15))), false)
   assert.equal(commentEditable({ at: at(0), author: { id: 'p-2' } }, 'p-1', now), false)
-  assert.equal(canWrite(['member']), true)
-  assert.equal(canWrite(['viewer']), false)
-  assert.equal(canWrite(undefined), true)
 })
 
 test('worker markers parse in their real variants; other comments stay comments', () => {

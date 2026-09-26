@@ -25,7 +25,7 @@ func (m *Module) branchDraft(w http.ResponseWriter, r *http.Request) {
 		respond(w, 0, nil, e)
 		return
 	}
-	if !admin(p) {
+	if !m.allow(r, p) {
 		respond(w, 0, nil, denied())
 		return
 	}

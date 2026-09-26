@@ -36,6 +36,8 @@ export const TYPES: readonly TypeMeta[] = [
   { type: 'external-system', label: 'External system', plural: 'External systems', icon: 'server', hint: 'Services the work touches: consoles, APIs, vaults.' },
   { type: 'related-project', label: 'Related project', plural: 'Related projects', icon: 'folders', hint: 'Projects this one depends on or feeds.' },
 ]
+// Each kind's hue (tokens.css --kind-*): list icons, graph bubbles and the legend agree.
+export const kindToken = (type: KnowledgeType | 'ticket') => `--kind-${type}`
 export function typeMeta(type: string): TypeMeta {
   return TYPES.find(t => t.type === type || t.type === type.replace(/_/g, '-')) ?? TYPES[0]
 }
@@ -177,6 +179,28 @@ export function countBy<T extends KnowledgeItem>(items: T[]) {
 export function entryPath(routeKey: string, type: KnowledgeType, slug: string, heading = ''): string {
   return `/p/${encodeURIComponent(routeKey)}/knowledge/${type}/${encodeURIComponent(slug)}${heading ? `#${heading}` : ''}`
 }
+// ---------- The docked preview (U25) ----------
+// From this width the list keeps at least 560px beside a reading pane of 560px
+// (page gutter 28px, gap 22px, window margin 10px); below it an entry opens on
+// its own page, as before.
+export const DOCK_MIN_WIDTH = 1200
+export const DOCK_MEDIA = `(min-width: ${DOCK_MIN_WIDTH}px)`
+// The list keeps this much of the window beside the pane (560px plus the margins).
+export const DOCK_LIST_RESERVE = 620
+// The pane's entry in the list's address: ?entry=<type>/<slug>.
+export function entryParam(type: KnowledgeType, slug: string): string { return `${type}/${slug}` }
+export function parseEntryParam(value: unknown): { type: KnowledgeType; slug: string } | null {
+  if (typeof value !== 'string') return null
+  const at = value.indexOf('/')
+  if (at <= 0) return null
+  const type = value.slice(0, at), slug = value.slice(at + 1)
+  return isKnowledgeType(type) && slug ? { type, slug } : null
+}
+export function dockPath(routeKey: string, type: KnowledgeType, slug: string): string {
+  // Written like the router writes it (the slash stays readable).
+  return `/p/${encodeURIComponent(routeKey)}/knowledge?entry=${type}/${encodeURIComponent(slug)}`
+}
+
 // How an agent reads the entry. The command is the product's CLI in its classic mode.
 export function cliCommand(product: string, routeKey: string, type: KnowledgeType, slug: string): string {
   return `${product.toLowerCase()} knowledge get ${type} ${slug} --project ${routeKey}`
@@ -184,11 +208,14 @@ export function cliCommand(product: string, routeKey: string, type: KnowledgeTyp
 
 // ---------- Reading ----------
 // Bodies often open with the entry's own title as a heading; the page shows it already.
+// A heading that is the title's start ("ADR-001 · Foundation" for "ADR-001 · Foundation (accepted)") counts too.
 export function withoutTitle(body: string, title: string): string {
   const match = /^\s*#\s+(.+?)\s*#*\s*(?:\n|$)/.exec(body)
   if (!match) return body
   const norm = (value: string) => value.toLowerCase().replace(/[^a-z0-9äöüß]+/g, ' ').trim()
-  return norm(match[1]) === norm(title) ? body.slice(match[0].length).replace(/^\s*\n/, '') : body
+  const heading = norm(match[1]), name = norm(title)
+  const same = heading === name || (heading.length >= 8 && name.startsWith(`${heading} `))
+  return same ? body.slice(match[0].length).replace(/^\s*\n/, '') : body
 }
 export function readingMinutes(body: string): number {
   const words = body.replace(/```[\s\S]*?```/g, ' ').split(/\s+/).filter(Boolean).length

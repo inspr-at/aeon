@@ -1,7 +1,7 @@
 <!-- SPDX-License-Identifier: AGPL-3.0-only -->
 <script setup lang="ts">
 import { computed, nextTick, onBeforeUnmount, onMounted, ref, shallowRef, watch } from 'vue'
-import { useRouter } from 'vue-router'
+import { onBeforeRouteLeave } from 'vue-router'
 import { setPageTitle } from '../../lib/brand'
 import { headerFolded } from '../../lib/chrome'
 import { confirmAction } from '../../lib/confirm'
@@ -39,7 +39,6 @@ import AppIcon from '../AppIcon.vue'
 // presence and undo history) from lib/quoteWorkspace, so switching between them
 // keeps unsaved work and never rejoins. Its layout follows its own width.
 const props = defineProps<{ quoteId: string; layout: 'full' | 'dock'; autoPrint?: boolean }>()
-const router = useRouter()
 const emit = defineEmits<{ close: []; expand: []; collapse: []; open: [quoteId: string]; printed: [] }>()
 const identity = useSession()
 const business = useBusiness()
@@ -475,7 +474,7 @@ function beforeUnload(event: BeforeUnloadEvent) {
   event.preventDefault()
   event.returnValue = ''
 }
-const removeRouteGuard = router.beforeEach(async to => {
+onBeforeRouteLeave(async to => {
   const sameQuote = to.path === `/business/quotes/${props.quoteId}` || (to.path === '/business/quotes' && to.query.quote === props.quoteId)
   if (sameQuote || !hasLocalWork()) return true
   const quote = live.value
@@ -487,7 +486,7 @@ const removeRouteGuard = router.beforeEach(async to => {
   })
 })
 onMounted(() => { window.addEventListener('keydown', keys); window.addEventListener('beforeunload', beforeUnload); phoneQuery.addEventListener('change', phoneChange) })
-onBeforeUnmount(() => { removeRouteGuard(); window.removeEventListener('keydown', keys); window.removeEventListener('beforeunload', beforeUnload); phoneQuery.removeEventListener('change', phoneChange); sizer?.disconnect(); rootSizer?.disconnect() })
+onBeforeUnmount(() => { window.removeEventListener('keydown', keys); window.removeEventListener('beforeunload', beforeUnload); phoneQuery.removeEventListener('change', phoneChange); sizer?.disconnect(); rootSizer?.disconnect() })
 onBeforeUnmount(() => { linkRead++ })
 function detailsChanged() { void live.value?.refresh(); void loadPublicLink() }
 // Clicking the footer mark on a page opens its settings on the Document tab.

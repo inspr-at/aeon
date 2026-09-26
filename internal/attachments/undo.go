@@ -8,6 +8,7 @@ import (
 	"reflect"
 	"time"
 
+	"github.com/inspr-at/aeon/internal/authz"
 	"github.com/inspr-at/aeon/internal/events"
 	"github.com/inspr-at/aeon/internal/tenant"
 	"github.com/jackc/pgx/v5"
@@ -34,6 +35,26 @@ func undo(ctx context.Context, tx pgx.Tx, p tenant.Principal, e events.Event) (e
 	}
 	if !reflect.DeepEqual(comparable(current), comparable(expected)) {
 		return events.Change{}, events.ErrConflict
+	}
+	// Undo needs what the reversing change needs, in the attachment's
+	// project: removing an added file, or writing one back (ADR-003 P2).
+	permission := "attachments.write"
+	if e.Type == "attachment.added" {
+		permission = "attachments.delete"
+	}
+	var project *string
+	if err := tx.QueryRow(ctx, `SELECT project_id::text FROM nodes WHERE tenant_id=$1 AND id=$2`, p.TenantID, current.NodeID).Scan(&project); err != nil {
+		if errors.Is(err, pgx.ErrNoRows) {
+			return events.Change{}, events.ErrConflict
+		}
+		return events.Change{}, err
+	}
+	scope := ""
+	if project != nil {
+		scope = *project
+	}
+	if authz.RequireInProjects(ctx, tx, p, permission, scope) != nil {
+		return events.Change{}, events.ErrForbidden
 	}
 	var restored Attachment
 	if e.Type == "attachment.added" {

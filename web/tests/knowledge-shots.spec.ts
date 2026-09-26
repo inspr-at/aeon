@@ -15,8 +15,9 @@ const dir = resolve(process.cwd(), '../../design-ref/shots', round || 'none')
 const widths = (process.env.SHOT_WIDTHS ?? '1920,1440,1280,1024,390').split(',').map(Number)
 const themes = (process.env.SHOT_THEMES ?? 'light,dark').split(',') as ('light' | 'dark')[]
 const only = process.env.SHOT_FILTER ?? ''
+const DOCK_WIDTHS = (process.env.DOCK_WIDTHS ?? '1920,1440,1200,1199,390').split(',').map(Number)
 
-interface State { name: string; path: string; empty?: boolean; options?: KnowledgeMockOptions; act?: (page: Page, width: number) => Promise<void>; full?: boolean }
+interface State { name: string; path: string; empty?: boolean; options?: KnowledgeMockOptions; act?: (page: Page, width: number) => Promise<void>; full?: boolean; widths?: number[] }
 const entry = '/p/PHAROS/knowledge/runbook/deploy-release'
 const states: State[] = [
   { name: '01-list', path: '/p/PHAROS/knowledge', act: async page => { await expect(page.locator('.k-row').first()).toBeVisible() }, full: true },
@@ -54,6 +55,13 @@ const states: State[] = [
   } },
   { name: '18-missing', path: '/p/PHAROS/knowledge/runbook/nope', act: async page => { await expect(page.getByRole('heading', { name: /No runbook called/ })).toBeVisible() } },
   { name: '19-renamed', path: '/p/PHAROS/knowledge/runbook/deploy-flow', act: async page => { await expect(page).toHaveURL(/deploy-release/); await expect(page.locator('.e-body')).toBeVisible() } },
+  // U25: the entry docked beside the list, at wide widths, at the docking edge (1200) and just below it.
+  { name: '20-dock', path: `/p/PHAROS/knowledge?entry=runbook/deploy-release`, widths: DOCK_WIDTHS, full: true, act: async page => { await expect(page.locator('.e-body')).toBeVisible() } },
+  { name: '21-dock-external', path: `/p/PHAROS/knowledge?entry=external-system/hetzner`, widths: DOCK_WIDTHS, act: async page => { await expect(page.locator('.e-body')).toBeVisible() } },
+  { name: '22-dock-edit', path: `/p/PHAROS/knowledge?entry=guideline/no-edge-accents`, widths: DOCK_WIDTHS, act: async page => { await expect(page.locator('.e-body')).toBeVisible(); await page.keyboard.press('e'); await expect(page.getByRole('form', { name: /Edit no-edge-accents/ })).toBeVisible() } },
+  { name: '23-dock-missing', path: `/p/PHAROS/knowledge?entry=runbook/nope`, widths: DOCK_WIDTHS, act: async (page, width) => { if (width >= 1200) await expect(page.getByRole('heading', { name: /No runbook called/ })).toBeVisible() } },
+  { name: '24-dock-search', path: `/p/PHAROS/knowledge?q=deploy&entry=runbook/deploy-release`, widths: DOCK_WIDTHS, act: async page => { await expect(page.locator('.e-body')).toBeVisible() } },
+  { name: '25-dock-memory', path: `/p/PHAROS/knowledge?status=all&entry=memory/hetzner-token-expiry`, widths: DOCK_WIDTHS, act: async page => { await expect(page.locator('.e-body')).toBeVisible() } },
 ]
 
 test.skip(!round, 'set KNOWLEDGE_SHOTS to the round name to capture')
@@ -63,7 +71,8 @@ for (const state of states.filter(s => !only || s.name.includes(only))) {
   test(`knowledge shots ${state.name}`, async ({ browser }) => {
     test.setTimeout(240_000)
     mkdirSync(dir, { recursive: true })
-    for (const theme of themes) for (const width of widths) {
+    const stateWidths = state.widths ?? widths
+    for (const theme of themes) for (const width of stateWidths) {
       const context = await browser.newContext({ viewport: { width, height: width <= 400 ? 844 : 900 }, colorScheme: theme, reducedMotion: 'reduce', deviceScaleFactor: 1 })
       const page = await context.newPage()
       await mockWork(page, fixtures())
@@ -72,13 +81,13 @@ for (const state of states.filter(s => !only || s.name.includes(only))) {
       await state.act?.(page, width)
       await page.waitForTimeout(250)
       await page.screenshot({ path: resolve(dir, `${state.name}-${width}-${theme}.png`) })
-      if (state.full) await page.locator('#main').evaluate(el => { el.scrollTop = el.scrollHeight })
+      if (state.full) await page.evaluate(() => { for (const el of [document.getElementById('main'), document.querySelector('.entry-page.dock .e-scroll')]) if (el) el.scrollTop = el.scrollHeight })
       if (state.full) { await page.waitForTimeout(150); await page.screenshot({ path: resolve(dir, `${state.name}-${width}-${theme}-end.png`) }) }
       await context.close()
     }
     // A contact sheet: every width and theme of this state on one page.
-    const cells = themes.flatMap(theme => widths.map(width => `<figure><img src="${state.name}-${width}-${theme}.png"><figcaption>${width} ${theme}</figcaption></figure>`)).join('')
-    const html = `<!doctype html><meta charset="utf-8"><style>body{margin:0;padding:16px;background:#888;font:12px system-ui;display:grid;grid-template-columns:repeat(${widths.length},auto);gap:12px;align-items:start}figure{margin:0}img{display:block;height:420px;width:auto;box-shadow:0 2px 8px #0006}figcaption{color:#fff;padding:4px 0}</style>${cells}`
+    const cells = themes.flatMap(theme => stateWidths.map(width => `<figure><img src="${state.name}-${width}-${theme}.png"><figcaption>${width} ${theme}</figcaption></figure>`)).join('')
+    const html = `<!doctype html><meta charset="utf-8"><style>body{margin:0;padding:16px;background:#888;font:12px system-ui;display:grid;grid-template-columns:repeat(${stateWidths.length},auto);gap:12px;align-items:start}figure{margin:0}img{display:block;height:420px;width:auto;box-shadow:0 2px 8px #0006}figcaption{color:#fff;padding:4px 0}</style>${cells}`
     const sheet = resolve(dir, `sheet-${state.name}.html`)
     writeFileSync(sheet, html)
     const context = await browser.newContext({ viewport: { width: 2400, height: 1000 } })

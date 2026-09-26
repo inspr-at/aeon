@@ -40,7 +40,7 @@ type claimInput struct {
 }
 
 func (m *messaging) ackCompatMessage(w http.ResponseWriter, r *http.Request) {
-	p, project, ok := messagingPrincipal(w, r, false)
+	p, project, ok := m.messagingPrincipal(w, r, false)
 	if !ok {
 		return
 	}
@@ -69,7 +69,7 @@ func (m *messaging) ackCompatMessage(w http.ResponseWriter, r *http.Request) {
 }
 
 func (m *messaging) claimDelivery(w http.ResponseWriter, r *http.Request) {
-	p, project, ok := messagingPrincipal(w, r, false)
+	p, project, ok := m.messagingPrincipal(w, r, false)
 	if !ok {
 		return
 	}
@@ -99,7 +99,7 @@ func localDeliveryAdapter(name string) bool {
 
 func (m *messaging) claim(ctx context.Context, p tenant.Principal, project string, in claimInput) (*DeliveryWork, error) {
 	var work *DeliveryWork
-	err := db.InTenant(ctx, m.base.pool, p.TenantID, func(tx pgx.Tx) error {
+	err := db.InTenant(tenant.WithPrincipal(ctx, p), m.base.pool, p.TenantID, func(tx pgx.Tx) error {
 		if err := messagingProject(ctx, tx, project); err != nil {
 			return err
 		}
@@ -212,7 +212,7 @@ type completeInput struct {
 }
 
 func (m *messaging) completeDelivery(w http.ResponseWriter, r *http.Request) {
-	p, project, ok := messagingPrincipal(w, r, false)
+	p, project, ok := m.messagingPrincipal(w, r, false)
 	if !ok {
 		return
 	}
@@ -248,7 +248,7 @@ func (m *messaging) completeDelivery(w http.ResponseWriter, r *http.Request) {
 
 func (m *messaging) complete(ctx context.Context, p tenant.Principal, project string, in completeInput) (MessageDelivery, error) {
 	var out MessageDelivery
-	err := db.InTenant(ctx, m.base.pool, p.TenantID, func(tx pgx.Tx) error {
+	err := db.InTenant(tenant.WithPrincipal(ctx, p), m.base.pool, p.TenantID, func(tx pgx.Tx) error {
 		if err := messagingProject(ctx, tx, project); err != nil {
 			return err
 		}
@@ -321,7 +321,7 @@ type unavailableInput struct {
 }
 
 func (m *messaging) unavailableDelivery(w http.ResponseWriter, r *http.Request) {
-	p, project, ok := messagingPrincipal(w, r, false)
+	p, project, ok := m.messagingPrincipal(w, r, false)
 	if !ok {
 		return
 	}

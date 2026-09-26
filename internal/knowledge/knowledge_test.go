@@ -44,21 +44,23 @@ func setup(t *testing.T) fixture {
 	}
 	principal := func(tenantID, name string, roles ...string) tenant.Principal {
 		p := tenant.Principal{TenantID: tenantID, Kind: tenant.Person, Name: name, Roles: roles}
-		err := db.InTenant(t.Context(), d.App, tenantID, func(tx pgx.Tx) error {
+		err := db.InTenant(dbtest.Seed(t.Context()), d.App, tenantID, func(tx pgx.Tx) error {
 			return tx.QueryRow(t.Context(), `INSERT INTO principals(tenant_id,kind,name,roles) VALUES($1,'person',$2,$3) RETURNING id::text`, tenantID, name, roles).Scan(&p.ID)
 		})
 		if err != nil {
 			t.Fatal(err)
 		}
+		dbtest.BindLegacy(t, d, tenantID, p.ID)
 		return p
 	}
 	f.a = principal(tenants[0], "Markus Barta", "member")
 	f.b = principal(tenants[0], "Mira Holm", "member")
 	f.viewer = principal(tenants[0], "Vera Viewer", "viewer")
+	dbtest.BindRole(t, d, tenants[0], f.viewer.ID, "viewer")
 	f.foreign = principal(tenants[1], "Otto Other", "member")
 	node := func(tenantID, key, kind, title string, parent *string) string {
 		var id string
-		err := db.InTenant(t.Context(), d.App, tenantID, func(tx pgx.Tx) error {
+		err := db.InTenant(dbtest.Seed(t.Context()), d.App, tenantID, func(tx pgx.Tx) error {
 			return tx.QueryRow(t.Context(), `INSERT INTO nodes(tenant_id,key,kind_id,title,parent_id)
 			  SELECT $1,$2,id,$3,$5::uuid FROM node_kinds WHERE tenant_id=$1 AND slug=$4 RETURNING id::text`, tenantID, key, title, kind, parent).Scan(&id)
 		})
@@ -217,7 +219,7 @@ func TestCreateReadListAndIsolation(t *testing.T) {
 
 	// Every write is one event with complete node snapshots.
 	var count int
-	err := db.InTenant(t.Context(), f.db.App, f.a.TenantID, func(tx pgx.Tx) error {
+	err := db.InTenant(dbtest.Seed(t.Context()), f.db.App, f.a.TenantID, func(tx pgx.Tx) error {
 		return tx.QueryRow(t.Context(), `SELECT count(*) FROM events WHERE type='knowledge.created' AND before IS NULL AND after ? 'kind_id' AND after ? 'fields'`).Scan(&count)
 	})
 	if err != nil || count != 4 {
@@ -329,7 +331,7 @@ func TestLinksAuthorAndImportedEntries(t *testing.T) {
 	f := setup(t)
 	entry := createEntry(t, f, f.a, map[string]any{"type": "memory", "slug": "keys-rotate-monthly", "title": "Keys rotate monthly"})
 	other := createEntry(t, f, f.a, map[string]any{"type": "runbook", "slug": "rotate-keys", "title": "Rotate keys"})
-	err := db.InTenant(t.Context(), f.db.App, f.a.TenantID, func(tx pgx.Tx) error {
+	err := db.InTenant(dbtest.Seed(t.Context()), f.db.App, f.a.TenantID, func(tx pgx.Tx) error {
 		if _, err := tx.Exec(t.Context(), `INSERT INTO node_relations(tenant_id,source_node_id,target_node_id,type) VALUES($1,$2,$3,'cites'),($1,least($2,$4::uuid),greatest($2,$4::uuid),'relates')`,
 			f.a.TenantID, entry.ID, f.ticket, other.ID); err != nil {
 			return err
@@ -390,6 +392,9 @@ func TestExcerpt(t *testing.T) {
 	}
 	if got := excerpt("tail of a sentence and then more words", "", nil, true); got != "…of a sentence and then more words" {
 		t.Fatalf("cut %q", got)
+	}
+	if got := excerpt("# ADR-001 · Aeon foundation\n\nStatus: accepted.", "ADR-001 · Aeon foundation (accepted)", nil, false); got != "Status: accepted." {
+		t.Fatalf("a heading that starts the title is dropped: %q", got)
 	}
 	if got := excerpt("Aeon is deployed by Pharos.", "Aeon", nil, false); got != "Aeon is deployed by Pharos." {
 		t.Fatalf("a sentence that starts with the title keeps it: %q", got)

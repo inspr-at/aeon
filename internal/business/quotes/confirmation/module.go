@@ -18,6 +18,7 @@ import (
 	"time"
 
 	"github.com/inspr-at/aeon/internal/attachments"
+	"github.com/inspr-at/aeon/internal/authz"
 	"github.com/inspr-at/aeon/internal/db"
 	"github.com/inspr-at/aeon/internal/events"
 	"github.com/inspr-at/aeon/internal/httpapi"
@@ -109,17 +110,12 @@ func (m *Module) Mount(mux *http.ServeMux) {
 	mux.HandleFunc("GET /api/quotes/{quoteId}/versions/{version}/confirmation/receipt", m.receipt)
 	mux.HandleFunc("POST /api/quotes/{quoteId}/versions/{version}/confirmation/retry", m.retry)
 }
-func caller(r *http.Request) (tenant.Principal, bool) {
+func (m *Module) caller(r *http.Request) (tenant.Principal, bool) {
 	p, ok := tenant.PrincipalFrom(r.Context())
 	if !ok || p.Kind != tenant.Person || !uuidPattern.MatchString(p.TenantID) || !uuidPattern.MatchString(p.ID) {
 		return p, false
 	}
-	for _, role := range p.Roles {
-		if role == "admin" || role == "member" {
-			return p, true
-		}
-	}
-	return p, false
+	return p, authz.RequirePattern(authz.BindPool(r.Context(), m.pool), r.Pattern, authz.Scope{}) == nil
 }
 func route(r *http.Request) (string, int, bool) {
 	id := r.PathValue("quoteId")
@@ -178,7 +174,7 @@ func scanJob(row pgx.Row) (Job, error) {
 const jobColumns = `quote_node_id::text,version,state,attempts,next_attempt_at,receipt_sha256,renderer_version,updated_at,acceptance_event_id`
 
 func (m *Module) readiness(w http.ResponseWriter, r *http.Request) {
-	p, ok := caller(r)
+	p, ok := m.caller(r)
 	if !ok {
 		fail(w, 403, "quote access denied")
 		return
@@ -195,7 +191,7 @@ func (m *Module) readiness(w http.ResponseWriter, r *http.Request) {
 	httpapi.WriteJSON(w, 200, map[string]any{"renderer_available": quotepdf.Available() && assetErr == nil, "smtp_enabled": false, "smtp_configured": false, "email_delivery": "disabled"})
 }
 func (m *Module) status(w http.ResponseWriter, r *http.Request) {
-	p, ok := caller(r)
+	p, ok := m.caller(r)
 	if !ok {
 		fail(w, 403, "quote access denied")
 		return
@@ -222,7 +218,7 @@ func (m *Module) status(w http.ResponseWriter, r *http.Request) {
 	httpapi.WriteJSON(w, 200, j)
 }
 func (m *Module) receipt(w http.ResponseWriter, r *http.Request) {
-	p, ok := caller(r)
+	p, ok := m.caller(r)
 	if !ok {
 		fail(w, 403, "quote access denied")
 		return
@@ -255,7 +251,7 @@ func (m *Module) receipt(w http.ResponseWriter, r *http.Request) {
 	_, _ = io.Copy(w, f)
 }
 func (m *Module) notices(w http.ResponseWriter, r *http.Request) {
-	p, ok := caller(r)
+	p, ok := m.caller(r)
 	if !ok {
 		fail(w, 403, "quote access denied")
 		return
@@ -299,18 +295,12 @@ func (m *Module) notices(w http.ResponseWriter, r *http.Request) {
 	httpapi.WriteJSON(w, 200, out)
 }
 func (m *Module) retry(w http.ResponseWriter, r *http.Request) {
-	p, ok := caller(r)
+	p, ok := m.caller(r)
 	if !ok {
 		fail(w, 403, "quote access denied")
 		return
 	}
-	admin := false
-	for _, role := range p.Roles {
-		if role == "admin" {
-			admin = true
-		}
-	}
-	if !admin {
+	if authz.Require(authz.BindPool(r.Context(), m.pool), "quotes.manage", authz.Scope{}) != nil {
 		fail(w, 403, "administrator required")
 		return
 	}
@@ -387,6 +377,8 @@ func (m *Module) ProcessNext(ctx context.Context, tenantID string) (bool, error)
 	if !uuidPattern.MatchString(tenantID) {
 		return false, errors.New("invalid tenant")
 	}
+	// A system job: it confirms quotes of every project (ADR-003 P2).
+	ctx = db.AllProjects(ctx, "quote confirmation job")
 	var j Job
 	claimed := false
 	var err error

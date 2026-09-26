@@ -6,9 +6,11 @@ import (
 	"errors"
 	"net/http"
 	"regexp"
+	"slices"
 	"strings"
 	"time"
 
+	"github.com/inspr-at/aeon/internal/authz"
 	"github.com/inspr-at/aeon/internal/tenant"
 )
 
@@ -108,17 +110,13 @@ func keyJSON(rec keyRecord) agentKeyJSON {
 	}
 }
 
-func isAdmin(p tenant.Principal) bool {
-	return tenant.IsAdmin(p)
-}
-
-func (m *Module) requireAdmin(w http.ResponseWriter, r *http.Request) (tenant.Principal, bool) {
+func (m *Module) requireKeyManagement(w http.ResponseWriter, r *http.Request) (tenant.Principal, bool) {
 	p, ok := tenant.PrincipalFrom(r.Context())
 	if !ok {
 		writeUnauthorized(w)
 		return tenant.Principal{}, false
 	}
-	if p.Kind != tenant.Person || !isAdmin(p) {
+	if p.Kind != tenant.Person || authz.Require(authz.BindPool(r.Context(), m.pool), "keys.manage", authz.Scope{}) != nil {
 		writeForbidden(w)
 		return tenant.Principal{}, false
 	}
@@ -126,20 +124,26 @@ func (m *Module) requireAdmin(w http.ResponseWriter, r *http.Request) (tenant.Pr
 }
 
 func (m *Module) handleCreateAgentKey(w http.ResponseWriter, r *http.Request) {
-	p, ok := m.requireAdmin(w, r)
+	p, ok := m.requireKeyManagement(w, r)
 	if !ok {
 		return
 	}
 	var body struct {
-		Name      string     `json:"name"`
-		Scopes    []string   `json:"scopes"`
-		ExpiresAt *time.Time `json:"expires_at"`
+		Name        string     `json:"name"`
+		PrincipalID string     `json:"principal_id"`
+		Scopes      []string   `json:"scopes"`
+		ExpiresAt   *time.Time `json:"expires_at"`
 	}
 	if !readJSON(w, r, &body) {
 		return
 	}
 	name := strings.TrimSpace(body.Name)
-	if name == "" || len(name) > 200 || strings.ContainsRune(name, 0) {
+	principalID := strings.TrimSpace(body.PrincipalID)
+	if principalID != "" && !uuidRe.MatchString(principalID) {
+		writeBadRequest(w, "principal_id must be a UUID")
+		return
+	}
+	if (principalID == "" && name == "") || len(name) > 200 || strings.ContainsRune(name, 0) {
 		writeBadRequest(w, "name is required")
 		return
 	}
@@ -152,9 +156,17 @@ func (m *Module) handleCreateAgentKey(w http.ResponseWriter, r *http.Request) {
 		writeBadRequest(w, "expires_at must be in the future")
 		return
 	}
-	rec, err := m.createAgentKey(r.Context(), p, name, scopes, body.ExpiresAt)
+	rec, err := m.createAgentKey(r.Context(), p, name, principalID, scopes, body.ExpiresAt)
 	if err != nil {
-		if errors.Is(err, errServicePrincipal) {
+		if errors.Is(err, errNotFound) {
+			writeJSON(w, http.StatusNotFound, errorJSON{Error: "agent not found"})
+			return
+		}
+		if errors.Is(err, errNotAgent) {
+			writeBadRequest(w, "principal_id must be an agent")
+			return
+		}
+		if errors.Is(err, errServicePrincipal) || errors.Is(err, authz.ErrForbidden) {
 			writeForbidden(w)
 			return
 		}
@@ -166,7 +178,7 @@ func (m *Module) handleCreateAgentKey(w http.ResponseWriter, r *http.Request) {
 }
 
 func (m *Module) handleListAgentKeys(w http.ResponseWriter, r *http.Request) {
-	p, ok := m.requireAdmin(w, r)
+	p, ok := m.requireKeyManagement(w, r)
 	if !ok {
 		return
 	}
@@ -183,7 +195,7 @@ func (m *Module) handleListAgentKeys(w http.ResponseWriter, r *http.Request) {
 }
 
 func (m *Module) handleRevokeAgentKey(w http.ResponseWriter, r *http.Request) {
-	p, ok := m.requireAdmin(w, r)
+	p, ok := m.requireKeyManagement(w, r)
 	if !ok {
 		return
 	}
@@ -192,7 +204,7 @@ func (m *Module) handleRevokeAgentKey(w http.ResponseWriter, r *http.Request) {
 		writeBadRequest(w, "invalid id")
 		return
 	}
-	err := m.revokeAgentKey(r.Context(), p.TenantID, id)
+	err := m.revokeAgentKey(r.Context(), p, id)
 	if errors.Is(err, errNotFound) {
 		writeJSON(w, http.StatusNotFound, errorJSON{Error: "not found"})
 		return
@@ -215,7 +227,19 @@ func cleanScopes(in []string) ([]string, error) {
 		if s == "" || len(s) > 128 || strings.ContainsAny(s, " \t\r\n") {
 			return nil, errors.New("bad scope")
 		}
-		out = append(out, s)
+		key := strings.ReplaceAll(s, ":", ".")
+		perm, ok := authz.Lookup(key)
+		if !ok || !perm.AgentGrantable {
+			return nil, errors.New("unknown scope")
+		}
+		if slices.Contains(out, key) {
+			continue
+		}
+		out = append(out, key)
 	}
 	return out, nil
 }
+
+// NormalizeScopes converts colon scopes to dot notation and rejects unknown
+// or non-agent-grantable permissions.
+func NormalizeScopes(in []string) ([]string, error) { return cleanScopes(in) }

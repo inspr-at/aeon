@@ -17,7 +17,6 @@ export {
   configurePlugin,
   disablePermissions,
   installationWrite,
-  isTenantAdmin,
   listPlugins,
   parseCatalog,
   pinAction,

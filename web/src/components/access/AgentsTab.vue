@@ -1,8 +1,8 @@
 <!-- SPDX-License-Identifier: AGPL-3.0-only -->
 <script setup lang="ts">
 import { brand } from '../../lib/brand'
-import { computed, onMounted, ref } from 'vue'
-import { revokeAgentKey, type Agent } from '../../lib/access'
+import { computed, onMounted, ref, watch } from 'vue'
+import { keyHint, revokeAgentKey, type Agent } from '../../lib/access'
 import { can, myPermissions } from '../../lib/authz'
 import { confirmAction } from '../../lib/confirm'
 import { keyState, listAgentKeys, type AgentKey } from '../../lib/settings'
@@ -36,15 +36,18 @@ async function loadKeys() {
 }
 function toggle(agent: Agent) { const next = new Set(open.value); if (next.has(agent.principal_id)) next.delete(agent.principal_id); else next.add(agent.principal_id); open.value = next }
 async function revoke(key: AgentKey) {
-  const ok = await confirmAction({ title: `Revoke the key aeon_${key.prefix}_…?`, points: [`Anything using it is refused from now on; ${key.name} keeps its other keys.`, 'A revoked key cannot be turned back on. Create a new one instead.'], confirmLabel: 'Revoke key', danger: true })
+  const ok = await confirmAction({ title: `Revoke the key ${keyHint(key.prefix)}?`, points: [`Anything using it is refused from now on; ${key.name} keeps its other keys.`, 'A revoked key cannot be turned back on. Create a new one instead.'], confirmLabel: 'Revoke key', danger: true })
   if (!ok) return
-  try { await revokeAgentKey(key.id); await Promise.all([loadKeys(), access.load(true)]); toast(`The key aeon_${key.prefix}_… is revoked`) }
+  try { await revokeAgentKey(key.id); await Promise.all([loadKeys(), access.load(true)]); toast(`The key ${keyHint(key.prefix)} is revoked`) }
   catch (e) { toast(problem(e, 'The key stays active'), { tone: 'error' }) }
 }
 const newKey = ref<Agent | null>(null)
 async function created() { await Promise.all([loadKeys(), access.load(true)]); if (newKey.value) open.value = new Set(open.value).add(newKey.value.principal_id) }
 const picker = ref<{ agent: Agent; anchor: HTMLElement } | null>(null)
 const busy = ref(false)
+// Why the server refused a role change, shown in the open picker.
+const roleError = ref('')
+watch(picker, () => { roleError.value = '' })
 async function chooseRole(roleId: string | null) {
   const target = picker.value
   if (!target) return
@@ -54,7 +57,7 @@ async function chooseRole(roleId: string | null) {
     await access.setWorkspaceRole(target.agent.principal_id, roleId)
     picker.value = null
     toast(`${target.agent.name} is now ${access.roleById.get(roleId ?? '')?.name ?? 'without a workspace role'}; its keys follow`, { action: { label: 'Undo', run: () => void access.setWorkspaceRole(target.agent.principal_id, before) } })
-  } catch (e) { toast(problem(e, `${target.agent.name} keeps its role`), { tone: 'error' }) }
+  } catch (e) { roleError.value = problem(e, `${target.agent.name} keeps its role`) }
   finally { busy.value = false }
 }
 onMounted(loadKeys)
@@ -105,7 +108,7 @@ onMounted(loadKeys)
 
     <RolePicker
       v-if="picker" :anchor="picker.anchor" :subject="picker.agent.name" :roles="access.roles" :current="picker.agent.workspace_role?.id ?? null" :registry="access.registry"
-      :mine="myPermissions()" scope="workspace" allow-none none-label="No role" :busy="busy" @choose="chooseRole" @close="picker = null"
+      :mine="myPermissions()" scope="workspace" allow-none none-label="No role" :busy="busy" :error="roleError" @choose="chooseRole" @close="picker = null"
     />
     <NewKeySheet v-if="newKey" :agent="newKey" @close="newKey = null" @created="created" />
   </div>

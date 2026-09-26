@@ -5,6 +5,7 @@ package auth
 import (
 	"bytes"
 	"encoding/json"
+	"github.com/inspr-at/aeon/internal/dbtest"
 	"log/slog"
 	"net/http"
 	"net/http/httptest"
@@ -67,7 +68,7 @@ func TestMeDevMode(t *testing.T) {
 func signinPerson(t *testing.T, tid, subject, name, email, identityEmail, role string) (string, string) {
 	t.Helper()
 	var pid, iid string
-	err := db.InTenant(t.Context(), appPool, tid, func(tx pgx.Tx) error {
+	err := db.InTenant(dbtest.Seed(t.Context()), appPool, tid, func(tx pgx.Tx) error {
 		if err := tx.QueryRow(t.Context(), `INSERT INTO identities(issuer,subject,email,display_name) VALUES('test-signin',$1,$2,$3) RETURNING id::text`, subject, identityEmail, name).Scan(&iid); err != nil {
 			return err
 		}

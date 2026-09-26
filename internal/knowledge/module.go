@@ -18,6 +18,7 @@ import (
 	"github.com/jackc/pgx/v5/pgconn"
 	"github.com/jackc/pgx/v5/pgxpool"
 
+	"github.com/inspr-at/aeon/internal/authz"
 	"github.com/inspr-at/aeon/internal/db"
 	"github.com/inspr-at/aeon/internal/events"
 	"github.com/inspr-at/aeon/internal/httpapi"
@@ -100,15 +101,8 @@ func principal(w http.ResponseWriter, r *http.Request) (tenant.Principal, bool) 
 	return p, true
 }
 
-// canWrite mirrors the web app: viewer and read-only roles read but never write.
-func canWrite(p tenant.Principal) bool {
-	for _, role := range p.Roles {
-		switch strings.ToLower(role) {
-		case "viewer", "readonly", "read_only", "read-only":
-			return false
-		}
-	}
-	return true
+func canWrite(ctx context.Context, tx pgx.Tx, p tenant.Principal, permission string) bool {
+	return authz.RequireTx(ctx, tx, p, permission, authz.RouteScope(ctx)) == nil
 }
 
 func readObject(w http.ResponseWriter, r *http.Request) (map[string]json.RawMessage, error) {
@@ -401,7 +395,8 @@ func parseCreate(raw map[string]json.RawMessage) (createInput, error) {
 }
 
 func create(ctx context.Context, tx pgx.Tx, p tenant.Principal, in createInput) (Entry, error) {
-	if !canWrite(p) {
+	// A new entry is decided in the project it joins (ADR-003 P2).
+	if !validUUID(in.ProjectID) || authz.RequireTx(ctx, tx, p, "knowledge.write", authz.Scope{ProjectID: in.ProjectID}) != nil {
 		return Entry{}, fail(http.StatusForbidden, "forbidden", "you can read knowledge but not change it")
 	}
 	var projectOK bool
@@ -617,7 +612,7 @@ var errStale = errors.New("stale")
 func (m *module) update(ctx context.Context, p tenant.Principal, id string, in patchInput, expected *time.Time) (Entry, error) {
 	var entry Entry
 	err := db.InTenant(ctx, m.pool, p.TenantID, func(tx pgx.Tx) error {
-		if !canWrite(p) {
+		if !canWrite(ctx, tx, p, "knowledge.write") {
 			return fail(http.StatusForbidden, "forbidden", "you can read knowledge but not change it")
 		}
 		current, kind, err := lockNode(ctx, tx, p.TenantID, id, false)
@@ -725,7 +720,7 @@ func (m *module) handleDelete(w http.ResponseWriter, r *http.Request) {
 	}
 	var eventID int64
 	err = db.InTenant(r.Context(), m.pool, p.TenantID, func(tx pgx.Tx) error {
-		if !canWrite(p) {
+		if !canWrite(r.Context(), tx, p, "knowledge.delete") {
 			return fail(http.StatusForbidden, "forbidden", "you can read knowledge but not change it")
 		}
 		current, _, err := lockNode(r.Context(), tx, p.TenantID, id, false)

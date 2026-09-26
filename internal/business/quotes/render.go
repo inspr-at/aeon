@@ -171,7 +171,7 @@ func (m *Module) export(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	var v version
-	e = m.tx(r.Context(), p, fence.PermViewsProvide, false, func(tx pgx.Tx) error {
+	e = m.tx(portalContext(r), p, fence.PermViewsProvide, false, func(tx pgx.Tx) error {
 		q, err := readQuote(r.Context(), tx, id, false)
 		if err != nil {
 			return err

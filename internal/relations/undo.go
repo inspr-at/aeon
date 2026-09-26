@@ -51,6 +51,11 @@ func undoCreated(ctx context.Context, tx pgx.Tx, p tenant.Principal, e events.Ev
 	if current.SourceNodeID != original.SourceNodeID || current.TargetNodeID != original.TargetNodeID || current.Type != original.Type || !current.CreatedAt.Equal(original.CreatedAt) {
 		return events.Change{}, events.ErrConflict
 	}
+	// Undoing a link unlinks: relations.delete in both items' projects, as
+	// DELETE /api/relations/{id} needs (ADR-003 P2).
+	if err := requireOnEnds(ctx, tx, p, "relations.delete", current.SourceNodeID, current.TargetNodeID); err != nil {
+		return events.Change{}, undoAuthError(err)
+	}
 	if _, err := tx.Exec(ctx, `DELETE FROM node_relations WHERE tenant_id=$1 AND id=$2`, p.TenantID, current.ID); err != nil {
 		return events.Change{}, err
 	}
@@ -67,6 +72,11 @@ func undoDeleted(ctx context.Context, tx pgx.Tx, p tenant.Principal, e events.Ev
 			return events.Change{}, events.ErrConflict
 		}
 		return events.Change{}, err
+	}
+	// Undoing an unlink links again: relations.write in both items' projects,
+	// as POST /api/relations needs (ADR-003 P2).
+	if err := requireOnEnds(ctx, tx, p, "relations.write", original.SourceNodeID, original.TargetNodeID); err != nil {
+		return events.Change{}, undoAuthError(err)
 	}
 	if err := enforceGraph(ctx, tx, p.TenantID, original.SourceNodeID, original.TargetNodeID, original.Type); err != nil {
 		if errors.Is(err, events.ErrNotFound) || errors.Is(err, errGraph) {
@@ -89,4 +99,14 @@ func undoDeleted(ctx context.Context, tx pgx.Tx, p tenant.Principal, e events.Ev
 		return events.Change{}, err
 	}
 	return events.Change{NodeID: &restored.SourceNodeID, Type: "relation.undone", After: restored}, nil
+}
+
+func undoAuthError(err error) error {
+	switch {
+	case errors.Is(err, errForbiddenRelation):
+		return events.ErrForbidden
+	case errors.Is(err, pgx.ErrNoRows):
+		return events.ErrConflict
+	}
+	return err
 }

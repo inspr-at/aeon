@@ -14,8 +14,7 @@ import {
   clone, decimal, localeDate, num, problems as findProblems, stable, switchLocale, tableRoom, tableWidth, type Locale,
 } from '../../lib/quotes/profileForm'
 import type { QuoteLayout, QuoteProfileDefinition, QuoteSender } from '../../lib/quotes/types'
-import { isTenantAdmin } from '../../components/business/catalog'
-import { useSession } from '../../stores/session'
+import { can } from '../../lib/authz'
 import AppIcon, { type IconName } from '../../components/AppIcon.vue'
 import MmField from '../../components/quotes/inspector/MmField.vue'
 import ProfileColors from '../../components/settings/profiles/ProfileColors.vue'
@@ -31,8 +30,7 @@ import ProfileThumb from '../../components/settings/profiles/ProfileThumb.vue'
 // the default for new quotes, duplicated, and archived with Undo.
 const props = defineProps<{ profileId?: string }>()
 const router = useRouter()
-const session = useSession()
-const admin = computed(() => isTenantAdmin(session.identity))
+const admin = computed(() => can('quotes.manage'))
 const id = useId()
 
 const profiles = ref<QuoteProfile[]>([])

@@ -10,7 +10,7 @@ export type IconName =
   | 'minus' | 'compare' | 'download' | 'paperclip' | 'image' | 'upload' | 'info' | 'journey'
   | 'users' | 'history' | 'sparkle' | 'wrench' | 'bug' | 'gear' | 'commit' | 'tag' | 'box' | 'rollback'
   | 'command' | 'option' | 'backspace'
-  | 'book' | 'runbook' | 'guideline' | 'memory' | 'server' | 'folders' | 'terminal' | 'hash'
+  | 'book' | 'runbook' | 'guideline' | 'memory' | 'server' | 'folders' | 'terminal' | 'hash' | 'graph'
   | 'bookmark' | 'star' | 'calendar' | 'coin' | 'not' | 'sort' | 'select' | 'shift'
   | 'cards' | 'columns' | 'grip'
 </script>
@@ -110,6 +110,7 @@ withDefaults(defineProps<{ name: IconName; size?: number }>(), { size: 16 })
     <template v-else-if="name === 'server'"><rect x="2.2" y="2.4" width="11.6" height="4.6" rx="1.4" /><rect x="2.2" y="9" width="11.6" height="4.6" rx="1.4" /><path d="M4.8 4.7h.01M4.8 11.3h.01M8 4.7h3.2M8 11.3h3.2" /></template>
     <template v-else-if="name === 'folders'"><path d="M4.6 5.2V4c0-.6.4-1 1-1h2.3l1.2 1.2h4.1c.6 0 1 .4 1 1v5.4c0 .6-.4 1-1 1h-.9" /><path d="M1.8 7.2c0-.6.4-1 1-1h2.3l1.2 1.2h4c.6 0 1 .4 1 1v4c0 .6-.4 1-1 1H2.8c-.6 0-1-.4-1-1Z" /></template>
     <template v-else-if="name === 'terminal'"><rect x="1.8" y="2.6" width="12.4" height="10.8" rx="1.8" /><path d="m4.7 6.3 2 1.7-2 1.7M8.3 10.1h3" /></template>
+    <template v-else-if="name === 'graph'"><circle cx="4" cy="4.6" r="1.9" /><circle cx="12" cy="3.8" r="1.6" /><circle cx="11.2" cy="12" r="2.1" /><circle cx="3.6" cy="11.8" r="1.5" /><path d="M5.8 4.4 10.4 4M5.5 5.8l4.3 4.7M11.7 5.4l-.3 4.5M5.1 11.8h4" /></template>
     <path v-else-if="name === 'hash'" d="M6.3 2.4 5.1 13.6M10.9 2.4 9.7 13.6M2.8 5.9h10.6M2.6 10.1h10.6" />
     <path v-else-if="name === 'bookmark'" d="M4.4 2.2h7.2c.3 0 .6.3.6.6v11L8 11.1l-4.2 2.7v-11c0-.3.3-.6.6-.6Z" />
     <path v-else-if="name === 'star'" d="m8 2 1.8 3.7 4 .6-2.9 2.8.7 4L8 11.2l-3.6 1.9.7-4-2.9-2.8 4-.6Z" />

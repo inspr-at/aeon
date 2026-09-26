@@ -5,6 +5,7 @@ package inbox
 import (
 	"errors"
 	"fmt"
+	"github.com/inspr-at/aeon/internal/dbtest"
 	"testing"
 
 	"github.com/inspr-at/aeon/internal/db"
@@ -14,7 +15,7 @@ import (
 
 func TestMessagingAtomicRollbackAndProjectBoundary(t *testing.T) {
 	w, m, project, srv := messagingWorld(t)
-	err := db.InTenant(t.Context(), w.db.Admin, w.sender.TenantID, func(tx pgx.Tx) error {
+	err := db.InTenant(dbtest.Seed(t.Context()), w.db.Admin, w.sender.TenantID, func(tx pgx.Tx) error {
 		_, err := tx.Exec(t.Context(), `CREATE FUNCTION p54_reject_delivery() RETURNS trigger LANGUAGE plpgsql AS $$ BEGIN RAISE EXCEPTION 'fixture rollback'; END $$; CREATE TRIGGER p54_reject BEFORE INSERT ON inbox_message_deliveries FOR EACH ROW EXECUTE FUNCTION p54_reject_delivery()`)
 		return err
 	})
@@ -26,7 +27,7 @@ func TestMessagingAtomicRollbackAndProjectBoundary(t *testing.T) {
 	if _, err := m.commitMessage(t.Context(), w.sender, project, in); err == nil {
 		t.Fatal("failed outbox did not abort")
 	}
-	err = db.InTenant(t.Context(), w.db.Admin, w.sender.TenantID, func(tx pgx.Tx) error {
+	err = db.InTenant(dbtest.Seed(t.Context()), w.db.Admin, w.sender.TenantID, func(tx pgx.Tx) error {
 		for _, table := range []string{"inbox_compat_messages", "inbox_messages", "inbox_reply_obligations", "inbox_message_deliveries", "events"} {
 			var n int
 			if err := tx.QueryRow(t.Context(), "SELECT count(*) FROM "+table).Scan(&n); err != nil {
@@ -44,7 +45,7 @@ func TestMessagingAtomicRollbackAndProjectBoundary(t *testing.T) {
 	}
 	msg := mustCompatSend(t, m, w.sender, project, in)
 	var otherProject string
-	err = db.InTenant(t.Context(), w.db.App, w.sender.TenantID, func(tx pgx.Tx) error {
+	err = db.InTenant(dbtest.Seed(t.Context()), w.db.App, w.sender.TenantID, func(tx pgx.Tx) error {
 		return tx.QueryRow(t.Context(), `INSERT INTO nodes(tenant_id,kind_id,key,title) SELECT $1::uuid,id,'MSG-2','Other' FROM node_kinds WHERE slug='project' RETURNING id::text`, w.sender.TenantID).Scan(&otherProject)
 	})
 	if err != nil {
@@ -98,7 +99,7 @@ func TestMessagingPaginationHeldFilterAndEvents(t *testing.T) {
 			t.Fatal("invalid pagination accepted")
 		}
 	}
-	err := db.InTenant(t.Context(), w.db.App, w.sender.TenantID, func(tx pgx.Tx) error {
+	err := db.InTenant(dbtest.Seed(t.Context()), w.db.App, w.sender.TenantID, func(tx pgx.Tx) error {
 		var leaked bool
 		if err := tx.QueryRow(t.Context(), `SELECT EXISTS(SELECT 1 FROM events WHERE after::text LIKE '%fixture message body%')`).Scan(&leaked); err != nil {
 			return err

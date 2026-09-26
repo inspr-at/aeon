@@ -4,6 +4,7 @@ package nodes
 
 import (
 	"encoding/json"
+	"github.com/inspr-at/aeon/internal/dbtest"
 	"net/http"
 	"net/url"
 	"os"
@@ -155,7 +156,7 @@ func TestList6000FiltersPerformance(t *testing.T) {
 	project := kindBySlug(t, p, "project")
 	ticket := kindBySlug(t, p, "ticket")
 	root := mustNode(t, p, `{"kind_id":"`+project.ID+`","title":"Large project"}`)
-	err := db.InTenant(t.Context(), appPool, p.TenantID, func(tx pgx.Tx) error {
+	err := db.InTenant(dbtest.Seed(t.Context()), appPool, p.TenantID, func(tx pgx.Tx) error {
 		_, err := tx.Exec(t.Context(), `INSERT INTO nodes (tenant_id,key,kind_id,title,fields,state,parent_id,position)
             SELECT $1::uuid,'PERF-'||g,$2::uuid,'Item '||g,
                 jsonb_build_object('priority',CASE g%3 WHEN 0 THEN 'high' WHEN 1 THEN 'medium' ELSE 'low' END,
@@ -203,7 +204,7 @@ func TestList6000FiltersPerformance(t *testing.T) {
 func addPrincipalIn(t *testing.T, tenantID, name string) struct{ ID string } {
 	t.Helper()
 	var id string
-	if err := db.InTenant(t.Context(), appPool, tenantID, func(tx pgx.Tx) error {
+	if err := db.InTenant(dbtest.Seed(t.Context()), appPool, tenantID, func(tx pgx.Tx) error {
 		return tx.QueryRow(t.Context(), `INSERT INTO principals (tenant_id, kind, name, roles) VALUES ($1, 'person', $2, $3) RETURNING id::text`, tenantID, name, []string{"member"}).Scan(&id)
 	}); err != nil {
 		t.Fatal(err)
@@ -230,7 +231,7 @@ func TestListAssigneeFacetOverLargeImportedFields(t *testing.T) {
 			t.Fatal(err)
 		}
 	}
-	err := db.InTenant(t.Context(), appPool, p.TenantID, func(tx pgx.Tx) error {
+	err := db.InTenant(dbtest.Seed(t.Context()), appPool, p.TenantID, func(tx pgx.Tx) error {
 		_, err := tx.Exec(t.Context(), `INSERT INTO nodes (tenant_id,key,kind_id,title,fields,state,parent_id,position)
             SELECT $1::uuid,'IMP-'||g,$2::uuid,'Imported '||g,
                 jsonb_build_object('priority','medium','classic',jsonb_build_object('source_id','ppm-large','assignee_id',100+g%5,

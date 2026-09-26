@@ -3,6 +3,7 @@
 package nodes
 
 import (
+	"github.com/inspr-at/aeon/internal/dbtest"
 	"net/http"
 	"net/http/httptest"
 	"strconv"
@@ -22,7 +23,7 @@ func TestProjectMoveAliasAndUndo(t *testing.T) {
 	source := mustNode(t, p, `{"kind_id":"`+projectKind.ID+`","title":"Source","fields":{"project_key":"SRC"}}`)
 	target := mustNode(t, p, `{"kind_id":"`+projectKind.ID+`","title":"Target","fields":{"project_key":"DST"}}`)
 	issue := mustNode(t, p, `{"kind_id":"`+ticketKind.ID+`","title":"Move me","parent_id":"`+source.ID+`","key_prefix":"SRC"}`)
-	if err := db.InTenant(t.Context(), appPool, p.TenantID, func(tx pgx.Tx) error {
+	if err := db.InTenant(dbtest.Seed(t.Context()), appPool, p.TenantID, func(tx pgx.Tx) error {
 		if _, err := tx.Exec(t.Context(), `INSERT INTO journey_projects(tenant_id,project_node_id)
 		 VALUES($1::uuid,$2::uuid),($1::uuid,$3::uuid)`, p.TenantID, source.ID, target.ID); err != nil {
 			return err
@@ -48,7 +49,7 @@ func TestProjectMoveAliasAndUndo(t *testing.T) {
 	if moved.OldKey != issue.Key || !strings.HasPrefix(moved.NewKey, "DST-") || moved.IssueID != issue.ID || moved.ProjectID != target.ID {
 		t.Fatalf("move: %+v", moved)
 	}
-	if err := db.InTenant(t.Context(), appPool, p.TenantID, func(tx pgx.Tx) error {
+	if err := db.InTenant(dbtest.Seed(t.Context()), appPool, p.TenantID, func(tx pgx.Tx) error {
 		membership, err := loadJourneyMembership(t.Context(), tx, issue.ID)
 		if err != nil {
 			return err
@@ -73,7 +74,7 @@ func TestProjectMoveAliasAndUndo(t *testing.T) {
 		t.Fatalf("alias reuse status %d: %s", w.Code, w.Body.String())
 	}
 	var eventID int64
-	if err := db.InTenant(t.Context(), appPool, p.TenantID, func(tx pgx.Tx) error {
+	if err := db.InTenant(dbtest.Seed(t.Context()), appPool, p.TenantID, func(tx pgx.Tx) error {
 		return tx.QueryRow(t.Context(), `SELECT id FROM events WHERE type='node.project_moved' AND node_id=$1::uuid ORDER BY id DESC LIMIT 1`, issue.ID).Scan(&eventID)
 	}); err != nil {
 		t.Fatal(err)
@@ -89,7 +90,7 @@ func TestProjectMoveAliasAndUndo(t *testing.T) {
 			t.Fatalf("undo resolve %s: %+v", key, resolved)
 		}
 	}
-	if err := db.InTenant(t.Context(), appPool, p.TenantID, func(tx pgx.Tx) error {
+	if err := db.InTenant(dbtest.Seed(t.Context()), appPool, p.TenantID, func(tx pgx.Tx) error {
 		membership, err := loadJourneyMembership(t.Context(), tx, issue.ID)
 		if err != nil {
 			return err

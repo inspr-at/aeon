@@ -55,7 +55,7 @@ func setup(t *testing.T) fixture {
 	}
 	reg.Seal()
 	ctx := context.Background()
-	err = db.InTenant(ctx, f.db.App, f.tenant, func(tx pgx.Tx) error {
+	err = db.InTenant(dbtest.Seed(ctx), f.db.App, f.tenant, func(tx pgx.Tx) error {
 		if _, e := tx.Exec(ctx, `INSERT INTO tenants(id,slug,name) VALUES($1::uuid,'collaboration-test','Collaboration test')`, f.tenant); e != nil {
 			return e
 		}
@@ -64,6 +64,13 @@ func setup(t *testing.T) fixture {
 			dest       *string
 		}{{"admin", "admin", &f.admin}, {"other", "member", &f.other}, {"viewer", "viewer", &f.viewer}, {"customer", "customer", &f.customer}} {
 			if e := tx.QueryRow(ctx, `INSERT INTO principals(tenant_id,kind,name,roles) VALUES($1::uuid,'person',$2,ARRAY[$3]::text[]) RETURNING id::text`, f.tenant, person.name, person.role).Scan(person.dest); e != nil {
+				return e
+			}
+			if person.role == "viewer" {
+				if _, e := tx.Exec(ctx, `INSERT INTO role_bindings(tenant_id,principal_id,role_id,scope_type) SELECT $1::uuid,$2::uuid,id,'workspace' FROM roles WHERE tenant_id=$1::uuid AND key='viewer'`, f.tenant, *person.dest); e != nil {
+					return e
+				}
+			} else if e := dbtest.BindLegacyTx(ctx, tx, f.tenant, *person.dest); e != nil {
 				return e
 			}
 		}
@@ -161,7 +168,7 @@ func TestLeasesAndAuthorization(t *testing.T) {
 		t.Fatalf("unbounded cursor update %d", code)
 	}
 	ctx := context.Background()
-	err := db.InTenant(ctx, f.db.App, f.tenant, func(tx pgx.Tx) error {
+	err := db.InTenant(dbtest.Seed(ctx), f.db.App, f.tenant, func(tx pgx.Tx) error {
 		_, e := tx.Exec(ctx, `UPDATE quote_presence SET last_seen=clock_timestamp()-interval '1 second',last_interaction=clock_timestamp()-interval '61 seconds' WHERE session_id=$1::uuid`, session)
 		return e
 	})
@@ -172,7 +179,7 @@ func TestLeasesAndAuthorization(t *testing.T) {
 	if code, out := f.call(t, f.admin, "PATCH", base+"/"+session, heartbeat); code != 200 || out["sessions"].([]any)[0].(map[string]any)["mode"] != "idle" {
 		t.Fatalf("inactive editor did not idle %d %v", code, out)
 	}
-	err = db.InTenant(ctx, f.db.App, f.tenant, func(tx pgx.Tx) error {
+	err = db.InTenant(dbtest.Seed(ctx), f.db.App, f.tenant, func(tx pgx.Tx) error {
 		_, e := tx.Exec(ctx, `UPDATE quote_presence SET expires_at=clock_timestamp()-interval '1 second' WHERE session_id=$1::uuid`, session)
 		return e
 	})
@@ -188,8 +195,8 @@ func TestLeasesAndAuthorization(t *testing.T) {
 	if code, _ := f.call(t, f.viewer, "POST", base, `{"mode":"viewing","observed_revision":1}`); code != 201 {
 		t.Fatalf("viewer view %d", code)
 	}
-	err = db.InTenant(ctx, f.db.App, f.tenant, func(tx pgx.Tx) error {
-		_, e := tx.Exec(ctx, `UPDATE principals SET roles=ARRAY['customer']::text[] WHERE id=$1::uuid`, f.viewer)
+	err = db.InTenant(dbtest.Seed(ctx), f.db.App, f.tenant, func(tx pgx.Tx) error {
+		_, e := tx.Exec(ctx, `UPDATE role_bindings SET role_id=(SELECT id FROM roles WHERE tenant_id=$1::uuid AND key='customer') WHERE principal_id=$2::uuid AND scope_type='workspace'`, f.tenant, f.viewer)
 		return e
 	})
 	if err != nil {
@@ -198,7 +205,7 @@ func TestLeasesAndAuthorization(t *testing.T) {
 	if code, _ := f.call(t, f.viewer, "GET", base, ""); code != 403 {
 		t.Fatalf("revoked viewer %d", code)
 	}
-	err = db.InTenant(ctx, f.db.App, f.tenant, func(tx pgx.Tx) error {
+	err = db.InTenant(dbtest.Seed(ctx), f.db.App, f.tenant, func(tx pgx.Tx) error {
 		_, e := tx.Exec(ctx, `UPDATE plugin_installations SET enabled=false WHERE plugin_id='business_quotes'`)
 		return e
 	})
@@ -239,7 +246,7 @@ func TestConcurrentJoinsAndTenantIsolation(t *testing.T) {
 	}
 	otherTenant := "bbbbbbbb-bbbb-4bbb-8bbb-bbbbbbbbbbbb"
 	ctx := context.Background()
-	if err := db.InTenant(ctx, f.db.App, otherTenant, func(tx pgx.Tx) error {
+	if err := db.InTenant(dbtest.Seed(ctx), f.db.App, otherTenant, func(tx pgx.Tx) error {
 		_, e := tx.Exec(ctx, `INSERT INTO tenants(id,slug,name) VALUES($1::uuid,'other-collab','Other')`, otherTenant)
 		return e
 	}); err != nil {
@@ -301,7 +308,7 @@ func TestStreamScopedNoticeAndRevocation(t *testing.T) {
 	if got := readUntil("event: presence"); strings.Contains(got, "Secret test text") {
 		t.Fatal("presence exposed document")
 	}
-	err = db.InTenant(ctx, f.db.App, f.tenant, func(tx pgx.Tx) error {
+	err = db.InTenant(dbtest.Seed(ctx), f.db.App, f.tenant, func(tx pgx.Tx) error {
 		_, e := events.Append(ctx, tx, actor, events.Change{NodeID: &f.quote, Type: "quote.draft_updated", After: map[string]any{"draft_revision": 2, "quote_revision": 2, "client_session_id": "11111111-1111-4111-8111-111111111111", "mutation_id": "22222222-2222-4222-8222-222222222222", "secret": "Secret test text"}})
 		return e
 	})
@@ -322,8 +329,8 @@ func TestStreamScopedNoticeAndRevocation(t *testing.T) {
 	if strings.Contains(got, "Secret test text") || !strings.Contains(got, `"draft_revision":2`) || !strings.Contains(got, f.quote) {
 		t.Fatalf("unsafe or missing scoped notice %s", got)
 	}
-	err = db.InTenant(ctx, f.db.App, f.tenant, func(tx pgx.Tx) error {
-		_, e := tx.Exec(ctx, `UPDATE principals SET roles=ARRAY['customer']::text[] WHERE id=$1::uuid`, f.admin)
+	err = db.InTenant(dbtest.Seed(ctx), f.db.App, f.tenant, func(tx pgx.Tx) error {
+		_, e := tx.Exec(ctx, `UPDATE role_bindings SET role_id=(SELECT id FROM roles WHERE tenant_id=$1::uuid AND key='customer') WHERE principal_id=$2::uuid AND scope_type='workspace'`, f.tenant, f.admin)
 		return e
 	})
 	if err != nil {

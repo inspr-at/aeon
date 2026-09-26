@@ -9,8 +9,10 @@ import (
 	"github.com/jackc/pgx/v5"
 	"github.com/jackc/pgx/v5/pgxpool"
 
+	"github.com/inspr-at/aeon/internal/authz"
 	"github.com/inspr-at/aeon/internal/db"
 	"github.com/inspr-at/aeon/internal/httpapi"
+	"github.com/inspr-at/aeon/internal/tenant"
 )
 
 // Module serves /api/agent-accounts.
@@ -46,7 +48,7 @@ func (m *Module) list(w http.ResponseWriter, r *http.Request) {
 	if !ok {
 		return
 	}
-	if err := requireAdmin(p); err != nil {
+	if err := m.requirePermission(r, p, "account.read"); err != nil {
 		writeErr(w, err)
 		return
 	}
@@ -98,7 +100,7 @@ func (m *Module) createWindow(w http.ResponseWriter, r *http.Request) {
 	if !ok {
 		return
 	}
-	if err := requireAdmin(p); err != nil {
+	if err := m.requirePermission(r, p, "account.manage"); err != nil {
 		writeErr(w, err)
 		return
 	}
@@ -125,7 +127,7 @@ func (m *Module) patch(w http.ResponseWriter, r *http.Request) {
 	if !ok {
 		return
 	}
-	if err := requireAdmin(p); err != nil {
+	if err := m.requirePermission(r, p, "account.manage"); err != nil {
 		writeErr(w, err)
 		return
 	}
@@ -145,6 +147,13 @@ func (m *Module) patch(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	httpapi.WriteJSON(w, http.StatusOK, out)
+}
+
+func (m *Module) requirePermission(r *http.Request, p tenant.Principal, permission string) error {
+	if p.Kind != tenant.Person || authz.Require(authz.BindPool(r.Context(), m.pool), permission, authz.Scope{}) != nil {
+		return fail(http.StatusForbidden, "permission denied")
+	}
+	return nil
 }
 
 func (m *Module) probe(w http.ResponseWriter, r *http.Request) {

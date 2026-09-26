@@ -22,7 +22,10 @@ const now = Date.parse('2026-09-23T12:00:00Z')
 const ago = (hours: number) => new Date(now - hours * 3_600_000).toISOString()
 
 type Risk = 'low' | 'medium' | 'high'
-const P = (key: string, group: string, description: string, risk: Risk, project = true) => ({ key, group, description, risk, grantable_at: project ? ['workspace', 'project'] : ['workspace'] })
+// agent_grantable mirrors internal/authz/registry.go: human governance, approval
+// decisions and the portal never go on an agent key.
+const NOT_FOR_AGENTS = new Set(['members.manage', 'roles.manage', 'keys.manage', 'keys.read', 'settings.manage', 'audit.read', 'approvals.decide', 'approvals.decide_high', 'portal.quotes'])
+const P = (key: string, group: string, description: string, risk: Risk, project = true) => ({ key, group, description, risk, grantable_at: project ? ['workspace', 'project'] : ['workspace'], agent_grantable: !NOT_FOR_AGENTS.has(key) })
 export const REGISTRY = [
   P('nodes.read', 'Work', 'See projects, tickets and their history', 'low'),
   P('nodes.write', 'Work', 'Create and edit tickets, move them and change their status', 'medium'),
@@ -125,13 +128,13 @@ export function accessWorld(options: { role?: 'owner' | 'admin' | 'member' | 'vi
   const r = (id: string) => ref(world.roles.find(x => x.id === id)!)
   e(24 * 60, ME, 'invite.created', null, { id: 'inv-4', email: 'jonas@inspr.at' })
   e(24 * 59, JONAS, 'invite.accepted', null, { id: 'inv-4', email: 'jonas@inspr.at', principal_id: JONAS })
-  e(24 * 40, ME, 'principal.deactivated', null, { principal_id: PAUL })
+  e(24 * 40, ME, 'principal.deactivated', { principal_id: PAUL, status: 'active' }, { principal_id: PAUL, status: 'deactivated' })
   e(24 * 30, ME, 'role.created', null, { id: 'role-lead', name: 'Delivery lead', permissions: world.roles.find(x => x.id === 'role-lead')!.permissions })
   e(24 * 11, ME, 'agent_key.created', null, { id: 'k2', principal_id: DEPLOYER, name: 'pharos-deployer', prefix: 'ph4r' })
-  e(24 * 5, MIRA, 'binding.set', null, { principal_id: LENA, scope: 'project', project_id: 'p-aeon', role: r('role-guest') })
-  e(26, MIRA, 'binding.set', { principal_id: JONAS, scope: 'project', project_id: 'p-pharos', role: r('role-member') }, { principal_id: JONAS, scope: 'project', project_id: 'p-pharos', role: r('role-lead') })
+  e(24 * 5, MIRA, 'binding.set', null, { principal_id: LENA, scope_type: 'project', project_id: 'p-aeon', role: r('role-guest') })
+  e(26, MIRA, 'binding.set', { principal_id: JONAS, scope_type: 'project', project_id: 'p-pharos', role: r('role-member') }, { principal_id: JONAS, scope_type: 'project', project_id: 'p-pharos', role: r('role-lead') })
   e(20, MIRA, 'invite.created', null, { id: 'inv-1', email: 'anna@studio.at' })
-  e(2, ME, 'principal.alias_linked', null, { principal_id: ME, from_principal_id: MBA_CLASSIC })
+  e(2, ME, 'principal.alias_linked', { principal_id: MBA_CLASSIC, linked_to: null }, { principal_id: MBA_CLASSIC, linked_to: ME })
   return world
 }
 
@@ -148,13 +151,14 @@ export async function mockAccess(page: Page, world: AccessWorld) {
   const fail = (route: Route, status: number, code: string, reason: string, field?: string) => route.fulfill({ status, json: { error: reason, code, reason, ...(field ? { field } : {}) } })
   const roleRef = (id: string | null) => { const role = world.roles.find(r => r.id === id); return role ? ref(role) : null }
   const projectRoles = (principal: string) => world.bindings.filter(b => b.principal_id === principal).map(b => ({ project_id: b.project_id, project_key: world.projects[b.project_id]?.key ?? '', project_title: world.projects[b.project_id]?.title ?? '', role: roleRef(b.role_id)! }))
-  const person = (p: AccessWorld['people'][number]) => ({ ...p, workspace_role: roleRef(p.workspace_role), project_roles: projectRoles(p.principal_id) })
-  const agent = (a: AccessWorld['agents'][number]) => ({ ...a, workspace_role: roleRef(a.workspace_role), key_count: world.keys.filter(k => k.principal_id === a.principal_id && !k.revoked_at).length })
-  const invite = (i: AccessWorld['invites'][number]) => ({ ...i, workspace_role: roleRef(i.workspace_role), project_roles: i.project_roles.map(pr => ({ project_id: pr.project_id, project_key: world.projects[pr.project_id]?.key ?? '', project_title: world.projects[pr.project_id]?.title ?? '', role: roleRef(pr.role_id)! })) })
-  const role = (r: MockRole) => ({ ...r, member_count: world.people.filter(p => p.workspace_role === r.id).length + world.agents.filter(a => a.workspace_role === r.id).length + world.bindings.filter(b => b.role_id === r.id).length })
   const activeOwners = () => world.people.filter(p => p.status === 'active' && p.workspace_role === 'role-owner')
   const lastOwner = (id: string) => { const p = world.people.find(x => x.principal_id === id); return p?.workspace_role === 'role-owner' && p.status === 'active' && activeOwners().length === 1 }
-  const LAST = 'The last active owner cannot be demoted, deactivated or removed.'
+  const person = (p: AccessWorld['people'][number]) => ({ ...p, has_avatar: false, workspace_role: roleRef(p.workspace_role), project_roles: projectRoles(p.principal_id), last_owner: lastOwner(p.principal_id) })
+  const nameOf = (id: string) => world.people.find(p => p.principal_id === id)?.name ?? world.agents.find(a => a.principal_id === id)?.name ?? world.imported.find(i => i.principal_id === id)?.name ?? world.people.flatMap(p => p.aliases).find(a => a.principal_id === id)?.name ?? ''
+  const principalRef = (id: string) => ({ principal_id: id, name: nameOf(id) })
+  const agent = (a: AccessWorld['agents'][number]) => ({ ...a, has_avatar: false, workspace_role: roleRef(a.workspace_role), key_count: world.keys.filter(k => k.principal_id === a.principal_id && !k.revoked_at).length })
+  const invite = (i: AccessWorld['invites'][number]) => ({ ...i, created_by: principalRef(i.created_by), accepted_by: i.status === 'accepted' ? principalRef(JONAS) : null, accepted_at: i.status === 'accepted' ? ago(24 * 59) : null, workspace_role: roleRef(i.workspace_role), project_roles: i.project_roles.map(pr => ({ project_id: pr.project_id, project_key: world.projects[pr.project_id]?.key ?? '', project_title: world.projects[pr.project_id]?.title ?? '', role: roleRef(pr.role_id)! })) })
+  const role = (r: MockRole) => ({ ...r, member_count: world.people.filter(p => p.workspace_role === r.id).length + world.agents.filter(a => a.workspace_role === r.id).length + world.bindings.filter(b => b.role_id === r.id).length })
 
   await page.route(/\/api\/(me\/permissions|authz\/permissions|roles|members|audit|agent-keys|projects\/[^/]+\/members)(\/|\?|$)/, async route => {
     const request = route.request(), url = new URL(request.url()), path = url.pathname, method = request.method()
@@ -222,7 +226,9 @@ export async function mockAccess(page: Page, world: AccessWorld) {
     // ---------- Members ----------
     if (path === '/api/members' && method === 'GET') {
       if (!need('members.read')) return fail(route, 403, 'forbidden', 'You need See members to see who is here.')
-      return route.fulfill({ json: { people: world.people.map(person), agents: world.agents.map(agent), invites: world.invites.map(invite), imported: world.imported } })
+      // Like internal/authz/members.go: imported classic identities appear in people as well as in imported.
+      const importedPeople = world.imported.map(i => ({ principal_id: i.principal_id, name: i.name, avatar_url: null, has_avatar: false, email: null, status: 'active', identity: null, workspace_role: null, project_roles: [], aliases: [], classic_role: i.classic_role, last_active_at: null, last_owner: false }))
+      return route.fulfill({ json: { people: [...world.people.map(person), ...importedPeople], agents: world.agents.map(agent), invites: world.invites.map(invite), imported: world.imported, owner_count: activeOwners().length } })
     }
     const roleOf = /^\/api\/members\/([^/]+)\/workspace-role$/.exec(path)
     if (roleOf && method === 'PUT') {
@@ -230,12 +236,14 @@ export async function mockAccess(page: Page, world: AccessWorld) {
       const id = roleOf[1], next = (body.role_id as string | null) ?? null
       const target = world.people.find(p => p.principal_id === id) ?? world.agents.find(a => a.principal_id === id)
       if (!target) return fail(route, 404, 'not_found', 'This person is no longer here.')
-      if (lastOwner(id) && next !== 'role-owner') return fail(route, 409, 'last_owner', LAST, 'role_id')
+      if (next === 'role-guest') return fail(route, 400, 'project_only_role', 'Guest is a project role; grant it on a project instead', 'role_id')
+      if (lastOwner(id) && next !== 'role-owner') return fail(route, 409, 'last_owner', 'The last active owner cannot be removed', 'role_id')
       const beyond = world.roles.find(r => r.id === next)?.permissions.filter(k => !mine(world).has(k)) ?? []
-      if (beyond.length) return fail(route, 403, 'escalation', 'You cannot give a role with permissions you do not hold.', 'role_id')
+      if (beyond.length) return fail(route, 403, 'forbidden', 'You cannot grant a role with permissions you do not hold', 'role_id')
       const before = roleRef(target.workspace_role)
       target.workspace_role = next
-      event(next ? 'binding.set' : 'binding.removed', { principal_id: id, scope: 'workspace', role: before }, next ? { principal_id: id, scope: 'workspace', role: roleRef(next) } : null)
+      // authz.workspace_role_changed, which the access log reads as binding.set or binding.removed.
+      event(next ? 'binding.set' : 'binding.removed', { principal_id: id, role_id: before?.id ?? null }, { principal_id: id, role_id: next })
       return route.fulfill({ json: 'service' in target ? agent(target) : person(target) })
     }
     const lifecycle = /^\/api\/members\/([^/]+)\/(deactivate|reactivate)$/.exec(path)
@@ -244,12 +252,12 @@ export async function mockAccess(page: Page, world: AccessWorld) {
       const target = world.people.find(p => p.principal_id === lifecycle[1])
       if (!target) return fail(route, 404, 'not_found', 'This person is no longer here.')
       if (lifecycle[2] === 'deactivate') {
-        if (lastOwner(target.principal_id)) return fail(route, 409, 'last_owner', LAST)
+        if (lastOwner(target.principal_id)) return fail(route, 409, 'last_owner', 'The last active owner cannot be deactivated. Make another person an owner first.', 'principal_id')
         target.status = 'deactivated'
-        event('principal.deactivated', null, { principal_id: target.principal_id })
+        event('principal.deactivated', { principal_id: target.principal_id, status: 'active' }, { principal_id: target.principal_id, status: 'deactivated' })
       } else {
         target.status = 'active'
-        event('principal.reactivated', null, { principal_id: target.principal_id })
+        event('principal.reactivated', { principal_id: target.principal_id, status: 'deactivated' }, { principal_id: target.principal_id, status: 'active' })
       }
       return route.fulfill({ json: person(target) })
     }
@@ -260,29 +268,30 @@ export async function mockAccess(page: Page, world: AccessWorld) {
       if (!target) return fail(route, 404, 'not_found', 'This person is no longer here.')
       if (method === 'POST') {
         const from = world.imported.find(i => i.principal_id === body.from_principal_id)
-        if (!from) return fail(route, 409, 'linked', 'This identity is already linked to someone.', 'from_principal_id')
+        if (!from) return fail(route, 409, 'conflict', 'That person is already linked. Unlink them first.', 'from_principal_id')
         world.imported.splice(world.imported.indexOf(from), 1)
         target.aliases.push({ principal_id: from.principal_id, name: from.name, source: 'classic' })
-        event('principal.alias_linked', null, { principal_id: target.principal_id, from_principal_id: from.principal_id })
+        event('principal.alias_linked', { principal_id: from.principal_id, linked_to: null }, { principal_id: from.principal_id, linked_to: target.principal_id })
         return route.fulfill({ json: person(target) })
       }
       if (method === 'DELETE') {
         const index = target.aliases.findIndex(a => a.principal_id === alias[2])
-        if (index === -1) return fail(route, 404, 'not_found', 'This identity is not linked here.')
+        if (index === -1) return fail(route, 404, 'not_found', 'That alias is not linked to this person', 'from_principal_id')
         const [gone] = target.aliases.splice(index, 1)
         world.imported.push({ principal_id: gone.principal_id, name: gone.name, classic_role: null })
-        event('principal.alias_unlinked', null, { principal_id: target.principal_id, from_principal_id: gone.principal_id })
+        event('principal.alias_unlinked', { principal_id: gone.principal_id, linked_to: target.principal_id }, { principal_id: gone.principal_id, linked_to: null })
         return route.fulfill({ status: 204 })
       }
     }
     if (path === '/api/members/invites' && method === 'POST') {
       if (!need('members.manage')) return fail(route, 403, 'forbidden', 'You need Manage members to invite people.')
       const email = String(body.email ?? '').trim().toLowerCase()
-      if (!/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(email)) return fail(route, 400, 'invalid', 'Enter an email address like name@example.com.', 'email')
-      if (world.people.some(p => p.email === email && p.status === 'active')) return fail(route, 409, 'member', `${email} is already a member of this workspace.`, 'email')
+      if (!/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(email)) return fail(route, 400, 'invalid', 'Enter an email address', 'email')
+      if (body.workspace_role_id === 'role-guest') return fail(route, 400, 'project_only_role', 'Guest is a project role; grant it on a project instead', 'workspace_role_id')
+      if (world.people.some(p => p.email === email && p.status === 'active')) return fail(route, 409, 'already_member', 'This person is already an active member', 'email')
       if (world.invites.some(i => i.email === email && i.status === 'pending')) return fail(route, 409, 'pending', `There is already a pending invite for ${email}. Revoke it first to send a new link.`, 'email')
       const days = Number(body.expires_in_days ?? 14)
-      if (!(days >= 1 && days <= 90)) return fail(route, 400, 'invalid', 'An invite can last from 1 to 90 days.', 'expires_in_days')
+      if (!(days >= 1 && days <= 90)) return fail(route, 400, 'invalid', 'Expiry must be between 1 and 90 days', 'expires_in_days')
       const created = { id: `inv-${nextId++}`, email, workspace_role: (body.workspace_role_id as string | undefined) ?? null, project_roles: (body.project_roles as { project_id: string; role_id: string }[] | undefined) ?? [], status: 'pending' as const, created_by: world.me, created_at: new Date(now).toISOString(), expires_at: new Date(now + days * 86_400_000).toISOString() }
       world.invites.unshift(created)
       event('invite.created', null, { id: created.id, email })
@@ -302,58 +311,75 @@ export async function mockAccess(page: Page, world: AccessWorld) {
     if (project) {
       const projectId = project[1]
       if (method === 'GET') {
-        if (!need('members.read')) return fail(route, 403, 'forbidden', 'You need See members.')
+        if (!need('members.read')) return fail(route, 403, 'forbidden', 'Permission denied')
+        // Like internal/authz/project_members.go: one row per active person or agent
+        // who reaches the project (a project binding, or a workspace role that reads
+        // work); no deactivated principals, classic aliases or service principals.
         const out: unknown[] = []
-        for (const p of world.people.filter(x => x.status === 'active')) {
-          const ws = world.roles.find(r => r.id === p.workspace_role)
-          if (ws?.permissions.includes('nodes.read')) out.push({ principal_id: p.principal_id, name: p.name, avatar_url: null, kind: 'person', via: 'workspace', role: ref(ws) })
-        }
-        for (const a of world.agents.filter(x => !x.service)) {
-          const ws = world.roles.find(r => r.id === a.workspace_role)
-          if (ws?.permissions.includes('nodes.read')) out.push({ principal_id: a.principal_id, name: a.name, avatar_url: null, kind: 'agent', via: 'workspace', role: ref(ws) })
-        }
-        for (const b of world.bindings.filter(x => x.project_id === projectId)) {
-          const who = world.people.find(p => p.principal_id === b.principal_id) ?? world.agents.find(a => a.principal_id === b.principal_id)
-          if (who) out.push({ principal_id: b.principal_id, name: who.name, avatar_url: null, kind: 'service' in who ? 'agent' : 'person', via: 'project', role: roleRef(b.role_id) })
+        const who = [...world.people.filter(p => p.status === 'active').map(p => ({ ...p, kind: 'person' as const })), ...world.agents.filter(a => !a.service).map(a => ({ ...a, kind: 'agent' as const }))]
+        for (const p of who) {
+          const ws = world.roles.find(r => r.id === p.workspace_role) ?? null
+          const binding = world.bindings.find(b => b.project_id === projectId && b.principal_id === p.principal_id)
+          if (binding) out.push({ principal_id: p.principal_id, name: p.name, avatar_url: null, has_avatar: false, kind: p.kind, via: 'project', role: roleRef(binding.role_id), workspace_role: ws ? ref(ws) : null })
+          else if (ws?.permissions.includes('nodes.read')) out.push({ principal_id: p.principal_id, name: p.name, avatar_url: null, has_avatar: false, kind: p.kind, via: 'workspace', role: ref(ws), workspace_role: ref(ws) })
         }
         return route.fulfill({ json: out })
       }
-      if (!need('members.manage')) return fail(route, 403, 'forbidden', 'You need Manage members on this project.')
+      if (!need('members.manage')) return fail(route, 403, 'forbidden', 'Permission denied')
       const principal = project[2]!
       const existing = world.bindings.find(b => b.project_id === projectId && b.principal_id === principal)
       if (method === 'PUT') {
         const roleId = String(body.role_id ?? '')
         const target = world.roles.find(r => r.id === roleId)
-        if (!target) return fail(route, 400, 'invalid', 'Choose a role.', 'role_id')
-        if (target.permissions.some(k => !mine(world).has(k))) return fail(route, 403, 'escalation', 'You cannot give a role with permissions you do not hold.', 'role_id')
+        if (!target) return fail(route, 400, 'invalid', 'Choose a role in this workspace', 'role_id')
+        if (target.builtin && (target.key === 'owner' || target.key === 'customer')) return fail(route, 400, 'invalid', 'Owner and Customer are workspace roles; choose a project role', 'role_id')
+        if (target.permissions.some(k => !mine(world).has(k))) return fail(route, 403, 'forbidden', 'You cannot grant a role with permissions you do not hold', 'role_id')
         const before = existing ? roleRef(existing.role_id) : null
         if (existing) existing.role_id = roleId; else world.bindings.push({ principal_id: principal, project_id: projectId, role_id: roleId })
-        event('binding.set', before ? { principal_id: principal, scope: 'project', project_id: projectId, role: before } : null, { principal_id: principal, scope: 'project', project_id: projectId, role: roleRef(roleId) })
-        return route.fulfill({ json: { principal_id: principal, project_id: projectId, role: roleRef(roleId) } })
+        event('binding.set', before ? { principal_id: principal, scope_type: 'project', project_id: projectId, role: before } : null, { principal_id: principal, scope_type: 'project', project_id: projectId, role: roleRef(roleId) })
+        return route.fulfill({ json: { id: `binding-${principal}-${projectId}`, principal_id: principal, project_id: projectId, scope_type: 'project', role: roleRef(roleId), created_at: new Date(now).toISOString() } })
       }
       if (method === 'DELETE') {
-        if (!existing) return fail(route, 404, 'not_found', 'This person has no role on this project.')
+        if (!existing) {
+          const p = world.people.find(x => x.principal_id === principal) ?? world.agents.find(x => x.principal_id === principal)
+          if (p && world.roles.find(r => r.id === p.workspace_role)?.permissions.includes('nodes.read')) return fail(route, 409, 'via_workspace', 'This access comes from the workspace role; change it in Members', 'principal_id')
+          return fail(route, 404, 'not_found', 'No project access to remove', 'principal_id')
+        }
         world.bindings.splice(world.bindings.indexOf(existing), 1)
-        event('binding.removed', { principal_id: principal, scope: 'project', project_id: projectId, role: roleRef(existing.role_id) }, null)
+        event('binding.removed', { principal_id: principal, scope_type: 'project', project_id: projectId, role: roleRef(existing.role_id) }, null)
         return route.fulfill({ status: 204 })
       }
     }
     // ---------- Audit ----------
     if (path === '/api/audit') {
       if (!need('audit.read')) return fail(route, 403, 'forbidden', 'You need Read the access log.')
+      // Like internal/authz/audit.go: oldest first after ?after=<id>, 50 a page,
+      // names resolved, snapshots under data.
       const after = Number(url.searchParams.get('after') ?? 0)
-      const items = [...world.events].reverse().filter(e => !after || e.id < after)
-      const page = items.slice(0, 50)
+      const items = world.events.filter(e => !after || e.id > after)
+      const page = items.slice(0, 50).map(e => {
+        const snap = (v: unknown) => (v && typeof v === 'object' ? v as Record<string, unknown> : {})
+        const either = Object.keys(snap(e.after)).length ? snap(e.after) : snap(e.before)
+        const subjectId = typeof either.principal_id === 'string' ? either.principal_id : ''
+        const projectId = typeof either.project_id === 'string' ? either.project_id : ''
+        return { id: e.id, type: e.type, at: e.at, actor: principalRef(e.actor_principal_id), subject: subjectId ? principalRef(subjectId) : null, project: projectId ? { id: projectId, key: world.projects[projectId]?.key ?? '' } : null, data: { before: e.before, after: e.after } }
+      })
       return route.fulfill({ json: { items: page, next_after: items.length > 50 ? page.at(-1)!.id : null } })
     }
     // ---------- Agent keys ----------
     if (path === '/api/agent-keys' && method === 'GET') return route.fulfill({ json: { keys: world.keys } })
     if (path === '/api/agent-keys' && method === 'POST') {
       if (!need('keys.manage')) return fail(route, 403, 'forbidden', 'You need Manage agent keys.')
-      const agentRow = world.agents.find(a => a.name === body.name)
-      if (agentRow?.service) return fail(route, 403, 'service', 'Service principals never get keys.', 'name')
+      const agentRow = world.agents.find(a => a.principal_id === body.principal_id) ?? world.agents.find(a => a.name === body.name)
+      if (!agentRow) return route.fulfill({ status: 404, json: { error: 'agent not found' } })
+      if (agentRow.service) return route.fulfill({ status: 403, json: { error: 'forbidden' } })
+      const scopes = Array.isArray(body.scopes) ? (body.scopes as string[]).map(k => k.replace(/:/g, '.')) : []
+      if (scopes.length > 32 || scopes.some(k => !REGISTRY.find(p => p.key === k)?.agent_grantable)) return route.fulfill({ status: 400, json: { error: 'invalid scopes' } })
+      // Never more than the creator holds, nor (on a shared role) than the agent's role.
+      const agentRole = world.roles.find(r => r.id === agentRow.workspace_role)
+      if (scopes.some(k => !mine(world).has(k) || (agentRole && !agentRole.permissions.includes(k)))) return route.fulfill({ status: 403, json: { error: 'forbidden' } })
       const prefix = `n${String(nextId++).slice(-3)}`
-      const key = { id: `k-${prefix}`, principal_id: agentRow?.principal_id ?? `agent-${prefix}`, name: String(body.name), prefix, scopes: Array.isArray(body.scopes) ? (body.scopes as string[]) : [], created_at: new Date(now).toISOString(), expires_at: (body.expires_at as string | undefined) ?? null, last_used_at: null, revoked_at: null }
+      const key = { id: `k-${prefix}`, principal_id: agentRow?.principal_id ?? `agent-${prefix}`, name: String(body.name), prefix, scopes, created_at: new Date(now).toISOString(), expires_at: (body.expires_at as string | undefined) ?? null, last_used_at: null, revoked_at: null }
       world.keys.unshift(key)
       event('agent_key.created', null, { id: key.id, principal_id: key.principal_id, name: key.name, prefix })
       return route.fulfill({ status: 201, json: { id: key.id, token: `aeon_${prefix}_T0k3nS3cr3tValue`, prefix, name: key.name, expires_at: key.expires_at } })

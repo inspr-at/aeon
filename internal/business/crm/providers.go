@@ -285,7 +285,7 @@ func (m *module) providerGate(ctx context.Context, tx pgx.Tx, tenantID string) e
 	return m.gate(ctx, tx, tenantID, fence.PermIntegrationsCall)
 }
 func (m *module) listProviders(w http.ResponseWriter, r *http.Request) {
-	p, ok := actor(w, r, true)
+	p, ok := m.actor(w, r, true)
 	if !ok {
 		return
 	}
@@ -316,7 +316,7 @@ func (m *module) listProviders(w http.ResponseWriter, r *http.Request) {
 	httpapi.WriteJSON(w, 200, out)
 }
 func (m *module) putProviderConfig(w http.ResponseWriter, r *http.Request) {
-	p, ok := actor(w, r, true)
+	p, ok := m.actor(w, r, true)
 	if !ok {
 		return
 	}
@@ -376,7 +376,7 @@ func (m *module) putProviderConfig(w http.ResponseWriter, r *http.Request) {
 	httpapi.WriteJSON(w, 200, out)
 }
 func (m *module) searchProviders(w http.ResponseWriter, r *http.Request) {
-	p, ok := actor(w, r, true)
+	p, ok := m.actor(w, r, true)
 	if !ok {
 		return
 	}
@@ -450,7 +450,7 @@ func (m *module) searchProviders(w http.ResponseWriter, r *http.Request) {
 	httpapi.WriteJSON(w, 200, filtered)
 }
 func (m *module) importProvider(w http.ResponseWriter, r *http.Request) {
-	p, ok := actor(w, r, true)
+	p, ok := m.actor(w, r, true)
 	if !ok {
 		return
 	}
@@ -534,7 +534,7 @@ func (m *module) importProvider(w http.ResponseWriter, r *http.Request) {
 	httpapi.WriteJSON(w, 201, out)
 }
 func (m *module) syncProvider(w http.ResponseWriter, r *http.Request) {
-	p, ok := actor(w, r, true)
+	p, ok := m.actor(w, r, true)
 	if !ok {
 		return
 	}
@@ -633,7 +633,7 @@ func (m *module) syncProvider(w http.ResponseWriter, r *http.Request) {
 }
 
 func (m *module) providerSyncStatus(w http.ResponseWriter, r *http.Request) {
-	p, ok := actor(w, r, true)
+	p, ok := m.actor(w, r, true)
 	if !ok {
 		return
 	}

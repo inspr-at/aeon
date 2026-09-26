@@ -93,7 +93,7 @@ func (m *Module) versions(w http.ResponseWriter, r *http.Request) {
 		respond(w, 0, nil, e)
 		return
 	}
-	if !staff(p) {
+	if !m.allow(r, p) {
 		respond(w, 0, nil, denied())
 		return
 	}
@@ -153,7 +153,7 @@ func (m *Module) version(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	var out version
-	e = m.tx(r.Context(), p, fence.PermViewsProvide, false, func(tx pgx.Tx) error {
+	e = m.tx(portalContext(r), p, fence.PermViewsProvide, false, func(tx pgx.Tx) error {
 		q, err := readQuote(r.Context(), tx, id, false)
 		if err != nil {
 			return err
@@ -247,7 +247,7 @@ func (m *Module) freeze(w http.ResponseWriter, r *http.Request) {
 		respond(w, 0, nil, e)
 		return
 	}
-	if !staff(p) {
+	if !m.allow(r, p) {
 		respond(w, 0, nil, denied())
 		return
 	}

@@ -167,21 +167,21 @@ func TestCostUnitRates(t *testing.T) {
 		}
 	}
 
-	err := db.InTenant(ctx, database.App, tenantA, func(tx pgx.Tx) error {
+	err := db.InTenant(dbtest.Seed(ctx), database.App, tenantA, func(tx pgx.Tx) error {
 		_, err := tx.Exec(ctx, `UPDATE cost_unit_rates SET bill_amount = bill_amount + 1 WHERE id = $1::uuid`, first.ID)
 		return err
 	})
 	if err == nil {
 		t.Fatal("historical amount changed")
 	}
-	err = db.InTenant(ctx, database.App, tenantA, func(tx pgx.Tx) error {
+	err = db.InTenant(dbtest.Seed(ctx), database.App, tenantA, func(tx pgx.Tx) error {
 		_, err := tx.Exec(ctx, `DELETE FROM cost_unit_rates WHERE id = $1::uuid`, first.ID)
 		return err
 	})
 	if err == nil {
 		t.Fatal("historical rate deleted")
 	}
-	err = db.InTenant(ctx, database.App, tenantA, func(tx pgx.Tx) error {
+	err = db.InTenant(dbtest.Seed(ctx), database.App, tenantA, func(tx pgx.Tx) error {
 		_, err := tx.Exec(ctx, `UPDATE cost_unit_rates SET effective_until = effective_until + 1 WHERE id = $1::uuid AND effective_until IS NOT NULL`, first.ID)
 		return err
 	})
@@ -196,7 +196,7 @@ func TestCostUnitRates(t *testing.T) {
 		t.Fatal("other tenant wrote")
 	}
 	var visible int
-	if err := db.InTenant(ctx, database.App, tenantB, func(tx pgx.Tx) error {
+	if err := db.InTenant(dbtest.Seed(ctx), database.App, tenantB, func(tx pgx.Tx) error {
 		return tx.QueryRow(ctx, `SELECT count(*) FROM cost_unit_rates`).Scan(&visible)
 	}); err != nil || visible != 0 {
 		t.Fatalf("tenant B sees %d (%v)", visible, err)
@@ -485,6 +485,7 @@ func insertPrincipal(t *testing.T, database *dbtest.DB, tenantID string, kind te
 	if err := database.Admin.QueryRow(t.Context(), `INSERT INTO principals(tenant_id, kind, name, roles) VALUES($1::uuid, $2, $3, $4) RETURNING id::text`, tenantID, string(kind), name, roles).Scan(&p.ID); err != nil {
 		t.Fatal(err)
 	}
+	dbtest.BindLegacy(t, database, tenantID, p.ID)
 	return p
 }
 

@@ -15,10 +15,10 @@ import (
 	"net/http"
 	"path"
 	"regexp"
-	"slices"
 	"strings"
 	"time"
 
+	"github.com/inspr-at/aeon/internal/authz"
 	"github.com/inspr-at/aeon/internal/db"
 	"github.com/inspr-at/aeon/internal/events"
 	"github.com/inspr-at/aeon/internal/httpapi"
@@ -69,14 +69,14 @@ func (m *Module) Mount(mux *http.ServeMux) {
 	mux.HandleFunc("GET /api/attachments/{id}/content", m.content)
 }
 func uuid(s string) bool { var v pgtype.UUID; return len(s) == 36 && v.Scan(s) == nil && v.Valid }
-func principal(w http.ResponseWriter, r *http.Request) (tenant.Principal, bool) {
+func (m *Module) principal(w http.ResponseWriter, r *http.Request, permission string) (tenant.Principal, bool) {
 	p, ok := tenant.PrincipalFrom(r.Context())
 	if !ok || !uuid(p.ID) || !uuid(p.TenantID) {
 		httpapi.WriteError(w, 401, "unauthorized")
 		return p, false
 	}
-	if p.Kind != tenant.Person || (!slices.Contains(p.Roles, "admin") && !slices.Contains(p.Roles, "member")) {
-		httpapi.WriteError(w, 403, "staff access required")
+	if authz.Require(authz.BindPool(r.Context(), m.Pool), permission, authz.RouteScope(r.Context())) != nil {
+		httpapi.WriteError(w, 403, "permission denied")
 		return p, false
 	}
 	return p, true
@@ -112,7 +112,7 @@ func liveNode(ctx context.Context, tx pgx.Tx, tenantID, nodeID string) error {
 	return nil
 }
 func (m *Module) list(w http.ResponseWriter, r *http.Request) {
-	p, ok := principal(w, r)
+	p, ok := m.principal(w, r, "attachments.read")
 	if !ok {
 		return
 	}
@@ -177,7 +177,7 @@ func cleanName(s string) string {
 }
 func utf8Valid(s string) bool { return strings.ToValidUTF8(s, "") == s }
 func (m *Module) upload(w http.ResponseWriter, r *http.Request) {
-	p, ok := principal(w, r)
+	p, ok := m.principal(w, r, "attachments.write")
 	if !ok {
 		return
 	}
@@ -317,7 +317,7 @@ func precondition(r *http.Request) (*time.Time, error) {
 	return &t, nil
 }
 func (m *Module) patch(w http.ResponseWriter, r *http.Request) {
-	p, ok := principal(w, r)
+	p, ok := m.principal(w, r, "attachments.write")
 	if !ok {
 		return
 	}
@@ -388,7 +388,7 @@ func (m *Module) patch(w http.ResponseWriter, r *http.Request) {
 	httpapi.WriteJSON(w, 200, out)
 }
 func (m *Module) remove(w http.ResponseWriter, r *http.Request) {
-	p, ok := principal(w, r)
+	p, ok := m.principal(w, r, "attachments.delete")
 	if !ok {
 		return
 	}

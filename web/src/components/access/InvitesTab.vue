@@ -58,7 +58,7 @@ function again(invite: Invite) {
         <span class="text">
           <span class="email">{{ invite.email }}</span>
           <span class="roles">{{ inviteRoles(invite) }}</span>
-          <span class="meta">Invited by {{ creatorName(invite, access.names) }} {{ relativeTime(invite.created_at, { long: true }) }}<template v-if="when(invite)"> · {{ when(invite) }}</template></span>
+          <span class="meta">Invited by {{ creatorName(invite) }} {{ relativeTime(invite.created_at, { long: true }) }}<template v-if="when(invite)"> · {{ when(invite) }}</template></span>
         </span>
         <StatusChip class="state" :tone="TONE[invite.status]" :label="INVITE_LABEL[invite.status]" />
         <span class="acts">

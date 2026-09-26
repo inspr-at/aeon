@@ -39,7 +39,10 @@ func setup(t *testing.T) *fixture {
 		if _, err := tx.Exec(t.Context(), `INSERT INTO tenants(id,slug,name) VALUES($1,'activity','Activity')`, f.p.TenantID); err != nil {
 			return err
 		}
-		return tx.QueryRow(t.Context(), `INSERT INTO principals(tenant_id,kind,name,roles) VALUES($1,'person','Writer',ARRAY['member']) RETURNING id::text`, f.p.TenantID).Scan(&f.p.ID)
+		if err := tx.QueryRow(t.Context(), `INSERT INTO principals(tenant_id,kind,name,roles) VALUES($1,'person','Writer',ARRAY['member']) RETURNING id::text`, f.p.TenantID).Scan(&f.p.ID); err != nil {
+			return err
+		}
+		return dbtest.BindLegacyTx(t.Context(), tx, f.p.TenantID, f.p.ID)
 	})
 	f.node = f.addNode("ACT-1")
 	mux := http.NewServeMux()
@@ -50,7 +53,7 @@ func setup(t *testing.T) *fixture {
 
 func (f *fixture) tx(fn func(pgx.Tx) error) {
 	f.t.Helper()
-	if err := db.InTenant(f.t.Context(), f.d.App, f.p.TenantID, fn); err != nil {
+	if err := db.InTenant(dbtest.Seed(f.t.Context()), f.d.App, f.p.TenantID, fn); err != nil {
 		f.t.Fatal(err)
 	}
 }
@@ -197,7 +200,10 @@ func TestCommentLifecycleAuthorizationIsolationAndConcurrency(t *testing.T) {
 	itemPath := path + "/" + comment.ID
 	other := f.p
 	f.tx(func(tx pgx.Tx) error {
-		return tx.QueryRow(t.Context(), `INSERT INTO principals(tenant_id,kind,name,roles) VALUES($1,'person','Admin',ARRAY['admin']) RETURNING id::text`, f.p.TenantID).Scan(&other.ID)
+		if err := tx.QueryRow(t.Context(), `INSERT INTO principals(tenant_id,kind,name,roles) VALUES($1,'person','Admin',ARRAY['admin']) RETURNING id::text`, f.p.TenantID).Scan(&other.ID); err != nil {
+			return err
+		}
+		return dbtest.BindLegacyTx(t.Context(), tx, f.p.TenantID, other.ID)
 	})
 	for _, method := range []string{"PATCH", "DELETE"} {
 		f.call(&other, method, itemPath, `{"body_markdown":"Unauthorized"}`, 403)
@@ -283,7 +289,7 @@ func TestCommentLifecycleAuthorizationIsolationAndConcurrency(t *testing.T) {
 	// A second tenant uses the same event-ID space. RLS and explicit predicates
 	// must keep both reads and writes bound to the caller's tenant.
 	outsider := tenant.Principal{TenantID: "20000000-0000-4000-8000-000000000002", Name: "Outside", Kind: tenant.Person}
-	err := db.InTenant(t.Context(), f.d.App, outsider.TenantID, func(tx pgx.Tx) error {
+	err := db.InTenant(dbtest.Seed(t.Context()), f.d.App, outsider.TenantID, func(tx pgx.Tx) error {
 		if _, err := tx.Exec(t.Context(), `INSERT INTO tenants(id,slug,name) VALUES($1,'outside','Outside')`, outsider.TenantID); err != nil {
 			return err
 		}

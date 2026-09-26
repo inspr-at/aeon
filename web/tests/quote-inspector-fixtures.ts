@@ -5,6 +5,7 @@
 // and number is invented.
 import type { Page, Route } from '@playwright/test'
 import { me } from './work-fixtures'
+import { mockEffectivePermissions } from './authz-fixtures'
 
 export const QUOTE_ID = 'aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa'
 export const SECTIONS = ['11111111-1111-4111-8111-000000000001', '11111111-1111-4111-8111-000000000002', '11111111-1111-4111-8111-000000000003', '11111111-1111-4111-8111-000000000004']
@@ -58,10 +59,11 @@ export async function mockQuoteEditor(page: Page, doc: QuoteDoc = quoteDocument(
     const request = route.request(), url = new URL(request.url()), path = url.pathname, method = request.method()
     let body: unknown = null
     try { body = request.postDataJSON() } catch { body = null }
-    const known = path === '/api/me' || path === '/api/plugins' || path.startsWith('/api/quotes')
+    const known = path === '/api/me' || path === '/api/me/permissions' || path === '/api/plugins' || path.startsWith('/api/quotes')
     if (!known) return route.fallback()
     calls.push({ path, method, body })
     if (path === '/api/me') return route.fulfill({ json: { principal: { id: me.id, name: me.name, kind: 'person', roles: [options.role ?? 'admin'] }, tenant: { id: 't1', name: 'INSPR Studio' } } })
+    if (path === '/api/me/permissions') return route.fulfill({ json: mockEffectivePermissions(options.role ?? 'admin', url.searchParams.get('project_id') ?? undefined) })
     if (path === '/api/plugins') return route.fulfill({ json: ['business_costs', 'business_crm', 'business_quotes'].map(id => ({ id, version: '1', digest_sha256: 'ab'.repeat(32), owner: 'aeon', permissions: ['views.provide'], node_kinds: [], views: [], workflow_steps: [], agent_tools: [], integrations: [], background_jobs: [], installation: { manifest_digest_sha256: 'ab'.repeat(32), enabled: true, permissions: ['views.provide'], plugin_id: id, version: '1', updated_at: '2026-09-20T09:00:00Z' } })) })
     if (path === '/api/quotes') return route.fulfill({ json: [{ quote_node_id: QUOTE_ID, offer_no: 'A260924-1', state: options.state ?? 'draft' }] })
     if (path === `/api/quotes/${QUOTE_ID}`) return route.fulfill({ json: { quote_node_id: QUOTE_ID, offer_no: 'A260924-1', state: options.state ?? 'draft', revision: 1 } })

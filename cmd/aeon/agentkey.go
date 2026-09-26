@@ -20,19 +20,21 @@ import (
 // agentKeyCommand runs the operator-only agent key commands:
 //
 //	aeon agent-key create --tenant SLUG --name AGENT --out-file PATH [--scopes a,b] [--expires 720h]
+//	aeon agent-key create --tenant SLUG --principal-id UUID --out-file PATH [--name LABEL] [--scopes a,b]
 //	aeon agent-key revoke --tenant SLUG --id KEY_ID
 //
 // The token is written only to --out-file (created with mode 0600, never
 // overwritten) and is never printed.
 func agentKeyCommand(args []string, stdout io.Writer) error {
-	const usage = "usage: aeon agent-key create --tenant SLUG --name AGENT --out-file PATH [--scopes a,b] [--expires DURATION] | aeon agent-key revoke --tenant SLUG --id KEY_ID"
+	const usage = "usage: aeon agent-key create --tenant SLUG (--name AGENT | --principal-id UUID) --out-file PATH [--scopes a,b] [--expires DURATION] | aeon agent-key revoke --tenant SLUG --id KEY_ID"
 	if len(args) == 0 || (args[0] != "create" && args[0] != "revoke") {
 		return errors.New(usage)
 	}
 	flags := flag.NewFlagSet("aeon agent-key "+args[0], flag.ContinueOnError)
 	flags.SetOutput(io.Discard)
 	tenantSlug := flags.String("tenant", "", "tenant slug")
-	name := flags.String("name", "", "agent name")
+	name := flags.String("name", "", "agent or key name")
+	principalID := flags.String("principal-id", "", "existing agent principal")
 	outFile := flags.String("out-file", "", "file to write the key to (0600, must not exist)")
 	scopes := flags.String("scopes", "", "comma-separated scopes")
 	expires := flags.Duration("expires", 0, "lifetime, e.g. 720h (default: no expiry)")
@@ -40,7 +42,7 @@ func agentKeyCommand(args []string, stdout io.Writer) error {
 	if err := flags.Parse(args[1:]); err != nil || flags.NArg() != 0 || *tenantSlug == "" {
 		return errors.New(usage)
 	}
-	if args[0] == "create" && (*name == "" || *outFile == "") || args[0] == "revoke" && *id == "" {
+	if args[0] == "create" && (*outFile == "" || (*name == "" && *principalID == "")) || args[0] == "revoke" && *id == "" {
 		return errors.New(usage)
 	}
 	return withPool(func(ctx context.Context, pool *pgxpool.Pool) error {
@@ -69,7 +71,13 @@ func agentKeyCommand(args []string, stdout io.Writer) error {
 				list = append(list, s)
 			}
 		}
-		keyID, principalID, token, err := auth.OperatorCreateAgentKey(ctx, pool, tenantID, *name, list, exp)
+		list, err = auth.NormalizeScopes(list)
+		if err != nil {
+			f.Close()
+			os.Remove(*outFile)
+			return err
+		}
+		keyID, agentID, token, err := auth.OperatorCreateAgentKey(ctx, pool, tenantID, *name, *principalID, list, exp)
 		if err != nil {
 			f.Close()
 			os.Remove(*outFile)
@@ -82,6 +90,6 @@ func agentKeyCommand(args []string, stdout io.Writer) error {
 		if err := f.Close(); err != nil {
 			return err
 		}
-		return json.NewEncoder(stdout).Encode(map[string]any{"id": keyID, "principal_id": principalID, "name": *name, "scopes": list, "file": *outFile})
+		return json.NewEncoder(stdout).Encode(map[string]any{"id": keyID, "principal_id": agentID, "name": *name, "scopes": list, "file": *outFile})
 	})
 }

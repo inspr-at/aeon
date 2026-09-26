@@ -8,6 +8,7 @@ import (
 	"net/http"
 	"strings"
 
+	"github.com/inspr-at/aeon/internal/authz"
 	"github.com/inspr-at/aeon/internal/tenant"
 	"github.com/jackc/pgx/v5"
 )
@@ -42,8 +43,8 @@ func (m *Module) handleUpdateTag(w http.ResponseWriter, r *http.Request) {
 		writeErr(w, err)
 		return
 	}
-	if patch.Name != nil && !tenant.IsAdmin(p) {
-		writeError(w, http.StatusForbidden, "admin required")
+	if patch.Name != nil && (p.Kind != tenant.Person || authz.Require(authz.BindPool(r.Context(), m.pool), "tags.manage", authz.Scope{}) != nil) {
+		writeError(w, http.StatusForbidden, "permission denied")
 		return
 	}
 	if patch.Name == nil && patch.Color == nil && patch.Description == nil {

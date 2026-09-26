@@ -3,7 +3,7 @@
 import { computed, nextTick, watch, type Component } from 'vue'
 import { useRoute } from 'vue-router'
 import '../styles/settings.css'
-import { isTenantAdmin } from '../components/business/catalog'
+import { can, permissionsKnown, refreshPermissions } from '../lib/authz'
 import AppIcon from '../components/AppIcon.vue'
 import BizIcon, { type BizIconName } from '../components/business/BizIcon.vue'
 import BusinessSection from '../components/settings/BusinessSection.vue'
@@ -12,7 +12,6 @@ import ProjectsSection from '../components/settings/ProjectsSection.vue'
 import WorkspaceSection from '../components/settings/WorkspaceSection.vue'
 import AccessSection from '../components/access/AccessSection.vue'
 import { SETTINGS_SECTIONS, sectionOf, visibleSections, type SectionId } from '../lib/settings'
-import { can, loadPermissions, permissionsLoaded } from '../lib/authz'
 import { useSession } from '../stores/session'
 
 // Settings: Personal for everyone; Workspace, Business and Projects for admins;
@@ -20,16 +19,16 @@ import { useSession } from '../stores/session'
 // /settings/<section>#<card> deep-links to one card, which is ringed on arrival.
 const route = useRoute()
 const session = useSession()
-const admin = computed(() => isTenantAdmin(session.identity))
+const admin = computed(() => can('settings.manage'))
 const sections = computed(() => visibleSections(admin.value, permission => can(permission)))
 const current = computed(() => sectionOf(route.params.section))
 const meta = computed(() => SETTINGS_SECTIONS.find(section => section.id === current.value)!)
 const allowed = computed(() => meta.value.permission ? can(meta.value.permission) : !meta.value.admin || admin.value)
 // A permission-gated section waits for my permissions before it says no.
-const deciding = computed(() => !!meta.value.permission && !permissionsLoaded.value)
+const deciding = computed(() => !!meta.value.permission && !permissionsKnown())
 // Which sections show depends on my permissions: the layout waits for them, so
 // the nav never re-flows under the pointer (usually a few milliseconds).
-void loadPermissions()
+void refreshPermissions()
 const VIEW: Record<SectionId, Component> = { personal: PersonalSection, workspace: WorkspaceSection, access: AccessSection, business: BusinessSection, projects: ProjectsSection }
 const ICON: Record<SectionId, BizIconName> = { personal: 'user', workspace: 'folder', access: 'users', business: 'briefcase', projects: 'layers' }
 
@@ -61,7 +60,7 @@ watch(() => [current.value, route.hash] as const, async ([, hash]) => {
       <p class="summary">{{ admin ? 'Your own preferences, and the workspace’s for admins.' : 'Your own preferences.' }}</p>
     </header>
     <!-- One grid for everyone: with only Personal to show, the nav still holds its column. -->
-    <div v-if="!permissionsLoaded" class="layout waiting" role="status" aria-label="Loading settings"><span class="skeleton nav-skeleton" /><span class="skeleton body-skeleton" /></div>
+    <div v-if="!permissionsKnown()" class="layout waiting" role="status" aria-label="Loading settings"><span class="skeleton nav-skeleton" /><span class="skeleton body-skeleton" /></div>
     <div v-else class="layout" :class="{ single: sections.length < 2 }">
       <nav class="section-nav" aria-label="Settings sections">
         <RouterLink v-for="section in sections" :key="section.id" :to="`/settings/${section.id}`" class="section-link" :aria-current="section.id === current ? 'page' : undefined">

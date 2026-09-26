@@ -1,7 +1,7 @@
 <!-- SPDX-License-Identifier: AGPL-3.0-only -->
 <script setup lang="ts">
 import { computed, onMounted, ref, watch } from 'vue'
-import { getProjectMembers, type ProjectMember } from '../../lib/access'
+import { AccessError, getProjectMembers, type ProjectMember } from '../../lib/access'
 import { can, myPermissions } from '../../lib/authz'
 import { confirmAction } from '../../lib/confirm'
 import { toast } from '../../lib/toast'
@@ -27,12 +27,13 @@ async function load() {
   error.value = ''
   try { rows.value = await getProjectMembers(props.project.id) } catch (e) { error.value = problem(e, 'The people on this project could not be loaded') }
 }
-// One entry per principal: their project role and their workspace role, either or both.
+// One row per person or agent (contract v2 #4): the project role when there is
+// one, and the workspace role for context.
 const people = computed(() => {
   const out = new Map<string, { principal_id: string; name: string; kind: 'person' | 'agent'; avatar_url: string | null; project: ProjectMember['role'] | null; workspace: ProjectMember['role'] | null }>()
   for (const row of rows.value ?? []) {
-    const entry = out.get(row.principal_id) ?? { principal_id: row.principal_id, name: row.name, kind: row.kind, avatar_url: row.avatar_url, project: null, workspace: null }
-    if (row.via === 'project') entry.project = row.role; else entry.workspace = row.role
+    const entry = out.get(row.principal_id) ?? { principal_id: row.principal_id, name: row.name, kind: row.kind, avatar_url: row.avatar_url, project: null, workspace: row.workspace_role }
+    if (row.via === 'project') entry.project = row.role; else entry.workspace = row.workspace_role ?? row.role
     out.set(row.principal_id, entry)
   }
   return [...out.values()].sort((a, b) => Number(!a.project) - Number(!b.project) || Number(a.kind === 'agent') - Number(b.kind === 'agent') || a.name.localeCompare(b.name))
@@ -45,6 +46,9 @@ type Entry = (typeof people.value)[number]
 const picker = ref<{ id: string; name: string; current: string | null; anchor: HTMLElement } | null>(null)
 const adding = ref<HTMLElement | null>(null)
 const busy = ref(false)
+// Why the server refused a role change, shown in the open picker.
+const roleError = ref('')
+watch(picker, () => { roleError.value = '' })
 const addChoices = computed(() => [
   ...access.people.filter(p => p.status === 'active' && !people.value.some(e => e.principal_id === p.principal_id && e.project)).map(p => ({ value: p.principal_id, label: p.name, detail: p.workspace_role ? `${p.workspace_role.name} in the workspace` : 'No workspace role' })),
   ...access.agents.filter(a => !a.service && !people.value.some(e => e.principal_id === a.principal_id && e.project)).map(a => ({ value: a.principal_id, label: a.name, detail: 'Agent' })),
@@ -68,7 +72,7 @@ async function choose(roleId: string | null) {
     toast(before ? `${target.name} is ${name} on ${props.project.title}` : `${target.name} can work on ${props.project.title} as ${name}`, {
       action: { label: 'Undo', run: () => void (before ? access.setProjectRole(props.project.id, target.id, before) : access.removeProjectMember(props.project.id, target.id)).then(load) },
     })
-  } catch (e) { toast(problem(e, `${target.name}’s access did not change`), { tone: 'error' }) }
+  } catch (e) { roleError.value = problem(e, `${target.name}’s access did not change`) }
   finally { busy.value = false }
 }
 async function remove(entry: Entry) {
@@ -89,7 +93,11 @@ async function remove(entry: Entry) {
     await access.removeProjectMember(props.project.id, entry.principal_id)
     await load()
     toast(`${entry.name} is off ${props.project.title}`, { action: { label: 'Undo', run: () => void access.setProjectRole(props.project.id, entry.principal_id, role).then(load) } })
-  } catch (e) { toast(problem(e, `${entry.name} stays on ${props.project.title}`), { tone: 'error' }) }
+  } catch (e) {
+    toast(problem(e, `${entry.name} stays on ${props.project.title}`), { tone: 'error' })
+    // 404 or via_workspace: what is shown is out of date.
+    if (e instanceof AccessError && (e.status === 404 || e.status === 409)) void load()
+  }
 }
 onMounted(load)
 watch(() => props.project.id, load)
@@ -138,8 +146,8 @@ watch(() => props.project.id, load)
     <p v-if="rows && !shown.length" class="empty">{{ filter === 'project' ? 'No one has a role on this project yet.' : 'No one reaches this project through the workspace.' }}</p>
     <ChoicePicker v-if="adding" :anchor="adding" :label="`Add to ${project.title}`" :choices="addChoices" current="" placeholder="Find a person or agent…" @choose="pickPerson" @close="adding = null" />
     <RolePicker
-      v-if="picker" :anchor="picker.anchor" :subject="`${picker.name} on ${project.title}`" :roles="access.roles" :current="picker.current" :registry="access.registry"
-      :mine="myPermissions()" scope="project" :busy="busy" @choose="choose" @close="picker = null"
+      v-if="picker" :anchor="picker.anchor" :subject="picker.name" :place="project.title" :roles="access.roles" :current="picker.current" :registry="access.registry"
+      :mine="myPermissions()" scope="project" :busy="busy" :error="roleError" @choose="choose" @close="picker = null"
     />
   </div>
 </template>

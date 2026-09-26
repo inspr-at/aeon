@@ -1,8 +1,9 @@
 <!-- SPDX-License-Identifier: AGPL-3.0-only -->
 <script setup lang="ts">
 import { computed, nextTick, ref } from 'vue'
-import { KEY_PRESETS, KEY_SCOPE_COUNT, KEY_SCOPE_GROUPS, MAX_KEY_SCOPES, createAgentKey, type Agent, type AgentKeyCreated } from '../../lib/access'
-import { refreshPermissions } from '../../lib/authz'
+import { AccessError, COORDINATOR_SCOPES, MAX_KEY_SCOPES, agentScopeCeiling, createAgentKey, groupPermissions, keyScopes, permissionLabel, type Agent, type AgentKeyCreated } from '../../lib/access'
+import { myPermissions } from '../../lib/authz'
+import { useAccess } from '../../stores/access'
 import { absoluteTime } from '../../lib/work'
 import AppIcon from '../AppIcon.vue'
 import AccessSheet from './AccessSheet.vue'
@@ -18,7 +19,21 @@ const days = ref(90)
 const busy = ref(false)
 const error = ref('')
 const created = ref<AgentKeyCreated | null>(null)
+const access = useAccess()
 const scopes = ref(new Set<string>())
+const term = ref('')
+// A scope can go on the key when I hold it and the agent's role allows it; the
+// rest show, disabled, with the reason.
+const mine = computed(() => myPermissions())
+const ceiling = computed(() => agentScopeCeiling(props.agent, access.roles))
+const held = computed(() => new Set([...mine.value].filter(k => !ceiling.value || ceiling.value.has(k))))
+const why = (key: string) => !mine.value.has(key) ? 'you do not hold this' : `beyond ${props.agent.name}’s role${role.value ? ` (${role.value})` : ''}`
+const available = computed(() => keyScopes(access.registry))
+const groups = computed(() => {
+  const needle = term.value.trim().toLowerCase()
+  return groupPermissions(available.value.filter(p => !needle || `${permissionLabel(p.key)} ${p.key} ${p.group}`.toLowerCase().includes(needle)))
+})
+const presets = computed(() => [{ id: 'coordinator', label: 'Coordinator', scopes: COORDINATOR_SCOPES.filter(k => held.value.has(k) && available.value.some(p => p.key === k)) }])
 const tried = ref(false)
 function toggle(key: string) { const next = new Set(scopes.value); if (next.has(key)) next.delete(key); else next.add(key); scopes.value = next }
 function preset(keys: string[]) { scopes.value = new Set(keys) }
@@ -34,12 +49,13 @@ async function create() {
   error.value = ''
   try {
     const expires = days.value ? new Date(Date.now() + days.value * 86_400_000).toISOString() : null
-    created.value = await createAgentKey(props.agent.name, expires, [...scopes.value])
+    created.value = await createAgentKey(props.agent, expires, [...scopes.value])
     emit('created')
-    void refreshPermissions()
     await nextTick()
     document.querySelector<HTMLElement>('.token-copy')?.focus()
-  } catch (e) { error.value = problem(e, 'The key was not created') }
+  } catch (e) {
+    error.value = e instanceof AccessError && e.status === 403 ? `The key was not created: it may only do what both you and ${props.agent.name}’s role may.` : problem(e, 'The key was not created')
+  }
   finally { busy.value = false }
 }
 async function copy() { if (!created.value) return; try { await navigator.clipboard.writeText(created.value.token); copied.value = true } catch { copied.value = false } }
@@ -56,18 +72,23 @@ async function copy() { if (!created.value) return; try { await navigator.clipbo
         </div>
       </fieldset>
       <fieldset id="key-scopes" class="scopes" tabindex="-1" :aria-invalid="tried && !!scopeProblem" :aria-describedby="tried && scopeProblem ? 'key-scopes-error' : undefined">
-        <legend class="label">What it may do <span class="count">{{ scopes.size }} of {{ KEY_SCOPE_COUNT }}</span></legend>
+        <legend class="label">What it may do <span class="count">{{ scopes.size }} chosen, at most {{ MAX_KEY_SCOPES }}</span></legend>
         <div class="presets">
-          <button v-for="p in KEY_PRESETS" :key="p.id" type="button" class="chip-btn" :aria-pressed="presetOn(p.scopes)" @click="preset(p.scopes)">{{ p.label }}</button>
+          <label class="search-field find">
+            <AppIcon name="search" :size="14" />
+            <input v-model="term" class="field" type="search" placeholder="Find a scope" aria-label="Find a scope" autocomplete="off" spellcheck="false" />
+          </label>
+          <button v-for="p in presets" :key="p.id" type="button" class="chip-btn" :aria-pressed="presetOn(p.scopes)" @click="preset(p.scopes)">{{ p.label }}</button>
           <button type="button" class="chip-btn" :disabled="!scopes.size" @click="preset([])">Clear</button>
         </div>
-        <div v-for="group in KEY_SCOPE_GROUPS" :key="group.label" class="scope-group" role="group" :aria-label="group.label">
-          <p class="group-h">{{ group.label }}</p>
-          <label v-for="scope in group.scopes" :key="scope.key" class="scope-row">
-            <input type="checkbox" :checked="scopes.has(scope.key)" @change="toggle(scope.key)" />
-            <span class="scope-text"><span>{{ scope.label }}</span><span class="mono key">{{ scope.key }}</span></span>
+        <div v-for="group in groups" :key="group.group" class="scope-group" role="group" :aria-label="group.group">
+          <p class="group-h">{{ group.group }}</p>
+          <label v-for="scope in group.items" :key="scope.key" class="scope-row" :class="{ off: !held.has(scope.key) }">
+            <input type="checkbox" :checked="scopes.has(scope.key)" :disabled="!held.has(scope.key) && !scopes.has(scope.key)" @change="toggle(scope.key)" />
+            <span class="scope-text"><span>{{ permissionLabel(scope.key) }}</span><span class="mono key">{{ scope.key }}{{ held.has(scope.key) ? '' : ` · ${why(scope.key)}` }}</span></span>
           </label>
         </div>
+        <p v-if="!groups.length" class="empty">No scope matches “{{ term }}”.</p>
         <p v-if="tried && scopeProblem" id="key-scopes-error" class="field-error" role="alert"><AppIcon name="alert" :size="12" />{{ scopeProblem }}</p>
       </fieldset>
       <p v-if="error" class="set-note error" role="alert"><AppIcon name="alert" :size="14" />{{ error }}</p>
@@ -112,6 +133,10 @@ async function copy() { if (!created.value) return; try { await navigator.clipbo
 .scope-row input { width: 16px; height: 16px; margin: 2px 0 0; accent-color: var(--teal); }
 .scope-text { display: grid; gap: 1px; font-size: 13px; line-height: 1.35; color: var(--ink); }
 .scope-text .key { font-size: 11px; color: var(--ink-3); }
+.scope-row.off { cursor: default; }
+.scope-row.off .scope-text > span:first-child { color: var(--ink-2); }
+.presets .find { flex: 1 1 180px; }
+.empty { font-size: 13px; color: var(--ink-3); }
 .field-error { display: flex; align-items: center; gap: 6px; font-size: 12.5px; color: var(--danger); }
 .token .field { font-size: 12.5px; }
 @media (max-width: 600px) { .seg { grid-template-columns: repeat(2, 1fr); border-radius: 16px; } .seg button { height: 44px; } .token { grid-template-columns: 1fr; } .token .btn { height: 44px; } .scope-group { grid-template-columns: minmax(0, 1fr); } .scope-row { min-height: 44px; align-items: center; } .scope-row input { margin: 0; } .chip-btn { height: 44px; } }

@@ -32,7 +32,7 @@ func setup(t *testing.T) *fixture {
 	f := &fixture{t: t, db: dbtest.Open(t), mux: http.NewServeMux()}
 	// Bootstrap is the only operation that precedes tenant creation; even test
 	// queries are wrapped in InTenant rather than relying on superuser bypass.
-	err := db.InTenant(t.Context(), f.db.Admin, "00000000-0000-0000-0000-000000000001", func(tx pgx.Tx) error {
+	err := db.InTenant(dbtest.Seed(t.Context()), f.db.Admin, "00000000-0000-0000-0000-000000000001", func(tx pgx.Tx) error {
 		if err := tx.QueryRow(t.Context(), `INSERT INTO tenants(slug,name) VALUES('walker-a','Walker A') RETURNING id::text`).Scan(&f.person.TenantID); err != nil {
 			return err
 		}
@@ -49,12 +49,14 @@ func setup(t *testing.T) *fixture {
 			p.Name = "Test agent"
 			p.TenantID = f.person.TenantID
 		}
-		err = db.InTenant(t.Context(), f.db.App, p.TenantID, func(tx pgx.Tx) error {
+		err = db.InTenant(dbtest.Seed(t.Context()), f.db.App, p.TenantID, func(tx pgx.Tx) error {
 			return tx.QueryRow(t.Context(), `INSERT INTO principals(tenant_id,kind,name) VALUES($1,$2,$3) RETURNING id::text`, p.TenantID, string(p.Kind), p.Name).Scan(&p.ID)
 		})
 		if err != nil {
 			t.Fatal(err)
 		}
+		// Handlers see project data only through a binding (ADR-003 P2).
+		dbtest.BindRole(t, f.db, p.TenantID, p.ID, "member")
 	}
 	f.tx(func(tx pgx.Tx) error {
 		var err error
@@ -84,7 +86,7 @@ func setup(t *testing.T) *fixture {
 }
 func (f *fixture) tx(fn func(pgx.Tx) error) {
 	f.t.Helper()
-	if err := db.InTenant(f.t.Context(), f.db.App, f.person.TenantID, fn); err != nil {
+	if err := db.InTenant(dbtest.Seed(f.t.Context()), f.db.App, f.person.TenantID, fn); err != nil {
 		f.t.Fatal(err)
 	}
 }
@@ -324,6 +326,9 @@ func TestAgreementRejectsStaleAndRevokedAuthority(t *testing.T) {
 					_, err = tx.Exec(t.Context(), `UPDATE agent_permission_grants SET valid_until=now()-interval '1 second' WHERE approval_request_id=$1`, in.ApprovalID)
 				case "wrong_actor":
 					err = tx.QueryRow(t.Context(), `INSERT INTO principals(tenant_id,kind,name) VALUES($1,'person','Different person') RETURNING id::text`, f.person.TenantID).Scan(&f.person.ID)
+					if err == nil {
+						_, err = tx.Exec(t.Context(), `INSERT INTO role_bindings(tenant_id,principal_id,role_id,scope_type) SELECT $1,$2,id,'workspace' FROM roles WHERE tenant_id=$1 AND key='member'`, f.person.TenantID, f.person.ID)
+					}
 				case "building":
 					_, err = tx.Exec(t.Context(), `UPDATE journey_releases SET state='building' WHERE release_node_id=$1`, f.release)
 				case "not_ready":
@@ -352,7 +357,7 @@ func TestAgreementAtomicEventFailure(t *testing.T) {
 	f.add("functional", "Feature")
 	in := f.approve()
 	beforeNodes, beforeEvents := f.count("nodes"), f.count("events")
-	err := db.InTenant(t.Context(), f.db.Admin, f.person.TenantID, func(tx pgx.Tx) error {
+	err := db.InTenant(dbtest.Seed(t.Context()), f.db.Admin, f.person.TenantID, func(tx pgx.Tx) error {
 		_, err := tx.Exec(t.Context(), `CREATE FUNCTION reject_agreement_event() RETURNS trigger LANGUAGE plpgsql AS $$ BEGIN IF NEW.type='journey.requirements_agreed' THEN RAISE EXCEPTION 'test event failure'; END IF; RETURN NEW; END; $$`)
 		if err != nil {
 			return err
@@ -580,7 +585,7 @@ func TestPlanEventFailureRollsBackSelectionAndRevisions(t *testing.T) {
 	before := f.walker()
 	projectRev := f.revision()
 	eventCount := f.count("events")
-	err := db.InTenant(t.Context(), f.db.Admin, f.person.TenantID, func(tx pgx.Tx) error {
+	err := db.InTenant(dbtest.Seed(t.Context()), f.db.Admin, f.person.TenantID, func(tx pgx.Tx) error {
 		if _, err := tx.Exec(t.Context(), `CREATE FUNCTION reject_plan_event() RETURNS trigger LANGUAGE plpgsql AS $$ BEGIN IF NEW.type='journey.release_planned' THEN RAISE EXCEPTION 'test event failure'; END IF; RETURN NEW; END; $$`); err != nil {
 			return err
 		}
@@ -609,7 +614,7 @@ func TestDigestHoldsContentStableUntilCommit(t *testing.T) {
 	release := make(chan struct{})
 	done := make(chan error, 1)
 	go func() {
-		done <- db.InTenant(t.Context(), f.db.App, f.person.TenantID, func(tx pgx.Tx) error {
+		done <- db.InTenant(dbtest.Seed(t.Context()), f.db.App, f.person.TenantID, func(tx pgx.Tx) error {
 			if _, err := lockProject(t.Context(), tx, f.project, true); err != nil {
 				close(ready)
 				return err
@@ -624,7 +629,7 @@ func TestDigestHoldsContentStableUntilCommit(t *testing.T) {
 		})
 	}()
 	<-ready
-	err := db.InTenant(t.Context(), f.db.App, f.person.TenantID, func(tx pgx.Tx) error {
+	err := db.InTenant(dbtest.Seed(t.Context()), f.db.App, f.person.TenantID, func(tx pgx.Tx) error {
 		if _, err := tx.Exec(t.Context(), `SET LOCAL lock_timeout='50ms'`); err != nil {
 			return err
 		}

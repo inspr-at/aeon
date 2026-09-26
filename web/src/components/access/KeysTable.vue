@@ -1,6 +1,6 @@
 <!-- SPDX-License-Identifier: AGPL-3.0-only -->
 <script setup lang="ts">
-import { scopeLabel } from '../../lib/access'
+import { keyHint, scopeLabel } from '../../lib/access'
 import { keyState, type AgentKey } from '../../lib/settings'
 import { absoluteTime, relativeTime } from '../../lib/work'
 import AppIcon from '../AppIcon.vue'
@@ -20,12 +20,12 @@ const STATE: Record<string, string> = { active: 'Active', expired: 'Expired', re
       <tbody>
         <tr v-for="key in keys" :key="key.id" :class="keyState(key)">
           <th v-if="showName" scope="row">{{ key.name }}<span class="sub">Created {{ relativeTime(key.created_at, { long: true }) }}</span></th>
-          <td class="mono">aeon_{{ key.prefix }}_…<span v-if="!showName" class="sub">Created {{ relativeTime(key.created_at, { long: true }) }}</span></td>
+          <td class="mono">{{ keyHint(key.prefix) }}<span v-if="!showName" class="sub">Created {{ relativeTime(key.created_at, { long: true }) }}</span></td>
           <td data-label="Scopes"><span v-if="!key.scopes.length" class="muted" data-tip="A key without scopes can do nothing">None</span><span v-for="scope in key.scopes.slice(0, 4)" :key="scope" class="scope mono" :data-tip="scopeLabel(scope)">{{ scope }}</span><span v-if="key.scopes.length > 4" class="more" :data-tip="key.scopes.slice(4).join('\n')">and {{ key.scopes.length - 4 }} more</span></td>
           <td data-label="Last used"><time v-if="key.last_used_at" :datetime="key.last_used_at" :data-tip="absoluteTime(key.last_used_at)">{{ relativeTime(key.last_used_at, { long: true }) }}</time><span v-else class="muted">Never</span></td>
           <td data-label="Status"><span class="state" :class="keyState(key)">{{ STATE[keyState(key)] }}</span><span v-if="key.expires_at && keyState(key) === 'active'" class="sub">until {{ absoluteTime(key.expires_at) }}</span></td>
           <td v-if="revocable" class="act">
-            <button v-if="keyState(key) === 'active'" type="button" class="btn sm ghost danger-text" :aria-label="`Revoke key aeon_${key.prefix}`" @click="emit('revoke', key)"><AppIcon name="close" :size="12" />Revoke</button>
+            <button v-if="keyState(key) === 'active'" type="button" class="btn sm ghost danger-text" :aria-label="`Revoke key ${keyHint(key.prefix)}`" @click="emit('revoke', key)"><AppIcon name="close" :size="12" />Revoke</button>
           </td>
         </tr>
       </tbody>

@@ -81,7 +81,7 @@ func TestImportVersionAndIsolation(t *testing.T) {
 	otherID := "bbbbbbbb-bbbb-4bbb-8bbb-bbbbbbbbbbbb"
 	var adminID string
 	for _, tid := range []string{tenantID, otherID} {
-		err := db.InTenant(ctx, d.App, tid, func(tx pgx.Tx) error {
+		err := db.InTenant(dbtest.Seed(ctx), d.App, tid, func(tx pgx.Tx) error {
 			if _, err := tx.Exec(ctx, `INSERT INTO tenants(id,slug,name) VALUES($1::uuid,$2,$2)`, tid, tid); err != nil {
 				return err
 			}
@@ -101,8 +101,9 @@ func TestImportVersionAndIsolation(t *testing.T) {
 			t.Fatal(err)
 		}
 	}
+	dbtest.BindLegacy(t, d, tenantID, adminID)
 	var profileID string
-	if err := db.InTenant(ctx, d.App, tenantID, func(tx pgx.Tx) error {
+	if err := db.InTenant(dbtest.Seed(ctx), d.App, tenantID, func(tx pgx.Tx) error {
 		if err := tx.QueryRow(ctx, `INSERT INTO quote_document_profiles(tenant_id,name,current_revision) VALUES($1::uuid,'Synthetic print',1) RETURNING id::text`, tenantID).Scan(&profileID); err != nil {
 			return err
 		}
@@ -123,7 +124,7 @@ func TestImportVersionAndIsolation(t *testing.T) {
 		t.Fatalf("initial mapping: %+v", report)
 	}
 	quoteID := report.Mappings[2].NodeID
-	if err := db.InTenant(ctx, d.App, tenantID, func(tx pgx.Tx) error {
+	if err := db.InTenant(dbtest.Seed(ctx), d.App, tenantID, func(tx pgx.Tx) error {
 		var state, number, body, importedProfileID string
 		var version int
 		var total int64
@@ -161,7 +162,7 @@ func TestImportVersionAndIsolation(t *testing.T) {
 	if newer.Mappings[2].Action != "update" || newer.Mappings[2].NodeID != quoteID {
 		t.Fatalf("newer revision mapping: %+v", newer.Mappings[2])
 	}
-	if err := db.InTenant(ctx, d.App, tenantID, func(tx pgx.Tx) error {
+	if err := db.InTenant(dbtest.Seed(ctx), d.App, tenantID, func(tx pgx.Tx) error {
 		var n, snapshots, issues, eventCount int
 		if err := tx.QueryRow(ctx, `SELECT current_version FROM business_quotes WHERE quote_node_id=$1::uuid`, quoteID).Scan(&n); err != nil {
 			return err
@@ -189,7 +190,7 @@ func TestImportVersionAndIsolation(t *testing.T) {
 	}); err != nil {
 		t.Fatal(err)
 	}
-	if err := db.InTenant(ctx, d.App, otherID, func(tx pgx.Tx) error {
+	if err := db.InTenant(dbtest.Seed(ctx), d.App, otherID, func(tx pgx.Tx) error {
 		var n int
 		if err := tx.QueryRow(ctx, `SELECT count(*) FROM paimos_offer_imports`).Scan(&n); err != nil {
 			return err
@@ -223,7 +224,7 @@ func TestImportVersionAndIsolation(t *testing.T) {
 	if drafts.Mappings[3].Action != "create" {
 		t.Fatalf("draft mapping: %+v", drafts.Mappings[3])
 	}
-	if err := db.InTenant(ctx, d.App, tenantID, func(tx pgx.Tx) error {
+	if err := db.InTenant(dbtest.Seed(ctx), d.App, tenantID, func(tx pgx.Tx) error {
 		var state string
 		var version int
 		if err := tx.QueryRow(ctx, `SELECT state,current_version FROM business_quotes WHERE quote_node_id=$1::uuid`, drafts.Mappings[3].NodeID).Scan(&state, &version); err != nil {
@@ -239,7 +240,7 @@ func TestImportVersionAndIsolation(t *testing.T) {
 	if _, err := Import(ctx, d.App, tenantID, adminID, "second-instance", b, true); err == nil {
 		t.Fatal("colliding imported customer number accepted")
 	}
-	if err := db.InTenant(ctx, d.App, tenantID, func(tx pgx.Tx) error {
+	if err := db.InTenant(dbtest.Seed(ctx), d.App, tenantID, func(tx pgx.Tx) error {
 		var n int
 		if err := tx.QueryRow(ctx, `SELECT count(*) FROM paimos_offer_imports WHERE source_instance='second-instance'`).Scan(&n); err != nil {
 			return err

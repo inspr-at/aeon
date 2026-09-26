@@ -47,7 +47,10 @@ func Open(ctx context.Context, url string) (*pgxpool.Pool, error) {
 }
 
 // InTenant runs fn in one transaction with TenantSetting set to tenantID
-// (set_config(..., true)), so every RLS policy applies.
+// (set_config(..., true)), so every RLS policy applies. The same statement
+// sets the transaction's project visibility (ADR-003 P2): an explicit service
+// visibility from AllProjects or OnlyProjects, else the visibility of the
+// principal in ctx, else none (fail closed).
 func InTenant(ctx context.Context, pool *pgxpool.Pool, tenantID string, fn func(pgx.Tx) error) error {
 	tx, err := pool.Begin(ctx)
 	if err != nil {
@@ -55,7 +58,7 @@ func InTenant(ctx context.Context, pool *pgxpool.Pool, tenantID string, fn func(
 	}
 	defer func() { _ = tx.Rollback(ctx) }()
 
-	if _, err := tx.Exec(ctx, "SELECT set_config($1, $2, true)", TenantSetting, tenantID); err != nil {
+	if err := enterTenant(ctx, tx, tenantID); err != nil {
 		return fmt.Errorf("set tenant: %w", err)
 	}
 	if err := fn(tx); err != nil {

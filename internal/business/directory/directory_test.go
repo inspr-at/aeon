@@ -41,7 +41,7 @@ func TestDirectoryListsTenantPrincipalsForStaff(t *testing.T) {
 		}
 		tenants[slug] = id
 	}
-	err = db.InTenant(t.Context(), d.App, tenants["dir-a"], func(tx pgx.Tx) error {
+	err = db.InTenant(dbtest.Seed(t.Context()), d.App, tenants["dir-a"], func(tx pgx.Tx) error {
 		for _, p := range []struct{ key, kind, name, role string }{
 			{"admin", "person", "Ada Admin", "admin"}, {"member", "person", "Mia Member", "member"},
 			{"customer", "person", "Cleo Customer", "customer"}, {"agent", "agent", "Nova", ""},
@@ -64,7 +64,10 @@ func TestDirectoryListsTenantPrincipalsForStaff(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	err = db.InTenant(t.Context(), d.App, tenants["dir-b"], func(tx pgx.Tx) error {
+	for _, id := range []string{ids["admin"], ids["member"], ids["customer"]} {
+		dbtest.BindLegacy(t, d, tenants["dir-a"], id)
+	}
+	err = db.InTenant(dbtest.Seed(t.Context()), d.App, tenants["dir-b"], func(tx pgx.Tx) error {
 		var id string
 		if err := tx.QueryRow(t.Context(), `INSERT INTO principals(tenant_id,kind,name,roles) VALUES($1,'person','Other tenant',ARRAY['admin']) RETURNING id::text`, tenants["dir-b"]).Scan(&id); err != nil {
 			return err
@@ -75,9 +78,10 @@ func TestDirectoryListsTenantPrincipalsForStaff(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
+	dbtest.BindLegacy(t, d, tenants["dir-b"], ids["other"])
 	install := func(tenantID string, enabled bool, digest string) {
 		t.Helper()
-		err := db.InTenant(t.Context(), d.App, tenantID, func(tx pgx.Tx) error {
+		err := db.InTenant(dbtest.Seed(t.Context()), d.App, tenantID, func(tx pgx.Tx) error {
 			_, err := tx.Exec(t.Context(), `INSERT INTO plugin_installations(tenant_id,plugin_id,version,manifest_digest_sha256,owner,enabled,permissions,updated_by_principal_id)
 				VALUES($1,$2,$3,$4,$5,$6,$7,$8)
 				ON CONFLICT (tenant_id, plugin_id) DO UPDATE SET enabled = EXCLUDED.enabled, manifest_digest_sha256 = EXCLUDED.manifest_digest_sha256`,

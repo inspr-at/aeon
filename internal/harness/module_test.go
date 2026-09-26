@@ -46,7 +46,7 @@ func fixture(t *testing.T) *harnessFixture {
 	f.agent = tenant.Principal{ID: uid(), TenantID: f.person.TenantID, Kind: tenant.Agent}
 	f.foreign = tenant.Principal{ID: uid(), TenantID: uid(), Kind: tenant.Person}
 	for _, p := range []tenant.Principal{f.person, f.foreign} {
-		err := db.InTenant(t.Context(), f.db.Admin, p.TenantID, func(tx pgx.Tx) error {
+		err := db.InTenant(dbtest.Seed(t.Context()), f.db.Admin, p.TenantID, func(tx pgx.Tx) error {
 			_, e := tx.Exec(t.Context(), `INSERT INTO tenants(id,slug,name) VALUES($1,$2,'Harness Test')`, p.TenantID, "h-"+p.TenantID)
 			return e
 		})
@@ -60,6 +60,9 @@ func fixture(t *testing.T) *harnessFixture {
 			return err
 		})
 	}
+	// Handlers see project data only through a binding (ADR-003 P2).
+	dbtest.BindRole(t, f.db, f.person.TenantID, f.person.ID, "admin")
+	dbtest.BindRole(t, f.db, f.person.TenantID, f.agent.ID, "member")
 	f.project, f.ticket = uid(), uid()
 	f.tx(t, f.person, func(tx pgx.Tx) error {
 		var projectKind, ticketKind string
@@ -88,7 +91,7 @@ func fixture(t *testing.T) *harnessFixture {
 }
 func (f *harnessFixture) tx(t *testing.T, p tenant.Principal, fn func(pgx.Tx) error) {
 	t.Helper()
-	if err := db.InTenant(t.Context(), f.db.App, p.TenantID, fn); err != nil {
+	if err := db.InTenant(dbtest.Seed(t.Context()), f.db.App, p.TenantID, fn); err != nil {
 		t.Fatal(err)
 	}
 }

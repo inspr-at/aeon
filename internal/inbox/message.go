@@ -150,7 +150,7 @@ func normalizeSend(p tenant.Principal, recipient, body, key string, reply *strin
 
 func (m *module) send(ctx context.Context, p tenant.Principal, in sendInput) (Message, error) {
 	var out Message
-	err := db.InTenant(ctx, m.pool, p.TenantID, func(tx pgx.Tx) error {
+	err := db.InTenant(tenant.WithPrincipal(ctx, p), m.pool, p.TenantID, func(tx pgx.Tx) error {
 		// UUIDs are fixed width, so this key aliases only when the idempotency
 		// key itself collides. Postgres text cannot store a NUL separator.
 		if _, err := tx.Exec(ctx, `SELECT pg_advisory_xact_lock(hashtextextended($1, 22))`,
@@ -280,7 +280,7 @@ func (m *module) handleAck(w http.ResponseWriter, r *http.Request) {
 
 func (m *module) ack(ctx context.Context, p tenant.Principal, id string) (Message, error) {
 	var out Message
-	err := db.InTenant(ctx, m.pool, p.TenantID, func(tx pgx.Tx) error {
+	err := db.InTenant(tenant.WithPrincipal(ctx, p), m.pool, p.TenantID, func(tx pgx.Tx) error {
 		current, err := scanMessage(tx.QueryRow(ctx, `SELECT `+messageCols+`
 			FROM inbox_messages WHERE id = $1::uuid FOR UPDATE`, id))
 		if errors.Is(err, pgx.ErrNoRows) {

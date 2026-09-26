@@ -78,15 +78,19 @@ func newFixture(t *testing.T) *fixture {
 	f.tenantB = insertTenant(t, f.db.Admin, "approvals-b")
 	f.personA = insertPrincipal(t, f.db.Admin, f.tenantA, tenant.Person, "ada")
 	f.personA.Roles = []string{"admin"}
-	if err := db.InTenant(ctx, f.db.App, f.tenantA, func(tx pgx.Tx) error {
+	if err := db.InTenant(dbtest.Seed(ctx), f.db.App, f.tenantA, func(tx pgx.Tx) error {
 		_, err := tx.Exec(ctx, `UPDATE principals SET roles=$2 WHERE id=$1::uuid`, f.personA.ID, f.personA.Roles)
 		return err
 	}); err != nil {
 		t.Fatal(err)
 	}
+	dbtest.BindLegacy(t, f.db, f.tenantA, f.personA.ID)
 	f.personB = insertPrincipal(t, f.db.Admin, f.tenantB, tenant.Person, "bea")
 	f.agentA = insertPrincipal(t, f.db.Admin, f.tenantA, tenant.Agent, "agent-a")
 	f.agentB = insertPrincipal(t, f.db.Admin, f.tenantA, tenant.Agent, "agent-b")
+	// Agents see project data only through a binding (ADR-003 P2).
+	dbtest.BindRole(t, f.db, f.tenantA, f.agentA.ID, "member")
+	dbtest.BindRole(t, f.db, f.tenantA, f.agentB.ID, "member")
 	f.wide = insertKey(t, f.db.Admin, f.agentA, []string{"run", "nodes.read"}, false)
 	f.exact = insertKey(t, f.db.Admin, f.agentA, []string{"run.claim"}, false)
 	f.narrow = insertKey(t, f.db.Admin, f.agentA, []string{"nodes.read"}, false)
@@ -265,7 +269,7 @@ func (f *fixture) eventTypes(t *testing.T) []string {
 func (f *fixture) live(t *testing.T, tenantID, agent, scope, kind string, resource *string, scopes []string) bool {
 	t.Helper()
 	var live bool
-	err := db.InTenant(t.Context(), f.db.App, tenantID, func(tx pgx.Tx) error {
+	err := db.InTenant(dbtest.Seed(t.Context()), f.db.App, tenantID, func(tx pgx.Tx) error {
 		var err error
 		live, err = LiveGrant(t.Context(), tx, agent, scope, kind, resource, scopes)
 		return err
@@ -555,7 +559,7 @@ func TestApprovals(t *testing.T) {
 		t.Fatal("expired request was decided")
 	}
 
-	if err := db.InTenant(ctx, f.db.App, f.tenantA, func(tx pgx.Tx) error {
+	if err := db.InTenant(dbtest.Seed(ctx), f.db.App, f.tenantA, func(tx pgx.Tx) error {
 		_, err := tx.Exec(ctx, `
 			INSERT INTO approval_requests (
 				tenant_id, proposed_by_principal_id, agent_principal_id,
@@ -567,7 +571,7 @@ func TestApprovals(t *testing.T) {
 		t.Fatalf("person insert request: %v", err)
 	}
 	guardID := insertGuardRequest(t, f)
-	if err := db.InTenant(ctx, f.db.App, f.tenantA, func(tx pgx.Tx) error {
+	if err := db.InTenant(dbtest.Seed(ctx), f.db.App, f.tenantA, func(tx pgx.Tx) error {
 		_, err := tx.Exec(ctx, `
 			INSERT INTO approval_decisions (tenant_id, request_id, decided_by_principal_id, decision)
 			VALUES ($1::uuid, $2::uuid, $3::uuid, 'approved')`, f.tenantA, guardID, f.agentA.ID)
@@ -575,7 +579,7 @@ func TestApprovals(t *testing.T) {
 	}); err == nil || !strings.Contains(err.Error(), "only a person") {
 		t.Fatalf("agent insert decision: %v", err)
 	}
-	if err := db.InTenant(ctx, f.db.App, f.tenantA, func(tx pgx.Tx) error {
+	if err := db.InTenant(dbtest.Seed(ctx), f.db.App, f.tenantA, func(tx pgx.Tx) error {
 		_, err := tx.Exec(ctx, `
 			INSERT INTO agent_permission_grants (
 				tenant_id, approval_request_id, agent_principal_id, scope, resource_kind, valid_until)
@@ -593,7 +597,7 @@ func TestApprovals(t *testing.T) {
 func insertGuardRequest(t *testing.T, f *fixture) string {
 	t.Helper()
 	var id string
-	err := db.InTenant(t.Context(), f.db.App, f.tenantA, func(tx pgx.Tx) error {
+	err := db.InTenant(dbtest.Seed(t.Context()), f.db.App, f.tenantA, func(tx pgx.Tx) error {
 		return tx.QueryRow(t.Context(), `
 			INSERT INTO approval_requests (
 				tenant_id, proposed_by_principal_id, agent_principal_id,
@@ -609,7 +613,7 @@ func insertGuardRequest(t *testing.T, f *fixture) string {
 
 func TestLiveGrantRejectsBadIDs(t *testing.T) {
 	f := newFixture(t)
-	err := db.InTenant(t.Context(), f.db.App, f.tenantA, func(tx pgx.Tx) error {
+	err := db.InTenant(dbtest.Seed(t.Context()), f.db.App, f.tenantA, func(tx pgx.Tx) error {
 		_, err := LiveGrant(t.Context(), tx, "not-a-uuid", "run.claim", "tenant", nil, []string{"run.claim"})
 		return err
 	})

@@ -9,7 +9,7 @@ import SettingsCard from './SettingsCard.vue'
 // The workspace itself: its name and my role in it. Who is in it, their roles,
 // invites and agent keys live under Access.
 const session = useSession()
-const role = computed(() => myWorkspaceRole()?.name ?? (permissionsAvailable.value ? 'No workspace role' : '—'))
+const role = computed(() => myWorkspaceRole()?.name ?? (permissionsAvailable() ? 'No workspace role' : '—'))
 </script>
 
 <template>

@@ -135,7 +135,7 @@ func TestQuoteFlowAndGates(t *testing.T) {
 	}
 	reg.Seal()
 	ids := map[string]string{}
-	e = db.InTenant(ctx, database.App, tenantID, func(tx pgx.Tx) error {
+	e = db.InTenant(dbtest.Seed(ctx), database.App, tenantID, func(tx pgx.Tx) error {
 		if _, err := tx.Exec(ctx, `INSERT INTO tenants(id,slug,name) VALUES($1::uuid,'quotes-test','Quotes test')`, tenantID); err != nil {
 			return err
 		}
@@ -146,6 +146,9 @@ func TestQuoteFlowAndGates(t *testing.T) {
 				return err
 			}
 			ids[p.key] = id
+			if err := dbtest.BindLegacyTx(ctx, tx, tenantID, id); err != nil {
+				return err
+			}
 		}
 		for slug, prefix := range map[string]string{"cost_unit": "CU", "organisation": "ORG", "contact": "CON", "quote": "QUO"} {
 			var id string
@@ -243,7 +246,7 @@ func TestQuoteFlowAndGates(t *testing.T) {
 	digest := v["content_sha256"].(string)
 	// This is the pre-document R4 write path on a migrated database. Its saved
 	// digest/pricing modes, lines and export must remain readable after 0600.
-	if err := db.InTenant(ctx, database.App, tenantID, func(tx pgx.Tx) error {
+	if err := db.InTenant(dbtest.Seed(ctx), database.App, tenantID, func(tx pgx.Tx) error {
 		old, err := readVersion(ctx, tx, quoteID, 1)
 		if err != nil {
 			return err
@@ -304,7 +307,7 @@ func TestQuoteFlowAndGates(t *testing.T) {
 		t.Fatalf("replay %d", status)
 	}
 	var count int
-	e = db.InTenant(ctx, database.App, tenantID, func(tx pgx.Tx) error {
+	e = db.InTenant(dbtest.Seed(ctx), database.App, tenantID, func(tx pgx.Tx) error {
 		return tx.QueryRow(ctx, `SELECT count(*) FROM events WHERE type LIKE 'quote.%'`).Scan(&count)
 	})
 	if e != nil {
@@ -332,7 +335,7 @@ func TestQuoteFlowAndGates(t *testing.T) {
 	if status != 409 {
 		t.Fatalf("stale settings revision %d", status)
 	}
-	e = db.InTenant(ctx, database.App, tenantID, func(tx pgx.Tx) error {
+	e = db.InTenant(dbtest.Seed(ctx), database.App, tenantID, func(tx pgx.Tx) error {
 		if _, err := tx.Exec(ctx, `UPDATE nodes SET fields=$2::jsonb WHERE id=$1::uuid`, ids["org"], `{"billing_address":{"street":"Billing Lane 4","postal_code":"8010","city":"Graz","country":"AT"},"visiting_address":{"street":"Visit Lane 8","postal_code":"8020","city":"Graz","country":"AT"}}`); err != nil {
 			return err
 		}
@@ -384,7 +387,7 @@ func TestQuoteFlowAndGates(t *testing.T) {
 		}
 	}
 	var customerNo string
-	e = db.InTenant(ctx, database.App, tenantID, func(tx pgx.Tx) error {
+	e = db.InTenant(dbtest.Seed(ctx), database.App, tenantID, func(tx pgx.Tx) error {
 		return tx.QueryRow(ctx, `SELECT customer_no FROM crm_customer_numbers WHERE organisation_node_id=$1::uuid`, ids["org"]).Scan(&customerNo)
 	})
 	if e != nil || !strings.HasPrefix(customerNo, "K"+localDay.Format("0601")) || customerNo == "K"+localDay.Format("0601") {
@@ -495,7 +498,7 @@ func TestQuoteFlowAndGates(t *testing.T) {
 		t.Fatalf("writer floor regressed after removing marks %d %v", code, value)
 	}
 	var customerCount int
-	e = db.InTenant(ctx, database.App, tenantID, func(tx pgx.Tx) error {
+	e = db.InTenant(dbtest.Seed(ctx), database.App, tenantID, func(tx pgx.Tx) error {
 		return tx.QueryRow(ctx, `SELECT count(*) FROM crm_customer_numbers WHERE organisation_node_id=$1::uuid`, ids["org"]).Scan(&customerCount)
 	})
 	if e != nil || customerCount != 1 {
@@ -665,7 +668,7 @@ func TestQuoteFlowAndGates(t *testing.T) {
 	}
 	var rateAmount string
 	var rateCentsStored int64
-	e = db.InTenant(ctx, database.App, tenantID, func(tx pgx.Tx) error {
+	e = db.InTenant(dbtest.Seed(ctx), database.App, tenantID, func(tx pgx.Tx) error {
 		return tx.QueryRow(ctx, `SELECT rate_amount::text,total_cents FROM quote_document_lines WHERE quote_node_id=$1::uuid AND version=1`, rateQuoteID).Scan(&rateAmount, &rateCentsStored)
 	})
 	if e != nil || rateAmount != "19.9900" || rateCentsStored != 2999 {
@@ -698,7 +701,7 @@ func TestQuoteFlowAndGates(t *testing.T) {
 		t.Fatalf("stale duplicate revision %d", status)
 	}
 	status, issuedNow := call("admin", "GET", "/api/quotes/"+newID, "")
-	e = db.InTenant(ctx, database.App, tenantID, func(tx pgx.Tx) error {
+	e = db.InTenant(dbtest.Seed(ctx), database.App, tenantID, func(tx pgx.Tx) error {
 		_, err := tx.Exec(ctx, `UPDATE nodes SET fields=$2::jsonb WHERE id=$1::uuid`, ids["contact"], `{"email":"latest@example.test"}`)
 		return err
 	})
@@ -718,7 +721,7 @@ func TestQuoteFlowAndGates(t *testing.T) {
 		t.Fatalf("archive %d %v", status, archived)
 	}
 	var legacyOrg string
-	e = db.InTenant(ctx, database.App, tenantID, func(tx pgx.Tx) error {
+	e = db.InTenant(dbtest.Seed(ctx), database.App, tenantID, func(tx pgx.Tx) error {
 		if err := tx.QueryRow(ctx, `INSERT INTO nodes(tenant_id,key,kind_id,title) VALUES($1::uuid,'ORG-999',$2::uuid,'Legacy Example') RETURNING id::text`, tenantID, ids["organisation_kind"]).Scan(&legacyOrg); err != nil {
 			return err
 		}
@@ -744,7 +747,7 @@ func TestQuoteFlowAndGates(t *testing.T) {
 	if e == nil {
 		t.Fatal("legacy conversion replay changed number")
 	}
-	e = db.InTenant(ctx, database.App, tenantID, func(tx pgx.Tx) error {
+	e = db.InTenant(dbtest.Seed(ctx), database.App, tenantID, func(tx pgx.Tx) error {
 		_, err := tx.Exec(ctx, `UPDATE plugin_installations SET enabled=false WHERE plugin_id='business_crm'`)
 		return err
 	})

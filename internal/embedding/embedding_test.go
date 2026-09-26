@@ -84,7 +84,7 @@ func TestWorkerStoresRewritesAndIsolates(t *testing.T) {
 		t.Fatalf("events visible without tenant: %d", leaked)
 	}
 	var other int
-	if err := db.InTenant(ctx, d.App, tenantA, func(tx pgx.Tx) error {
+	if err := db.InTenant(dbtest.Seed(ctx), d.App, tenantA, func(tx pgx.Tx) error {
 		return tx.QueryRow(ctx, `SELECT count(*) FROM node_embeddings WHERE node_id = $1`, nodeB).Scan(&other)
 	}); err != nil {
 		t.Fatal(err)
@@ -93,7 +93,7 @@ func TestWorkerStoresRewritesAndIsolates(t *testing.T) {
 		t.Fatal("cross-tenant embedding visible")
 	}
 
-	if err := db.InTenant(ctx, d.App, tenantA, func(tx pgx.Tx) error {
+	if err := db.InTenant(dbtest.Seed(ctx), d.App, tenantA, func(tx pgx.Tx) error {
 		_, err := tx.Exec(ctx, `UPDATE nodes SET title = $2 WHERE id = $1`, nodeA, "Renamed title")
 		return err
 	}); err != nil {
@@ -110,7 +110,7 @@ func TestWorkerStoresRewritesAndIsolates(t *testing.T) {
 		t.Fatalf("events %d", countEvents(t, d.App, tenantA))
 	}
 
-	if err := db.InTenant(ctx, d.App, tenantA, func(tx pgx.Tx) error {
+	if err := db.InTenant(dbtest.Seed(ctx), d.App, tenantA, func(tx pgx.Tx) error {
 		_, err := tx.Exec(ctx, `UPDATE nodes SET title = title WHERE id = $1`, nodeA)
 		return err
 	}); err != nil {
@@ -163,7 +163,7 @@ func TestWorkerKeepsStaleVectorOffTheRow(t *testing.T) {
 		t.Fatal("stale vector stored")
 	}
 	var status string
-	if err := db.InTenant(ctx, d.App, tenantID, func(tx pgx.Tx) error {
+	if err := db.InTenant(dbtest.Seed(ctx), d.App, tenantID, func(tx pgx.Tx) error {
 		return tx.QueryRow(ctx, `SELECT status FROM node_embedding_jobs WHERE node_id = $1`, nodeID).Scan(&status)
 	}); err != nil {
 		t.Fatal(err)
@@ -191,7 +191,7 @@ func TestWorkerBackoffAndDeletedNodes(t *testing.T) {
 	seedTenant(t, d, tenantID, "alpha")
 	insertNode(t, d.App, tenantID, liveID, "PAI-1", "Retry me", "body", "open")
 	insertNode(t, d.App, tenantID, deadID, "PAI-2", "Delete me", "body", "open")
-	if err := db.InTenant(ctx, d.App, tenantID, func(tx pgx.Tx) error {
+	if err := db.InTenant(dbtest.Seed(ctx), d.App, tenantID, func(tx pgx.Tx) error {
 		_, err := tx.Exec(ctx, `UPDATE nodes SET deleted_at = now() WHERE id = $1`, deadID)
 		return err
 	}); err != nil {
@@ -231,7 +231,7 @@ func TestWorkerBackoffAndDeletedNodes(t *testing.T) {
 	if attempts != 2 {
 		t.Fatalf("attempts moved after cap %d", attempts)
 	}
-	if err := db.InTenant(ctx, d.App, tenantID, func(tx pgx.Tx) error {
+	if err := db.InTenant(dbtest.Seed(ctx), d.App, tenantID, func(tx pgx.Tx) error {
 		_, err := tx.Exec(ctx, `UPDATE nodes SET title = title || ' again' WHERE id = $1`, liveID)
 		return err
 	}); err != nil {
@@ -281,7 +281,7 @@ type raceProvider struct {
 }
 
 func (p raceProvider) Embed(ctx context.Context, texts []string) ([][]float32, error) {
-	if err := db.InTenant(ctx, p.pool, p.tenant, func(tx pgx.Tx) error {
+	if err := db.InTenant(dbtest.Seed(ctx), p.pool, p.tenant, func(tx pgx.Tx) error {
 		_, err := tx.Exec(ctx, `UPDATE nodes SET title = $2 WHERE id = $1`, p.node, p.title)
 		return err
 	}); err != nil {
@@ -305,7 +305,7 @@ func seedTenant(t *testing.T, d *dbtest.DB, id, slug string) {
 
 func insertNode(t *testing.T, pool *pgxpool.Pool, tenant, id, key, title, body, state string) {
 	t.Helper()
-	err := db.InTenant(t.Context(), pool, tenant, func(tx pgx.Tx) error {
+	err := db.InTenant(dbtest.Seed(t.Context()), pool, tenant, func(tx pgx.Tx) error {
 		tag, err := tx.Exec(t.Context(), `
 			INSERT INTO nodes (tenant_id, id, key, kind_id, title, body, state)
 			SELECT $1, $2, $3, k.id, $4, $5, $6
@@ -328,7 +328,7 @@ func assertEmbedding(t *testing.T, pool *pgxpool.Pool, tenant, node, model, hash
 	t.Helper()
 	var gotModel, gotHash string
 	var dims int
-	err := db.InTenant(t.Context(), pool, tenant, func(tx pgx.Tx) error {
+	err := db.InTenant(dbtest.Seed(t.Context()), pool, tenant, func(tx pgx.Tx) error {
 		return tx.QueryRow(t.Context(), `
 			SELECT model, content_hash, vector_dims(embedding::vector)
 			FROM node_embeddings WHERE node_id = $1`, node).Scan(&gotModel, &gotHash, &dims)
@@ -346,7 +346,7 @@ func assertEvent(t *testing.T, pool *pgxpool.Pool, tenant, node string, beforeNu
 	var beforeEmpty bool
 	var gotBefore, gotAfter string
 	var actor string
-	err := db.InTenant(t.Context(), pool, tenant, func(tx pgx.Tx) error {
+	err := db.InTenant(dbtest.Seed(t.Context()), pool, tenant, func(tx pgx.Tx) error {
 		return tx.QueryRow(t.Context(), `
 			SELECT actor_principal_id::text, before IS NULL,
 			       coalesce(before->>'content_hash', ''), after->>'content_hash'
@@ -365,7 +365,7 @@ func assertEvent(t *testing.T, pool *pgxpool.Pool, tenant, node string, beforeNu
 func assertNoJob(t *testing.T, pool *pgxpool.Pool, tenant, node string) {
 	t.Helper()
 	var n int
-	if err := db.InTenant(t.Context(), pool, tenant, func(tx pgx.Tx) error {
+	if err := db.InTenant(dbtest.Seed(t.Context()), pool, tenant, func(tx pgx.Tx) error {
 		return tx.QueryRow(t.Context(), `SELECT count(*) FROM node_embedding_jobs WHERE node_id = $1`, node).Scan(&n)
 	}); err != nil {
 		t.Fatal(err)
@@ -378,7 +378,7 @@ func assertNoJob(t *testing.T, pool *pgxpool.Pool, tenant, node string) {
 func countEvents(t *testing.T, pool *pgxpool.Pool, tenant string) int {
 	t.Helper()
 	var n int
-	if err := db.InTenant(t.Context(), pool, tenant, func(tx pgx.Tx) error {
+	if err := db.InTenant(dbtest.Seed(t.Context()), pool, tenant, func(tx pgx.Tx) error {
 		return tx.QueryRow(t.Context(), `SELECT count(*) FROM events`).Scan(&n)
 	}); err != nil {
 		t.Fatal(err)
@@ -389,7 +389,7 @@ func countEvents(t *testing.T, pool *pgxpool.Pool, tenant string) int {
 func countEmbeddings(t *testing.T, pool *pgxpool.Pool, tenant string) int {
 	t.Helper()
 	var n int
-	if err := db.InTenant(t.Context(), pool, tenant, func(tx pgx.Tx) error {
+	if err := db.InTenant(dbtest.Seed(t.Context()), pool, tenant, func(tx pgx.Tx) error {
 		return tx.QueryRow(t.Context(), `SELECT count(*) FROM node_embeddings`).Scan(&n)
 	}); err != nil {
 		t.Fatal(err)
@@ -401,7 +401,7 @@ func jobState(t *testing.T, pool *pgxpool.Pool, tenant, node string) (int, strin
 	t.Helper()
 	var attempts int
 	var status, last string
-	err := db.InTenant(t.Context(), pool, tenant, func(tx pgx.Tx) error {
+	err := db.InTenant(dbtest.Seed(t.Context()), pool, tenant, func(tx pgx.Tx) error {
 		return tx.QueryRow(t.Context(), `
 			SELECT attempts, status, coalesce(last_error, '')
 			FROM node_embedding_jobs WHERE node_id = $1`, node).Scan(&attempts, &status, &last)
@@ -415,7 +415,7 @@ func jobState(t *testing.T, pool *pgxpool.Pool, tenant, node string) (int, strin
 func visible(t *testing.T, pool *pgxpool.Pool, tenant, q string, p fixedProvider) int {
 	t.Helper()
 	var n int
-	err := db.InTenant(t.Context(), pool, tenant, func(tx pgx.Tx) error {
+	err := db.InTenant(dbtest.Seed(t.Context()), pool, tenant, func(tx pgx.Tx) error {
 		return tx.QueryRow(t.Context(), `
 			SELECT count(*) FROM aeon_search_nodes($1, $2::real[]::halfvec(1536), $3)`,
 			q, pgtype.FlatArray[float32](p.vec), p.model).Scan(&n)

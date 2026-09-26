@@ -98,7 +98,7 @@ func TestGreetingRotationPreferencesAndTenantIsolation(t *testing.T) {
 		{tenantA, "Alice Walker", &aliceID},
 		{tenantB, "Bob Smith", &bobID},
 	} {
-		if err := db.InTenant(ctx, database.App, row.tenant, func(tx pgx.Tx) error {
+		if err := db.InTenant(dbtest.Seed(ctx), database.App, row.tenant, func(tx pgx.Tx) error {
 			return tx.QueryRow(ctx, `INSERT INTO principals (tenant_id,kind,name) VALUES ($1::uuid,'person',$2) RETURNING id::text`, row.tenant, row.name).Scan(row.id)
 		}); err != nil {
 			t.Fatal(err)
@@ -136,7 +136,7 @@ func TestGreetingRotationPreferencesAndTenantIsolation(t *testing.T) {
 	if first.Salutation != "Hello" || first.Name != "Alice" {
 		t.Fatalf("header/local first name: %+v", first)
 	}
-	if err := db.InTenant(ctx, database.App, tenantA, func(tx pgx.Tx) error {
+	if err := db.InTenant(dbtest.Seed(ctx), database.App, tenantA, func(tx pgx.Tx) error {
 		_, err := tx.Exec(ctx, `INSERT INTO user_preferences (tenant_id,principal_id,key,value) VALUES ($1::uuid,$2::uuid,'timezone','{"timezone":"Europe/Vienna"}'),($1::uuid,$2::uuid,'profile','{"first_name":"Ally"}')`, tenantA, aliceID)
 		return err
 	}); err != nil {
@@ -154,7 +154,7 @@ func TestGreetingRotationPreferencesAndTenantIsolation(t *testing.T) {
 		seen[g.ID] = true
 	}
 	var own, foreign, eventCount int
-	if err := db.InTenant(ctx, database.App, tenantA, func(tx pgx.Tx) error {
+	if err := db.InTenant(dbtest.Seed(ctx), database.App, tenantA, func(tx pgx.Tx) error {
 		if err := tx.QueryRow(ctx, `SELECT count(*) FROM greeting_history WHERE principal_id=$1::uuid`, aliceID).Scan(&own); err != nil {
 			return err
 		}
@@ -172,7 +172,7 @@ func TestGreetingRotationPreferencesAndTenantIsolation(t *testing.T) {
 	if other.Name != "Bob" {
 		t.Fatalf("other tenant greeting: %+v", other)
 	}
-	if err := db.InTenant(ctx, database.App, tenantB, func(tx pgx.Tx) error {
+	if err := db.InTenant(dbtest.Seed(ctx), database.App, tenantB, func(tx pgx.Tx) error {
 		return tx.QueryRow(ctx, `SELECT count(*) FROM greeting_history WHERE principal_id=$1::uuid`, aliceID).Scan(&foreign)
 	}); err != nil {
 		t.Fatal(err)
@@ -183,7 +183,7 @@ func TestGreetingRotationPreferencesAndTenantIsolation(t *testing.T) {
 	// The oldest row is pruned after draw 301, and an absence of 72 hours
 	// changes the salutation and permits return-tagged lines.
 	_ = draw(tenantA, aliceID, "UTC")
-	if err := db.InTenant(ctx, database.App, tenantA, func(tx pgx.Tx) error {
+	if err := db.InTenant(dbtest.Seed(ctx), database.App, tenantA, func(tx pgx.Tx) error {
 		return tx.QueryRow(ctx, `SELECT count(*) FROM greeting_history WHERE principal_id=$1::uuid`, aliceID).Scan(&own)
 	}); err != nil {
 		t.Fatal(err)

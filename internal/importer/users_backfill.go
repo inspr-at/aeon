@@ -22,7 +22,7 @@ func BackfillPrincipals(ctx context.Context, pool *pgxpool.Pool, tenantID string
 	if pool == nil || tenantID == "" {
 		return report, errors.New("database pool and tenant id are required")
 	}
-	err := db.InTenant(ctx, pool, tenantID, func(tx pgx.Tx) error {
+	err := db.InTenant(db.AllProjects(ctx, "classic importer"), pool, tenantID, func(tx pgx.Tx) error {
 		if _, err := tx.Exec(ctx, `SELECT pg_advisory_xact_lock(hashtextextended($1,42))`, tenantID+":principal-backfill"); err != nil {
 			return err
 		}

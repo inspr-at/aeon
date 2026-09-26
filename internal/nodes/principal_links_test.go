@@ -4,6 +4,7 @@ package nodes
 import (
 	"encoding/json"
 	"fmt"
+	"github.com/inspr-at/aeon/internal/dbtest"
 	"testing"
 
 	"github.com/inspr-at/aeon/internal/db"
@@ -15,7 +16,7 @@ func TestLinkedAssigneesListFacetsPickerAndWrites(t *testing.T) {
 	p := newPrincipal(t, "linked-assignees")
 	kind := kindBySlug(t, p, "ticket")
 	var alias string
-	if err := db.InTenant(t.Context(), appPool, p.TenantID, func(tx pgx.Tx) error {
+	if err := db.InTenant(dbtest.Seed(t.Context()), appPool, p.TenantID, func(tx pgx.Tx) error {
 		var identity string
 		if err := tx.QueryRow(t.Context(), `INSERT INTO identities(issuer,subject) VALUES('paimos-classic','link-source:7') RETURNING id::text`).Scan(&identity); err != nil {
 			return err
@@ -59,7 +60,7 @@ func TestLinkedAssigneesListFacetsPickerAndWrites(t *testing.T) {
 	if fields["assignee"].(map[string]any)["id"] != p.ID || fields["assignee"].(map[string]any)["name"] != p.Name || fields["assignee_id"] != p.ID {
 		t.Fatalf("patch stored alias: %s", body)
 	}
-	if err := db.InTenant(t.Context(), appPool, p.TenantID, func(tx pgx.Tx) error {
+	if err := db.InTenant(dbtest.Seed(t.Context()), appPool, p.TenantID, func(tx pgx.Tx) error {
 		var assignment string
 		if err := tx.QueryRow(t.Context(), `SELECT after->'fields'->'assignee'->>'id' FROM events WHERE tenant_id=$1 AND node_id=$2 AND type='node.updated' ORDER BY id DESC LIMIT 1`, p.TenantID, node.ID).Scan(&assignment); err != nil {
 			return err

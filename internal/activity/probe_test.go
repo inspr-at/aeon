@@ -4,6 +4,7 @@ package activity
 
 import (
 	"encoding/json"
+	"github.com/inspr-at/aeon/internal/dbtest"
 	"net/http"
 	"os"
 	"sort"
@@ -40,7 +41,7 @@ func TestReadOnlyImportedDataset(t *testing.T) {
 	defer pool.Close()
 	p := tenant.Principal{TenantID: tenantID, Kind: tenant.Person}
 	nodes := map[string]string{}
-	err = db.InTenant(t.Context(), pool, tenantID, func(tx pgx.Tx) error {
+	err = db.InTenant(dbtest.Seed(t.Context()), pool, tenantID, func(tx pgx.Tx) error {
 		if err := tx.QueryRow(t.Context(), `SELECT id::text,name FROM principals WHERE tenant_id=$1 AND kind='person' ORDER BY id LIMIT 1`, tenantID).Scan(&p.ID, &p.Name); err != nil {
 			return err
 		}

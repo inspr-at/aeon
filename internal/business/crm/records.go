@@ -13,6 +13,7 @@ import (
 	"strconv"
 	"strings"
 
+	"github.com/inspr-at/aeon/internal/authz"
 	"github.com/inspr-at/aeon/internal/db"
 	"github.com/inspr-at/aeon/internal/events"
 	"github.com/inspr-at/aeon/internal/httpapi"
@@ -163,9 +164,6 @@ func (m *module) gate(ctx context.Context, tx pgx.Tx, tenantID, permission strin
 	}
 	return nil
 }
-func staff(p tenant.Principal) bool {
-	return p.Kind == tenant.Person && (slices.Contains(p.Roles, "admin") || slices.Contains(p.Roles, "member"))
-}
 func (m *module) run(r *http.Request, p tenant.Principal, permission string, fn func(pgx.Tx) error) error {
 	return db.InTenant(r.Context(), m.pool, p.TenantID, func(tx pgx.Tx) error {
 		if err := m.gate(r.Context(), tx, p.TenantID, permission); err != nil {
@@ -174,17 +172,12 @@ func (m *module) run(r *http.Request, p tenant.Principal, permission string, fn 
 		return fn(tx)
 	})
 }
-func actor(w http.ResponseWriter, r *http.Request, write bool) (tenant.Principal, bool) {
+func (m *module) actor(w http.ResponseWriter, r *http.Request, write bool) (tenant.Principal, bool) {
 	p, ok := principal(w, r)
 	if !ok {
 		return p, false
 	}
-	if write {
-		if requireAdmin(p) != nil {
-			writeErr(w, errForbidden)
-			return p, false
-		}
-	} else if !staff(p) {
+	if authz.RequirePattern(authz.BindPool(r.Context(), m.pool), r.Pattern, authz.Scope{}) != nil {
 		writeErr(w, errForbidden)
 		return p, false
 	}
@@ -239,7 +232,7 @@ func contact(ctx context.Context, tx pgx.Tx, id string, lock bool) (ContactRecor
 	return c, err
 }
 func (m *module) listCustomers(w http.ResponseWriter, r *http.Request) {
-	p, ok := actor(w, r, false)
+	p, ok := m.actor(w, r, false)
 	if !ok {
 		return
 	}
@@ -325,7 +318,7 @@ func (m *module) listCustomers(w http.ResponseWriter, r *http.Request) {
 	httpapi.WriteJSON(w, 200, out)
 }
 func (m *module) getCustomer(w http.ResponseWriter, r *http.Request) {
-	p, ok := actor(w, r, false)
+	p, ok := m.actor(w, r, false)
 	if !ok {
 		return
 	}
@@ -343,7 +336,7 @@ func (m *module) getCustomer(w http.ResponseWriter, r *http.Request) {
 	httpapi.WriteJSON(w, 200, out)
 }
 func (m *module) createCustomer(w http.ResponseWriter, r *http.Request) {
-	p, ok := actor(w, r, true)
+	p, ok := m.actor(w, r, true)
 	if !ok {
 		return
 	}
@@ -383,7 +376,7 @@ func (m *module) createCustomer(w http.ResponseWriter, r *http.Request) {
 	httpapi.WriteJSON(w, 201, out)
 }
 func (m *module) updateCustomer(w http.ResponseWriter, r *http.Request) {
-	p, ok := actor(w, r, true)
+	p, ok := m.actor(w, r, true)
 	if !ok {
 		return
 	}
@@ -431,7 +424,7 @@ func (m *module) updateCustomer(w http.ResponseWriter, r *http.Request) {
 	httpapi.WriteJSON(w, 200, out)
 }
 func (m *module) deleteCustomer(w http.ResponseWriter, r *http.Request) {
-	p, ok := actor(w, r, true)
+	p, ok := m.actor(w, r, true)
 	if !ok {
 		return
 	}
@@ -513,7 +506,7 @@ func (m *module) deleteCustomer(w http.ResponseWriter, r *http.Request) {
 	w.WriteHeader(204)
 }
 func (m *module) listContacts(w http.ResponseWriter, r *http.Request) {
-	p, ok := actor(w, r, false)
+	p, ok := m.actor(w, r, false)
 	if !ok {
 		return
 	}
@@ -562,7 +555,7 @@ func (m *module) listContacts(w http.ResponseWriter, r *http.Request) {
 	httpapi.WriteJSON(w, 200, out)
 }
 func (m *module) getContact(w http.ResponseWriter, r *http.Request) {
-	p, ok := actor(w, r, false)
+	p, ok := m.actor(w, r, false)
 	if !ok {
 		return
 	}
@@ -580,7 +573,7 @@ func (m *module) getContact(w http.ResponseWriter, r *http.Request) {
 	httpapi.WriteJSON(w, 200, out)
 }
 func (m *module) createContact(w http.ResponseWriter, r *http.Request) {
-	p, ok := actor(w, r, true)
+	p, ok := m.actor(w, r, true)
 	if !ok {
 		return
 	}
@@ -650,7 +643,7 @@ func (m *module) createContact(w http.ResponseWriter, r *http.Request) {
 	httpapi.WriteJSON(w, 201, out)
 }
 func (m *module) updateContact(w http.ResponseWriter, r *http.Request) {
-	p, ok := actor(w, r, true)
+	p, ok := m.actor(w, r, true)
 	if !ok {
 		return
 	}
@@ -699,7 +692,7 @@ func (m *module) updateContact(w http.ResponseWriter, r *http.Request) {
 	httpapi.WriteJSON(w, 200, out)
 }
 func (m *module) promoteContact(w http.ResponseWriter, r *http.Request) {
-	p, ok := actor(w, r, true)
+	p, ok := m.actor(w, r, true)
 	if !ok {
 		return
 	}
@@ -758,7 +751,7 @@ func (m *module) promoteContact(w http.ResponseWriter, r *http.Request) {
 	httpapi.WriteJSON(w, 200, out)
 }
 func (m *module) deleteContact(w http.ResponseWriter, r *http.Request) {
-	p, ok := actor(w, r, true)
+	p, ok := m.actor(w, r, true)
 	if !ok {
 		return
 	}
@@ -819,7 +812,7 @@ func (m *module) deleteContact(w http.ResponseWriter, r *http.Request) {
 // customer leaves the default list and keeps everything attached to it; the
 // change is one event, undone through the event log.
 func (m *module) customerVisibility(w http.ResponseWriter, r *http.Request) {
-	p, ok := actor(w, r, true)
+	p, ok := m.actor(w, r, true)
 	if !ok {
 		return
 	}

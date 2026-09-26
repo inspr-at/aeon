@@ -9,6 +9,7 @@ import (
 	"regexp"
 	"time"
 
+	"github.com/inspr-at/aeon/internal/authz"
 	"github.com/inspr-at/aeon/internal/db"
 	"github.com/inspr-at/aeon/internal/plugins"
 	"github.com/inspr-at/aeon/internal/plugins/fence"
@@ -80,7 +81,7 @@ func allocateOfferNumber(ctx context.Context, tx pgx.Tx, p tenant.Principal, day
 // ReformatLegacyCustomerNumber is the guarded domain operation used by the
 // CRM package's admin adapter. It never changes an issued quote or history.
 func ReformatLegacyCustomerNumber(ctx context.Context, pool *pgxpool.Pool, registry *plugins.Registry, p tenant.Principal, org, expected string) (string, error) {
-	if pool == nil || registry == nil || !admin(p) {
+	if pool == nil || registry == nil || authz.Require(authz.BindPool(tenant.WithPrincipal(ctx, p), pool), "quotes.manage", authz.Scope{}) != nil {
 		return "", denied()
 	}
 	if !uuidRe.MatchString(org) || !legacyCustomerNumber.MatchString(expected) {
@@ -88,7 +89,7 @@ func ReformatLegacyCustomerNumber(ctx context.Context, pool *pgxpool.Pool, regis
 	}
 	m := &Module{pool: pool, registry: registry}
 	var result string
-	err := db.InTenant(ctx, pool, p.TenantID, func(tx pgx.Tx) error {
+	err := db.InTenant(tenant.WithPrincipal(ctx, p), pool, p.TenantID, func(tx pgx.Tx) error {
 		if err := m.enabled(ctx, tx, p.TenantID, fence.PermNodesContribute, true); err != nil {
 			return err
 		}

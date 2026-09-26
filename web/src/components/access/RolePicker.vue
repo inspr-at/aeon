@@ -1,7 +1,7 @@
 <!-- SPDX-License-Identifier: AGPL-3.0-only -->
 <script setup lang="ts">
 import { computed, nextTick, onMounted, ref, useId, watch } from 'vue'
-import { LAST_OWNER_REASON, beyond, diff, effectLine, permissionLabel, type Permission, type Role } from '../../lib/access'
+import { beyond, diff, effectLine, LAST_OWNER_REASON, type Permission, permissionLabel, projectRolesOf, type Role, workspaceRolesOf } from '../../lib/access'
 import AppIcon from '../AppIcon.vue'
 import FloatingPanel from '../work/FloatingPanel.vue'
 import RiskBadge from './RiskBadge.vue'
@@ -11,14 +11,17 @@ import RiskBadge from './RiskBadge.vue'
 // what the person gains and loses. Roles I may not give are there, disabled,
 // with the reason; so is everything else while the last owner keeps Owner.
 const props = withDefaults(defineProps<{
-  anchor: HTMLElement | null; subject: string; roles: Role[]; current: string | null; registry: Permission[]; mine: Set<string>
+  // place: the project, for a project role ("Give Mira Guest on Pharos").
+  anchor: HTMLElement | null; subject: string; place?: string; roles: Role[]; current: string | null; registry: Permission[]; mine: Set<string>
   scope: 'workspace' | 'project'; allowNone?: boolean; noneLabel?: string; locked?: boolean; busy?: boolean
-}>(), { allowNone: false, noneLabel: 'No workspace role', locked: false, busy: false })
+  // Why the server refused the last choice, in words; shown at the choice until another role is picked.
+  error?: string
+}>(), { allowNone: false, noneLabel: 'No workspace role', locked: false, busy: false, error: '' })
 const emit = defineEmits<{ choose: [roleId: string | null]; close: [restoreFocus: boolean] }>()
 const id = useId()
 const byKey = computed(() => new Map(props.registry.map(p => [p.key, p])))
-// On a project only roles with something grantable there make sense.
-const offered = computed(() => props.scope === 'workspace' ? props.roles : props.roles.filter(role => role.permissions.some(key => byKey.value.get(key)?.grantable_at.includes('project'))))
+// Only roles the server accepts at this scope: never Guest in the workspace, never Owner or Customer on a project.
+const offered = computed(() => props.scope === 'workspace' ? workspaceRolesOf(props.roles) : projectRolesOf(props.roles, props.registry))
 const NONE = '__none__'
 const options = computed(() => [...offered.value.map(role => ({ id: role.id, role })), ...(props.allowNone ? [{ id: NONE, role: null }] : [])])
 const picked = ref<string>(props.current ?? (props.allowNone ? NONE : ''))
@@ -37,7 +40,8 @@ const byRisk = (keys: string[]) => [...keys].sort((a, b) => RISK[byKey.value.get
 const change = computed(() => { const d = diff(currentRole.value?.permissions ?? [], pickedRole.value?.permissions ?? []); return { added: byRisk(d.added), removed: byRisk(d.removed) } })
 const changed = computed(() => (picked.value === NONE ? null : picked.value) !== props.current)
 const pickedReason = computed(() => reasonFor(picked.value === NONE ? null : pickedRole.value))
-const applyLabel = computed(() => picked.value === NONE ? `Remove ${props.subject}’s workspace role` : `Give ${props.subject} ${pickedRole.value?.name ?? ''}`)
+const applyLabel = computed(() => picked.value === NONE ? `Remove ${props.subject}’s workspace role` : `Give ${props.subject} ${pickedRole.value?.name ?? ''}${props.place ? ` on ${props.place}` : ''}`)
+const whom = computed(() => props.place ? `${props.subject} on ${props.place}` : props.subject)
 const risky = (keys: string[]) => keys.filter(key => byKey.value.get(key)?.risk === 'high')
 function keys(event: KeyboardEvent) {
   const ids = options.value.map(option => option.id)
@@ -53,6 +57,9 @@ function apply() { if (!changed.value || pickedReason.value || props.busy) retur
 onMounted(() => { document.getElementById(`${id}-${picked.value}`)?.focus({ preventScroll: true }); void nextTick(reveal) })
 // The preview grows when a role is picked; the picked role stays in view.
 const list = ref<HTMLElement>()
+const refusal = ref(props.error)
+watch(() => props.error, value => { refusal.value = value })
+watch(picked, () => { refusal.value = '' })
 // Keeps the picked role in view by scrolling the list alone: scrollIntoView would
 // also move the page behind the menu.
 function reveal() {
@@ -67,11 +74,11 @@ watch(picked, () => void nextTick(reveal))
 </script>
 
 <template>
-  <FloatingPanel :anchor="anchor" :width="400" :tallest="620" :label="`Role of ${subject}`" @close="restore => emit('close', restore)">
+  <FloatingPanel :anchor="anchor" :width="400" :tallest="620" :label="`Role of ${whom}`" @close="restore => emit('close', restore)">
     <div class="picker" @keydown="keys">
-      <p class="eyebrow title">{{ scope === 'workspace' ? 'Workspace role' : 'Project role' }} · {{ subject }}</p>
+      <p class="eyebrow title">{{ scope === 'workspace' ? 'Workspace role' : 'Project role' }} · {{ whom }}</p>
       <p v-if="locked" :id="`${id}-locked`" class="locked"><AppIcon name="shield" :size="14" /><span>{{ LAST_OWNER_REASON }}</span></p>
-      <div ref="list" class="options" role="radiogroup" :aria-label="`Role for ${subject}`">
+      <div ref="list" class="options" role="radiogroup" :aria-label="`Role for ${whom}`">
         <button
           v-for="option in options" :id="`${id}-${option.id}`" :key="option.id" type="button" role="radio" class="option"
           :aria-checked="picked === option.id" :tabindex="picked === option.id ? 0 : -1" :class="{ off: !!reasonFor(option.role) }"
@@ -102,6 +109,7 @@ watch(picked, () => void nextTick(reveal))
           <span v-if="change.removed.length > 6" class="more">and {{ change.removed.length - 6 }} more</span>
         </div>
       </div>
+      <p v-if="refusal" :id="`${id}-error`" class="refusal" role="alert"><AppIcon name="alert" :size="13" /><span>{{ refusal }}</span></p>
       <div class="actions">
         <template v-if="locked"><button type="button" class="btn sm" @click="emit('close', true)">Close</button></template>
         <template v-else>
@@ -143,6 +151,8 @@ watch(picked, () => void nextTick(reveal))
 .preview { display: grid; gap: 6px; margin: 2px 2px 0; padding: 10px 12px; border-radius: 12px; background: var(--surface-sunken); box-shadow: inset 0 0 0 1px var(--line); }
 .effect { font-size: 13px; line-height: 1.45; color: var(--ink); }
 .idle-text { color: var(--ink-3); }
+.refusal { display: grid; grid-template-columns: 13px minmax(0, 1fr); gap: 7px; margin: 0 4px; font-size: 12.5px; line-height: 1.45; color: var(--danger); }
+.refusal svg { margin-top: 2px; }
 .preview:focus-visible { outline: none; box-shadow: var(--focus-ring); }
 .delta { display: flex; flex-wrap: wrap; align-items: center; gap: 4px 6px; }
 .delta-h { display: inline-flex; align-items: center; gap: 4px; margin-right: 2px; font: 600 11px/1 var(--mono); letter-spacing: .04em; font-variant-ligatures: none; }

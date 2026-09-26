@@ -31,6 +31,7 @@ type oidcPayload struct {
 	Nonce    string `json:"n"`
 	Verifier string `json:"v"`
 	Tenant   string `json:"t"`
+	Invite   string `json:"i,omitempty"`
 	Exp      int64  `json:"e"`
 }
 

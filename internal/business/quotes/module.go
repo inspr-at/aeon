@@ -15,6 +15,7 @@ import (
 	"strings"
 	"time"
 
+	"github.com/inspr-at/aeon/internal/authz"
 	"github.com/inspr-at/aeon/internal/config"
 	"github.com/inspr-at/aeon/internal/db"
 	"github.com/inspr-at/aeon/internal/httpapi"
@@ -121,27 +122,16 @@ func caller(r *http.Request) (tenant.Principal, error) {
 	return p, nil
 }
 func person(p tenant.Principal) bool { return p.Kind == tenant.Person }
-func staff(p tenant.Principal) bool {
-	if !person(p) {
-		return false
-	}
-	for _, role := range p.Roles {
-		if role == "admin" || role == "member" {
-			return true
-		}
-	}
-	return false
+
+// portalContext serves the routes a customer may call (read, version, export,
+// accept). A customer sees no project and no workspace node, so these reads
+// run with every project visible; canReadQuote and the acceptance checks
+// authorize the caller against the quote's recipient first (ADR-003 P2).
+func portalContext(r *http.Request) context.Context {
+	return db.AllProjects(r.Context(), "quote portal")
 }
-func admin(p tenant.Principal) bool {
-	if !person(p) {
-		return false
-	}
-	for _, role := range p.Roles {
-		if role == "admin" {
-			return true
-		}
-	}
-	return false
+func (m *Module) allow(r *http.Request, p tenant.Principal) bool {
+	return authz.RequirePattern(authz.BindPool(tenant.WithPrincipal(r.Context(), p), m.pool), r.Pattern, authz.Scope{}) == nil
 }
 func pathID(r *http.Request) (string, error) {
 	s := r.PathValue("quoteId")
@@ -305,7 +295,7 @@ func readQuote(ctx context.Context, tx pgx.Tx, id string, lock bool) (quote, err
 	return out, err
 }
 func canReadQuote(ctx context.Context, tx pgx.Tx, p tenant.Principal, q quote, versionNo int) error {
-	if staff(p) {
+	if authz.RequireTx(ctx, tx, p, "quotes.read", authz.Scope{}) == nil {
 		return nil
 	}
 	if !person(p) || q.State != "issued" && q.State != "accepted" || q.CurrentVersion != versionNo || versionNo < 1 {
@@ -327,7 +317,7 @@ func (m *Module) list(w http.ResponseWriter, r *http.Request) {
 		respond(w, 0, nil, e)
 		return
 	}
-	if !staff(p) {
+	if !m.allow(r, p) {
 		respond(w, 0, nil, denied())
 		return
 	}
@@ -462,7 +452,7 @@ func (m *Module) get(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	var out quote
-	e = m.tx(r.Context(), p, fence.PermViewsProvide, false, func(tx pgx.Tx) error {
+	e = m.tx(portalContext(r), p, fence.PermViewsProvide, false, func(tx pgx.Tx) error {
 		var err error
 		out, err = readQuote(r.Context(), tx, id, false)
 		if err != nil {
@@ -479,7 +469,7 @@ func (m *Module) create(w http.ResponseWriter, r *http.Request) {
 		respond(w, 0, nil, e)
 		return
 	}
-	if !staff(p) {
+	if !m.allow(r, p) {
 		respond(w, 0, nil, denied())
 		return
 	}

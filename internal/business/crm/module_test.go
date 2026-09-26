@@ -79,7 +79,7 @@ func TestBindContactPrincipal(t *testing.T) {
 	}
 
 	var otherContact string
-	err = db.InTenant(t.Context(), f.db.App, f.other.TenantID, func(tx pgx.Tx) error {
+	err = db.InTenant(dbtest.Seed(t.Context()), f.db.App, f.other.TenantID, func(tx pgx.Tx) error {
 		return tx.QueryRow(t.Context(), `INSERT INTO nodes(tenant_id,kind_id,key,title)
 			VALUES ($1,$2,'CON-1','Other contact') RETURNING id::text`, f.other.TenantID, f.otherContactKind).Scan(&otherContact)
 	})
@@ -151,7 +151,7 @@ func TestBindRejectsClosedGatesWithoutEvents(t *testing.T) {
 	f.setInstall(t, true, f.digest, []string{fence.PermStepsApply})
 	forged := f.admin
 	forged.ID = f.other.ID
-	expect(t, request(f.handler, forged, "POST", "/api/crm/contacts/"+f.contact+"/principals", customerCall), 500)
+	expect(t, request(f.handler, forged, "POST", "/api/crm/contacts/"+f.contact+"/principals", customerCall), 403)
 	if count(t, f, f.admin.TenantID, `SELECT count(*) FROM crm_contact_principals`) != 0 || len(logEvents(t, f)) != before {
 		t.Fatal("failed event append left a binding")
 	}
@@ -235,7 +235,7 @@ func setup(t *testing.T) fixture {
 	if err := d.Admin.QueryRow(t.Context(), `INSERT INTO tenants(slug,name) VALUES('crm-c','C') RETURNING id::text`).Scan(&f.bareTenant); err != nil {
 		t.Fatal(err)
 	}
-	err = db.InTenant(t.Context(), d.App, f.admin.TenantID, func(tx pgx.Tx) error {
+	err = db.InTenant(dbtest.Seed(t.Context()), d.App, f.admin.TenantID, func(tx pgx.Tx) error {
 		var err error
 		f.admin.ID, err = insertPrincipal(t, tx, f.admin.TenantID, "person", "Admin", []string{"admin"})
 		if err != nil {
@@ -293,7 +293,7 @@ func setup(t *testing.T) fixture {
 	if err != nil {
 		t.Fatal(err)
 	}
-	err = db.InTenant(t.Context(), d.App, f.other.TenantID, func(tx pgx.Tx) error {
+	err = db.InTenant(dbtest.Seed(t.Context()), d.App, f.other.TenantID, func(tx pgx.Tx) error {
 		var err error
 		f.other.ID, err = insertPrincipal(t, tx, f.other.TenantID, "person", "Other admin", []string{"admin"})
 		if err != nil {
@@ -316,7 +316,7 @@ func setup(t *testing.T) fixture {
 	if err != nil {
 		t.Fatal(err)
 	}
-	err = db.InTenant(t.Context(), d.App, f.bareTenant, func(tx pgx.Tx) error {
+	err = db.InTenant(dbtest.Seed(t.Context()), d.App, f.bareTenant, func(tx pgx.Tx) error {
 		var err error
 		f.bareAdmin, err = insertPrincipal(t, tx, f.bareTenant, "person", "Bare", []string{"admin"})
 		return err
@@ -329,7 +329,7 @@ func setup(t *testing.T) fixture {
 
 func (f fixture) setInstall(t *testing.T, enabled bool, digest string, perms []string) {
 	t.Helper()
-	err := db.InTenant(t.Context(), f.db.App, f.admin.TenantID, func(tx pgx.Tx) error {
+	err := db.InTenant(dbtest.Seed(t.Context()), f.db.App, f.admin.TenantID, func(tx pgx.Tx) error {
 		_, err := tx.Exec(t.Context(), `UPDATE plugin_installations
 			SET enabled = $3, manifest_digest_sha256 = $4, permissions = $5
 			WHERE tenant_id = $1 AND plugin_id = $2`, f.admin.TenantID, ID, enabled, digest, perms)
@@ -347,6 +347,9 @@ func insertPrincipal(t *testing.T, tx pgx.Tx, tenantID, kind, name string, roles
 	}
 	var id string
 	err := tx.QueryRow(t.Context(), `INSERT INTO principals(tenant_id,kind,name,roles) VALUES($1,$2,$3,$4) RETURNING id::text`, tenantID, kind, name, roles).Scan(&id)
+	if err == nil {
+		err = dbtest.BindLegacyTx(t.Context(), tx, tenantID, id)
+	}
 	return id, err
 }
 
@@ -374,7 +377,7 @@ func insertNode(t *testing.T, tx pgx.Tx, tenantID, kindID, key, title string) (s
 func count(t *testing.T, f fixture, tenantID, sql string) int {
 	t.Helper()
 	var n int
-	err := db.InTenant(t.Context(), f.db.App, tenantID, func(tx pgx.Tx) error {
+	err := db.InTenant(dbtest.Seed(t.Context()), f.db.App, tenantID, func(tx pgx.Tx) error {
 		return tx.QueryRow(t.Context(), sql).Scan(&n)
 	})
 	if err != nil {

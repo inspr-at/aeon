@@ -22,11 +22,14 @@ func TestProfileBundleApplyAndDraftAssignment(t *testing.T) {
 	ctx := context.Background()
 	tenantID := "aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa"
 	var adminID string
-	if err := db.InTenant(ctx, database.App, tenantID, func(tx pgx.Tx) error {
+	if err := db.InTenant(dbtest.Seed(ctx), database.App, tenantID, func(tx pgx.Tx) error {
 		if _, err := tx.Exec(ctx, `INSERT INTO tenants(id,slug,name) VALUES($1::uuid,'synthetic','Synthetic')`, tenantID); err != nil {
 			return err
 		}
 		if err := tx.QueryRow(ctx, `INSERT INTO principals(tenant_id,kind,name,roles) VALUES($1::uuid,'person','Synthetic Admin',ARRAY['admin']) RETURNING id::text`, tenantID).Scan(&adminID); err != nil {
+			return err
+		}
+		if err := dbtest.BindLegacyTx(ctx, tx, tenantID, adminID); err != nil {
 			return err
 		}
 		for slug, prefix := range map[string]string{"organisation": "ORG", "contact": "CON", "quote": "QUO"} {
@@ -52,7 +55,7 @@ func TestProfileBundleApplyAndDraftAssignment(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if err := db.InTenant(ctx, database.App, tenantID, func(tx pgx.Tx) error {
+	if err := db.InTenant(dbtest.Seed(ctx), database.App, tenantID, func(tx pgx.Tx) error {
 		_, err := tx.Exec(ctx, `INSERT INTO quote_settings(tenant_id,revision,numbering_time_zone,default_currency,sender,defaults,layout,updated_by_principal_id) VALUES($1::uuid,1,'Europe/Vienna','EUR','{}'::jsonb,'{}'::jsonb,'{}'::jsonb,$2::uuid)`, tenantID, adminID)
 		return err
 	}); err != nil {
@@ -106,7 +109,7 @@ func TestProfileBundleApplyAndDraftAssignment(t *testing.T) {
 	if replay.Action != "unchanged" || replay.AssetsCreated != 0 || replay.DraftsChanged != 0 || replay.DefaultChange || replay.Revision != 1 {
 		t.Fatalf("replay changed state: %+v", replay)
 	}
-	if err := db.InTenant(ctx, database.App, tenantID, func(tx pgx.Tx) error {
+	if err := db.InTenant(dbtest.Seed(ctx), database.App, tenantID, func(tx pgx.Tx) error {
 		if _, err := tx.Exec(ctx, `INSERT INTO principals(tenant_id,kind,name,roles) VALUES($1::uuid,'agent','Renamed bootstrap',ARRAY['operator']::text[])`, tenantID); err != nil {
 			return err
 		}
@@ -119,7 +122,7 @@ func TestProfileBundleApplyAndDraftAssignment(t *testing.T) {
 	if err != nil || roleReplay.Action != "unchanged" {
 		t.Fatalf("operator role lookup: %+v: %v", roleReplay, err)
 	}
-	if err := db.InTenant(ctx, database.App, tenantID, func(tx pgx.Tx) error {
+	if err := db.InTenant(dbtest.Seed(ctx), database.App, tenantID, func(tx pgx.Tx) error {
 		var defaultID, selectedID string
 		var draftRevision int64
 		if err := tx.QueryRow(ctx, `SELECT default_profile_id::text FROM quote_settings`).Scan(&defaultID); err != nil {

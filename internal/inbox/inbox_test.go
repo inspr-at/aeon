@@ -66,12 +66,17 @@ func insertPrincipal(t *testing.T, d *dbtest.DB, tenantID string, kind tenant.Pr
 		roles = []string{}
 	}
 	p := tenant.Principal{TenantID: tenantID, Kind: kind, Name: name, Roles: roles}
-	err := db.InTenant(t.Context(), d.App, tenantID, func(tx pgx.Tx) error {
+	err := db.InTenant(dbtest.Seed(t.Context()), d.App, tenantID, func(tx pgx.Tx) error {
 		return tx.QueryRow(t.Context(), `INSERT INTO principals (tenant_id, kind, name, roles)
 			VALUES ($1::uuid, $2, $3, $4) RETURNING id::text`, tenantID, string(kind), name, roles).Scan(&p.ID)
 	})
 	if err != nil {
 		t.Fatal(err)
+	}
+	dbtest.BindLegacy(t, d, tenantID, p.ID)
+	if len(roles) == 0 {
+		// Handlers see project data only through a binding (ADR-003 P2).
+		dbtest.BindRole(t, d, tenantID, p.ID, "member")
 	}
 	return p
 }
@@ -164,7 +169,7 @@ func sendJSON(recipient, body, key string, reply *string, expires *time.Time) st
 func countSQL(t *testing.T, pool *pgxpool.Pool, tenantID, query string, args ...any) int {
 	t.Helper()
 	var n int
-	err := db.InTenant(t.Context(), pool, tenantID, func(tx pgx.Tx) error {
+	err := db.InTenant(dbtest.Seed(t.Context()), pool, tenantID, func(tx pgx.Tx) error {
 		return tx.QueryRow(t.Context(), query, args...).Scan(&n)
 	})
 	if err != nil {
@@ -176,7 +181,7 @@ func countSQL(t *testing.T, pool *pgxpool.Pool, tenantID, query string, args ...
 func eventText(t *testing.T, pool *pgxpool.Pool, tenantID, eventType string) string {
 	t.Helper()
 	var b strings.Builder
-	err := db.InTenant(t.Context(), pool, tenantID, func(tx pgx.Tx) error {
+	err := db.InTenant(dbtest.Seed(t.Context()), pool, tenantID, func(tx pgx.Tx) error {
 		rows, err := tx.Query(t.Context(), `SELECT coalesce(before::text,'') || coalesce(after::text,'')
 			FROM events WHERE type = $1 ORDER BY id`, eventType)
 		if err != nil {
@@ -333,7 +338,7 @@ func TestMessages(t *testing.T) {
 		t.Fatalf("exp send %d %s", status, body)
 	}
 	expID := mustJSON[Message](t, body).ID
-	if err := db.InTenant(t.Context(), w.db.App, w.sender.TenantID, func(tx pgx.Tx) error {
+	if err := db.InTenant(dbtest.Seed(t.Context()), w.db.App, w.sender.TenantID, func(tx pgx.Tx) error {
 		_, err := tx.Exec(t.Context(), `UPDATE inbox_messages
 			SET created_at = clock_timestamp() - interval '2 minutes',
 			    expires_at = clock_timestamp() - interval '1 minute'
@@ -381,7 +386,7 @@ func TestAgentScope(t *testing.T) {
 		t.Fatalf("scoped send %d %s", status, body)
 	}
 	revoked := insertKey(t, w.db, w.agent, []string{"inbox.send"}, "secret-revoked")
-	if err := db.InTenant(t.Context(), w.db.App, w.agent.TenantID, func(tx pgx.Tx) error {
+	if err := db.InTenant(dbtest.Seed(t.Context()), w.db.App, w.agent.TenantID, func(tx pgx.Tx) error {
 		_, err := tx.Exec(t.Context(), `UPDATE agent_keys SET revoked_at = now() WHERE hash = $1`, hashSecret("secret-revoked"))
 		return err
 	}); err != nil {
@@ -401,7 +406,7 @@ func insertKey(t *testing.T, d *dbtest.DB, p tenant.Principal, scopes []string, 
 		prefix += strings.Repeat("ab", 48)
 	}
 	prefix = prefix[:48]
-	err := db.InTenant(t.Context(), d.App, p.TenantID, func(tx pgx.Tx) error {
+	err := db.InTenant(dbtest.Seed(t.Context()), d.App, p.TenantID, func(tx pgx.Tx) error {
 		_, err := tx.Exec(t.Context(), `INSERT INTO agent_keys (tenant_id, principal_id, name, prefix, hash, scopes)
 			VALUES ($1::uuid, $2::uuid, $3, $4, $5, $6)`, p.TenantID, p.ID, p.Name+"-"+secret, prefix, hashSecret(secret), scopes)
 		return err
@@ -799,7 +804,7 @@ func TestWakeDelivery(t *testing.T) {
 		t.Fatalf("delivered event leaked %s", delivered)
 	}
 	var done bool
-	if err := db.InTenant(t.Context(), w.db.App, w.sender.TenantID, func(tx pgx.Tx) error {
+	if err := db.InTenant(dbtest.Seed(t.Context()), w.db.App, w.sender.TenantID, func(tx pgx.Tx) error {
 		return tx.QueryRow(t.Context(), `SELECT delivered_at IS NOT NULL AND last_status = 204 FROM inbox_wakes WHERE message_id = $1`, msg.ID).Scan(&done)
 	}); err != nil || !done {
 		t.Fatalf("delivered row %v %v", done, err)
@@ -821,7 +826,7 @@ func TestWakeDelivery(t *testing.T) {
 	if _, err := worker.ProcessOnce(t.Context()); err != nil || poster.calls != 1 {
 		t.Fatalf("fail call %d %v", poster.calls, err)
 	}
-	if err := db.InTenant(t.Context(), w.db.App, w.sender.TenantID, func(tx pgx.Tx) error {
+	if err := db.InTenant(dbtest.Seed(t.Context()), w.db.App, w.sender.TenantID, func(tx pgx.Tx) error {
 		_, err := tx.Exec(t.Context(), `UPDATE inbox_wakes SET next_attempt_at = clock_timestamp() - interval '1 second'
 			WHERE delivered_at IS NULL`)
 		return err
@@ -831,7 +836,7 @@ func TestWakeDelivery(t *testing.T) {
 	if _, err := worker.ProcessOnce(t.Context()); err != nil || poster.calls != 2 {
 		t.Fatalf("second fail %d %v", poster.calls, err)
 	}
-	if err := db.InTenant(t.Context(), w.db.App, w.sender.TenantID, func(tx pgx.Tx) error {
+	if err := db.InTenant(dbtest.Seed(t.Context()), w.db.App, w.sender.TenantID, func(tx pgx.Tx) error {
 		_, err := tx.Exec(t.Context(), `UPDATE inbox_wakes SET next_attempt_at = clock_timestamp() - interval '1 second'
 			WHERE delivered_at IS NULL`)
 		return err
@@ -849,7 +854,7 @@ func TestWakeDelivery(t *testing.T) {
 	if status != 204 {
 		t.Fatal(status)
 	}
-	if err := db.InTenant(t.Context(), w.db.App, w.sender.TenantID, func(tx pgx.Tx) error {
+	if err := db.InTenant(dbtest.Seed(t.Context()), w.db.App, w.sender.TenantID, func(tx pgx.Tx) error {
 		_, err := tx.Exec(t.Context(), `UPDATE inbox_wakes SET attempts = 100 WHERE delivered_at IS NULL`)
 		return err
 	}); err != nil {
@@ -877,7 +882,7 @@ func TestWakeDelivery(t *testing.T) {
 		t.Fatalf("loopback webhook was contacted %d times", hits)
 	}
 
-	if err := db.InTenant(t.Context(), w.db.App, w.sender.TenantID, func(tx pgx.Tx) error {
+	if err := db.InTenant(dbtest.Seed(t.Context()), w.db.App, w.sender.TenantID, func(tx pgx.Tx) error {
 		_, err := tx.Exec(t.Context(), `UPDATE inbox_wakes SET attempts = 100 WHERE delivered_at IS NULL`)
 		return err
 	}); err != nil {
@@ -893,7 +898,7 @@ func TestWakeDelivery(t *testing.T) {
 		t.Fatal(string(body))
 	}
 	expiredID := mustJSON[Message](t, body).ID
-	if err := db.InTenant(t.Context(), w.db.App, w.sender.TenantID, func(tx pgx.Tx) error {
+	if err := db.InTenant(dbtest.Seed(t.Context()), w.db.App, w.sender.TenantID, func(tx pgx.Tx) error {
 		_, err := tx.Exec(t.Context(), `UPDATE inbox_messages
 			SET created_at = clock_timestamp() - interval '2 minutes',
 			    expires_at = clock_timestamp() - interval '1 minute'

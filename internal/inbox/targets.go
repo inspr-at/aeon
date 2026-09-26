@@ -17,6 +17,7 @@ import (
 	"time"
 	"unicode/utf8"
 
+	"github.com/inspr-at/aeon/internal/authz"
 	"github.com/inspr-at/aeon/internal/db"
 	"github.com/inspr-at/aeon/internal/events"
 	"github.com/inspr-at/aeon/internal/httpapi"
@@ -93,7 +94,7 @@ func messagingFailure(w http.ResponseWriter, err error) {
 	}
 	writeError(w, 500, "internal_error", "messaging operation failed")
 }
-func messagingPrincipal(w http.ResponseWriter, r *http.Request, admin bool) (tenant.Principal, string, bool) {
+func (m *messaging) messagingPrincipal(w http.ResponseWriter, r *http.Request, admin bool) (tenant.Principal, string, bool) {
 	p, ok := principal(w, r)
 	if !ok {
 		return p, "", false
@@ -103,7 +104,7 @@ func messagingPrincipal(w http.ResponseWriter, r *http.Request, admin bool) (ten
 		messagingFailure(w, errNotFound)
 		return p, "", false
 	}
-	if admin && !isAdmin(p) {
+	if admin && authz.Require(authz.BindPool(r.Context(), m.base.pool), "inbox.manage", authz.Scope{ProjectID: project}) != nil {
 		messagingFailure(w, errForbidden)
 		return p, "", false
 	}
@@ -284,7 +285,7 @@ func validateCompatTarget(ctx context.Context, in *targetInput) error {
 	return nil
 }
 func (m *messaging) setTarget(w http.ResponseWriter, r *http.Request) {
-	p, project, ok := messagingPrincipal(w, r, true)
+	p, project, ok := m.messagingPrincipal(w, r, true)
 	if !ok {
 		return
 	}
@@ -305,7 +306,7 @@ func (m *messaging) setTarget(w http.ResponseWriter, r *http.Request) {
 }
 func (m *messaging) storeTarget(ctx context.Context, p tenant.Principal, project string, in targetInput) (MessageTarget, error) {
 	var out MessageTarget
-	err := db.InTenant(ctx, m.base.pool, p.TenantID, func(tx pgx.Tx) error {
+	err := db.InTenant(tenant.WithPrincipal(ctx, p), m.base.pool, p.TenantID, func(tx pgx.Tx) error {
 		if err := messagingProject(ctx, tx, project); err != nil {
 			return err
 		}
@@ -366,7 +367,7 @@ func (m *messaging) storeTarget(ctx context.Context, p tenant.Principal, project
 	return out, err
 }
 func (m *messaging) getTargets(w http.ResponseWriter, r *http.Request) {
-	p, project, ok := messagingPrincipal(w, r, true)
+	p, project, ok := m.messagingPrincipal(w, r, true)
 	if !ok {
 		return
 	}

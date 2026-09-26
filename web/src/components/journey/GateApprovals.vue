@@ -2,6 +2,8 @@
 <script setup lang="ts">
 import { computed, nextTick, ref } from 'vue'
 import type { Approval } from '../../lib/agents'
+import { canDecideApproval } from '../../lib/agentState'
+import { can } from '../../lib/authz'
 import { expiresIn, expiresSoon, RISK_LABEL, riskFor } from '../../lib/agentState'
 import { GATE_LABEL, type Gate } from '../../lib/journey'
 import { relativeTime } from '../../lib/work'
@@ -16,6 +18,7 @@ const props = defineProps<{ gate: Gate; approvals: Approval[]; on: string; canDe
 const emit = defineEmits<{ decided: [approval: Approval, decision: 'approved' | 'denied'] }>()
 const agents = useAgents()
 const live = computed(() => props.approvals.filter(a => a.decision === null && Date.parse(a.expires_at) > props.now))
+const mayDecide = (approval: Approval) => props.canDecide && canDecideApproval(approval, can)
 const past = computed(() => props.approvals.filter(a => !live.value.includes(a)).slice(0, 3))
 const open = ref<{ id: string; mode: 'approve' | 'deny' } | null>(null)
 const reason = ref('')
@@ -23,12 +26,13 @@ const error = ref('')
 const saving = ref(false)
 const area = ref<HTMLTextAreaElement[]>([])
 async function begin(approval: Approval, mode: 'approve' | 'deny') {
+  if (!mayDecide(approval)) return
   open.value = { id: approval.id, mode }; reason.value = ''; error.value = ''
   await nextTick(); area.value[0]?.focus()
 }
 function cancel() { open.value = null; error.value = '' }
 async function submit(approval: Approval) {
-  if (!open.value || saving.value) return
+  if (!open.value || saving.value || !mayDecide(approval)) return
   const decision = open.value.mode === 'approve' ? 'approved' : 'denied'
   if (decision === 'denied' && !reason.value.trim()) { error.value = 'Say why, so the agent can change course.'; return }
   saving.value = true; error.value = ''
@@ -70,7 +74,7 @@ const decidedBy = (approval: Approval) => approval.decided_by_principal_id && ap
             </div>
           </form>
         </div>
-        <div v-if="open?.id !== approval.id && canDecide" class="row-actions">
+        <div v-if="open?.id !== approval.id && mayDecide(approval)" class="row-actions">
           <button type="button" class="btn sm" @click="begin(approval, 'deny')"><AppIcon name="close" :size="13" />Deny</button>
           <button type="button" class="btn sm approve-soft" @click="begin(approval, 'approve')"><AppIcon name="check" :size="13" />Approve</button>
         </div>

@@ -13,6 +13,7 @@ import (
 
 	"github.com/jackc/pgx/v5"
 
+	"github.com/inspr-at/aeon/internal/authz"
 	"github.com/inspr-at/aeon/internal/tenant"
 )
 
@@ -238,6 +239,9 @@ func (m *Module) createNode(ctx context.Context, p tenant.Principal, in nodeCrea
 				return err
 			}
 		}
+		if err := requireCreateTarget(ctx, tx, p, kind.Slug, parentID); err != nil {
+			return err
+		}
 		key := explicit
 		if key == "" {
 			usePrefix := kind.ShortPrefix
@@ -425,6 +429,11 @@ func (m *Module) moveNode(ctx context.Context, p tenant.Principal, id string, pa
 		}
 		if parentID != nil && *parentID == current.ID {
 			return conflict("node cannot parent itself")
+		}
+		if !sameString(parentID, current.ParentID) {
+			if err := requireMoveTarget(ctx, tx, p, current.ID, parentID); err != nil {
+				return err
+			}
 		}
 		if parentID != nil && !sameString(parentID, current.ParentID) {
 			kind, _, err := loadKind(ctx, tx, current.KindID)
@@ -666,4 +675,93 @@ func scanNode(row pgx.Row) (nodeJSON, error) {
 	n.Fields = json.RawMessage(fields)
 	n.Position = trimDecimal(position)
 	return n, nil
+}
+
+// errMoveForbidden: the caller lacks nodes.move in a project a move changes.
+var errMoveForbidden = errors.New("move not permitted")
+
+// moveScopes lists the projects a re-parenting changes, "" standing for the
+// workspace: the node's own project, the project of its current parent and
+// the project of its new parent (no parent, or a parent outside every
+// project, is the workspace). A new parent the caller cannot see is
+// pgx.ErrNoRows. A current parent the caller cannot see (a nested project
+// under another project) refuses the move: detaching a node changes its
+// parent's project, which the caller cannot even see (fail closed).
+func moveScopes(ctx context.Context, tx pgx.Tx, nodeID string, newParent *string) ([]string, error) {
+	var own, currentParentProject *string
+	var hasParent, parentVisible bool
+	if err := tx.QueryRow(ctx, `SELECT n.project_id::text, n.parent_id IS NOT NULL, p.id IS NOT NULL, p.project_id::text
+		FROM nodes n LEFT JOIN nodes p ON p.tenant_id=n.tenant_id AND p.id=n.parent_id
+		WHERE n.id=$1::uuid`, nodeID).Scan(&own, &hasParent, &parentVisible, &currentParentProject); err != nil {
+		return nil, err
+	}
+	if hasParent && !parentVisible {
+		return nil, errMoveForbidden
+	}
+	scopes := []string{deref(own), deref(currentParentProject)}
+	if newParent == nil {
+		return append(scopes, ""), nil
+	}
+	var target *string
+	if err := tx.QueryRow(ctx, `SELECT project_id::text FROM nodes WHERE id=$1::uuid AND deleted_at IS NULL`, *newParent).Scan(&target); err != nil {
+		return nil, err
+	}
+	return append(scopes, deref(target)), nil
+}
+
+// requireMove decides a re-parenting in every project it changes (ADR-003
+// P2): moving work out of a project, into another or back by undo needs
+// nodes.move in each, so a project binding never carries work into (or out
+// of) a project where the caller holds less.
+func requireMove(ctx context.Context, tx pgx.Tx, p tenant.Principal, nodeID string, newParent *string) error {
+	scopes, err := moveScopes(ctx, tx, nodeID, newParent)
+	if err != nil {
+		return err
+	}
+	if authz.RequireInProjects(ctx, tx, p, "nodes.move", scopes...) != nil {
+		return errMoveForbidden
+	}
+	return nil
+}
+
+func deref(s *string) string {
+	if s == nil {
+		return ""
+	}
+	return *s
+}
+
+// requireMoveTarget is requireMove for the move routes, as an API error.
+func requireMoveTarget(ctx context.Context, tx pgx.Tx, p tenant.Principal, nodeID string, parentID *string) error {
+	err := requireMove(ctx, tx, p, nodeID, parentID)
+	switch {
+	case errors.Is(err, errMoveForbidden):
+		return &httpError{status: http.StatusForbidden, msg: "permission denied"}
+	case errors.Is(err, pgx.ErrNoRows):
+		return notFound("parent not found")
+	}
+	return err
+}
+
+// requireCreateTarget decides node creation in the project the new node joins
+// (ADR-003 P2): its parent's project, or the workspace for a new project or a
+// node outside every project.
+func requireCreateTarget(ctx context.Context, tx pgx.Tx, p tenant.Principal, kindSlug string, parentID *string) error {
+	scope := authz.Scope{}
+	if kindSlug != "project" && parentID != nil {
+		var project *string
+		if err := tx.QueryRow(ctx, `SELECT project_id::text FROM nodes WHERE id=$1::uuid`, *parentID).Scan(&project); err != nil {
+			if errors.Is(err, pgx.ErrNoRows) {
+				return notFound("parent not found")
+			}
+			return err
+		}
+		if project != nil {
+			scope.ProjectID = *project
+		}
+	}
+	if authz.RequireTx(ctx, tx, p, "nodes.write", scope) != nil {
+		return &httpError{status: http.StatusForbidden, msg: "permission denied"}
+	}
+	return nil
 }

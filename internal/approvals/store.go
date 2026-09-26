@@ -6,10 +6,12 @@ import (
 	"context"
 	"errors"
 	"net/http"
+	"strings"
 	"time"
 
 	"github.com/jackc/pgx/v5"
 
+	"github.com/inspr-at/aeon/internal/authz"
 	"github.com/inspr-at/aeon/internal/events"
 	"github.com/inspr-at/aeon/internal/tenant"
 )
@@ -120,8 +122,17 @@ func (m *Module) decide(ctx context.Context, p tenant.Principal, id, decision, r
 		if err := requirePerson(ctx, tx, p, "only a person may decide a live approval"); err != nil {
 			return err
 		}
-		if !tenant.IsAdmin(p) && !(before.Risk != "high" && hasDecisionRole(p, "member")) {
+		if err := authz.RequireTx(ctx, tx, p, "approvals.decide", authz.Scope{}); err != nil {
 			return fail(http.StatusForbidden, "approval decision requires an authorized person")
+		}
+		if before.Risk == "high" {
+			if err := authz.RequireTx(ctx, tx, p, "approvals.decide_high", authz.Scope{}); err != nil {
+				return fail(http.StatusForbidden, "high-risk approval requires workspace administration")
+			}
+		}
+		permission := approvalPermission(before.Scope)
+		if permission == "" || authz.RequireTx(ctx, tx, p, permission, authz.Scope{}) != nil {
+			return fail(http.StatusForbidden, "approval requires the permission being granted")
 		}
 		var existing string
 		err = tx.QueryRow(ctx, `
@@ -244,16 +255,24 @@ func requirePerson(ctx context.Context, tx pgx.Tx, p tenant.Principal, msg strin
 	return err
 }
 
-func hasDecisionRole(p tenant.Principal, role string) bool {
-	if p.Kind != tenant.Person {
-		return false
+func approvalPermission(scope string) string {
+	if scope == "release.deploy" || strings.HasPrefix(scope, "release.deploy.") {
+		return "releases.deploy"
 	}
-	for _, candidate := range p.Roles {
-		if candidate == role {
-			return true
+	if strings.HasPrefix(scope, "journey.") {
+		return "journey.act"
+	}
+	for scope != "" {
+		if _, ok := authz.Lookup(scope); ok {
+			return scope
 		}
+		last := strings.LastIndexByte(scope, '.')
+		if last < 0 {
+			break
+		}
+		scope = scope[:last]
 	}
-	return false
+	return ""
 }
 
 func verifyResource(ctx context.Context, tx pgx.Tx, agentID string, in proposal) error {

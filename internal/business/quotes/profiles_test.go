@@ -93,7 +93,7 @@ func TestProfileRevisionsAssetsAndTenantIsolation(t *testing.T) {
 	reg.Seal()
 	actors := map[string]tenant.Principal{}
 	for _, spec := range []struct{ tenantID, slug string }{{"aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa", "example-one"}, {"bbbbbbbb-bbbb-4bbb-8bbb-bbbbbbbbbbbb", "example-two"}} {
-		err = db.InTenant(ctx, database.App, spec.tenantID, func(tx pgx.Tx) error {
+		err = db.InTenant(dbtest.Seed(ctx), database.App, spec.tenantID, func(tx pgx.Tx) error {
 			if _, e := tx.Exec(ctx, `INSERT INTO tenants(id,slug,name) VALUES($1::uuid,$2,'Synthetic tenant')`, spec.tenantID, spec.slug); e != nil {
 				return e
 			}
@@ -102,6 +102,9 @@ func TestProfileRevisionsAssetsAndTenantIsolation(t *testing.T) {
 				return e
 			}
 			actors[spec.slug] = tenant.Principal{ID: id, TenantID: spec.tenantID, Kind: tenant.Person, Roles: []string{"admin"}}
+			if e := dbtest.BindLegacyTx(ctx, tx, spec.tenantID, id); e != nil {
+				return e
+			}
 			for _, pluginID := range []string{"business_costs", "business_crm", PluginID} {
 				plug, _ := reg.Lookup(pluginID)
 				if _, e := tx.Exec(ctx, `INSERT INTO plugin_installations(tenant_id,plugin_id,version,manifest_digest_sha256,owner,enabled,permissions,updated_by_principal_id) VALUES($1::uuid,$2,$3,$4,$5,true,$6,$7::uuid)`, spec.tenantID, pluginID, plug.Manifest.Version, plug.Manifest.DigestSHA256, plug.Manifest.Owner, plug.Manifest.Permissions, id); e != nil {
@@ -177,7 +180,7 @@ func TestProfileRevisionsAssetsAndTenantIsolation(t *testing.T) {
 		t.Fatal("undo did not append restored revision")
 	}
 	actor := actors["example-one"]
-	if err = db.InTenant(ctx, database.App, actor.TenantID, func(tx pgx.Tx) error {
+	if err = db.InTenant(dbtest.Seed(ctx), database.App, actor.TenantID, func(tx pgx.Tx) error {
 		_, e := tx.Exec(ctx, `INSERT INTO quote_settings(tenant_id,revision,numbering_time_zone,default_currency,sender,defaults,layout,updated_by_principal_id,default_profile_id) VALUES($1::uuid,1,'UTC','EUR','{}'::jsonb,'{}'::jsonb,'{}'::jsonb,$2::uuid,$3::uuid)`, actor.TenantID, actor.ID, first.ID)
 		return e
 	}); err != nil {

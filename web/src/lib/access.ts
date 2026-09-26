@@ -4,31 +4,37 @@
 // helpers below are free of Vue so they can be unit-tested.
 import { api } from './api.ts'
 import { learnPictures } from './avatar.ts'
-import type { RoleRef } from './authz.ts'
 
-export type { RoleRef }
 export type Risk = 'low' | 'medium' | 'high'
 export type Scope = 'workspace' | 'project'
-export interface Permission { key: string; group: string; description: string; risk: Risk; grantable_at: Scope[] }
+export interface RoleRef { id: string; key: string; name: string }
+// agent_grantable: may be a scope on an agent key (contract v2 #6).
+export interface Permission { key: string; group: string; description: string; risk: Risk; grantable_at: Scope[]; agent_grantable: boolean }
 export interface Role { id: string; key: string; name: string; description: string; builtin: boolean; permissions: string[]; based_on: string | null; member_count: number }
 export interface ProjectRole { project_id: string; project_key: string; project_title: string; role: RoleRef }
 export interface Alias { principal_id: string; name: string; source: 'classic' }
 export type Status = 'active' | 'deactivated'
 export interface Person {
-  // has_avatar (U27) is additive; the contract's avatar_url says the same when it is absent.
-  principal_id: string; name: string; avatar_url: string | null; has_avatar?: boolean; email: string | null; status: Status; identity: 'inspr_id' | null
+  principal_id: string; name: string; avatar_url: string | null; has_avatar: boolean; email: string | null; status: Status; identity: 'inspr_id' | null
   workspace_role: RoleRef | null; project_roles: ProjectRole[]; aliases: Alias[]; classic_role: string | null; last_active_at: string | null
+  // The server says who is the last active owner (contract v2 #5); the UI never counts role keys.
+  last_owner: boolean
 }
-export interface Agent { principal_id: string; name: string; workspace_role: RoleRef | null; key_count: number; last_seen_at: string | null; service: boolean }
+export interface Agent { principal_id: string; name: string; has_avatar: boolean; workspace_role: RoleRef | null; key_count: number; last_seen_at: string | null; service: boolean }
 export type InviteStatus = 'pending' | 'expired' | 'revoked' | 'accepted'
 export interface Invite {
   id: string; email: string; workspace_role: RoleRef | null; project_roles: ProjectRole[]; status: InviteStatus
-  created_by: string | { principal_id: string; name: string }; created_at: string; expires_at: string
+  created_by: PrincipalRef; created_at: string; expires_at: string; accepted_by: PrincipalRef | null; accepted_at: string | null
 }
 export interface Imported { principal_id: string; name: string; classic_role: string | null }
-export interface Members { people: Person[]; agents: Agent[]; invites: Invite[]; imported: Imported[] }
-export interface ProjectMember { principal_id: string; name: string; avatar_url: string | null; has_avatar?: boolean; kind: 'person' | 'agent'; via: 'workspace' | 'project'; role: RoleRef }
-export interface AuditEvent { id: number; actor_principal_id: string; node_id?: string | null; type: string; before: unknown; after: unknown; at: string }
+export interface PrincipalRef { principal_id: string; name: string }
+// people also lists the imported classic identities; the UI shows those only in their own group.
+export interface Members { people: Person[]; agents: Agent[]; invites: Invite[]; imported: Imported[]; owner_count: number }
+// One row per person or agent: role is the project binding's role when there is one (via project), else the workspace role.
+export interface ProjectMember { principal_id: string; name: string; avatar_url: string | null; has_avatar: boolean; kind: 'person' | 'agent'; via: 'workspace' | 'project'; role: RoleRef; workspace_role: RoleRef | null }
+export interface ProjectBinding { id: string; principal_id: string; project_id: string; scope_type: 'project'; role: RoleRef; created_at: string }
+// Names are resolved by the server, including people who have since left (contract v2 #1).
+export interface AuditEvent { id: number; type: string; at: string; actor: PrincipalRef; subject: PrincipalRef | null; project: { id: string; key: string } | null; data: { before?: unknown; after?: unknown } }
 
 // ---------- Errors: {error, code, field?, reason} ----------
 export class AccessError extends Error {
@@ -55,12 +61,12 @@ export const createRole = (body: { name: string; description: string; permission
 export const updateRole = (roleId: string, body: { name?: string; description?: string; permissions?: string[] }) => call<Role>(`/roles/${id(roleId)}`, 'PATCH', body)
 export const deleteRole = (roleId: string, reassignTo?: string) => call<void>(`/roles/${id(roleId)}${reassignTo ? `?reassign_to=${id(reassignTo)}` : ''}`, 'DELETE')
 // Avatars ask for a picture only for people a payload says have one (lib/avatar).
-const pictureHints = (people: { principal_id: string; avatar_url: string | null; has_avatar?: boolean; kind?: string }[]) =>
-  learnPictures(people.filter(p => p.kind !== 'agent').map(p => ({ id: p.principal_id, has_avatar: p.has_avatar ?? !!p.avatar_url })))
+const pictureHints = (people: { principal_id: string; has_avatar: boolean; kind?: string }[]) =>
+  learnPictures(people.filter(p => p.kind !== 'agent').map(p => ({ id: p.principal_id, has_avatar: p.has_avatar })))
 export const getMembers = () => call<Members>('/members').then(members => { pictureHints(members.people); return members })
 export const setWorkspaceRole = (principalId: string, roleId: string | null) => call<Person | Agent>(`/members/${id(principalId)}/workspace-role`, 'PUT', { role_id: roleId })
 export const getProjectMembers = (projectId: string) => call<ProjectMember[]>(`/projects/${id(projectId)}/members`).then(members => { pictureHints(members); return members })
-export const setProjectRole = (projectId: string, principalId: string, roleId: string) => call<unknown>(`/projects/${id(projectId)}/members/${id(principalId)}`, 'PUT', { role_id: roleId })
+export const setProjectRole = (projectId: string, principalId: string, roleId: string) => call<ProjectBinding>(`/projects/${id(projectId)}/members/${id(principalId)}`, 'PUT', { role_id: roleId })
 export const removeProjectMember = (projectId: string, principalId: string) => call<void>(`/projects/${id(projectId)}/members/${id(principalId)}`, 'DELETE')
 export const createInvite = (body: { email: string; workspace_role_id?: string; project_roles?: { project_id: string; role_id: string }[]; expires_in_days?: number }) =>
   call<{ invite: Invite; join_url: string }>('/members/invites', 'POST', body)
@@ -69,47 +75,57 @@ export const deactivate = (principalId: string) => call<Person>(`/members/${id(p
 export const reactivate = (principalId: string) => call<Person>(`/members/${id(principalId)}/reactivate`, 'POST')
 export const linkAlias = (principalId: string, fromPrincipalId: string) => call<Person>(`/members/${id(principalId)}/aliases`, 'POST', { from_principal_id: fromPrincipalId })
 export const unlinkAlias = (principalId: string, fromPrincipalId: string) => call<void>(`/members/${id(principalId)}/aliases/${id(fromPrincipalId)}`, 'DELETE')
-export async function getAudit(after?: number): Promise<{ items: AuditEvent[]; next_after: number | null }> {
-  const body = await call<AuditEvent[] | { items: AuditEvent[]; next_after?: number | null }>(`/audit?category=access${after ? `&after=${after}` : ''}`)
-  return Array.isArray(body) ? { items: body, next_after: null } : { items: body.items, next_after: body.next_after ?? null }
+// The server pages oldest first (?after=<id>); the log reads newest first, so
+// every page is read (up to a ceiling) and the result reversed.
+export const AUDIT_MAX_PAGES = 40
+export async function getAudit(): Promise<{ items: AuditEvent[]; complete: boolean }> {
+  const items: AuditEvent[] = []
+  let after: number | null = null
+  for (let page = 0; page < AUDIT_MAX_PAGES; page++) {
+    const body: { items: AuditEvent[]; next_after: number | null } = await call(`/audit?category=access${after != null ? `&after=${after}` : ''}`)
+    items.push(...body.items)
+    after = body.next_after
+    if (after == null) return { items: items.reverse(), complete: true }
+  }
+  return { items: items.reverse(), complete: false }
 }
 // Agent keys (existing endpoints): a new key's secret is shown only once.
 export interface AgentKeyCreated { id: string; token: string; prefix: string; name: string; expires_at: string | null }
-export const createAgentKey = (name: string, expiresAt: string | null, scopes: string[]) => call<AgentKeyCreated>('/agent-keys', 'POST', { name, scopes, ...(expiresAt ? { expires_at: expiresAt } : {}) })
+export const createAgentKey = (agent: PrincipalRef, expiresAt: string | null, scopes: string[]) => call<AgentKeyCreated>('/agent-keys', 'POST', { principal_id: agent.principal_id, name: agent.name, scopes, ...(expiresAt ? { expires_at: expiresAt } : {}) })
 export const revokeAgentKey = (keyId: string) => call<void>(`/agent-keys/${id(keyId)}`, 'DELETE')
 
 // ---------- Agent key scopes ----------
-// What a key may call. Since SEC4 the server's key ceiling denies by default and
-// an empty list grants nothing (internal/auth/doc.go); a key also never does more
-// than its agent's role allows. The server has no list of scopes to read yet, so
-// this mirrors its route table (stage.<op> scopes are left to the CLI).
-export interface KeyScope { key: string; label: string }
-export const KEY_SCOPE_GROUPS: { label: string; scopes: KeyScope[] }[] = [
-  { label: 'Work', scopes: [{ key: 'nodes.read', label: 'Read projects and tickets' }, { key: 'nodes.write', label: 'Create and change tickets' }, { key: 'nodes.configure', label: 'Set up ticket types and tags' }] },
-  { label: 'Links and history', scopes: [{ key: 'relations.read', label: 'Read links between tickets' }, { key: 'relations.write', label: 'Link tickets' }, { key: 'events.read', label: 'Read history' }, { key: 'events.undo', label: 'Undo changes' }] },
-  { label: 'Search and views', scopes: [{ key: 'search.read', label: 'Search' }, { key: 'views.read', label: 'Read saved views' }, { key: 'views.write', label: 'Save views' }] },
-  { label: 'Knowledge', scopes: [{ key: 'knowledge.read', label: 'Read knowledge' }, { key: 'knowledge.write', label: 'Write knowledge' }, { key: 'journey.read', label: 'Read project journeys' }] },
-  { label: 'Messages and approvals', scopes: [{ key: 'inbox.read', label: 'Read its messages' }, { key: 'inbox.send', label: 'Send messages' }, { key: 'approvals.read', label: 'Read approvals' }, { key: 'approvals.request', label: 'Ask for approval' }] },
-  { label: 'Work orders and runs', scopes: [{ key: 'work_orders.read', label: 'Read work orders' }, { key: 'work_orders.write', label: 'Write work orders' }, { key: 'run.create', label: 'Start runs' }, { key: 'run.read', label: 'Read runs' }, { key: 'run.claim', label: 'Take on runs' }, { key: 'run.telemetry', label: 'Report run progress' }] },
-  { label: 'Harness sessions', scopes: [{ key: 'harness.read', label: 'Read sessions' }, { key: 'harness.write', label: 'Register and update sessions' }, { key: 'harness.worker', label: 'Work as a session' }, { key: 'harness.control', label: 'Control sessions' }] },
-  { label: 'Intake and hours', scopes: [{ key: 'intake.read', label: 'Read intake' }, { key: 'intake.write', label: 'Add to intake' }, { key: 'hours.read', label: 'Read hours' }, { key: 'hours.write', label: 'Book hours' }] },
-  { label: 'Itself', scopes: [{ key: 'account.manage', label: 'Read its own identity and accounts' }, { key: 'models.read', label: 'Read models' }, { key: 'plugins.read', label: 'Read plugins' }] },
-]
-const ALL_SCOPES = KEY_SCOPE_GROUPS.flatMap(g => g.scopes)
-export const KEY_SCOPE_COUNT = ALL_SCOPES.length
+// What a key may call: registry permissions marked agent_grantable (contract v2
+// #6). An empty list grants nothing (SEC4); the server takes at most 32 and never
+// more than the creator holds.
 export const MAX_KEY_SCOPES = 32
-export const KEY_PRESETS: { id: string; label: string; scopes: string[] }[] = [
-  { id: 'read', label: 'Read only', scopes: [...ALL_SCOPES.filter(s => s.key.endsWith('.read')).map(s => s.key), 'account.manage'] },
-  // What the coordinating agent uses end to end (internal/cli compat test).
-  { id: 'coordinator', label: 'Coordinator', scopes: ['account.manage', 'inbox.read', 'inbox.send', 'models.read', 'nodes.read', 'nodes.write', 'nodes.configure', 'relations.read', 'relations.write', 'events.read', 'events.undo', 'search.read', 'views.read', 'views.write'] },
-]
-export const scopeLabel = (key: string) => ALL_SCOPES.find(s => s.key === key)?.label ?? key
+export const keyScopes = (registry: Permission[]) => registry.filter(p => p.agent_grantable)
+// What the coordinating agent uses end to end (internal/cli compat test).
+export const COORDINATOR_SCOPES = ['account.manage', 'inbox.read', 'inbox.send', 'models.read', 'nodes.read', 'nodes.write', 'nodes.configure', 'relations.read', 'relations.write', 'events.read', 'events.undo', 'search.read', 'views.read', 'views.write']
+export const scopeLabel = (key: string) => permissionLabel(key)
+// How a key is named on screen. Real prefixes start with the workspace id, the
+// same for every key, so a long one shows its distinguishing tail.
+export const keyHint = (prefix: string) => prefix.length > 12 ? `aeon_…${prefix.slice(-8)}_…` : `aeon_${prefix}_…`
+// The most a new key for this agent may carry besides my own permissions: an
+// agent on a shared role (built-in or custom) is capped by that role; an agent
+// with no role, or with the role the server keeps for it alone, is not
+// (internal/auth ensureAgentBinding). null means no cap from the role.
+export function agentScopeCeiling(agent: Pick<Agent, 'principal_id' | 'workspace_role'>, roles: Role[]): Set<string> | null {
+  const role = agent.workspace_role ? roles.find(r => r.id === agent.workspace_role!.id) : undefined
+  if (!role) return null
+  if (!role.builtin && role.key === `agent_${agent.principal_id.replace(/-/g, '')}`) return null
+  return new Set(role.permissions)
+}
 
 // ---------- Permissions in words ----------
 const RESOURCE: Record<string, string> = {
   nodes: 'work', comments: 'comments', knowledge: 'knowledge', kinds: 'ticket types', settings: 'workspace settings', members: 'members',
   roles: 'roles', audit: 'the access log', keys: 'agent keys', approvals: 'agent approvals', agents: 'agents', quotes: 'quotes',
   hours: 'hours', customers: 'customers', portal: 'the customer portal', workspace: 'the workspace', releases: 'releases', journey: 'the journey',
+  authz: 'their own access', account: 'agent accounts', harness: 'harness sessions', run: 'runs', runs: 'runs', work_orders: 'work orders',
+  stage: 'stages', stage_handoffs: 'stage handoffs', inbox: 'messages', models: 'models', plugins: 'plugins', imports: 'imports', intake: 'intake',
+  requirements: 'requirements', project_groups: 'project groups', profile: 'document profiles', crm: 'CRM', cost_units: 'cost units',
+  tags: 'tags', relations: 'links between tickets', attachments: 'attachments', views: 'saved views', events: 'history', search: 'search', ownership: 'ownership',
 }
 const ACTION: Record<string, string> = { read: 'See', write: 'Edit', manage: 'Manage', delete: 'Delete', issue: 'Issue', approve: 'Approve', decide: 'Decide on', log: 'Log', run: 'Run', create: 'Create' }
 // "members.manage" -> "Manage members"; "nodes.read" -> "See work".
@@ -153,16 +169,18 @@ export const beyond = (wanted: string[], mine: Set<string>) => wanted.filter(key
 // What a new invite starts with: Member in the workspace; Guest on a project.
 export const defaultWorkspaceRole = (roles: Role[]) => roles.find(r => r.builtin && r.key === 'member')?.id ?? ''
 export const defaultProjectRole = (roles: Role[]) => roles.find(r => r.builtin && r.key === 'guest')?.id ?? roles[0]?.id ?? ''
-// Roles that mean something on a project: at least one permission grantable there.
-export const projectRolesOf = (roles: Role[], registry: Permission[]) => roles.filter(role => role.permissions.some(key => registry.find(p => p.key === key)?.grantable_at.includes('project')))
+// Where a role may be given. The server refuses Guest in the workspace
+// (project_only_role) and Owner or Customer on a project, so they are never
+// offered there; a custom role goes wherever one of its permissions is grantable.
+const PROJECT_ONLY = new Set(['guest'])
+const WORKSPACE_ONLY = new Set(['owner', 'customer'])
+export const workspaceRolesOf = (roles: Role[]) => roles.filter(role => !(role.builtin && PROJECT_ONLY.has(role.key)))
+export const projectRolesOf = (roles: Role[], registry: Permission[]) => roles.filter(role => !(role.builtin && WORKSPACE_ONLY.has(role.key))
+  && role.permissions.some(key => registry.find(p => p.key === key)?.grantable_at.includes('project')))
 
 // ---------- People ----------
-export const OWNER = 'owner'
-// The last active owner can never be demoted, deactivated or removed.
-export function isLastOwner(person: Pick<Person, 'principal_id' | 'status' | 'workspace_role'>, people: Pick<Person, 'principal_id' | 'status' | 'workspace_role'>[]): boolean {
-  if (person.workspace_role?.key !== OWNER || person.status !== 'active') return false
-  return people.filter(p => p.status === 'active' && p.workspace_role?.key === OWNER).length === 1
-}
+// The last active owner can never be demoted, deactivated or removed; the server says who that is.
+export const isLastOwner = (person: Pick<Person, 'last_owner'>) => person.last_owner
 export const LAST_OWNER_REASON = 'The last active owner keeps Owner, so the workspace always has someone who can manage it. Make another person an owner first.'
 export function projectSummary(roles: ProjectRole[]): string {
   if (!roles.length) return ''
@@ -185,8 +203,7 @@ export function inviteRoles(invite: Pick<Invite, 'workspace_role' | 'project_rol
   const parts = [invite.workspace_role ? `${invite.workspace_role.name} in the workspace` : '', ...invite.project_roles.map(r => `${r.role.name} on ${r.project_title}`)].filter(Boolean)
   return parts.join(' · ') || 'No access yet'
 }
-export const creatorName = (invite: Invite, names: Map<string, string>) =>
-  typeof invite.created_by === 'string' ? names.get(invite.created_by) ?? 'Someone' : invite.created_by.name
+export const creatorName = (invite: Invite) => invite.created_by.name || 'Someone'
 
 // ---------- Audit ----------
 export type AuditCategory = 'roles' | 'bindings' | 'invites' | 'lifecycle' | 'keys'
@@ -201,18 +218,20 @@ export function categoryOf(type: string): AuditCategory | null {
   if (type.startsWith('agent_key.')) return 'keys'
   return null
 }
-export interface Names { principal: (id: string | null | undefined) => string; project: (id: string | null | undefined) => string }
+export interface Names { principal: (id: string | null | undefined) => string; project: (id: string | null | undefined) => string; role: (id: string | null | undefined) => string }
 type Snapshot = Record<string, unknown>
 const obj = (value: unknown): Snapshot => value && typeof value === 'object' && !Array.isArray(value) ? value as Snapshot : {}
 const str = (value: unknown) => typeof value === 'string' ? value : ''
-const roleName = (value: unknown) => str(obj(value).name) || str(obj(obj(value).role).name)
-// One event as a sentence: who did what to whom, in plain words. The subject
-// (the person or thing changed) is returned apart, so a filter can match it.
+// One event as a sentence: who did what to whom, in plain words. The server
+// names the actor, the subject and the project; data carries the before and
+// after snapshots, whose roles come as objects or as role_id.
 export function auditSentence(event: AuditEvent, names: Names): { actor: string; text: string; subject: string } {
-  const before = obj(event.before), after = obj(event.after), either = Object.keys(after).length ? after : before
-  const actor = names.principal(event.actor_principal_id)
-  const who = names.principal(str(either.principal_id))
-  const scope = str(either.scope) === 'project' || str(either.project_id) ? ` on ${names.project(str(either.project_id))}` : ' in the workspace'
+  const before = obj(event.data?.before), after = obj(event.data?.after), either = Object.keys(after).length ? after : before
+  const actor = event.actor?.name || names.principal(event.actor?.principal_id)
+  const who = event.subject?.name || names.principal(str(either.principal_id))
+  const roleName = (snap: Snapshot) => str(obj(snap.role).name) || (str(snap.role_id) ? names.role(str(snap.role_id)) : '')
+  const projectId = event.project?.id || str(either.project_id) || (str(either.scope_type) === 'project' ? str(either.scope_id) : '')
+  const place = projectId ? ` on ${names.project(projectId) || event.project?.key || 'a project'}` : ' in the workspace'
   switch (event.type) {
     case 'role.created': return { actor, subject: str(after.name), text: `created the role ${str(after.name)}` }
     case 'role.updated': {
@@ -221,21 +240,30 @@ export function auditSentence(event: AuditEvent, names: Names): { actor: string;
       const changes = [d.added.length ? `${d.added.length} added` : '', d.removed.length ? `${d.removed.length} removed` : ''].filter(Boolean).join(', ')
       return { actor, subject: str(after.name), text: changes ? `${renamed} (${changes})` : renamed }
     }
-    case 'role.deleted': return { actor, subject: str(before.name), text: `deleted the role ${str(before.name)}${after.reassigned_to ? `; its people now have ${roleName(after.reassigned_to) || 'another role'}` : ''}` }
+    case 'role.deleted': return { actor, subject: str(before.name), text: `deleted the role ${str(before.name) || 'a custom role'}` }
     case 'binding.set': {
       const from = roleName(before), to = roleName(after)
-      return { actor, subject: who, text: from ? `changed ${who}’s role${scope} from ${from} to ${to}` : `gave ${who} the role ${to}${scope}` }
+      if (!to) return { actor, subject: who, text: `changed ${who}’s access${place}` }
+      return { actor, subject: who, text: from && from !== to ? `changed ${who}’s role${place} from ${from} to ${to}` : `gave ${who} the role ${to}${place}` }
     }
-    case 'binding.removed': return { actor, subject: who, text: `removed ${who}’s ${roleName(before) || 'access'}${scope}` }
-    case 'invite.created': return { actor, subject: str(after.email), text: `invited ${str(after.email)}` }
-    case 'invite.revoked': return { actor, subject: str(either.email), text: `revoked the invite for ${str(either.email)}` }
-    case 'invite.accepted': return { actor, subject: str(either.email), text: `accepted the invite for ${str(either.email)}` }
+    case 'binding.removed': return { actor, subject: who, text: `removed ${who}’s ${roleName(before) ? `${roleName(before)} role` : 'access'}${place}` }
+    case 'invite.created': return { actor, subject: str(after.email), text: `invited ${str(after.email) || 'someone'}` }
+    case 'invite.revoked': return { actor, subject: str(either.email), text: `revoked the invite for ${str(either.email) || 'someone'}` }
+    case 'invite.accepted': return { actor, subject: str(either.email) || who, text: `accepted the invite${str(either.email) ? ` for ${str(either.email)}` : ''}` }
     case 'principal.deactivated': return { actor, subject: who, text: `deactivated ${who}; their sessions and keys were revoked` }
     case 'principal.reactivated': return { actor, subject: who, text: `reactivated ${who}` }
-    case 'principal.alias_linked': return { actor, subject: who, text: `linked ${names.principal(str(either.from_principal_id))} to ${who}` }
-    case 'principal.alias_unlinked': return { actor, subject: who, text: `unlinked ${names.principal(str(either.from_principal_id))} from ${who}` }
-    case 'agent_key.created': return { actor, subject: names.principal(str(either.principal_id)), text: `created the key ${str(either.name) || 'for an agent'}${either.prefix ? ` (aeon_${str(either.prefix)}_…)` : ''}` }
-    case 'agent_key.revoked': return { actor, subject: names.principal(str(either.principal_id)), text: `revoked the key ${str(either.name) || ''}${either.prefix ? ` (aeon_${str(either.prefix)}_…)` : ''}`.trim() }
+    case 'principal.alias_linked':
+    case 'principal.alias_unlinked': {
+      // The server's snapshot is the alias principal itself ({id, name, linked_to}).
+      const alias = str(either.from_principal_id) || str(either.principal_id) || str(either.id)
+      const person = str(after.linked_to) || str(before.linked_to) || str(either.to_principal_id)
+      const aliasName = alias && alias !== person ? (str(either.name) || names.principal(alias)) : ''
+      const personName = person ? names.principal(person) : who
+      const linked = event.type === 'principal.alias_linked'
+      return { actor, subject: personName, text: aliasName ? `${linked ? 'linked' : 'unlinked'} ${aliasName} ${linked ? 'to' : 'from'} ${personName}` : `${linked ? 'linked a classic identity to' : 'unlinked a classic identity from'} ${personName}` }
+    }
+    case 'agent_key.created': return { actor, subject: who, text: `created the key ${str(either.name) || 'for an agent'}${either.prefix ? ` (${keyHint(str(either.prefix))})` : ''}` }
+    case 'agent_key.revoked': return { actor, subject: who, text: `revoked the key ${str(either.name) || ''}${either.prefix ? ` (${keyHint(str(either.prefix))})` : ''}`.replace(/ +/g, ' ').trim() }
     default: return { actor, subject: '', text: event.type.replace(/[._]/g, ' ') }
   }
 }

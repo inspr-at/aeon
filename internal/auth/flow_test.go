@@ -10,6 +10,7 @@ import (
 	"net/http/cookiejar"
 	"net/http/httptest"
 	"net/url"
+	"slices"
 	"strings"
 	"testing"
 	"time"
@@ -222,7 +223,7 @@ func TestOIDCSessionLifecycle(t *testing.T) {
 	if len(me.Principal.Roles) != 1 || me.Principal.Roles[0] != "admin" {
 		t.Fatalf("roles %v", me.Principal.Roles)
 	}
-	if scalar(t, adminPool, `SELECT count(*) FROM principals`) != 1 {
+	if scalar(t, adminPool, `SELECT count(*) FROM principals WHERE kind='person'`) != 1 {
 		t.Fatal("principal count")
 	}
 	if scalar(t, appPool, `SELECT count(*) FROM principals`) != 0 {
@@ -240,7 +241,7 @@ func TestOIDCSessionLifecycle(t *testing.T) {
 	if status != http.StatusFound {
 		t.Fatalf("second login %d", status)
 	}
-	if scalar(t, adminPool, `SELECT count(*) FROM principals`) != 1 {
+	if scalar(t, adminPool, `SELECT count(*) FROM principals WHERE kind='person'`) != 1 {
 		t.Fatal("second login created another principal")
 	}
 
@@ -256,7 +257,7 @@ func TestOIDCSessionLifecycle(t *testing.T) {
 	`).Scan(&extended); err != nil || !extended {
 		t.Fatalf("session not rolled extended=%v err=%v", extended, err)
 	}
-	if status, _, _ = do(t, c, http.MethodGet, app.URL+"/api/missing", "", nil); status != http.StatusNotFound {
+	if status, _, _ = do(t, c, http.MethodGet, app.URL+"/api/missing", "", nil); status != http.StatusForbidden {
 		t.Fatalf("authed unknown %d", status)
 	}
 
@@ -335,7 +336,7 @@ func TestDevLoginAndAgentKeys(t *testing.T) {
 	if err := json.Unmarshal(body, &me); err != nil {
 		t.Fatal(err)
 	}
-	if me.Principal.Kind != string(tenant.Person) || !isAdmin(tenant.Principal{Kind: tenant.Person, Roles: me.Principal.Roles}) {
+	if me.Principal.Kind != string(tenant.Person) || !slices.Contains(me.Principal.Roles, "admin") {
 		t.Fatalf("dev me %+v", me.Principal)
 	}
 
@@ -398,7 +399,7 @@ func TestDevLoginAndAgentKeys(t *testing.T) {
 	if err := json.Unmarshal(body, &list); err != nil {
 		t.Fatal(err)
 	}
-	if len(list.Keys) != 1 || list.Keys[0].LastUsedAt == nil || len(list.Keys[0].Scopes) != 2 || list.Keys[0].Scopes[0] != "events:read" || list.Keys[0].Scopes[1] != "account.manage" {
+	if len(list.Keys) != 1 || list.Keys[0].LastUsedAt == nil || len(list.Keys[0].Scopes) != 2 || list.Keys[0].Scopes[0] != "events.read" || list.Keys[0].Scopes[1] != "account.manage" {
 		t.Fatalf("list %+v", list.Keys)
 	}
 
@@ -575,7 +576,7 @@ func TestAgentKeyRLS(t *testing.T) {
 		t.Fatalf("original bearer %d", status)
 	}
 
-	other, err := mod.createAgentKey(t.Context(), tenant.Principal{TenantID: tenantB, Roles: []string{"admin"}}, "b", nil, nil)
+	other, err := mod.createAgentKey(t.Context(), tenant.Principal{TenantID: tenantB, Roles: []string{"admin"}}, "b", "", nil, nil)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -640,7 +641,13 @@ func startApp(t *testing.T, m *Module) *httptest.Server {
 		w.Header().Set("Content-Type", "application/json")
 		_, _ = io.WriteString(w, `{"version":"dev","scheme":"inspr-calendar-v2"}`)
 	})
-	srv := httptest.NewServer(m.Middleware(mux))
+	mux.HandleFunc("GET /api/events", http.NotFound)
+	mux.HandleFunc("GET /api/quotes/{quoteId}", http.NotFound)
+	secured := m.Middleware(mux)
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		_, r.Pattern = mux.Handler(r)
+		secured.ServeHTTP(w, r)
+	}))
 	t.Cleanup(srv.Close)
 	return srv
 }

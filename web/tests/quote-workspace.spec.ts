@@ -104,6 +104,7 @@ test('invalid quantities block automatic save, explicit save, print and navigati
   await page.getByRole('button', { name: 'Save draft' }).click()
   await page.getByRole('button', { name: 'PDF', exact: true }).click()
   expect(calls.filter(c => c.method === 'PATCH' && c.path.endsWith('/draft'))).toHaveLength(0)
+  await expect(page.locator('.quote-ws input:invalid')).toHaveCount(1)
   await page.getByRole('link', { name: 'Back to Quotes' }).click()
   await expect(page.getByRole('dialog', { name: 'Leave with unsaved changes?' })).toBeVisible()
   expect(calls.filter(c => c.method === 'PATCH' && c.path.endsWith('/draft'))).toHaveLength(0)

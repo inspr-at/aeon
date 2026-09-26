@@ -4,6 +4,7 @@ package journey_test
 
 import (
 	"fmt"
+	"github.com/inspr-at/aeon/internal/dbtest"
 	"net/http"
 	"strings"
 	"testing"
@@ -37,7 +38,7 @@ func nullableTestID(id string) any {
 func backfill(t *testing.T, f *fixture) int {
 	t.Helper()
 	var count int
-	err := db.InTenant(t.Context(), f.db.App, f.tenant, func(tx pgx.Tx) error {
+	err := db.InTenant(dbtest.Seed(t.Context()), f.db.App, f.tenant, func(tx pgx.Tx) error {
 		return tx.QueryRow(t.Context(), `SELECT aeon_backfill_journey_releases($1::uuid)`, f.tenant).Scan(&count)
 	})
 	if err != nil {

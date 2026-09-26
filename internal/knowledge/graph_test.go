@@ -4,6 +4,7 @@ package knowledge
 
 import (
 	"fmt"
+	"github.com/inspr-at/aeon/internal/dbtest"
 	"reflect"
 	"strings"
 	"testing"
@@ -61,7 +62,7 @@ func TestGraphResolutionRelationsFiltersAndIsolation(t *testing.T) {
 	source := createEntry(t, f, f.a, map[string]any{"type": "runbook", "slug": "source", "title": "Source", "body": fmt.Sprintf("[[shared]] [[source]] [[foreign]] [[elsewhere]] [[archived-entry]] `adr-old` %s PHAROS-7 [typed](/p/PRJ-1/knowledge/memory/shared) [other](/p/PRJ-2/knowledge/memory/shared)", same.Key)})
 	// Real rename event, including its before snapshot, is written by PATCH.
 	expect(t, call(t, f, f.a, "PATCH", "/api/knowledge/"+target.ID, map[string]any{"slug": "adr-new"}), 200)
-	err := db.InTenant(t.Context(), f.db.App, f.a.TenantID, func(tx pgx.Tx) error {
+	err := db.InTenant(dbtest.Seed(t.Context()), f.db.App, f.a.TenantID, func(tx pgx.Tx) error {
 		for _, pair := range [][2]string{{source.ID, same.ID}, {f.ticket, target.ID}} {
 			if _, err := tx.Exec(t.Context(), `INSERT INTO node_relations(tenant_id,source_node_id,target_node_id,type) VALUES($1,$2,$3,'cites')`, f.a.TenantID, pair[0], pair[1]); err != nil {
 				return err
@@ -115,7 +116,7 @@ func TestGraphResolutionRelationsFiltersAndIsolation(t *testing.T) {
 
 func TestGraphCaps(t *testing.T) {
 	f := setup(t)
-	err := db.InTenant(t.Context(), f.db.App, f.a.TenantID, func(tx pgx.Tx) error {
+	err := db.InTenant(dbtest.Seed(t.Context()), f.db.App, f.a.TenantID, func(tx pgx.Tx) error {
 		_, err := tx.Exec(t.Context(), `INSERT INTO nodes(tenant_id,key,kind_id,title,parent_id,fields)
    SELECT $1,'RUN-'||s,k.id,'Runbook '||s,$2,jsonb_build_object('slug','run-'||s)
    FROM generate_series(1,2001) s CROSS JOIN node_kinds k WHERE k.tenant_id=$1 AND k.slug='runbook'`, f.a.TenantID, f.project)
@@ -162,7 +163,7 @@ func TestGraphTicketSatellitesIncludeRelationsWithoutExpandingHops(t *testing.T)
 	f := setup(t)
 	source := createEntry(t, f, f.a, map[string]any{"type": "memory", "slug": "source", "title": "Source", "body": "PHAROS-7 PHAROS-8"})
 	var satellite, distant string
-	err := db.InTenant(t.Context(), f.db.App, f.a.TenantID, func(tx pgx.Tx) error {
+	err := db.InTenant(dbtest.Seed(t.Context()), f.db.App, f.a.TenantID, func(tx pgx.Tx) error {
 		// Synthetic fixture bodies deliberately name the next ticket. Graph
 		// expansion must only inspect the knowledge body's references.
 		for i, id := range []*string{&satellite, &distant} {

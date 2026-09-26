@@ -16,6 +16,7 @@ import (
 	"github.com/jackc/pgx/v5"
 	"golang.org/x/oauth2"
 
+	"github.com/inspr-at/aeon/internal/db"
 	"github.com/inspr-at/aeon/internal/httpapi"
 	"github.com/inspr-at/aeon/internal/tenant"
 )
@@ -61,7 +62,11 @@ func (m *Module) handleLogin(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	verifier := oauth2.GenerateVerifier()
-	payload := oidcPayload{State: state, Nonce: nonce, Verifier: verifier, Tenant: slug, Exp: time.Now().Add(oidcTTL).Unix()}
+	invite := strings.TrimSpace(r.URL.Query().Get("invite"))
+	if len(invite) > 128 || strings.ContainsAny(invite, " \t\r\n") {
+		invite = ""
+	}
+	payload := oidcPayload{State: state, Nonce: nonce, Verifier: verifier, Tenant: slug, Invite: invite, Exp: time.Now().Add(oidcTTL).Unix()}
 	if err := m.setOIDCCookie(w, payload); err != nil {
 		writeHTML(w, http.StatusInternalServerError, notReadyPage)
 		return
@@ -80,6 +85,9 @@ func (m *Module) callbackFailure(w http.ResponseWriter, r *http.Request, code, r
 }
 
 func (m *Module) handleCallback(w http.ResponseWriter, r *http.Request) {
+	// Sign-in touches only workspace rows; a cookie already present must not
+	// change what it sees (ADR-003 P2).
+	r = r.WithContext(db.NoProjects(r.Context(), "sign-in"))
 	q := r.URL.Query()
 	fail := func(code, reason string) { m.callbackFailure(w, r, code, reason) }
 	switch q.Get("error") {
@@ -141,9 +149,10 @@ func (m *Module) handleCallback(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	var claims struct {
-		Email     string `json:"email"`
-		Name      string `json:"name"`
-		Preferred string `json:"preferred_username"`
+		Email         string `json:"email"`
+		EmailVerified bool   `json:"email_verified"`
+		Name          string `json:"name"`
+		Preferred     string `json:"preferred_username"`
 	}
 	if err := idt.Claims(&claims); err != nil {
 		fail("failed", "invalid_claims")
@@ -155,7 +164,7 @@ func (m *Module) handleCallback(w http.ResponseWriter, r *http.Request) {
 		fail("unavailable", "tenant_lookup")
 		return
 	}
-	principal, identityID, err := m.resolveOIDCPerson(r.Context(), tenantID, payload.Tenant, idt.Issuer, idt.Subject, claims.Email, display)
+	principal, identityID, err := m.resolveOIDCPerson(r.Context(), tenantID, payload.Tenant, idt.Issuer, idt.Subject, claims.Email, display, claims.EmailVerified, payload.Invite)
 	if errors.Is(err, errNotMember) {
 		fail("not_member", "tenant_membership")
 		return
@@ -208,6 +217,9 @@ func (m *Module) handleMe(w http.ResponseWriter, r *http.Request) {
 }
 
 func (m *Module) handleDevLogin(w http.ResponseWriter, r *http.Request) {
+	// Sign-in touches only workspace rows; a cookie already present must not
+	// change what it sees (ADR-003 P2).
+	r = r.WithContext(db.NoProjects(r.Context(), "sign-in"))
 	if !m.cfg.Dev() {
 		http.NotFound(w, r)
 		return

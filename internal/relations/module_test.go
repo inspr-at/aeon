@@ -43,7 +43,7 @@ func setup(t *testing.T) fixture {
 		if err != nil {
 			t.Fatal(err)
 		}
-		err = db.InTenant(t.Context(), d.App, p.TenantID, func(tx pgx.Tx) error {
+		err = db.InTenant(dbtest.Seed(t.Context()), d.App, p.TenantID, func(tx pgx.Tx) error {
 			if err := tx.QueryRow(t.Context(), `INSERT INTO principals(tenant_id,kind,name,roles) VALUES($1,$2,'Test',$3) RETURNING id::text`, p.TenantID, p.Kind, p.Roles).Scan(&p.ID); err != nil {
 				return err
 			}
@@ -65,6 +65,7 @@ func setup(t *testing.T) fixture {
 			t.Fatal(err)
 		}
 	}
+	dbtest.BindLegacy(t, d, f.a.TenantID, f.a.ID)
 	f.handler = (&httpapi.Server{Pool: d.App, Modules: []httpapi.Module{New(d.App), events.New(d.App, UndoOption())}}).Handler()
 	return f
 }
@@ -208,7 +209,7 @@ func TestRefusalsReadAsWords(t *testing.T) {
 	refused(t, post(f, a, b, "duplicates"), 409, "TSK-1 cannot duplicate TSK-2: TSK-2 already duplicates TSK-1, so this link would make a loop.")
 	refused(t, post(f, a, a, "blocks"), 400, "an item cannot be linked to itself")
 	// A deleted item breaks the chain; the loop is no longer there.
-	err := db.InTenant(t.Context(), f.db.App, f.a.TenantID, func(tx pgx.Tx) error {
+	err := db.InTenant(dbtest.Seed(t.Context()), f.db.App, f.a.TenantID, func(tx pgx.Tx) error {
 		_, err := tx.Exec(t.Context(), `UPDATE nodes SET deleted_at=now() WHERE id=$1`, b)
 		return err
 	})
@@ -217,7 +218,7 @@ func TestRefusalsReadAsWords(t *testing.T) {
 	}
 	create(t, f, c, a, "blocks")
 	// Undo cannot restore a link that a later one turned into a loop.
-	err = db.InTenant(t.Context(), f.db.App, f.a.TenantID, func(tx pgx.Tx) error {
+	err = db.InTenant(dbtest.Seed(t.Context()), f.db.App, f.a.TenantID, func(tx pgx.Tx) error {
 		_, err := tx.Exec(t.Context(), `UPDATE nodes SET deleted_at=NULL WHERE id=$1`, b)
 		return err
 	})
@@ -310,16 +311,20 @@ func TestPaginationValidationAndAtomicity(t *testing.T) {
 	}
 	// A valid tenant with an invalid actor makes event insertion fail. The link
 	// mutation must roll back, leaving its tuple available for the real caller.
+	// Since ADR-003 P2 such an actor also sees no project, so the link is
+	// refused before the event; either way nothing is written.
 	forged := f.a
 	forged.ID = f.b.ID
 	body := fmt.Sprintf(`{"source_node_id":%q,"target_node_id":%q,"type":"duplicates"}`, f.nodes[0], f.nodes[1])
-	expect(t, request(f.handler, forged, "POST", "/api/relations", body), 500)
+	if w := request(f.handler, forged, "POST", "/api/relations", body); w.Code != 500 && w.Code != 404 {
+		t.Fatalf("forged actor: %d %s", w.Code, w.Body.String())
+	}
 	create(t, f, f.nodes[0], f.nodes[1], "duplicates")
 	if len(logEvents(t, f)) != 4 {
 		t.Fatal("failed writes left history")
 	}
 	// Deleting a node prevents new relations without consuming an event ID.
-	err := db.InTenant(t.Context(), f.db.App, f.a.TenantID, func(tx pgx.Tx) error {
+	err := db.InTenant(dbtest.Seed(t.Context()), f.db.App, f.a.TenantID, func(tx pgx.Tx) error {
 		_, err := tx.Exec(t.Context(), `UPDATE nodes SET deleted_at=now() WHERE id=$1`, f.nodes[2])
 		return err
 	})
@@ -335,20 +340,25 @@ func TestUndoAuthorizationRestorationAndConflicts(t *testing.T) {
 	other := f.a
 	other.Kind = tenant.Agent
 	other.Roles = nil
-	err := db.InTenant(t.Context(), f.db.App, f.a.TenantID, func(tx pgx.Tx) error {
+	err := db.InTenant(dbtest.Seed(t.Context()), f.db.App, f.a.TenantID, func(tx pgx.Tx) error {
 		return tx.QueryRow(t.Context(), `INSERT INTO principals(tenant_id,kind,name) VALUES($1,'agent','Other') RETURNING id::text`, f.a.TenantID).Scan(&other.ID)
 	})
 	if err != nil {
 		t.Fatal(err)
 	}
+	// The agent sees the event (ADR-003 P2) but may not undo another's change.
+	dbtest.BindRole(t, f.db, f.a.TenantID, other.ID, "member")
 	expect(t, request(f.handler, other, "POST", "/api/events/1/undo", ""), 403)
 	other.Roles = []string{"admin"}
 	expect(t, request(f.handler, other, "POST", "/api/events/1/undo", ""), 403)
 	other.Kind = tenant.Person
-	err = db.InTenant(t.Context(), f.db.App, f.a.TenantID, func(tx pgx.Tx) error {
+	err = db.InTenant(dbtest.Seed(t.Context()), f.db.App, f.a.TenantID, func(tx pgx.Tx) error {
 		return tx.QueryRow(t.Context(), `INSERT INTO principals(tenant_id,kind,name) VALUES($1,'person','Decider') RETURNING id::text`, f.a.TenantID).Scan(&other.ID)
 	})
 	if err != nil {
+		t.Fatal(err)
+	}
+	if _, err := f.db.Admin.Exec(t.Context(), `INSERT INTO role_bindings(tenant_id,principal_id,role_id,scope_type) SELECT $1::uuid,$2::uuid,id,'workspace' FROM roles WHERE tenant_id=$1::uuid AND key='admin'`, f.a.TenantID, other.ID); err != nil {
 		t.Fatal(err)
 	}
 	expect(t, request(f.handler, other, "POST", "/api/events/1/undo", ""), 201)
@@ -379,7 +389,7 @@ func TestUndoAuthorizationRestorationAndConflicts(t *testing.T) {
 	third := create(t, f, f.nodes[0], f.nodes[1], "blocks")
 	expect(t, request(f.handler, f.a, "POST", "/api/events/6/undo", ""), 409)
 	expect(t, request(f.handler, f.a, "DELETE", "/api/relations/"+third.ID, ""), 204)
-	err = db.InTenant(t.Context(), f.db.App, f.a.TenantID, func(tx pgx.Tx) error {
+	err = db.InTenant(dbtest.Seed(t.Context()), f.db.App, f.a.TenantID, func(tx pgx.Tx) error {
 		_, err := tx.Exec(t.Context(), `UPDATE nodes SET deleted_at=now() WHERE id=$1`, f.nodes[1])
 		return err
 	})

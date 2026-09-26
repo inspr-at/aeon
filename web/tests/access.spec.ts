@@ -7,7 +7,7 @@
 import { test, expect, type Page } from '@playwright/test'
 import AxeBuilder from '@axe-core/playwright'
 import { fixtures, mockWork, watchErrors } from './work-fixtures'
-import { JONAS, LENA, ME, MIRA, accessWorld, mockAccess, type AccessWorld } from './access-fixtures'
+import { DEPLOYER, JONAS, LENA, ME, MIRA, accessWorld, mockAccess, type AccessWorld } from './access-fixtures'
 
 test.beforeEach(async ({ page }) => { await page.clock.setSystemTime(new Date('2026-09-23T12:00:00Z')) })
 
@@ -222,7 +222,7 @@ test('project access: through the workspace or the project; add, change and remo
   await page.getByRole('dialog', { name: 'Add to Pharos' }).getByRole('option', { name: /Cleo Customer/ }).click()
   const picker = page.getByRole('dialog', { name: 'Role of Cleo Customer on Pharos' })
   await picker.getByRole('radio', { name: /^Guest/ }).click()
-  await picker.getByRole('button', { name: 'Give Cleo Customer on Pharos Guest' }).click()
+  await picker.getByRole('button', { name: 'Give Cleo Customer Guest on Pharos' }).click()
   await expect(list.getByRole('listitem').filter({ hasText: 'Cleo Customer' })).toContainText('Guest here')
   expect(calls(world, 'PUT', /\/projects\/p-pharos\/members\//).at(-1)?.body).toEqual({ role_id: 'role-guest' })
   // Remove Lena: the confirmation says she loses the project entirely.
@@ -261,21 +261,27 @@ test('agents: role and keys; a new key shows once; service principals are intern
   await sheet.getByRole('button', { name: 'Create key' }).click()
   await expect(sheet.getByRole('alert')).toContainText('Choose at least one thing it may do')
   expect(calls(world, 'POST', /\/agent-keys$/)).toHaveLength(0)
-  await sheet.getByRole('button', { name: 'Read only' }).click()
-  await expect(sheet.getByRole('button', { name: 'Read only' })).toHaveAttribute('aria-pressed', 'true')
-  await sheet.getByRole('checkbox', { name: /Read hours/ }).uncheck()
-  await expect(sheet.getByRole('button', { name: 'Read only' })).toHaveAttribute('aria-pressed', 'false')
+  // The scopes are the registry's agent-grantable permissions; human governance is not offered.
+  await expect(sheet.getByRole('checkbox', { name: /members\.manage/ })).toHaveCount(0)
+  await sheet.getByRole('button', { name: 'Coordinator' }).click()
+  await expect(sheet.getByRole('button', { name: 'Coordinator' })).toHaveAttribute('aria-pressed', 'true')
+  // The deployer is a Viewer: a scope beyond that role is disabled, with the reason.
+  await expect(sheet.getByRole('checkbox', { name: /nodes\.write/ })).toBeDisabled()
+  await expect(sheet).toContainText('nodes.write · beyond pharos-deployer’s role (Viewer)')
+  await sheet.getByRole('checkbox', { name: /nodes\.read/ }).uncheck()
+  await expect(sheet.getByRole('button', { name: 'Coordinator' })).toHaveAttribute('aria-pressed', 'false')
+  await sheet.getByRole('checkbox', { name: /nodes\.read/ }).check()
   await sheet.getByRole('button', { name: 'Create key' }).click()
   const ready = page.getByRole('dialog', { name: 'Key ready' })
   await expect(ready.getByLabel('New agent key')).toHaveValue(/^aeon_/)
   await expect(ready).toContainText('shown only now')
   await ready.getByRole('button', { name: 'Done' }).click()
   await expect(deployer.locator('tbody tr')).toHaveCount(3)
-  const sent = calls(world, 'POST', /\/agent-keys$/)[0]!.body.scopes as string[]
-  expect(sent).toContain('nodes.read')
-  expect(sent).not.toContain('hours.read')
-  expect(sent).not.toContain('nodes.write')
-  await expect(deployer.locator('tbody tr').first()).toContainText('more')
+  const body = calls(world, 'POST', /\/agent-keys$/)[0]!.body as { principal_id: string; scopes: string[] }
+  expect(body.principal_id).toBe(DEPLOYER)
+  expect(body.scopes).toContain('nodes.read')
+  expect(body.scopes).not.toContain('nodes.write')
+  await expect(deployer.locator('tbody tr').first()).toContainText('nodes.read')
   await deployer.getByRole('button', { name: 'Revoke key aeon_ph4r' }).click()
   await page.getByRole('dialog', { name: /Revoke the key aeon_ph4r/ }).getByRole('button', { name: 'Revoke key' }).click()
   await expect(deployer.locator('tbody tr', { hasText: 'aeon_ph4r' }).locator('.state')).toHaveText('Revoked')

@@ -4,7 +4,7 @@ import { setPageTitle } from '../lib/brand'
 import { computed, defineAsyncComponent, nextTick, onBeforeUnmount, onMounted, ref, watch } from 'vue'
 import { onBeforeRouteLeave, onBeforeRouteUpdate, useRoute, useRouter } from 'vue-router'
 import { APIError, createNode, listNodes, type ListItem, type SavedView } from '../lib/api'
-import { canWrite } from '../lib/activity'
+import { can } from '../lib/authz'
 import { confirmAction } from '../lib/confirm'
 import { asListItem, guardedMove, keyPrefix, kinds } from '../lib/useTicket'
 import { useOutline } from '../lib/useOutline'
@@ -37,7 +37,7 @@ import EpicPicker from '../components/work/EpicPicker.vue'
 import JourneyChip from '../components/journey/JourneyChip.vue'
 import type KnowledgeEntryPageType from '../components/knowledge/KnowledgeEntryPage.vue'
 import type KnowledgeTabType from '../components/knowledge/KnowledgeTab.vue'
-import { isKnowledgeType } from '../lib/knowledge'
+import { DOCK_LIST_RESERVE, DOCK_MEDIA, entryPath, isKnowledgeType, parseEntryParam, type KnowledgeType } from '../lib/knowledge'
 import { filtersFromQuery as knowledgeFiltersFrom, filtersToQuery as knowledgeQuery, useKnowledge, type KnowledgeFilters } from '../lib/useKnowledge'
 import type { Stage } from '../lib/journey'
 import type { QuickDraft } from '../components/work/QuickCreateRow.vue'
@@ -97,10 +97,30 @@ const knowledgeType = computed(() => isKnowledgeType(route.params.knowledgeType)
 const knowledgeSlug = computed(() => typeof route.params.slug === 'string' ? route.params.slug : '')
 const knowledgeEntryOpen = computed(() => knowledgeActive.value && !!knowledgeType.value && !!knowledgeSlug.value)
 const knowledgeFilters = computed(() => knowledgeFiltersFrom(route.query))
-const knowledgeListQuery = computed(() => knowledgeQuery(knowledgeFilters.value))
+// The display (?mode=graph) belongs to the list's place too: closing or leaving an entry returns to it.
+const knowledgeDisplay = computed((): Record<string, string> => route.query.mode === 'graph' ? { mode: 'graph' } : {})
+const knowledgeListQuery = computed(() => ({ ...knowledgeDisplay.value, ...knowledgeQuery(knowledgeFilters.value) }))
 const knowledge = useKnowledge(projectId, knowledgeFilters, knowledgeActive)
 const knowledgeTab = ref<InstanceType<typeof KnowledgeTabType>>()
 const knowledgeEntry = ref<InstanceType<typeof KnowledgeEntryPageType>>()
+// Wide screens dock an entry beside the list (?entry=<type>/<slug>); narrower ones open its own page.
+const dockQuery = window.matchMedia(DOCK_MEDIA)
+const knowledgeWide = ref(dockQuery.matches)
+const onDockWidth = (event: MediaQueryListEvent) => { knowledgeWide.value = event.matches }
+dockQuery.addEventListener('change', onDockWidth)
+const dockEntry = computed(() => knowledgeActive.value && !knowledgeEntryOpen.value ? parseEntryParam(route.query.entry) : null)
+const knowledgeDocked = computed(() => knowledgeWide.value && !!dockEntry.value)
+// The entry on show: its own page, or docked. One component either way, so Expand keeps it.
+const shownEntry = computed<{ type: KnowledgeType; slug: string; mode: 'page' | 'dock' } | null>(() => {
+  if (knowledgeEntryOpen.value && knowledgeType.value) return { type: knowledgeType.value, slug: knowledgeSlug.value, mode: 'page' }
+  const docked = knowledgeDocked.value ? dockEntry.value : null
+  return docked ? { ...docked, mode: 'dock' } : null
+})
+// A docked link on a narrow screen (shared, or the window got narrower) opens the entry's page.
+// The graph keeps its selection there instead, shown in its own card.
+watch([dockEntry, knowledgeWide], ([entry, wide]) => {
+  if (entry && !wide && route.query.mode !== 'graph') void router.replace({ path: entryPath(routeKey.value, entry.type, entry.slug), query: knowledgeListQuery.value, hash: route.hash })
+}, { immediate: true })
 const fullViewQuery = computed(() => !!ticketKey.value && route.query.view === 'full')
 const lastListMode = ref<ViewMode>(modeOf(route.query.view))
 watch(() => route.query.view, view => { if (view !== 'full' && !knowledgeActive.value) lastListMode.value = modeOf(view) })
@@ -147,7 +167,16 @@ const creating = ref(false)
 // Full page: the same ticket workspace in a two-column page instead of the side panel.
 const fullView = fullViewQuery
 const me = computed(() => session.identity ? { id: session.identity.principal.id, name: session.identity.principal.name } : null)
-const writable = computed(() => canWrite(session.identity?.principal.roles))
+const writable = computed(() => can('nodes.write', projectId.value ?? undefined))
+const nodeDeletable = computed(() => can('nodes.delete', projectId.value ?? undefined))
+const nodeMovable = computed(() => can('nodes.move', projectId.value ?? undefined))
+const relationLinkable = computed(() => can('relations.write', projectId.value ?? undefined))
+const relationUnlinkable = computed(() => can('relations.delete', projectId.value ?? undefined))
+const commentable = computed(() => can('comments.write', projectId.value ?? undefined))
+const commentDeletable = computed(() => can('comments.delete', projectId.value ?? undefined))
+const attachable = computed(() => can('attachments.write', projectId.value ?? undefined) && can('attachments.delete', projectId.value ?? undefined))
+const knowledgeWritable = computed(() => can('knowledge.write', projectId.value ?? undefined))
+const knowledgeDeletable = computed(() => can('knowledge.delete', projectId.value ?? undefined))
 
 // ---------- Rows, groups and keyboard order ----------
 const displayRows = computed(() => {
@@ -568,7 +597,24 @@ watch(project, current => { if (current) remember({ type: 'project', key: curren
 
 // ---------- Knowledge: the list's place in the URL, and closing an entry ----------
 function updateKnowledge(patch: Partial<KnowledgeFilters>) {
-  void router.replace({ path: route.path, query: knowledgeQuery({ ...knowledgeFilters.value, ...patch }) })
+  // A docked entry, and the graph, stay while the list is searched and filtered.
+  const entry = typeof route.query.entry === 'string' ? { entry: route.query.entry } : {}
+  void router.replace({ path: route.path, query: { ...knowledgeDisplay.value, ...knowledgeQuery({ ...knowledgeFilters.value, ...patch }), ...entry } })
+}
+// The next navigation's outcome: true once it has landed, false when a guard kept the page.
+function landed() {
+  return new Promise<boolean>(resolve => { const stop = router.afterEach((_to, _from, failure) => { stop(); resolve(!failure) }) })
+}
+// Closing the docked entry: back to the list it was opened from, the row selected.
+async function closeKnowledgeDock() {
+  const id = knowledgeEntry.value?.entryId() ?? null
+  const list = { path: `/p/${encodeURIComponent(routeKey.value)}/knowledge`, query: knowledgeListQuery.value }
+  const done = landed()
+  if (window.history.state?.back === router.resolve(list).fullPath) router.back()
+  else void router.replace(list)
+  if (!(await done)) return
+  await nextTick()
+  if (id) knowledgeTab.value?.reveal(id, true)
 }
 let entryFromList = false
 watch(() => route.fullPath, (_path, old) => {
@@ -578,9 +624,12 @@ watch(() => route.fullPath, (_path, old) => {
 async function closeKnowledgeEntry() {
   const id = knowledgeEntry.value?.entryId() ?? null
   const back = entryFromList && typeof window.history.state?.back === 'string' && /\/knowledge(\?|$)/.test(window.history.state.back.split('#')[0])
+  const done = landed()
   if (back) router.back()
-  else await router.push({ path: `/p/${encodeURIComponent(routeKey.value)}/knowledge`, query: knowledgeListQuery.value })
-  if (id) setTimeout(() => knowledgeTab.value?.reveal(id), 60)
+  else void router.push({ path: `/p/${encodeURIComponent(routeKey.value)}/knowledge`, query: knowledgeListQuery.value })
+  if (!(await done)) return
+  await nextTick()
+  if (id) knowledgeTab.value?.reveal(id)
 }
 
 // ---------- Saved view actions ----------
@@ -808,9 +857,15 @@ async function confirmDiscard() {
   if (skipGuard || !dirty()) return true
   return confirmAction({ title: 'Discard unsaved changes?', body: 'You have edits in this ticket that are not saved yet.', confirmLabel: 'Discard changes', danger: true })
 }
+// Which knowledge entry an address shows (its page or the docked pane), so leaving
+// an entry asks about unsaved edits, while Expand (same entry, now its page) does not.
+function shownIn(location: { params: Record<string, unknown>; query: Record<string, unknown> }) {
+  if (typeof location.params.slug === 'string') return `${String(location.params.knowledgeType)}/${location.params.slug}`
+  return typeof location.query.entry === 'string' ? location.query.entry : ''
+}
 onBeforeRouteUpdate(async (to, from) => {
   if (to.params.ticketKey !== from.params.ticketKey || to.params.projectKey !== from.params.projectKey) return confirmDiscard()
-  if (from.params.slug && (to.params.slug !== from.params.slug || to.params.knowledgeType !== from.params.knowledgeType)) return confirmDiscard()
+  if (shownIn(from) && shownIn(to) !== shownIn(from)) return confirmDiscard()
 })
 onBeforeRouteLeave(async () => (await confirmDiscard()) && (!table.value?.createDirty() || skipGuard || confirmAction({ title: 'Discard the new ticket?', body: 'Its title has not been created yet.', confirmLabel: 'Discard', danger: true })))
 function beforeUnload(event: BeforeUnloadEvent) { if (dirty() || table.value?.createDirty()) { event.preventDefault(); event.returnValue = '' } }
@@ -973,11 +1028,12 @@ onBeforeUnmount(() => {
   stick?.disconnect()
   list.invalidate()
   knowledge.stop()
+  dockQuery.removeEventListener('change', onDockWidth)
 })
 
 // ---------- Document title ----------
-watch([project, panelItem, knowledgeActive, knowledgeEntryOpen], ([current, item, knowledgeOn, entryOn]) => {
-  if (!current || entryOn) return
+watch([project, panelItem, knowledgeActive, knowledgeEntryOpen, knowledgeDocked], ([current, item, knowledgeOn, entryOn, docked]) => {
+  if (!current || entryOn || docked) return
   setPageTitle(item ? `${item.key} ${item.title}` : knowledgeOn ? `Knowledge · ${current.routeKey} ${current.title}` : `${current.routeKey} ${current.title}`)
 }, { immediate: true })
 
@@ -985,7 +1041,7 @@ watch([project, panelItem, knowledgeActive, knowledgeEntryOpen], ([current, item
 </script>
 
 <template>
-  <section class="project-page" :class="{ 'panel-open': !!ticketKey && !fullView, 'full-view': fullView, 'knowledge-entry': knowledgeEntryOpen }" :style="{ '--toolbar-h': `${toolbarHeight}px` }" :aria-labelledby="project && !knowledgeEntryOpen ? 'project-title' : undefined">
+  <section class="project-page" :class="{ 'panel-open': (!!ticketKey && !fullView) || knowledgeDocked, 'full-view': fullView, 'knowledge-entry': knowledgeEntryOpen, 'knowledge-dock': knowledgeDocked }" :style="{ '--toolbar-h': `${toolbarHeight}px` }" :aria-labelledby="project && !knowledgeEntryOpen ? 'project-title' : undefined">
     <template v-if="project">
       <div v-show="!fullView && !knowledgeEntryOpen" class="list-view" :class="{ selecting: selectable && selected.size }">
       <header class="project-head">
@@ -1039,12 +1095,12 @@ watch([project, panelItem, knowledgeActive, knowledgeEntryOpen], ([current, item
 
       <JourneyView
         v-if="journeyActive" :project="{ id: project.id, routeKey: project.routeKey, title: project.title }" :stage="journeyStage" :release-key="journeyRelease" :walk-key="journeyWalk"
-        :can-write="writable" :person="session.identity?.principal.kind !== 'agent'" :me="me?.id ?? null"
+        :can-write="writable" :person="session.identity?.principal.kind === 'person'" :me="me?.id ?? null"
         @stage="journeyStageTo" @release="journeyReleaseTo" @walk="journeyWalkTo" @open="openKey"
       />
       <KnowledgeTab
         v-else-if="knowledgeActive" ref="knowledgeTab" :project="{ id: project.id, routeKey: project.routeKey, title: project.title }" :state="knowledge"
-        :filters="knowledgeFilters" :can-write="writable" :now="now" :paused="knowledgeEntryOpen" @update="updateKnowledge"
+        :filters="knowledgeFilters" :can-write="knowledgeWritable" :now="now" :paused="knowledgeEntryOpen" :dock="knowledgeWide" :open-entry="shownEntry?.mode === 'dock' ? shownEntry : null" @update="updateKnowledge"
       />
       <TicketTable
         v-else ref="table" :expected-rows="expectedRows" :groups="groups" :group="filters.group" :rows-by-id="rowsById" :cursor-id="cursorId" :open-id="panelItem?.id ?? null"
@@ -1076,14 +1132,17 @@ watch([project, panelItem, knowledgeActive, knowledgeEntryOpen], ([current, item
       </div>
 
       <KnowledgeEntryPage
-        v-if="knowledgeEntryOpen && knowledgeType" ref="knowledgeEntry" :project="{ id: project.id, routeKey: project.routeKey, title: project.title }"
-        :type="knowledgeType" :slug="knowledgeSlug" :state="knowledge" :can-write="writable" :now="now" :list-query="knowledgeListQuery" @close="closeKnowledgeEntry"
+        v-if="shownEntry" ref="knowledgeEntry" :project="{ id: project.id, routeKey: project.routeKey, title: project.title }" :mode="shownEntry.mode"
+        :type="shownEntry.type" :slug="shownEntry.slug" :state="knowledge" :can-write="knowledgeWritable" :can-delete="knowledgeDeletable" :now="now" :list-query="knowledgeListQuery"
+        @close="shownEntry.mode === 'dock' ? closeKnowledgeDock() : closeKnowledgeEntry()"
       />
+      <PanelSplitter v-if="knowledgeDocked" field="knowledgePanel" css-var="--knowledge-panel-user-w" target=".entry-page.dock" :reserve="DOCK_LIST_RESERVE" />
       <PanelSplitter v-if="ticketKey && !fullView" />
       <TicketWorkspace
         v-if="ticketKey" ref="panel" :item="panelItem" :ticket-key="ticketKey.toUpperCase()" :resolving="panelLoading" :resolve-error="panelError"
         :position="panelPosition" :now="now" :mode="fullView ? 'full' : 'panel'" :project="{ id: project.id, routeKey: project.routeKey }"
-        :names="list.names" :me="me" :can-write="writable" :people="people"
+        :names="list.names" :me="me" :can-write="writable" :can-delete="nodeDeletable" :can-move="nodeMovable" :can-link="relationLinkable" :can-unlink="relationUnlinkable"
+        :can-comment="commentable" :can-delete-comment="commentDeletable" :can-attach="attachable" :people="people"
         @close="closePanel" @prev="move(-1)" @next="move(1)" @expand="expand" @collapse="collapse" @new-tab="newTab(panelItem?.key ?? ticketKey)"
         @status="anchor => panelItem && openStatus(panelItem, anchor, 'panel')" @open-key="openRelated" :trail="trail" @trail-back="trailBack" @removed="removed" @created="childCreated" @moved="childMoved" @retry="resolvePanel"
       />
@@ -1166,6 +1225,12 @@ watch([project, panelItem, knowledgeActive, knowledgeEntryOpen], ([current, item
 .hint-link:hover { color: var(--teal-ink); }
 .project-page.full-view { padding-top: 12px; }
 .project-page.knowledge-entry { padding-top: 0; }
+/* The docked knowledge entry reads a little wider than a ticket and keeps a width of
+   its own (dragged, it is the person's); the list always keeps its 560px. */
+.project-page.knowledge-dock {
+  --panel-default: clamp(560px, calc(560px + (100vw - 1200px) * .36), 840px);
+  --panel-w: min(var(--knowledge-panel-user-w, var(--panel-default)), calc(100vw - 620px));
+}
 /* Wide screens dock the ticket panel: the list reflows beside it instead of under it. */
 @media (min-width: 1100px) {
   .project-page.panel-open { width: 100%; margin: 0; padding-right: calc(var(--panel-w) + 22px); }

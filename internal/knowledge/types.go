@@ -331,10 +331,12 @@ func withoutTitle(body, title string) string {
 	if !headingMark.MatchString(line) {
 		return body
 	}
+	// Words only, so "ADR-001 · Foundation" is the start of "ADR-001 · Foundation (accepted)".
 	norm := func(s string) string {
-		return strings.Join(strings.Fields(strings.ToLower(strings.Trim(s, "# \t"))), " ")
+		return strings.Join(strings.FieldsFunc(strings.ToLower(s), func(r rune) bool { return !unicode.IsLetter(r) && !unicode.IsDigit(r) }), " ")
 	}
-	if norm(headingMark.ReplaceAllString(line, "")) != norm(title) {
+	heading, name := norm(headingMark.ReplaceAllString(line, "")), norm(title)
+	if heading != name && (len(heading) < 8 || !strings.HasPrefix(name, heading+" ")) {
 		return body
 	}
 	return rest

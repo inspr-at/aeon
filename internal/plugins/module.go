@@ -12,6 +12,7 @@ import (
 	"github.com/jackc/pgx/v5"
 	"github.com/jackc/pgx/v5/pgxpool"
 
+	"github.com/inspr-at/aeon/internal/authz"
 	"github.com/inspr-at/aeon/internal/db"
 	"github.com/inspr-at/aeon/internal/events"
 	"github.com/inspr-at/aeon/internal/httpapi"
@@ -161,7 +162,7 @@ func (m *Module) List(ctx context.Context, p tenant.Principal) ([]CatalogItem, e
 		return nil, unauthorized()
 	}
 	var rows map[string]installRow
-	err := m.inTenant(ctx, p.TenantID, func(tx pgx.Tx) error {
+	err := m.inTenant(tenant.WithPrincipal(ctx, p), p.TenantID, func(tx pgx.Tx) error {
 		var err error
 		rows, err = listInstalls(ctx, tx, p.TenantID)
 		return err
@@ -188,14 +189,14 @@ func (m *Module) List(ctx context.Context, p tenant.Principal) ([]CatalogItem, e
 	return items, nil
 }
 
-// Configure pins a compiled plugin for the tenant. Only a person with the
-// admin role may call it. An unchanged pin does not append another event.
+// Configure pins a compiled plugin for the tenant. An unchanged pin does not
+// append another event.
 func (m *Module) Configure(ctx context.Context, p tenant.Principal, pluginID string, in InstallationWrite) (Installation, error) {
 	if p.ID == "" || p.TenantID == "" {
 		return Installation{}, unauthorized()
 	}
-	if err := requireAdmin(p); err != nil {
-		return Installation{}, err
+	if p.Kind != tenant.Person || authz.Require(authz.BindPool(tenant.WithPrincipal(ctx, p), m.pool), "plugins.manage", authz.Scope{}) != nil {
+		return Installation{}, forbidden("permission denied")
 	}
 	if !validID(pluginID) {
 		return Installation{}, invalid("invalid plugin id")
@@ -215,7 +216,7 @@ func (m *Module) Configure(ctx context.Context, p tenant.Principal, pluginID str
 		return Installation{}, err
 	}
 	var out Installation
-	err = m.inTenant(ctx, p.TenantID, func(tx pgx.Tx) error {
+	err = m.inTenant(tenant.WithPrincipal(ctx, p), p.TenantID, func(tx pgx.Tx) error {
 		current, err := loadInstall(ctx, tx, p.TenantID, pluginID, true)
 		if err != nil {
 			return err

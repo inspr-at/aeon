@@ -345,7 +345,7 @@ func ReconcileWithOptions(ctx context.Context, source *HTTPSource, pool *pgxpool
 	if err != nil {
 		return ReconcileReport{}, fmt.Errorf("resolve tenant: %w", err)
 	}
-	err = db.InTenant(ctx, pool, tenantID, func(tx pgx.Tx) error {
+	err = db.InTenant(db.AllProjects(ctx, "classic importer"), pool, tenantID, func(tx pgx.Tx) error {
 		return readReconcileTarget(ctx, tx, tenantID, snap.SourceID, project, projectKeys, store, targetSet, snap.Skipped)
 	})
 	if err != nil {

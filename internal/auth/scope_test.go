@@ -18,6 +18,7 @@ import (
 	"strings"
 	"testing"
 
+	"github.com/inspr-at/aeon/internal/authz"
 	"github.com/inspr-at/aeon/internal/tenant"
 	"github.com/jackc/pgx/v5"
 )
@@ -78,6 +79,17 @@ func TestAgentScopeSeparatesProjectSubpathsAndUnknownRoutes(t *testing.T) {
 
 var registeredRoute = regexp.MustCompile(`^(GET|HEAD|POST|PUT|PATCH|DELETE) /api/`)
 var routeValue = regexp.MustCompile(`\{[^}]+\}`)
+var policyMux = func() *http.ServeMux {
+	mux := http.NewServeMux()
+	for pattern := range authz.RoutePermissions {
+		mux.HandleFunc(pattern, func(http.ResponseWriter, *http.Request) {})
+	}
+	return mux
+}()
+
+func setPolicyPattern(r *http.Request) {
+	_, r.Pattern = policyMux.Handler(r)
+}
 
 // Source registration literals include the route arrays mounted by the work
 // order, run and harness modules. This catches additions without a scope map.
@@ -126,7 +138,7 @@ func TestEmptyAgentKeyDeniedAcrossRegisteredAPIRoutes(t *testing.T) {
 	reset(t)
 	tenantID := insertTenant(t, "scope-audit", "Scope audit")
 	m := newMod(t, Config{})
-	key, err := m.createAgentKey(t.Context(), tenant.Principal{TenantID: tenantID}, "empty-audit", []string{}, nil)
+	key, err := m.createAgentKey(t.Context(), tenant.Principal{TenantID: tenantID}, "empty-audit", "", []string{}, nil)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -135,6 +147,7 @@ func TestEmptyAgentKeyDeniedAcrossRegisteredAPIRoutes(t *testing.T) {
 		method, path, _ := strings.Cut(pattern, " ")
 		path = routeValue.ReplaceAllString(path, "aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa")
 		req := httptest.NewRequest(method, path, bytes.NewReader(nil))
+		setPolicyPattern(req)
 		if scope, _ := coreAgentScope(req); scope == selfScope {
 			// Reading its own identity is the one route every key may call.
 			continue
@@ -142,7 +155,7 @@ func TestEmptyAgentKeyDeniedAcrossRegisteredAPIRoutes(t *testing.T) {
 		req.Header.Set("Authorization", "Bearer "+key.Token)
 		res := httptest.NewRecorder()
 		handler.ServeHTTP(res, req)
-		if res.Code != http.StatusForbidden || !strings.Contains(res.Body.String(), "agent key scope required") {
+		if res.Code != http.StatusForbidden {
 			t.Errorf("%s: %d %s", pattern, res.Code, res.Body.String())
 		}
 	}
@@ -152,7 +165,7 @@ func TestCoordinatorScopesReachWorkRoutes(t *testing.T) {
 	reset(t)
 	tenantID := insertTenant(t, "coordinator-audit", "Coordinator audit")
 	m := newMod(t, Config{})
-	key, err := m.createAgentKey(t.Context(), tenant.Principal{TenantID: tenantID}, "aeon-coordinator", []string{"harness.worker", "inbox.read", "inbox.send", "nodes.read"}, nil)
+	key, err := m.createAgentKey(t.Context(), tenant.Principal{TenantID: tenantID}, "aeon-coordinator", "", []string{"harness.worker", "inbox.read", "inbox.send", "nodes.read"}, nil)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -166,6 +179,7 @@ func TestCoordinatorScopesReachWorkRoutes(t *testing.T) {
 	} {
 		method, path, _ := strings.Cut(route, " ")
 		req := httptest.NewRequest(method, path, nil)
+		setPolicyPattern(req)
 		req.Header.Set("Authorization", "Bearer "+key.Token)
 		res := httptest.NewRecorder()
 		handler.ServeHTTP(res, req)
@@ -189,7 +203,7 @@ func TestServicePrincipalsCannotReceiveAgentKeys(t *testing.T) {
 			if err != nil {
 				t.Fatal(err)
 			}
-			if _, err := m.createAgentKey(t.Context(), tenant.Principal{TenantID: tenantID}, name, []string{"nodes.read"}, nil); !errors.Is(err, errServicePrincipal) {
+			if _, err := m.createAgentKey(t.Context(), tenant.Principal{TenantID: tenantID}, name, "", []string{"nodes.read"}, nil); !errors.Is(err, errServicePrincipal) {
 				t.Fatalf("service key error: %v", err)
 			}
 		})
@@ -201,11 +215,11 @@ func TestServicePrincipalsCannotReceiveAgentKeys(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if _, err := m.createAgentKey(t.Context(), tenant.Principal{TenantID: tenantID}, "person-service", nil, nil); !errors.Is(err, errServicePrincipal) {
+	if _, err := m.createAgentKey(t.Context(), tenant.Principal{TenantID: tenantID}, "person-service", "", nil, nil); !errors.Is(err, errServicePrincipal) {
 		t.Fatalf("person service name collision: %v", err)
 	}
 	// A colliding ordinary agent must not hide a service principal of the same name.
-	normalKey, err := m.createAgentKey(t.Context(), tenant.Principal{TenantID: tenantID}, "collision", []string{"nodes.read"}, nil)
+	normalKey, err := m.createAgentKey(t.Context(), tenant.Principal{TenantID: tenantID}, "collision", "", []string{"nodes.read"}, nil)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -216,7 +230,7 @@ func TestServicePrincipalsCannotReceiveAgentKeys(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if _, err := m.createAgentKey(t.Context(), tenant.Principal{TenantID: tenantID}, "collision", nil, nil); !errors.Is(err, errServicePrincipal) {
+	if _, err := m.createAgentKey(t.Context(), tenant.Principal{TenantID: tenantID}, "collision", "", nil, nil); !errors.Is(err, errServicePrincipal) {
 		t.Fatalf("collision key error: %v", err)
 	}
 	if got := countInTenant(t, tenantID, `SELECT count(*) FROM agent_keys WHERE name='collision'`); got != 1 {

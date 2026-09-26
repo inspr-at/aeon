@@ -5,6 +5,7 @@ package inbox
 import (
 	"encoding/json"
 	"fmt"
+	"github.com/inspr-at/aeon/internal/dbtest"
 	"net/http"
 	"net/http/httptest"
 	"strings"
@@ -38,7 +39,7 @@ func workspaceStatus(t *testing.T, w *httptest.ResponseRecorder, want int) {
 }
 func workspaceTx(t *testing.T, w *world, p tenant.Principal, fn func(pgx.Tx) error) {
 	t.Helper()
-	if err := db.InTenant(t.Context(), w.db.App, p.TenantID, fn); err != nil {
+	if err := db.InTenant(dbtest.Seed(t.Context()), w.db.App, p.TenantID, fn); err != nil {
 		t.Fatal(err)
 	}
 }
@@ -223,7 +224,7 @@ func TestHeldResolutionEventFailureLeavesPending(t *testing.T) {
 	in := compatInput(w.recipient.ID, "held-failure")
 	in.ActionRequest = true
 	held := mustCompatSend(t, m, w.sender, project, in)
-	if err := db.InTenant(t.Context(), w.db.Admin, w.admin.TenantID, func(tx pgx.Tx) error {
+	if err := db.InTenant(dbtest.Seed(t.Context()), w.db.Admin, w.admin.TenantID, func(tx pgx.Tx) error {
 		_, err := tx.Exec(t.Context(), `CREATE FUNCTION reject_b7_resolution() RETURNS trigger LANGUAGE plpgsql AS $$ BEGIN IF NEW.type='inbox.action_resolved' THEN RAISE EXCEPTION 'test event failure'; END IF; RETURN NEW; END $$; CREATE TRIGGER reject_b7_resolution BEFORE INSERT ON events FOR EACH ROW EXECUTE FUNCTION reject_b7_resolution()`)
 		return err
 	}); err != nil {

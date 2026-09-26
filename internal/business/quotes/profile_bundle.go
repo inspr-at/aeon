@@ -19,6 +19,7 @@ import (
 	"strings"
 
 	"github.com/inspr-at/aeon/internal/attachments"
+	"github.com/inspr-at/aeon/internal/authz"
 	"github.com/inspr-at/aeon/internal/db"
 	"github.com/inspr-at/aeon/internal/tenant"
 	"github.com/jackc/pgx/v5"
@@ -212,7 +213,7 @@ func ApplyProfileBundle(ctx context.Context, pool *pgxpool.Pool, tenantID, actor
 		paths = append(paths, p)
 	}
 	sort.Strings(paths)
-	err := db.InTenant(ctx, pool, tenantID, func(tx pgx.Tx) error {
+	err := db.InTenant(db.AllProjects(ctx, "quote profile bundle"), pool, tenantID, func(tx pgx.Tx) error {
 		if apply {
 			// Settings PATCH takes this same tenant lock. It also serializes
 			// this command's default change with concurrent profile applies.
@@ -228,12 +229,18 @@ func ApplyProfileBundle(ctx context.Context, pool *pgxpool.Pool, tenantID, actor
 					return fmt.Errorf("operator actor unavailable; pass --actor-principal-id: %w", err)
 				}
 			}
-			var allowed bool
-			if err := tx.QueryRow(ctx, `SELECT EXISTS(SELECT 1 FROM principals WHERE id=$1::uuid AND (kind='agent' AND 'operator'=ANY(roles) OR kind='person' AND (roles && ARRAY['admin','super_admin']::text[])))`, actorID).Scan(&allowed); err != nil {
+			var kind, status string
+			var operator bool
+			if err := tx.QueryRow(ctx, `SELECT kind,status,kind='agent' AND 'operator'=ANY(roles) FROM principals WHERE id=$1::uuid`, actorID).Scan(&kind, &status, &operator); err != nil {
 				return err
 			}
-			if !allowed {
-				return errors.New("actor must be the tenant bootstrap operator or a tenant admin")
+			if status != "active" {
+				return errors.New("actor is inactive")
+			}
+			if !operator {
+				if kind != "person" || authz.RequireTx(ctx, tx, tenant.Principal{TenantID: tenantID, ID: actorID, Kind: tenant.Person}, "quotes.manage", authz.Scope{}) != nil {
+					return errors.New("actor requires quote management permission")
+				}
 			}
 		}
 		actor := tenant.Principal{TenantID: tenantID, ID: actorID, Kind: tenant.Person}

@@ -33,8 +33,8 @@ func setup(t *testing.T) (*dbtest.DB, tenant.Principal, string) {
 	if err := d.Admin.QueryRow(t.Context(), `INSERT INTO tenants(slug,name) VALUES('att','Attachments') RETURNING id::text`).Scan(&p.TenantID); err != nil {
 		t.Fatal(err)
 	}
-	err := db.InTenant(t.Context(), d.App, p.TenantID, func(tx pgx.Tx) error {
-		if err := tx.QueryRow(t.Context(), `INSERT INTO principals(tenant_id,kind,name) VALUES($1,'person','Tester') RETURNING id::text`, p.TenantID).Scan(&p.ID); err != nil {
+	err := db.InTenant(dbtest.Seed(t.Context()), d.App, p.TenantID, func(tx pgx.Tx) error {
+		if err := tx.QueryRow(t.Context(), `INSERT INTO principals(tenant_id,kind,name,roles) VALUES($1,'person','Tester',ARRAY['member']) RETURNING id::text`, p.TenantID).Scan(&p.ID); err != nil {
 			return err
 		}
 		var kind, node string
@@ -50,6 +50,7 @@ func setup(t *testing.T) (*dbtest.DB, tenant.Principal, string) {
 	if err != nil {
 		t.Fatal(err)
 	}
+	dbtest.BindLegacy(t, d, p.TenantID, p.ID)
 	p.Kind = tenant.Person
 	p.Roles = []string{"member"}
 	return d, p, p.Name
@@ -186,13 +187,14 @@ func TestUploadDedupeVariantsETagIsolationUndoAndOps(t *testing.T) {
 	if err := d.Admin.QueryRow(t.Context(), `INSERT INTO tenants(slug,name) VALUES('other','Other') RETURNING id::text`).Scan(&foreign.TenantID); err != nil {
 		t.Fatal(err)
 	}
-	if err := db.InTenant(t.Context(), d.App, foreign.TenantID, func(tx pgx.Tx) error {
-		return tx.QueryRow(t.Context(), `INSERT INTO principals(tenant_id,kind,name) VALUES($1,'person','Other') RETURNING id::text`, foreign.TenantID).Scan(&foreign.ID)
+	if err := db.InTenant(dbtest.Seed(t.Context()), d.App, foreign.TenantID, func(tx pgx.Tx) error {
+		return tx.QueryRow(t.Context(), `INSERT INTO principals(tenant_id,kind,name,roles) VALUES($1,'person','Other',ARRAY['member']) RETURNING id::text`, foreign.TenantID).Scan(&foreign.ID)
 	}); err != nil {
 		t.Fatal(err)
 	}
 	foreign.Kind = tenant.Person
 	foreign.Roles = []string{"member"}
+	dbtest.BindLegacy(t, d, foreign.TenantID, foreign.ID)
 	w = request(t, mux, foreign, "GET", "/api/attachments/"+a.ID+"/content", "", nil)
 	if w.Code != 404 {
 		t.Fatalf("cross tenant %d", w.Code)
@@ -206,7 +208,7 @@ func TestUploadDedupeVariantsETagIsolationUndoAndOps(t *testing.T) {
 		t.Fatalf("deleted content %d", w.Code)
 	}
 	var eventID int64
-	if err := db.InTenant(t.Context(), d.App, p.TenantID, func(tx pgx.Tx) error {
+	if err := db.InTenant(dbtest.Seed(t.Context()), d.App, p.TenantID, func(tx pgx.Tx) error {
 		return tx.QueryRow(t.Context(), `SELECT max(id) FROM events WHERE tenant_id=$1 AND type='attachment.removed'`, p.TenantID).Scan(&eventID)
 	}); err != nil {
 		t.Fatal(err)

@@ -92,7 +92,7 @@ func addPrincipal(t *testing.T, tenantID, kind, name string, roles []string) ten
 		roles = []string{}
 	}
 	var id string
-	err := db.InTenant(t.Context(), appPool, tenantID, func(tx pgx.Tx) error {
+	err := db.InTenant(dbtest.Seed(t.Context()), appPool, tenantID, func(tx pgx.Tx) error {
 		return tx.QueryRow(t.Context(), `
 			INSERT INTO principals (tenant_id, kind, name, roles)
 			VALUES ($1::uuid, $2, $3, $4) RETURNING id::text`, tenantID, kind, name, roles).Scan(&id)
@@ -100,6 +100,7 @@ func addPrincipal(t *testing.T, tenantID, kind, name string, roles []string) ten
 	if err != nil {
 		t.Fatalf("principal: %v", err)
 	}
+	dbtest.BindLegacy(t, testDB, tenantID, id)
 	k := tenant.Person
 	if kind == "agent" {
 		k = tenant.Agent
@@ -119,7 +120,7 @@ func issueKey(t *testing.T, p tenant.Principal, scopes []string) string {
 		t.Fatalf("short prefix %s", prefix)
 	}
 	prefix = prefix[:48]
-	err := db.InTenant(t.Context(), appPool, p.TenantID, func(tx pgx.Tx) error {
+	err := db.InTenant(dbtest.Seed(t.Context()), appPool, p.TenantID, func(tx pgx.Tx) error {
 		_, err := tx.Exec(t.Context(), `
 			INSERT INTO agent_keys (tenant_id, principal_id, name, prefix, hash, scopes)
 			VALUES ($1::uuid, $2::uuid, $3, $4, $5, $6)`,
@@ -156,7 +157,7 @@ func call(t *testing.T, mod httpapi.Module, p *tenant.Principal, token, method, 
 func codexProfile(t *testing.T, admin tenant.Principal) string {
 	t.Helper()
 	var id string
-	err := db.InTenant(t.Context(), appPool, admin.TenantID, func(tx pgx.Tx) error {
+	err := db.InTenant(dbtest.Seed(t.Context()), appPool, admin.TenantID, func(tx pgx.Tx) error {
 		return tx.QueryRow(t.Context(), `
 			INSERT INTO model_profiles (tenant_id, slug, version, harness, family, model, effort, tier)
 			VALUES ($1::uuid, 'codex-luna-medium', '2', 'codex', 'openai', 'gpt-6-luna', 'medium', 'fast')
@@ -171,7 +172,7 @@ func codexProfile(t *testing.T, admin tenant.Principal) string {
 func insertRun(t *testing.T, person, agent tenant.Principal, profileID string) string {
 	t.Helper()
 	var id string
-	err := db.InTenant(t.Context(), appPool, person.TenantID, func(tx pgx.Tx) error {
+	err := db.InTenant(dbtest.Seed(t.Context()), appPool, person.TenantID, func(tx pgx.Tx) error {
 		var nodeID string
 		if err := tx.QueryRow(t.Context(), `
 			INSERT INTO nodes (tenant_id, key, kind_id, title)
@@ -200,7 +201,7 @@ func insertRun(t *testing.T, person, agent tenant.Principal, profileID string) s
 func scalar(t *testing.T, p tenant.Principal, query string, args ...any) int64 {
 	t.Helper()
 	var n int64
-	err := db.InTenant(t.Context(), appPool, p.TenantID, func(tx pgx.Tx) error {
+	err := db.InTenant(dbtest.Seed(t.Context()), appPool, p.TenantID, func(tx pgx.Tx) error {
 		return tx.QueryRow(t.Context(), query, args...).Scan(&n)
 	})
 	if err != nil {
@@ -296,7 +297,7 @@ func TestAccountPoolRoutingAndLedger(t *testing.T) {
 		t.Fatal("reservation event repeated")
 	}
 
-	err := db.InTenant(t.Context(), appPool, admin.TenantID, func(tx pgx.Tx) error {
+	err := db.InTenant(dbtest.Seed(t.Context()), appPool, admin.TenantID, func(tx pgx.Tx) error {
 		_, err := tx.Exec(t.Context(), `
 			INSERT INTO run_telemetry (tenant_id, run_id, sequence, kind, turn_count_delta, input_tokens_delta, output_tokens_delta, cost_micros_delta)
 			VALUES ($1::uuid, $2::uuid, 1, 'usage', 2, 3, 2, 7)`, admin.TenantID, runID)
@@ -323,7 +324,7 @@ func TestAccountPoolRoutingAndLedger(t *testing.T) {
 	if scalar(t, admin, `SELECT count(*) FROM events WHERE type = 'account.settled'`) != 1 {
 		t.Fatal("settle was not idempotent")
 	}
-	err = db.InTenant(t.Context(), appPool, admin.TenantID, func(tx pgx.Tx) error {
+	err = db.InTenant(dbtest.Seed(t.Context()), appPool, admin.TenantID, func(tx pgx.Tx) error {
 		if _, err := tx.Exec(t.Context(), `
 			INSERT INTO run_telemetry (tenant_id, run_id, sequence, kind, turn_count_delta)
 			VALUES ($1::uuid, $2::uuid, 2, 'usage', 1)`, admin.TenantID, runID); err != nil {
@@ -347,7 +348,7 @@ func TestAccountPoolRoutingAndLedger(t *testing.T) {
 	if liveRoute.AccountID != account.ID {
 		t.Fatal("second run was not routed")
 	}
-	err = db.InTenant(t.Context(), appPool, admin.TenantID, func(tx pgx.Tx) error {
+	err = db.InTenant(dbtest.Seed(t.Context()), appPool, admin.TenantID, func(tx pgx.Tx) error {
 		if _, err := tx.Exec(t.Context(), `UPDATE agent_runs SET status = 'running', daemon_id = 'daemon-a', daemon_generation = 'g9' WHERE id = $1::uuid`, live); err != nil {
 			return err
 		}
@@ -392,7 +393,7 @@ func TestRankDrainGrantAndStaleProbe(t *testing.T) {
 		callStatus(t, mod, &runner, token, http.MethodPost, "/api/agent-accounts/"+account.ID+"/probe", fmt.Sprintf(`{"daemon_id":%q,"daemon_generation":"g1","available":true}`, account.DaemonID), http.StatusOK, nil)
 		callStatus(t, mod, &admin, "", http.MethodPost, "/api/agent-accounts/"+account.ID+"/windows", windowBody(start, end, "requests", 100, "unrestricted"), http.StatusCreated, nil)
 	}
-	err := db.InTenant(t.Context(), appPool, admin.TenantID, func(tx pgx.Tx) error {
+	err := db.InTenant(dbtest.Seed(t.Context()), appPool, admin.TenantID, func(tx pgx.Tx) error {
 		_, err := tx.Exec(t.Context(), `UPDATE account_allowance_windows w SET used = 40 FROM agent_accounts a WHERE a.id = w.account_id AND a.account_key = 'high'`)
 		return err
 	})
@@ -418,7 +419,7 @@ func TestRankDrainGrantAndStaleProbe(t *testing.T) {
 		t.Fatal("drain released an owned reservation")
 	}
 
-	err = db.InTenant(t.Context(), appPool, admin.TenantID, func(tx pgx.Tx) error {
+	err = db.InTenant(dbtest.Seed(t.Context()), appPool, admin.TenantID, func(tx pgx.Tx) error {
 		_, err := tx.Exec(t.Context(), `UPDATE agent_accounts SET last_probe_at = now() - interval '5 minutes' WHERE id = $1::uuid`, low.ID)
 		return err
 	})
@@ -427,7 +428,7 @@ func TestRankDrainGrantAndStaleProbe(t *testing.T) {
 	}
 	// low is full anyway; refresh high by reactivating and probing, then make its probe stale.
 	callStatus(t, mod, &admin, "", http.MethodPatch, "/api/agent-accounts/"+high.ID, `{"state":"available"}`, http.StatusOK, nil)
-	err = db.InTenant(t.Context(), appPool, admin.TenantID, func(tx pgx.Tx) error {
+	err = db.InTenant(dbtest.Seed(t.Context()), appPool, admin.TenantID, func(tx pgx.Tx) error {
 		_, err := tx.Exec(t.Context(), `UPDATE agent_accounts SET last_probe_at = now() - interval '5 minutes'`)
 		return err
 	})
@@ -435,7 +436,7 @@ func TestRankDrainGrantAndStaleProbe(t *testing.T) {
 		t.Fatalf("stale all: %v", err)
 	}
 	// Free a slot by completing the low run so staleness, not occupancy, is the cause.
-	err = db.InTenant(t.Context(), appPool, admin.TenantID, func(tx pgx.Tx) error {
+	err = db.InTenant(dbtest.Seed(t.Context()), appPool, admin.TenantID, func(tx pgx.Tx) error {
 		if _, err := tx.Exec(t.Context(), `UPDATE agent_runs SET status = 'completed' WHERE id = $1::uuid`, runLow); err != nil {
 			return err
 		}
@@ -466,7 +467,7 @@ func TestRankDrainGrantAndStaleProbe(t *testing.T) {
 
 func grantClaim(t *testing.T, person, agent tenant.Principal, runID string) {
 	t.Helper()
-	err := db.InTenant(t.Context(), appPool, person.TenantID, func(tx pgx.Tx) error {
+	err := db.InTenant(dbtest.Seed(t.Context()), appPool, person.TenantID, func(tx pgx.Tx) error {
 		var requestID string
 		var expires time.Time
 		if err := tx.QueryRow(t.Context(), `

@@ -117,7 +117,11 @@ start_app() {
     if ! docker exec "$app" id -u >/dev/null 2>&1; then break; fi
     sleep 1
   done
-  if (( healthy == 0 )); then echo "$mode image health failed" >&2; exit 1; fi
+  if (( healthy == 0 )); then
+    echo "$mode image health failed; last container log lines:" >&2
+    docker logs --tail 40 "$app" >&2 2>&1 || true
+    exit 1
+  fi
   [[ "$(docker exec "$app" id -u)" == 65532 ]] || { echo 'runtime UID is not 65532' >&2; exit 1; }
   [[ "$(docker exec "$app" id -g)" == 65532 ]] || { echo 'runtime GID is not 65532' >&2; exit 1; }
   [[ "$(docker exec "$app" stat -c '%u:%g:%a' /data/files)" == 65532:65532:750 ]] || {
@@ -205,6 +209,14 @@ body, content_type = multipart({'file': ('smoke.txt', 'text/plain', content)})
 attachment = call('POST', f"/api/nodes/{project['id']}/attachments", body, content_type)[0]
 assert call('GET', f"/api/attachments/{attachment['id']}/content") == content
 print('dev: attachment upload and download OK')
+
+# Every web action is gated by can(), which reads /api/me/permissions. If the
+# authz module is not mounted the whole UI turns read-only (P1, 2026-09-26).
+perms = call('GET', '/api/me/permissions')
+assert 'nodes.write' in perms['workspace']['permissions'], perms
+members = call('GET', '/api/members')
+assert members['people'], members
+print('dev: permissions and members served OK')
 
 body, content_type = multipart({'file': ('avatar.png', 'image/png', png()),
     'crop': ('', 'application/json', b'{"x":0,"y":0,"size":2}')})

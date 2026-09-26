@@ -1,6 +1,6 @@
 <!-- SPDX-License-Identifier: AGPL-3.0-only -->
 <script setup lang="ts">
-import { computed, nextTick, onMounted, ref } from 'vue'
+import { computed, nextTick, onMounted, ref, watch } from 'vue'
 import { LAST_OWNER_REASON, effectLine, identityLine, isLastOwner, type Person, type ProjectRole } from '../../lib/access'
 import { can, myPermissions } from '../../lib/authz'
 import { confirmAction } from '../../lib/confirm'
@@ -24,13 +24,15 @@ const emit = defineEmits<{ close: [] }>()
 const access = useAccess()
 const projects = useProjects()
 const manage = computed(() => can('members.manage'))
-const last = computed(() => isLastOwner(props.person, access.people))
+const last = computed(() => isLastOwner(props.person))
 const role = computed(() => props.person.workspace_role ? access.roleById.get(props.person.workspace_role.id) : undefined)
 const first = computed(() => props.person.name.split(' ')[0])
 const busy = ref(false)
 
 // ---------- Workspace role ----------
 const roleAnchor = ref<HTMLElement | null>(null)
+// Why the server refused a role change, shown in the open picker.
+const roleError = ref('')
 async function chooseWorkspace(roleId: string | null) {
   const before = props.person.workspace_role?.id ?? null
   busy.value = true
@@ -39,12 +41,13 @@ async function chooseWorkspace(roleId: string | null) {
     roleAnchor.value = null
     const name = access.roles.find(r => r.id === roleId)?.name
     toast(name ? `${props.person.name} is now ${name}` : `${props.person.name} has no workspace role now`, { action: { label: 'Undo', run: () => void access.setWorkspaceRole(props.person.principal_id, before) } })
-  } catch (e) { toast(problem(e, `${props.person.name} keeps their role`), { tone: 'error' }) }
+  } catch (e) { roleError.value = problem(e, `${props.person.name} keeps their role`) }
   finally { busy.value = false }
 }
 
 // ---------- Project access ----------
 const projectRole = ref<{ project: { id: string; title: string }; current: string | null; anchor: HTMLElement } | null>(null)
+watch([roleAnchor, projectRole], () => { roleError.value = '' })
 const adding = ref<HTMLElement | null>(null)
 const addChoices = computed(() => projects.projects.filter(p => !props.person.project_roles.some(r => r.project_id === p.id)).map(p => ({ value: p.id, label: p.title, hint: p.routeKey })))
 function pickProject(projectId: string) {
@@ -61,7 +64,7 @@ async function chooseProject(roleId: string | null) {
     await access.setProjectRole(target.project.id, props.person.principal_id, roleId)
     projectRole.value = null
     toast(`${props.person.name} is ${access.roles.find(r => r.id === roleId)?.name ?? 'set'} on ${target.project.title}`)
-  } catch (e) { toast(problem(e, `The role on ${target.project.title} did not change`), { tone: 'error' }) }
+  } catch (e) { roleError.value = problem(e, `The role on ${target.project.title} did not change`) }
   finally { busy.value = false }
 }
 async function removeProject(entry: ProjectRole) {
@@ -174,11 +177,11 @@ onMounted(async () => {
 
     <RolePicker
       v-if="roleAnchor" :anchor="roleAnchor" :subject="person.name" :roles="access.roles" :current="person.workspace_role?.id ?? null" :registry="access.registry"
-      :mine="myPermissions()" scope="workspace" allow-none none-label="Projects only" :locked="last" :busy="busy" @choose="chooseWorkspace" @close="roleAnchor = null"
+      :mine="myPermissions()" scope="workspace" allow-none none-label="Projects only" :locked="last" :busy="busy" :error="roleError" @choose="chooseWorkspace" @close="roleAnchor = null"
     />
     <RolePicker
-      v-if="projectRole" :anchor="projectRole.anchor" :subject="`${person.name} on ${projectRole.project.title}`" :roles="access.roles" :current="projectRole.current" :registry="access.registry"
-      :mine="myPermissions()" scope="project" :busy="busy" @choose="chooseProject" @close="projectRole = null"
+      v-if="projectRole" :anchor="projectRole.anchor" :subject="person.name" :place="projectRole.project.title" :roles="access.roles" :current="projectRole.current" :registry="access.registry"
+      :mine="myPermissions()" scope="project" :busy="busy" :error="roleError" @choose="chooseProject" @close="projectRole = null"
     />
     <ChoicePicker v-if="adding" :anchor="adding" label="Add to project" :choices="addChoices" current="" placeholder="Find a project…" @choose="pickProject" @close="adding = null" />
   </AccessSheet>

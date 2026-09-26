@@ -116,7 +116,7 @@ func validateCompatSend(in *compatSend) error {
 	return nil
 }
 func (m *messaging) sendMessage(w http.ResponseWriter, r *http.Request) {
-	p, project, ok := messagingPrincipal(w, r, false)
+	p, project, ok := m.messagingPrincipal(w, r, false)
 	if !ok {
 		return
 	}
@@ -142,7 +142,7 @@ func (m *messaging) sendMessage(w http.ResponseWriter, r *http.Request) {
 func (m *messaging) commitMessage(ctx context.Context, p tenant.Principal, project string, in compatSend) (CompatMessage, error) {
 	var out CompatMessage
 	key, digest := messageDigest(in.Key), messageDigest(in)
-	err := db.InTenant(ctx, m.base.pool, p.TenantID, func(tx pgx.Tx) error {
+	err := db.InTenant(tenant.WithPrincipal(ctx, p), m.base.pool, p.TenantID, func(tx pgx.Tx) error {
 		if err := messagingProject(ctx, tx, project); err != nil {
 			return err
 		}
@@ -289,7 +289,7 @@ func queueCompatDelivery(ctx context.Context, tx pgx.Tx, p tenant.Principal, pro
 	return err
 }
 func (m *messaging) getDeliveries(w http.ResponseWriter, r *http.Request) {
-	p, project, ok := messagingPrincipal(w, r, true)
+	p, project, ok := m.messagingPrincipal(w, r, true)
 	if !ok {
 		return
 	}
@@ -334,7 +334,7 @@ func (m *messaging) inspectMessages(w http.ResponseWriter, r *http.Request) {
 	m.readMessages(w, r, true)
 }
 func (m *messaging) readMessages(w http.ResponseWriter, r *http.Request, inspect bool) {
-	p, project, ok := messagingPrincipal(w, r, inspect)
+	p, project, ok := m.messagingPrincipal(w, r, inspect)
 	if !ok {
 		return
 	}

@@ -59,18 +59,6 @@ func principal(w http.ResponseWriter, r *http.Request) (tenant.Principal, bool) 
 	return p, true
 }
 
-func requireAdmin(p tenant.Principal) error {
-	if p.Kind != tenant.Person {
-		return forbidden("admin session required")
-	}
-	for _, role := range p.Roles {
-		if role == "admin" {
-			return nil
-		}
-	}
-	return forbidden("admin session required")
-}
-
 func decodeJSON(w http.ResponseWriter, r *http.Request, dst any) error {
 	r.Body = http.MaxBytesReader(w, r.Body, 1<<20)
 	dec := json.NewDecoder(r.Body)

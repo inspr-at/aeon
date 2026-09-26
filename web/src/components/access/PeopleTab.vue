@@ -1,6 +1,6 @@
 <!-- SPDX-License-Identifier: AGPL-3.0-only -->
 <script setup lang="ts">
-import { computed, ref } from 'vue'
+import { computed, ref, watch } from 'vue'
 import { useRouter } from 'vue-router'
 import { LAST_OWNER_REASON, identityLine, isLastOwner, matchesPerson, projectSummary, type Person } from '../../lib/access'
 import { can, myPermissions } from '../../lib/authz'
@@ -36,11 +36,14 @@ const shown = computed(() => access.people
   .filter(p => status.value === 'all' || p.status === status.value)
   .filter(p => matchesPerson(p, term.value))
   .sort((a, b) => Number(a.status === 'deactivated') - Number(b.status === 'deactivated') || a.name.localeCompare(b.name)))
-const lastOwner = (p: Person) => isLastOwner(p, access.people)
+const lastOwner = (p: Person) => isLastOwner(p)
 
 // ---------- Role ----------
 const picker = ref<{ person: Person; anchor: HTMLElement } | null>(null)
 const busy = ref(false)
+// Why the server refused a role change, shown in the open picker.
+const roleError = ref('')
+watch(picker, () => { roleError.value = '' })
 function openRole(person: Person, anchor: HTMLElement) { picker.value = picker.value?.person.principal_id === person.principal_id ? null : { person, anchor } }
 async function chooseRole(roleId: string | null) {
   const target = picker.value
@@ -53,12 +56,13 @@ async function chooseRole(roleId: string | null) {
     if (!ok) return
   }
   busy.value = true
+  roleError.value = ''
   try {
     await access.setWorkspaceRole(target.person.principal_id, roleId)
     picker.value = null
     const name = target.person.name
     toast(roleId ? `${name} is now ${role?.name ?? 'changed'}` : `${name} has no workspace role now`, { action: { label: 'Undo', run: () => void access.setWorkspaceRole(target.person.principal_id, before).then(() => toast(`${name} has their role back`), e => toast(problem(e, 'The role could not be put back'), { tone: 'error' })) } })
-  } catch (e) { toast(problem(e, `${target.person.name} keeps their role`), { tone: 'error' }) }
+  } catch (e) { roleError.value = problem(e, `${target.person.name} keeps their role`) }
   finally { busy.value = false }
 }
 
@@ -189,7 +193,7 @@ async function link(personId: string) {
 
     <RolePicker
       v-if="picker" :anchor="picker.anchor" :subject="picker.person.name" :roles="access.roles" :current="picker.person.workspace_role?.id ?? null" :registry="access.registry"
-      :mine="myPermissions()" scope="workspace" allow-none none-label="Projects only" :locked="lastOwner(picker.person)" :busy="busy" @choose="chooseRole" @close="picker = null"
+      :mine="myPermissions()" scope="workspace" allow-none none-label="Projects only" :locked="lastOwner(picker.person)" :busy="busy" :error="roleError" @choose="chooseRole" @close="picker = null"
     />
     <RowMenu v-if="menu" :anchor="menu.anchor" :items="actions" :label="`Actions for ${menu.person.name}`" @select="act" @close="menu = null" />
     <ChoicePicker v-if="linking" :anchor="linking.anchor" :label="`Link ${linking.name} to`" :choices="linkChoices" current="" placeholder="Find a person…" @choose="link" @close="linking = null" />

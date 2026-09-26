@@ -5,7 +5,7 @@ export interface InvitePrefill { email: string; workspaceRoleId: string | null; 
 <script setup lang="ts">
 import { brand } from '../../lib/brand'
 import { computed, nextTick, onMounted, ref } from 'vue'
-import { EXPIRY_DAYS, beyond, defaultProjectRole, defaultWorkspaceRole, effectLine, permissionLabel, projectRolesOf, validEmail, type Invite } from '../../lib/access'
+import { EXPIRY_DAYS, beyond, defaultProjectRole, defaultWorkspaceRole, effectLine, permissionLabel, projectRolesOf, validEmail, workspaceRolesOf, type Invite } from '../../lib/access'
 import { myPermissions } from '../../lib/authz'
 import { absoluteTime } from '../../lib/work'
 import { useAccess } from '../../stores/access'
@@ -34,6 +34,8 @@ const mine = computed(() => myPermissions())
 const grantable = (roleId: string) => !beyond(access.roleById.get(roleId)?.permissions ?? [], mine.value).length
 const whyNot = (roleId: string) => { const missing = beyond(access.roleById.get(roleId)?.permissions ?? [], mine.value); return missing.length ? `needs ${missing.slice(0, 2).map(permissionLabel).join(', ')}${missing.length > 2 ? ' and more' : ''}, which you do not hold` : '' }
 const projectRoles = computed(() => projectRolesOf(access.roles, access.registry))
+// Guest is a project role; it is offered on projects only.
+const workspaceRoles = computed(() => workspaceRolesOf(access.roles))
 const effect = computed(() => { const role = access.roleById.get(workspaceRole.value); return role ? effectLine(role.permissions, access.registry) : 'No workspace access: only the projects below.' })
 const freeProjects = (row: { project_id: string }) => projects.projects.filter(p => p.id === row.project_id || !projectRows.value.some(r => r.project_id === p.id))
 function addProject() {
@@ -83,7 +85,7 @@ onMounted(() => { void projects.load() })
         <label class="label" for="invite-role">Workspace role</label>
         <select id="invite-role" v-model="workspaceRole" class="field" :aria-invalid="!!errors.access" aria-describedby="ws-effect" @change="errors.access = ''">
           <option value="">None: only the projects below</option>
-          <option v-for="role in access.roles" :key="role.id" :value="role.id" :disabled="!grantable(role.id)">{{ role.name }}{{ grantable(role.id) ? '' : ` (${whyNot(role.id)})` }}</option>
+          <option v-for="role in workspaceRoles" :key="role.id" :value="role.id" :disabled="!grantable(role.id)">{{ role.name }}{{ grantable(role.id) ? '' : ` (${whyNot(role.id)})` }}</option>
         </select>
         <span id="ws-effect" class="hint">{{ effect }}</span>
       </div>

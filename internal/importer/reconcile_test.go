@@ -51,7 +51,7 @@ func TestReconcileReportsClassic404Findings(t *testing.T) {
 		t.Fatal(err)
 	}
 	var actorID string
-	if err := db.InTenant(ctx, d.App, tenantID, func(tx pgx.Tx) error {
+	if err := db.InTenant(dbtest.Seed(ctx), d.App, tenantID, func(tx pgx.Tx) error {
 		return tx.QueryRow(ctx, `SELECT id::text FROM principals WHERE tenant_id=$1 AND name='Classic Paimos importer'`, tenantID).Scan(&actorID)
 	}); err != nil {
 		t.Fatal(err)
@@ -198,7 +198,7 @@ func TestReconcileLinkedPrincipalDoesNotChangeClassicAssignment(t *testing.T) {
 		t.Fatal(err)
 	}
 	var alias string
-	if err := db.InTenant(ctx, d.App, tenantID, func(tx pgx.Tx) error {
+	if err := db.InTenant(dbtest.Seed(ctx), d.App, tenantID, func(tx pgx.Tx) error {
 		return tx.QueryRow(ctx, `SELECT p.id::text FROM principals p JOIN identities i ON i.id=p.identity_id WHERE p.tenant_id=$1 AND i.issuer='paimos-classic' AND i.subject=$2`, tenantID, source.InstanceID()+":7").Scan(&alias)
 	}); err != nil {
 		t.Fatal(err)
@@ -249,7 +249,7 @@ func TestReconcileClassicBytesAndDeltaConflict(t *testing.T) {
 		t.Fatalf("missing attachment bytes: %+v", got)
 	}
 	var actorID string
-	if err := db.InTenant(ctx, d.App, tenantID, func(tx pgx.Tx) error {
+	if err := db.InTenant(dbtest.Seed(ctx), d.App, tenantID, func(tx pgx.Tx) error {
 		return tx.QueryRow(ctx, `SELECT id::text FROM principals WHERE tenant_id=$1 AND name='Classic Paimos importer'`, tenantID).Scan(&actorID)
 	}); err != nil {
 		t.Fatal(err)
@@ -296,7 +296,7 @@ func TestReconcileClassicBytesAndDeltaConflict(t *testing.T) {
 		t.Fatalf("corrupt Aeon bytes not detected: %+v", got)
 	}
 	var nodeID string
-	if err := db.InTenant(ctx, d.App, tenantID, func(tx pgx.Tx) error {
+	if err := db.InTenant(dbtest.Seed(ctx), d.App, tenantID, func(tx pgx.Tx) error {
 		var before, after []byte
 		if err := tx.QueryRow(ctx, `SELECT id::text,to_jsonb(n) FROM nodes n WHERE tenant_id=$1 AND key='PAI-11'`, tenantID).Scan(&nodeID, &before); err != nil {
 			return err
@@ -322,7 +322,7 @@ func TestReconcileClassicBytesAndDeltaConflict(t *testing.T) {
 	if err != nil || len(delta.Conflicts) != 1 || delta.Conflicts[0].ClassicID != 11 {
 		t.Fatalf("delta conflict: %+v %v", delta, err)
 	}
-	if err := db.InTenant(ctx, d.App, tenantID, func(tx pgx.Tx) error {
+	if err := db.InTenant(dbtest.Seed(ctx), d.App, tenantID, func(tx pgx.Tx) error {
 		var title string
 		var comments int
 		if err := tx.QueryRow(ctx, `SELECT title FROM nodes WHERE tenant_id=$1 AND id=$2`, tenantID, nodeID).Scan(&title); err != nil {
@@ -357,7 +357,7 @@ func TestAttachmentDeltaRefreshesChangedClassicBytes(t *testing.T) {
 		t.Fatal(err)
 	}
 	var actorID string
-	if err := db.InTenant(ctx, d.App, tenantID, func(tx pgx.Tx) error {
+	if err := db.InTenant(dbtest.Seed(ctx), d.App, tenantID, func(tx pgx.Tx) error {
 		return tx.QueryRow(ctx, `SELECT id::text FROM principals WHERE tenant_id=$1 AND name='Classic Paimos importer'`, tenantID).Scan(&actorID)
 	}); err != nil {
 		t.Fatal(err)

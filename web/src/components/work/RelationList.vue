@@ -11,7 +11,10 @@ import StatusIcon from './StatusIcon.vue'
 // relate, each opening the other ticket. Where the ticket can be changed, Link
 // (r) adds one and each chip has a remove button; Delete on a chip removes it
 // too. The caller confirms and offers Undo; focus stays in the list.
-const props = defineProps<{ related: RelatedNode[]; editable?: boolean; unlink?: (entry: RelatedNode) => Promise<boolean> }>()
+// editable offers Link (relations.write); removable offers removal (relations.delete)
+// and follows editable when a host does not say otherwise.
+const props = defineProps<{ related: RelatedNode[]; editable?: boolean; removable?: boolean; unlink?: (entry: RelatedNode) => Promise<boolean> }>()
+const canRemove = computed(() => props.removable ?? props.editable)
 const emit = defineEmits<{ open: [key: string]; link: [anchor: HTMLElement] }>()
 const root = ref<HTMLElement>()
 const groups = computed(() => {
@@ -23,7 +26,7 @@ const flat = computed(() => groups.value.flatMap(([, entries]) => entries))
 const nameOf = (entry: RelatedNode) => entry.node?.key ?? 'an unavailable ticket'
 
 async function remove(entry: RelatedNode) {
-  if (!props.editable || !props.unlink) return
+  if (!canRemove.value || !props.unlink) return
   const index = flat.value.indexOf(entry)
   if (!(await props.unlink(entry))) return
   // The chip is gone: its neighbour takes focus, or Link when none is left.
@@ -55,17 +58,17 @@ defineExpose({ el: root })
       <span class="chips">
         <span
           v-for="entry in entries" :key="entry.relation.id" class="rel-chip"
-          :class="{ closed: entry.node && statusMeta(entry.node.state).closed, blocker: entry.node && label === 'Blocked by' && !statusMeta(entry.node.state).closed, missing: !entry.node, removable: editable }"
+          :class="{ closed: entry.node && statusMeta(entry.node.state).closed, blocker: entry.node && label === 'Blocked by' && !statusMeta(entry.node.state).closed, missing: !entry.node, removable: canRemove }"
         >
           <button
             v-if="entry.node" type="button" class="rel-open" :data-tip="`${entry.node.key} · ${statusMeta(entry.node.state).label}\n${entry.node.title}`"
-            :aria-label="`${label} ${entry.node.key}: ${entry.node.title}`" :aria-keyshortcuts="editable ? 'Delete' : undefined"
+            :aria-label="`${label} ${entry.node.key}: ${entry.node.title}`" :aria-keyshortcuts="canRemove ? 'Delete' : undefined"
             @click="emit('open', entry.node.key)" @keydown="chipKey($event, entry)"
           >
             <StatusIcon :state="entry.node.state" :size="11" /><span class="rel-key">{{ entry.node.key }}</span>
           </button>
           <span v-else class="rel-open unavailable" data-tip="This ticket is not available">Unavailable</span>
-          <button v-if="editable" type="button" class="rel-remove" :aria-label="`Remove link: ${label} ${nameOf(entry)}`" data-tip="Remove link" @click="remove(entry)">
+          <button v-if="canRemove" type="button" class="rel-remove" :aria-label="`Remove link: ${label} ${nameOf(entry)}`" data-tip="Remove link" @click="remove(entry)">
             <AppIcon name="close" :size="10" />
           </button>
         </span>

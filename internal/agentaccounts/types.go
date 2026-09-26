@@ -94,28 +94,11 @@ func principal(w http.ResponseWriter, r *http.Request) (tenant.Principal, bool) 
 	return p, true
 }
 
-func requireAdmin(p tenant.Principal) error {
-	if p.Kind != tenant.Person || !hasRole(p, "admin") {
-		return fail(http.StatusForbidden, "admin session required")
-	}
-	return nil
-}
-
 func requireAgent(p tenant.Principal) error {
 	if p.Kind != tenant.Agent {
 		return fail(http.StatusForbidden, "agent key required")
 	}
 	return nil
-}
-
-// hasRole reports whether p holds role; super_admin also satisfies admin.
-func hasRole(p tenant.Principal, role string) bool {
-	for _, item := range p.Roles {
-		if item == role || (role == "admin" && item == "super_admin") {
-			return true
-		}
-	}
-	return false
 }
 
 func decodeJSON(w http.ResponseWriter, r *http.Request, dst any) error {

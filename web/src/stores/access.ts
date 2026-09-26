@@ -3,7 +3,7 @@ import { defineStore } from 'pinia'
 import { computed, ref } from 'vue'
 import * as wire from '../lib/access'
 import type { Agent, Members, Permission, Person, Role } from '../lib/access'
-import { refreshPermissions } from '../lib/authz'
+import { accessChanged } from '../lib/authz'
 
 // Settings -> Access: the registry, the roles and the members, read together and
 // kept current. Every change goes to the server first; the list is then read
@@ -16,10 +16,11 @@ export const useAccess = defineStore('access', () => {
   const error = ref('')
   let request: Promise<void> | undefined
 
-  const people = computed(() => members.value?.people ?? [])
+  const imported = computed(() => members.value?.imported ?? [])
+  // The server lists imported classic identities among people too; they show only in their own group.
+  const people = computed(() => { const skip = new Set(imported.value.map(i => i.principal_id)); return (members.value?.people ?? []).filter(p => !skip.has(p.principal_id)) })
   const agents = computed(() => members.value?.agents ?? [])
   const invites = computed(() => members.value?.invites ?? [])
-  const imported = computed(() => members.value?.imported ?? [])
   const roleById = computed(() => new Map(roles.value.map(role => [role.id, role])))
   // Every principal's name, aliases and imported identities included, for the audit.
   const names = computed(() => {
@@ -50,7 +51,8 @@ export const useAccess = defineStore('access', () => {
     return request
   }
   // After a change: the lists again, and my own permissions.
-  async function settle() { await Promise.all([load(true), refreshPermissions()]) }
+  // My own access may have changed too: every cached answer is asked again.
+  async function settle() { await Promise.all([load(true), accessChanged()]) }
 
   async function setWorkspaceRole(principalId: string, roleId: string | null) { await wire.setWorkspaceRole(principalId, roleId); await settle() }
   async function deactivate(principalId: string) { await wire.deactivate(principalId); await settle() }

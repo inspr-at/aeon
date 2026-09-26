@@ -5,6 +5,7 @@ package relations
 import (
 	"encoding/json"
 	"fmt"
+	"github.com/inspr-at/aeon/internal/dbtest"
 	"testing"
 
 	"github.com/jackc/pgx/v5"
@@ -16,7 +17,7 @@ import (
 func TestCRMRelationKindsDirectionAndUndo(t *testing.T) {
 	f := setup(t)
 	ids := map[string]string{}
-	err := db.InTenant(t.Context(), f.db.App, f.a.TenantID, func(tx pgx.Tx) error {
+	err := db.InTenant(dbtest.Seed(t.Context()), f.db.App, f.a.TenantID, func(tx pgx.Tx) error {
 		for _, kind := range []struct{ slug, prefix string }{
 			{crm.Organisation, "ORG"}, {crm.Contact, "CON"}, {crm.Quote, "QUO"},
 		} {
@@ -78,7 +79,7 @@ func TestCRMRelationKindsDirectionAndUndo(t *testing.T) {
 	}
 
 	expect(t, request(f.handler, f.a, "DELETE", "/api/relations/"+customer.ID, ""), 204)
-	err = db.InTenant(t.Context(), f.db.App, f.a.TenantID, func(tx pgx.Tx) error {
+	err = db.InTenant(dbtest.Seed(t.Context()), f.db.App, f.a.TenantID, func(tx pgx.Tx) error {
 		_, err := tx.Exec(t.Context(), `UPDATE nodes SET kind_id = (SELECT id FROM node_kinds WHERE tenant_id=$1 AND slug='task') WHERE id=$2`, f.a.TenantID, ids["org"])
 		return err
 	})
@@ -99,7 +100,7 @@ func TestCRMRelationKindsDirectionAndUndo(t *testing.T) {
 	if len(logEvents(t, f)) != len(deleted) {
 		t.Fatal("kind mismatch undo appended an event")
 	}
-	err = db.InTenant(t.Context(), f.db.App, f.a.TenantID, func(tx pgx.Tx) error {
+	err = db.InTenant(dbtest.Seed(t.Context()), f.db.App, f.a.TenantID, func(tx pgx.Tx) error {
 		_, err := tx.Exec(t.Context(), `UPDATE nodes SET kind_id = (SELECT id FROM node_kinds WHERE tenant_id=$1 AND slug='organisation') WHERE id=$2`, f.a.TenantID, ids["org"])
 		return err
 	})

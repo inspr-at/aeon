@@ -10,8 +10,10 @@ import (
 	"github.com/jackc/pgx/v5"
 	"github.com/jackc/pgx/v5/pgxpool"
 
+	"github.com/inspr-at/aeon/internal/authz"
 	"github.com/inspr-at/aeon/internal/db"
 	"github.com/inspr-at/aeon/internal/httpapi"
+	"github.com/inspr-at/aeon/internal/tenant"
 )
 
 // Module serves /api/models.
@@ -64,7 +66,7 @@ func (m *Module) create(w http.ResponseWriter, r *http.Request) {
 	if !ok {
 		return
 	}
-	if err := requireAdmin(p); err != nil {
+	if err := m.requirePermission(r, p, "models.manage"); err != nil {
 		writeErr(w, err)
 		return
 	}
@@ -91,7 +93,7 @@ func (m *Module) replace(w http.ResponseWriter, r *http.Request) {
 	if !ok {
 		return
 	}
-	if err := requireAdmin(p); err != nil {
+	if err := m.requirePermission(r, p, "models.manage"); err != nil {
 		writeErr(w, err)
 		return
 	}
@@ -114,6 +116,13 @@ func (m *Module) replace(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	httpapi.WriteJSON(w, http.StatusOK, out)
+}
+
+func (m *Module) requirePermission(r *http.Request, p tenant.Principal, permission string) error {
+	if p.Kind != tenant.Person || authz.Require(authz.BindPool(r.Context(), m.pool), permission, authz.Scope{}) != nil {
+		return fail(http.StatusForbidden, "permission denied")
+	}
+	return nil
 }
 
 func (m *Module) resolve(w http.ResponseWriter, r *http.Request) {

@@ -15,21 +15,21 @@ import { problem } from './accessText'
 const access = useAccess()
 const projects = useProjects()
 const events = ref<AuditEvent[]>([])
-const next = ref<number | null>(null)
+const complete = ref(true)
 const state = ref<'loading' | 'ready' | 'error'>('loading')
 const error = ref('')
-const more = ref(false)
 const kinds = ref(new Set<AuditCategory>())
 const who = ref('')
 const term = ref('')
 const names = {
   principal: (id: string | null | undefined) => (id ? access.names.get(id) : undefined) ?? 'someone who is no longer here',
-  project: (id: string | null | undefined) => (id ? projects.byId(id)?.title : undefined) ?? 'a project',
+  project: (id: string | null | undefined) => (id ? projects.byId(id)?.title : undefined) ?? '',
+  role: (id: string | null | undefined) => (id ? access.roleById.get(id)?.name : undefined) ?? 'a role that was deleted',
 }
 const rows = computed(() => events.value.map(event => ({ event, category: categoryOf(event.type), ...auditSentence(event, names) })))
-const people = computed(() => [...new Map(rows.value.flatMap(r => [[r.event.actor_principal_id, r.actor] as const])).entries()].sort((a, b) => a[1].localeCompare(b[1])))
+const people = computed(() => [...new Map(rows.value.flatMap(r => [[r.event.actor.principal_id, r.actor] as const, ...(r.event.subject ? [[r.event.subject.principal_id, r.event.subject.name || r.subject] as const] : [])])).entries()].sort((a, b) => a[1].localeCompare(b[1])))
 const shown = computed(() => rows.value.filter(r => (!kinds.value.size || (r.category && kinds.value.has(r.category)))
-  && (!who.value || r.event.actor_principal_id === who.value || r.subject === names.principal(who.value))
+  && (!who.value || r.event.actor.principal_id === who.value || r.event.subject?.principal_id === who.value)
   && (!term.value.trim() || `${r.actor} ${r.text}`.toLowerCase().includes(term.value.trim().toLowerCase()))))
 const days = computed(() => {
   const out: { day: string; label: string; items: typeof shown.value }[] = []
@@ -54,15 +54,8 @@ function clear() { kinds.value = new Set(); who.value = ''; term.value = '' }
 const filtered = computed(() => kinds.value.size > 0 || !!who.value || !!term.value.trim())
 async function load() {
   state.value = 'loading'
-  try { const page = await getAudit(); events.value = page.items; next.value = page.next_after; state.value = 'ready' }
+  try { const log = await getAudit(); events.value = log.items; complete.value = log.complete; state.value = 'ready' }
   catch (e) { error.value = problem(e, 'The access log could not be loaded'); state.value = 'error' }
-}
-async function loadMore() {
-  if (next.value == null) return
-  more.value = true
-  try { const page = await getAudit(next.value); events.value = [...events.value, ...page.items]; next.value = page.next_after }
-  catch (e) { error.value = problem(e, 'More of the log could not be loaded') }
-  finally { more.value = false }
 }
 onMounted(() => { void load(); void projects.load() })
 </script>
@@ -86,20 +79,19 @@ onMounted(() => { void load(); void projects.load() })
     <div v-if="state === 'loading'" class="set-skeleton" role="status" aria-label="Loading the access log"><span class="skeleton" /><span class="skeleton" /><span class="skeleton" /></div>
     <p v-else-if="state === 'error'" class="set-note error" role="alert"><AppIcon name="alert" :size="14" />{{ error }}<button type="button" class="btn sm" @click="load">Try again</button></p>
     <template v-else>
-      <p class="summary" role="status">{{ filtered ? `${shown.length} of ${rows.length} changes` : `${rows.length} changes` }}{{ next != null ? ' so far' : '' }}</p>
+      <p class="summary" role="status">{{ filtered ? `${shown.length} of ${rows.length} changes` : `${rows.length} changes` }}{{ complete ? '' : ' (the most recent; older ones are not shown)' }}</p>
       <section v-for="day in days" :key="day.day" class="day" :aria-label="day.label">
         <h3 class="day-h">{{ day.label }}</h3>
         <ol class="events">
           <li v-for="row in day.items" :key="row.event.id" class="event">
             <span class="e-icon" aria-hidden="true"><AppIcon :name="row.category ? ICON[row.category] : 'history'" :size="13" /></span>
-            <Avatar :id="row.event.actor_principal_id" :name="row.actor" :size="22" />
+            <Avatar :id="row.event.actor.principal_id" :name="row.actor" :size="22" />
             <p class="e-text"><b>{{ row.actor }}</b> {{ row.text }}</p>
             <time class="e-time" :datetime="row.event.at" :data-tip="absoluteTime(row.event.at)">{{ relativeTime(row.event.at) }}</time>
           </li>
         </ol>
       </section>
       <p v-if="!shown.length" class="empty">{{ filtered ? 'No change matches these filters.' : 'No access changes yet.' }}</p>
-      <button v-if="next != null" type="button" class="btn sm load-more" :disabled="more" @click="loadMore">{{ more ? 'Loading…' : 'Show older changes' }}</button>
     </template>
   </div>
 </template>
@@ -126,7 +118,6 @@ onMounted(() => { void load(); void projects.load() })
 .e-text b { color: var(--ink); font-weight: 600; }
 .e-time { font-size: 12px; color: var(--ink-3); white-space: nowrap; }
 .empty { padding: 12px 0; font-size: 13px; color: var(--ink-3); }
-.load-more { justify-self: center; }
 @media (max-width: 600px) {
   .kinds { width: 100%; }
   .kind { height: 44px; }

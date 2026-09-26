@@ -111,6 +111,13 @@ func TestImportDryRunAndRerun(t *testing.T) {
 	if first.Created != 5 {
 		t.Fatalf("created %d", first.Created)
 	}
+	var plannedRows int
+	if err := d.Admin.QueryRow(ctx, `SELECT reltuples::int FROM pg_class WHERE oid='nodes'::regclass`).Scan(&plannedRows); err != nil {
+		t.Fatal(err)
+	}
+	if plannedRows < first.Created {
+		t.Fatalf("nodes statistics were not refreshed after import: estimated %d rows, created %d", plannedRows, first.Created)
+	}
 	second, err := job.Run(ctx, "test", "", false)
 	if err != nil {
 		t.Fatal(err)

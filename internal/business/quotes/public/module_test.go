@@ -55,7 +55,7 @@ func TestPublicSelectorResolverObeysForceRLS(t *testing.T) {
 	ctx := t.Context()
 	tenantID := "aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa"
 	selector := strings.Repeat("s", 32)
-	if err := db.InTenant(ctx, database.App, tenantID, func(tx pgx.Tx) error {
+	if err := db.InTenant(dbtest.Seed(ctx), database.App, tenantID, func(tx pgx.Tx) error {
 		if _, err := tx.Exec(ctx, `INSERT INTO tenants(id,slug,name) VALUES($1::uuid,'selector-rls','Selector RLS')`, tenantID); err != nil {
 			return err
 		}
@@ -69,7 +69,7 @@ func TestPublicSelectorResolverObeysForceRLS(t *testing.T) {
 		t.Fatalf("resolver escaped RLS without tenant transaction: %v, %v", err, resolved)
 	}
 	for _, supplied := range []string{"", strings.Repeat("x", 32)} {
-		err := db.InTenant(ctx, database.App, zeroTenant, func(tx pgx.Tx) error {
+		err := db.InTenant(dbtest.Seed(ctx), database.App, zeroTenant, func(tx pgx.Tx) error {
 			if supplied != "" {
 				if _, err := tx.Exec(ctx, `SELECT set_config('aeon.public_quote_selector',$1,true)`, supplied); err != nil {
 					return err
@@ -81,7 +81,7 @@ func TestPublicSelectorResolverObeysForceRLS(t *testing.T) {
 			t.Fatalf("resolver accepted mismatched selector %q: %v, %v", supplied, err, resolved)
 		}
 	}
-	if err := db.InTenant(ctx, database.App, zeroTenant, func(tx pgx.Tx) error {
+	if err := db.InTenant(dbtest.Seed(ctx), database.App, zeroTenant, func(tx pgx.Tx) error {
 		if _, err := tx.Exec(ctx, `SELECT set_config('aeon.public_quote_selector',$1,true)`, selector); err != nil {
 			return err
 		}
@@ -162,7 +162,7 @@ func newFixture(t *testing.T) *fixture {
 	reg.Seal()
 	f.reg = reg
 	ctx := t.Context()
-	err = db.InTenant(ctx, database.App, f.tenantID, func(tx pgx.Tx) error {
+	err = db.InTenant(dbtest.Seed(ctx), database.App, f.tenantID, func(tx pgx.Tx) error {
 		if _, err := tx.Exec(ctx, `INSERT INTO tenants(id,slug,name) VALUES($1::uuid,'public-test','Public test')`, f.tenantID); err != nil {
 			return err
 		}
@@ -170,6 +170,9 @@ func newFixture(t *testing.T) *fixture {
 		f.customer = tenant.Principal{TenantID: f.tenantID, Kind: tenant.Person, Roles: []string{"customer"}}
 		for _, p := range []*tenant.Principal{&f.admin, &f.customer} {
 			if err := tx.QueryRow(ctx, `INSERT INTO principals(tenant_id,kind,name,roles) VALUES($1::uuid,'person','Synthetic user',$2) RETURNING id::text`, f.tenantID, p.Roles).Scan(&p.ID); err != nil {
+				return err
+			}
+			if err := dbtest.BindLegacyTx(ctx, tx, f.tenantID, p.ID); err != nil {
 				return err
 			}
 		}
@@ -353,20 +356,20 @@ func TestPublicLinkReadDoesNotRotateCapability(t *testing.T) {
 	var retained, leaked int
 	var ciphertext []byte
 	token := path[strings.LastIndex(path, "/")+1:]
-	err := db.InTenant(t.Context(), f.pool.App, f.tenantID, func(tx pgx.Tx) error {
+	err := db.InTenant(dbtest.Seed(t.Context()), f.pool.App, f.tenantID, func(tx pgx.Tx) error {
 		return tx.QueryRow(t.Context(), `SELECT t.ciphertext,(SELECT count(*) FROM events WHERE node_id=$1::uuid AND after::text LIKE '%' || $2 || '%') FROM quote_public_link_tokens t JOIN quote_public_links l ON l.tenant_id=t.tenant_id AND l.id=t.link_id WHERE l.quote_node_id=$1::uuid`, id, token).Scan(&ciphertext, &leaked)
 	})
 	if err != nil || len(ciphertext) == 0 || strings.Contains(string(ciphertext), token) || leaked != 0 {
 		t.Fatalf("capability ciphertext or event privacy: bytes=%d leaked=%d err=%v", len(ciphertext), leaked, err)
 	}
 	var plaintextColumns int
-	err = db.InTenant(t.Context(), f.pool.App, f.tenantID, func(tx pgx.Tx) error {
+	err = db.InTenant(dbtest.Seed(t.Context()), f.pool.App, f.tenantID, func(tx pgx.Tx) error {
 		return tx.QueryRow(t.Context(), `SELECT count(*) FROM information_schema.columns WHERE table_name='quote_public_link_tokens' AND column_name='token'`).Scan(&plaintextColumns)
 	})
 	if err != nil || plaintextColumns != 0 {
 		t.Fatalf("plaintext token column survives: %d %v", plaintextColumns, err)
 	}
-	err = db.InTenant(t.Context(), f.pool.App, zeroTenant, func(tx pgx.Tx) error {
+	err = db.InTenant(dbtest.Seed(t.Context()), f.pool.App, zeroTenant, func(tx pgx.Tx) error {
 		return tx.QueryRow(t.Context(), `SELECT count(*) FROM quote_public_link_tokens`).Scan(&retained)
 	})
 	if err != nil || retained != 0 {
@@ -425,7 +428,7 @@ func TestPublicLinkWithoutKeyIsShownOnceAndRevocationDeletes(t *testing.T) {
 		t.Fatalf("revoke one-time link: %d %v", status, body)
 	}
 	var retained int
-	err = db.InTenant(t.Context(), f.pool.App, f.tenantID, func(tx pgx.Tx) error {
+	err = db.InTenant(dbtest.Seed(t.Context()), f.pool.App, f.tenantID, func(tx pgx.Tx) error {
 		return tx.QueryRow(t.Context(), `SELECT count(*) FROM quote_public_link_tokens`).Scan(&retained)
 	})
 	if err != nil || retained != 0 {
@@ -446,7 +449,7 @@ func TestPlaintextVaultMigrationEncryptsExistingLink(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	err = db.InTenant(t.Context(), f.pool.App, f.tenantID, func(tx pgx.Tx) error {
+	err = db.InTenant(dbtest.Seed(t.Context()), f.pool.App, f.tenantID, func(tx pgx.Tx) error {
 		_, err := tx.Exec(t.Context(), `UPDATE quote_public_link_tokens SET token=$1`, token)
 		return err
 	})
@@ -471,7 +474,7 @@ func TestPlaintextVaultMigrationEncryptsExistingLink(t *testing.T) {
 		t.Fatalf("migrated link cannot be re-copied: %d %s", status, body)
 	}
 	var plaintextColumns int
-	err = db.InTenant(t.Context(), f.pool.App, f.tenantID, func(tx pgx.Tx) error {
+	err = db.InTenant(dbtest.Seed(t.Context()), f.pool.App, f.tenantID, func(tx pgx.Tx) error {
 		return tx.QueryRow(t.Context(), `SELECT count(*) FROM information_schema.columns WHERE table_name='quote_public_link_tokens' AND column_name='token'`).Scan(&plaintextColumns)
 	})
 	if err != nil || plaintextColumns != 0 {
@@ -485,7 +488,7 @@ func acceptanceBody(digest, mutation string) string {
 func TestPublicSelectorUnderForcedRLS(t *testing.T) {
 	f := newFixture(t)
 	var superuser, bypassRLS, forcedRLS bool
-	err := db.InTenant(t.Context(), f.pool.App, zeroTenant, func(tx pgx.Tx) error {
+	err := db.InTenant(dbtest.Seed(t.Context()), f.pool.App, zeroTenant, func(tx pgx.Tx) error {
 		return tx.QueryRow(t.Context(), `SELECT r.rolsuper,r.rolbypassrls,c.relforcerowsecurity
 			FROM pg_roles r CROSS JOIN pg_class c
 			WHERE r.rolname=current_user AND c.oid='quote_public_tenant_selectors'::regclass`).Scan(&superuser, &bypassRLS, &forcedRLS)
@@ -518,7 +521,7 @@ func TestPublicSelectorUnderForcedRLS(t *testing.T) {
 		t.Fatalf("revoked link readable: %d", status)
 	}
 	var retained int
-	err = db.InTenant(t.Context(), f.pool.App, f.tenantID, func(tx pgx.Tx) error {
+	err = db.InTenant(dbtest.Seed(t.Context()), f.pool.App, f.tenantID, func(tx pgx.Tx) error {
 		return tx.QueryRow(t.Context(), `SELECT count(*) FROM quote_public_link_tokens t JOIN quote_public_links l ON l.tenant_id=t.tenant_id AND l.id=t.link_id WHERE l.quote_node_id=$1::uuid`, quoteID).Scan(&retained)
 	})
 	if err != nil || retained != 0 {
@@ -554,7 +557,7 @@ func TestPublicCapabilityReplayPrivacyAndDecisionRace(t *testing.T) {
 	}
 	var decisions, jobs, receipts int
 	var recipientFrozen bool
-	err := db.InTenant(t.Context(), f.pool.App, f.tenantID, func(tx pgx.Tx) error {
+	err := db.InTenant(dbtest.Seed(t.Context()), f.pool.App, f.tenantID, func(tx pgx.Tx) error {
 		return tx.QueryRow(t.Context(), `SELECT (SELECT count(*) FROM quote_decisions WHERE quote_node_id=$1::uuid),(SELECT count(*) FROM quote_confirmation_jobs WHERE quote_node_id=$1::uuid),(SELECT count(*) FROM quote_public_acceptances WHERE quote_node_id=$1::uuid),(SELECT j.recipient_snapshot=s.recipient FROM quote_confirmation_jobs j JOIN quote_version_snapshots s ON s.tenant_id=j.tenant_id AND s.quote_node_id=j.quote_node_id AND s.version=j.version WHERE j.quote_node_id=$1::uuid)`, id).Scan(&decisions, &jobs, &receipts, &recipientFrozen)
 	})
 	if err != nil || decisions != 1 || jobs != 1 || receipts != 1 || !recipientFrozen {
@@ -575,12 +578,12 @@ func TestPublicCapabilityReplayPrivacyAndDecisionRace(t *testing.T) {
 			t.Fatalf("receipt processing %v: %v", processed, err)
 		}
 		var receiptHash, jobState string
-		err = db.InTenant(t.Context(), f.pool.App, f.tenantID, func(tx pgx.Tx) error {
+		err = db.InTenant(dbtest.Seed(t.Context()), f.pool.App, f.tenantID, func(tx pgx.Tx) error {
 			return tx.QueryRow(t.Context(), `SELECT r.file_sha256,j.state FROM quote_confirmation_receipts r JOIN quote_confirmation_jobs j ON j.tenant_id=r.tenant_id AND j.quote_node_id=r.quote_node_id AND j.version=r.version WHERE r.quote_node_id=$1::uuid AND r.version=1`, id).Scan(&receiptHash, &jobState)
 		})
 		if err != nil || jobState != "ready" || len(receiptHash) != 64 {
 			var state, safeError string
-			_ = db.InTenant(t.Context(), f.pool.App, f.tenantID, func(tx pgx.Tx) error {
+			_ = db.InTenant(dbtest.Seed(t.Context()), f.pool.App, f.tenantID, func(tx pgx.Tx) error {
 				return tx.QueryRow(t.Context(), `SELECT state,last_safe_error FROM quote_confirmation_jobs WHERE quote_node_id=$1::uuid AND version=1`, id).Scan(&state, &safeError)
 			})
 			t.Fatalf("receipt binding %q %q: %v (job %q: %q)", receiptHash, jobState, err, state, safeError)
@@ -604,7 +607,7 @@ func TestPublicCapabilityReplayPrivacyAndDecisionRace(t *testing.T) {
 		}
 		// Model an ambiguous future transport result with a durable event. The
 		// disabled adapter cannot emit this state in the private instance.
-		err = db.InTenant(t.Context(), f.pool.App, f.tenantID, func(tx pgx.Tx) error {
+		err = db.InTenant(dbtest.Seed(t.Context()), f.pool.App, f.tenantID, func(tx pgx.Tx) error {
 			_, err := events.Append(t.Context(), tx, f.admin, events.Change{NodeID: &id, Type: "quote.confirmation_uncertain", After: map[string]any{"version": 1, "state": "uncertain"}})
 			if err != nil {
 				return err
@@ -669,13 +672,13 @@ func TestPublicCapabilityReplayPrivacyAndDecisionRace(t *testing.T) {
 			t.Fatalf("failed render transition %v: %v", processed, err)
 		}
 		var state string
-		err = db.InTenant(t.Context(), f.pool.App, f.tenantID, func(tx pgx.Tx) error {
+		err = db.InTenant(dbtest.Seed(t.Context()), f.pool.App, f.tenantID, func(tx pgx.Tx) error {
 			return tx.QueryRow(t.Context(), `SELECT state FROM quote_confirmation_jobs WHERE quote_node_id=$1::uuid AND version=1`, id2).Scan(&state)
 		})
 		if err != nil || state != "failed" {
 			t.Fatalf("failed job state %q: %v", state, err)
 		}
-		err = db.InTenant(t.Context(), f.pool.App, f.tenantID, func(tx pgx.Tx) error {
+		err = db.InTenant(dbtest.Seed(t.Context()), f.pool.App, f.tenantID, func(tx pgx.Tx) error {
 			_, err := events.Append(t.Context(), tx, f.admin, events.Change{NodeID: &id2, Type: "quote.confirmation_retry_limit_fixture", After: map[string]any{"attempts": 5}})
 			if err != nil {
 				return err
@@ -694,7 +697,7 @@ func TestPublicCapabilityReplayPrivacyAndDecisionRace(t *testing.T) {
 		if status != 200 {
 			t.Fatalf("failed job retry %d", status)
 		}
-		err = db.InTenant(t.Context(), f.pool.App, f.tenantID, func(tx pgx.Tx) error {
+		err = db.InTenant(dbtest.Seed(t.Context()), f.pool.App, f.tenantID, func(tx pgx.Tx) error {
 			var attempts int
 			if err := tx.QueryRow(t.Context(), `SELECT attempts FROM quote_confirmation_jobs WHERE quote_node_id=$1::uuid AND version=1`, id2).Scan(&attempts); err != nil {
 				return err
@@ -733,12 +736,13 @@ func TestAcceptanceNoticesFilterToOfferCreator(t *testing.T) {
 	module.Mount(f.mux)
 	var other tenant.Principal
 	other = tenant.Principal{TenantID: f.tenantID, Kind: tenant.Person, Roles: []string{"admin"}}
-	err = db.InTenant(t.Context(), f.pool.App, f.tenantID, func(tx pgx.Tx) error {
+	err = db.InTenant(dbtest.Seed(t.Context()), f.pool.App, f.tenantID, func(tx pgx.Tx) error {
 		return tx.QueryRow(t.Context(), `INSERT INTO principals(tenant_id,kind,name,roles) VALUES($1::uuid,'person','Other creator',$2) RETURNING id::text`, f.tenantID, other.Roles).Scan(&other.ID)
 	})
 	if err != nil {
 		t.Fatal(err)
 	}
+	dbtest.BindLegacy(t, f.pool, f.tenantID, other.ID)
 	status, body = f.call(&f.admin, "GET", "/api/quotes/acceptances?created_by_me=true", "")
 	if status != 200 || !strings.Contains(body, id) {
 		t.Fatalf("creator notices %d %s", status, body)
@@ -792,7 +796,7 @@ func TestExpiredReadableAndLinkCreationUndo(t *testing.T) {
 	id, digest, path := f.issued()
 	selector := strings.Split(strings.TrimPrefix(path, "/offers/"), "/")[0]
 	var originalEvent int64
-	err := db.InTenant(t.Context(), f.pool.App, f.tenantID, func(tx pgx.Tx) error {
+	err := db.InTenant(dbtest.Seed(t.Context()), f.pool.App, f.tenantID, func(tx pgx.Tx) error {
 		return tx.QueryRow(t.Context(), `SELECT issued_event_id FROM quote_public_links WHERE quote_node_id=$1::uuid`, id).Scan(&originalEvent)
 	})
 	if err != nil {
@@ -812,7 +816,7 @@ func TestExpiredReadableAndLinkCreationUndo(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	err = db.InTenant(t.Context(), f.pool.App, f.tenantID, func(tx pgx.Tx) error {
+	err = db.InTenant(dbtest.Seed(t.Context()), f.pool.App, f.tenantID, func(tx pgx.Tx) error {
 		event, err := events.Append(t.Context(), tx, f.admin, events.Change{NodeID: &id, Type: "quote.public_link_created", After: map[string]any{"version": 1, "target_content_sha256": digest}})
 		if err != nil {
 			return err

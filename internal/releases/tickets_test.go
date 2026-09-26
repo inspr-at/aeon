@@ -30,23 +30,31 @@ func ticketSetup(t *testing.T) *ticketFixture {
 	f := &ticketFixture{t: t, db: dbtest.Open(t), mux: http.NewServeMux()}
 	for i, p := range []*tenant.Principal{&f.person, &f.other} {
 		p.Kind = tenant.Person
-		err := db.InTenant(t.Context(), f.db.Admin, "00000000-0000-0000-0000-000000000001", func(tx pgx.Tx) error {
+		err := db.InTenant(dbtest.Seed(t.Context()), f.db.Admin, "00000000-0000-0000-0000-000000000001", func(tx pgx.Tx) error {
 			return tx.QueryRow(t.Context(), `INSERT INTO tenants(slug,name) VALUES($1,'Ticket tests') RETURNING id::text`, fmt.Sprintf("tickets-%d", i)).Scan(&p.TenantID)
 		})
 		if err != nil {
 			t.Fatal(err)
 		}
-		err = db.InTenant(t.Context(), f.db.App, p.TenantID, func(tx pgx.Tx) error {
+		err = db.InTenant(dbtest.Seed(t.Context()), f.db.App, p.TenantID, func(tx pgx.Tx) error {
 			return tx.QueryRow(t.Context(), `INSERT INTO principals(tenant_id,kind,name) VALUES($1,'person','Person') RETURNING id::text`, p.TenantID).Scan(&p.ID)
 		})
 		if err != nil {
 			t.Fatal(err)
 		}
+		// Handlers see project data only through a binding (ADR-003 P2).
+		dbtest.BindRole(t, f.db, p.TenantID, p.ID, "member")
 	}
 	f.agent = tenant.Principal{TenantID: f.person.TenantID, Kind: tenant.Agent}
 	f.tx(func(tx pgx.Tx) error {
 		ctx := t.Context()
 		if err := tx.QueryRow(ctx, `INSERT INTO principals(tenant_id,kind,name) VALUES($1,'agent','Agent') RETURNING id::text`, f.person.TenantID).Scan(&f.agent.ID); err != nil {
+			return err
+		}
+		if err := dbtest.BindLegacyTx(ctx, tx, f.person.TenantID, f.agent.ID); err != nil {
+			return err
+		}
+		if _, err := tx.Exec(ctx, `INSERT INTO role_bindings(tenant_id,principal_id,role_id,scope_type) SELECT $1,$2,id,'workspace' FROM roles WHERE tenant_id=$1 AND key='member'`, f.person.TenantID, f.agent.ID); err != nil {
 			return err
 		}
 		if _, err := tx.Exec(ctx, `SELECT aeon_seed_requirement_kind($1)`, f.person.TenantID); err != nil {
@@ -91,7 +99,7 @@ func ticketSetup(t *testing.T) *ticketFixture {
 }
 func (f *ticketFixture) tx(fn func(pgx.Tx) error) {
 	f.t.Helper()
-	if err := db.InTenant(f.t.Context(), f.db.App, f.person.TenantID, fn); err != nil {
+	if err := db.InTenant(dbtest.Seed(f.t.Context()), f.db.App, f.person.TenantID, fn); err != nil {
 		f.t.Fatal(err)
 	}
 }

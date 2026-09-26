@@ -8,6 +8,7 @@ import (
 	"slices"
 	"strings"
 
+	"github.com/inspr-at/aeon/internal/authz"
 	"github.com/inspr-at/aeon/internal/events"
 	"github.com/inspr-at/aeon/internal/httpapi"
 	"github.com/inspr-at/aeon/internal/plugins"
@@ -59,19 +60,14 @@ func (m *Module) Mount(mux *http.ServeMux) {
 			if route.operation != "" {
 				scope = "hours.write"
 			}
+			if route.operation == "period_approve" {
+				scope = "hours.approve"
+			}
 			workorders.Endpoint(m.pool, scope, false, route.status, func(r *http.Request, tx pgx.Tx, p tenant.Principal) (any, error) {
 				p.ID = strings.ToLower(p.ID)
 				p.TenantID = strings.ToLower(p.TenantID)
-				// Authority is read from the tenant projection, never just supplied roles.
-				var storedKind tenant.PrincipalKind
-				if err := tx.QueryRow(r.Context(), `SELECT kind,roles FROM principals WHERE tenant_id=$1 AND id=$2`, p.TenantID, p.ID).Scan(&storedKind, &p.Roles); err != nil {
-					return nil, err
-				}
-				if storedKind != p.Kind {
-					return nil, fail(403, "principal kind changed; authenticate again")
-				}
-				if p.Kind == tenant.Person && !slices.Contains(p.Roles, "member") && !admin(p) {
-					return nil, fail(403, "member or admin required")
+				if authz.RequireTx(r.Context(), tx, p, scope, authz.Scope{}) != nil {
+					return nil, fail(403, "permission denied")
 				}
 				for _, key := range []string{"periodId", "nodeId"} {
 					if v := r.PathValue(key); v != "" && !workorders.UUID(v) {
@@ -96,8 +92,8 @@ func (m *Module) Mount(mux *http.ServeMux) {
 
 func fail(status int, message string) error { return workorders.Fail(status, message) }
 
-func admin(p tenant.Principal) bool {
-	return tenant.IsAdmin(p)
+func admin(ctx context.Context, tx pgx.Tx, p tenant.Principal) bool {
+	return p.Kind == tenant.Person && authz.RequireTx(ctx, tx, p, "hours.approve", authz.Scope{}) == nil
 }
 func (m *Module) gate(ctx context.Context, tx pgx.Tx, p tenant.Principal, operation string) error {
 	if m.registry == nil {

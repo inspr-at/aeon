@@ -26,6 +26,7 @@ import (
 	"time"
 
 	"github.com/inspr-at/aeon/internal/attachments"
+	"github.com/inspr-at/aeon/internal/authz"
 	"github.com/inspr-at/aeon/internal/config"
 	"github.com/inspr-at/aeon/internal/db"
 	"github.com/inspr-at/aeon/internal/events"
@@ -110,17 +111,12 @@ func safeHeaders(w http.ResponseWriter) {
 	w.Header().Set("X-Robots-Tag", "noindex, nofollow, noarchive")
 	w.Header().Set("Content-Security-Policy", "default-src 'none'; frame-ancestors 'none'")
 }
-func admin(r *http.Request) (tenant.Principal, bool) {
+func (m *Module) admin(r *http.Request) (tenant.Principal, bool) {
 	p, ok := tenant.PrincipalFrom(r.Context())
 	if !ok || p.Kind != tenant.Person || !uuidPattern.MatchString(p.TenantID) || !uuidPattern.MatchString(p.ID) {
 		return p, false
 	}
-	for _, role := range p.Roles {
-		if role == "admin" {
-			return p, true
-		}
-	}
-	return p, false
+	return p, authz.Require(authz.BindPool(r.Context(), m.pool), "quotes.manage", authz.Scope{}) == nil
 }
 func routeQuote(r *http.Request) (string, int, bool) {
 	id := r.PathValue("quoteId")
@@ -192,7 +188,7 @@ type managedLink struct {
 }
 
 func (m *Module) createLink(w http.ResponseWriter, r *http.Request) {
-	p, ok := admin(r)
+	p, ok := m.admin(r)
 	if !ok {
 		fail(w, 403, "administrator required")
 		return
@@ -290,7 +286,7 @@ func (m *Module) createLink(w http.ResponseWriter, r *http.Request) {
 	write(w, 201, out)
 }
 func (m *Module) linkInfo(w http.ResponseWriter, r *http.Request) {
-	p, ok := admin(r)
+	p, ok := m.admin(r)
 	if !ok {
 		fail(w, 403, "administrator required")
 		return
@@ -327,7 +323,7 @@ func (m *Module) linkInfo(w http.ResponseWriter, r *http.Request) {
 	write(w, 200, out)
 }
 func (m *Module) revokeLink(w http.ResponseWriter, r *http.Request) {
-	p, ok := admin(r)
+	p, ok := m.admin(r)
 	if !ok {
 		fail(w, 403, "administrator required")
 		return
@@ -391,6 +387,9 @@ func (m *Module) resolve(ctx context.Context, selector, token string, lock bool,
 	if err != nil || len(decoded) != 32 {
 		return errors.New("capability not found")
 	}
+	// The capability link, not a signed-in visitor, decides access here; it
+	// reads the quote node, which belongs to no project (ADR-003 P2).
+	ctx = db.AllProjects(ctx, "public quote link")
 	var tenantID string
 	err = db.InTenant(ctx, m.pool, zeroTenant, func(tx pgx.Tx) error {
 		if _, err := tx.Exec(ctx, `SELECT set_config('aeon.public_quote_selector', $1, true)`, selector); err != nil {
