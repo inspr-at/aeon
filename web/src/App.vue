@@ -48,7 +48,7 @@ function freezePage() {
 let freezeObserver: MutationObserver | undefined
 watch(sessionEndedHere, async ended => { if (ended) { await nextTick(); freezePage() } })
 function signInAgain() {
-  window.open(`/signin?error=expired&return=${encodeURIComponent(route.fullPath)}`, '_blank', 'noopener')
+  window.open('/signin?error=expired', '_blank', 'noopener')
 }
 // A page that fills the screen (the quote editor) may fold the header away.
 const folded = computed(() => headerFolded.value && !!route.meta.foldHeader && !bare.value && !fatal.value)
@@ -159,8 +159,8 @@ watch(() => [route.path, route.params.projectKey, route.params.ticketKey, route.
     <AppHeader v-if="!bare && !folded" />
     <main id="main" ref="main" tabindex="-1" @scroll.passive="scrolled">
       <div v-if="sessionEndedHere" class="session-ended" role="alert">
-        <span>Your session has ended. This view stays here so you can keep what you entered or copy a link shown once.</span>
-        <button type="button" class="btn sm" @click="signInAgain">Sign in again</button>
+        <span>Your session has ended. Sign in again in a new tab; what you typed stays on this page.</span>
+        <button type="button" class="btn sm" @click="signInAgain">Sign in</button>
       </div>
       <div class="page-flow" :class="{ fill: route.meta.fill && !session.error && !fatal }">
         <ErrorPage v-if="fatal" :error="fatal" />
@@ -196,7 +196,7 @@ watch(() => [route.path, route.params.projectKey, route.params.ticketKey, route.
 /* The gutter is reserved so a scrollbar appearing as content loads never shifts the page sideways. */
 main { position: relative; min-height: 0; overflow: auto; scrollbar-gutter: stable; outline: none; scroll-padding-top: 96px; }
 main:focus-visible { box-shadow: none; }
-.session-ended { display: flex; align-items: center; justify-content: space-between; flex-wrap: wrap; gap: 10px; padding: 10px 28px; background: var(--chip-teal-bg); box-shadow: inset 0 -1px 0 var(--line); font-size: 13px; }
+.session-ended { position: sticky; top: 0; z-index: 50; display: flex; align-items: center; justify-content: space-between; flex-wrap: wrap; gap: 10px; padding: 10px 28px; background: var(--chip-teal-bg); box-shadow: inset 0 -1px 0 var(--line); font-size: 13px; }
 .page-flow { display: flex; flex-direction: column; min-height: 100%; }
 .page-flow > :first-child { flex: 1 0 auto; }
 .page-flow.fill { height: 100%; }

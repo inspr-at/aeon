@@ -50,4 +50,17 @@
 // authority_epoch is a JSON number. Consume recomputes the digest from the
 // current handoff, the built artifact and the qualifying readiness row, and
 // refuses on any drift.
+//
+// # Launch request replay
+//
+// HTTP admit and consume require a UUID Idempotency-Key. Their request digest
+// is hex(SHA-256(canonical JSON request body)), with UTF-8, lexically sorted
+// object keys and no insignificant whitespace, like the fixed sorted-key
+// launch binding representation. The JSON release_sequence remains an exact
+// integer; no binary float enters the digest. A receipt binds handoff, action,
+// principal, key, body digest and the original response. The routed principal
+// is checked before replay. Exact replay writes no event and is available
+// through 24 hours after a terminal result; a new key follows the normal
+// one-use admission and consumption rules. The coordinator mounts New or
+// NewService as httpapi.Module and supplies the Pharos launch checks.
 package stagehandoff

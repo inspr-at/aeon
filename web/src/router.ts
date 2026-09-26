@@ -87,6 +87,7 @@ export const router = createRouter({
     // Access: /settings/access/<tab>/<id> (a person, a role, a project).
     { path: '/settings/:section(access)/:tab(people|invites|roles|projects|agents|audit)?/:id?', component: () => import('./views/SettingsView.vue'), meta: { title: 'Access', keepsFocus: true } },
     { path: '/signin', component: SignInView, meta: { title: 'Sign in', bare: true } },
+    { path: '/from-classic/:rest(.*)*', component: () => import('./views/FromClassicView.vue'), meta: { title: 'Finding your page' } },
     { path: '/offers/:publicTenant/:token', component: () => import('./public/PublicQuoteView.vue'), props: true, meta: { title: 'Customer quote', bare: true, public: true } },
     // quote-print.html is the separate Vite entry, served directly from webFS.
     { path: '/:pathMatch(.*)*', component: NotFoundView, meta: { title: 'Page not found' } },
@@ -119,13 +120,26 @@ router.beforeEach(async (to, from) => {
   await refreshSession()
   if (session.error) return true // The shell shows a retry screen, never protected content.
   // Losing a session without signing out means it expired; say so on the sign-in page.
-  if (!session.identity && to.path !== '/signin') return wasSignedIn
-    ? { path: '/signin', query: { error: 'expired', return: to.fullPath } }
-    : '/signin'
+  if (!session.identity && to.path !== '/signin') {
+    // A classic link arrives before sign-in (AEON-175): keep it for after OIDC.
+    if (to.path.startsWith('/from-classic/')) sessionStorage.setItem('aeon.fromClassicReturn', to.fullPath)
+    return wasSignedIn
+      ? { path: '/signin', query: { error: 'expired', return: to.fullPath } }
+      : '/signin'
+  }
   if (session.identity && to.path === '/signin') return '/'
-  if (session.identity && to.path === '/' && !from.matched.length) {
-    const returnPath = takeSignInReturn()
-    if (returnPath !== '/') return returnPath
+  // OIDC returns to / after sign-in. Restore only a same-origin resolver route
+  // saved by this tab, or the return path of an expired session.
+  if (session.identity && to.path === '/') {
+    const pending = sessionStorage.getItem('aeon.fromClassicReturn')
+    if (pending) {
+      sessionStorage.removeItem('aeon.fromClassicReturn')
+      if (/^\/from-classic\/(?!\/)/.test(pending)) return pending
+    }
+    if (!from.matched.length) {
+      const returnPath = takeSignInReturn()
+      if (returnPath !== '/') return returnPath
+    }
   }
 })
 // A new page names the tab; a query change (filters, the release sheet) keeps the page's own title.

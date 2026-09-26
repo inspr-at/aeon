@@ -38,6 +38,7 @@ type Module struct {
 	pool         *pgxpool.Pool
 	registry     *plugins.Registry
 	launchChecks LaunchChecks
+	now          func() time.Time
 }
 
 var _ httpapi.Module = (*Module)(nil)
@@ -76,23 +77,31 @@ type RequestWrite struct {
 	IdempotencyKey          string `json:"idempotency_key"`
 }
 type Handoff struct {
-	ID                     string    `json:"id"`
-	ProjectNodeID          string    `json:"project_node_id"`
-	ReleaseNodeID          string    `json:"release_node_id"`
-	Stage                  string    `json:"stage"`
-	Operation              string    `json:"operation"`
-	PluginID               string    `json:"plugin_id"`
-	Attempt                int       `json:"attempt"`
-	AuthorityEpoch         int64     `json:"authority_epoch"`
-	JourneyRevision        int64     `json:"journey_revision"`
-	State                  string    `json:"state"`
-	ExpiresAt              time.Time `json:"expires_at"`
-	EvidenceCeiling        []string  `json:"evidence_ceiling"`
-	PlanDigest             string    `json:"plan_digest"`
-	PredecessorDigest      string    `json:"predecessor_digest"`
-	ContextDigest          string    `json:"context_digest"`
-	PrerequisiteSealSHA256 string    `json:"prerequisite_seal_sha256"`
-	Result                 *Result   `json:"result,omitempty"`
+	ID                     string                 `json:"id"`
+	ProjectNodeID          string                 `json:"project_node_id"`
+	ReleaseNodeID          string                 `json:"release_node_id"`
+	Stage                  string                 `json:"stage"`
+	Operation              string                 `json:"operation"`
+	PluginID               string                 `json:"plugin_id"`
+	Attempt                int                    `json:"attempt"`
+	AuthorityEpoch         int64                  `json:"authority_epoch"`
+	JourneyRevision        int64                  `json:"journey_revision"`
+	State                  string                 `json:"state"`
+	ExpiresAt              time.Time              `json:"expires_at"`
+	EvidenceCeiling        []string               `json:"evidence_ceiling"`
+	PlanDigest             string                 `json:"plan_digest"`
+	PredecessorDigest      string                 `json:"predecessor_digest"`
+	ContextDigest          string                 `json:"context_digest"`
+	PrerequisiteSealSHA256 string                 `json:"prerequisite_seal_sha256"`
+	Result                 *Result                `json:"result,omitempty"`
+	Admission              *HandoffAdmissionState `json:"admission,omitempty"`
+}
+type HandoffAdmissionState struct {
+	AdmissionID           string     `json:"admission_id"`
+	Epoch                 int64      `json:"epoch"`
+	ExpiresAt             time.Time  `json:"expires_at"`
+	ConsumedAt            *time.Time `json:"consumed_at,omitempty"`
+	ConsumedByPrincipalID *string    `json:"consumed_by_principal_id,omitempty"`
 }
 type Artifact struct {
 	VersionScheme        string `json:"version_scheme"`

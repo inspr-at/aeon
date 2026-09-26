@@ -68,6 +68,65 @@ test('sessions are grouped by what they need, with ticket, account, model and he
   expect(errors).toEqual([])
 })
 
+test('an approval from an agent with no session and no address shows its name', async ({ page }) => {
+  const { data } = await setup(page)
+  const principal = 'a0000000-0000-4000-8000-000000000099'
+  data.approvals.unshift({
+    id: 'a9000000-0000-4000-8000-000000000099',
+    agent_principal_id: principal,
+    agent_name: 'Harbor Clerk',
+    scope: 'nodes.read',
+    resource_kind: 'tenant',
+    resource_id: null,
+    run_id: null,
+    rationale: 'Read the workspace to draft the capture notes.',
+    expires_at: new Date(Date.now() + 60 * 60_000).toISOString(),
+    proposed_at: new Date().toISOString(),
+    decision: null,
+    decided_by_principal_id: null,
+    risk: 'high',
+  })
+  await openAgents(page)
+  const card = queue(page).locator('.item', { hasText: 'Harbor Clerk' })
+  await expect(card).toBeVisible()
+  await expect(card).toContainText('Harbor Clerk')
+  await expect(card).not.toContainText(`Agent ${principal.slice(0, 8)}`)
+  // The asker pill carries an agent icon, centered on the name.
+  const pill = card.locator('.who')
+  const icon = pill.locator('.who-icon svg')
+  await expect(icon).toBeVisible()
+  const [p, i] = [await pill.boundingBox(), await icon.boundingBox()]
+  expect(Math.abs((p!.y + p!.height / 2) - (i!.y + i!.height / 2))).toBeLessThanOrEqual(1)
+  // A resource shows its label once, not label and title twice.
+  await expect(card.getByText('the whole workspace')).toHaveCount(1)
+})
+
+test('an approval without agent_name falls back to the short agent id', async ({ page }) => {
+  const { data } = await setup(page)
+  const principal = 'a0000000-0000-4000-8000-000000000098'
+  data.approvals.unshift({
+    ...data.approvals[0],
+    id: 'a9000000-0000-4000-8000-000000000098',
+    agent_principal_id: principal,
+    agent_name: null,
+    scope: 'nodes.read',
+    resource_kind: 'tenant',
+    resource_id: null,
+    run_id: null,
+    rationale: 'Read the workspace to draft the capture notes.',
+    expires_at: new Date(Date.now() + 60 * 60_000).toISOString(),
+    proposed_at: new Date().toISOString(),
+    decision: null,
+    decided_by_principal_id: null,
+    risk: 'high',
+  })
+  delete (data.approvals[0] as { agent_name?: string | null }).agent_name
+  await openAgents(page)
+  const card = queue(page).locator('.item', { hasText: `Agent ${principal.slice(0, 8)}` })
+  await expect(card).toBeVisible()
+  await expect(card).not.toContainText('Harbor Clerk')
+})
+
 test('approvals: j and k move, a opens a reason, Enter records the decision', async ({ page }) => {
   const { calls, data } = await setup(page)
   await openAgents(page)

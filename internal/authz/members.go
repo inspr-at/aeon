@@ -3,6 +3,7 @@
 package authz
 
 import (
+	"context"
 	"encoding/json"
 	"errors"
 	"net/http"
@@ -10,6 +11,7 @@ import (
 	"time"
 
 	"github.com/inspr-at/aeon/internal/db"
+	"github.com/inspr-at/aeon/internal/tenant"
 	"github.com/jackc/pgx/v5"
 )
 
@@ -173,6 +175,7 @@ func (m *Module) members(w http.ResponseWriter, r *http.Request) {
 
 // errGuestWorkspace: Guest is a project-only role (ADR-003 P2).
 var errGuestWorkspace = errors.New("guest is a project role")
+var errOperatorOwner = errors.New("operator cannot grant the owner role")
 
 func (m *Module) putWorkspaceRole(w http.ResponseWriter, r *http.Request) {
 	p := actor(r)
@@ -201,70 +204,7 @@ func (m *Module) putWorkspaceRole(w http.ResponseWriter, r *http.Request) {
 		roleID = &idValue
 	}
 	err := db.InTenant(r.Context(), m.pool, p.TenantID, func(tx pgx.Tx) error {
-		if err := m.authorizeMutation(r.Context(), tx, p, "members.manage", nil); err != nil {
-			return err
-		}
-		if roleID != nil {
-			targetRole, err := roleTx(r.Context(), tx, *roleID)
-			if err != nil {
-				return err
-			}
-			if targetRole.Builtin && targetRole.Key == "guest" {
-				return errGuestWorkspace
-			}
-			if err := canGrantTx(r.Context(), tx, p, targetRole.Permissions); err != nil {
-				return err
-			}
-			if targetRole.Key == "owner" {
-				if err := requireTx(r.Context(), tx, p, "ownership.transfer", Scope{}); err != nil {
-					return err
-				}
-			}
-		}
-		var kind, status string
-		var legacy []string
-		var linked *string
-		if err := tx.QueryRow(r.Context(), `SELECT kind,status,roles,linked_to::text FROM principals WHERE tenant_id=$1::uuid AND id=$2::uuid FOR UPDATE`, p.TenantID, id).Scan(&kind, &status, &legacy, &linked); err != nil {
-			return err
-		}
-		if linked != nil {
-			return errAliasTarget
-		}
-		if status != "active" {
-			return ErrForbidden
-		}
-		if kind == "agent" {
-			for _, v := range legacy {
-				if v == "system" || v == "importer" || v == "operator" || v == "embedding" || strings.HasPrefix(v, "quote_") {
-					return ErrForbidden
-				}
-			}
-		}
-		var priorID *string
-		var priorKey *string
-		err := tx.QueryRow(r.Context(), `SELECT r.id::text,r.key FROM role_bindings b JOIN roles r ON r.tenant_id=b.tenant_id AND r.id=b.role_id WHERE b.tenant_id=$1::uuid AND b.principal_id=$2::uuid AND b.scope_type='workspace' FOR UPDATE OF b`, p.TenantID, id).Scan(&priorID, &priorKey)
-		if err != nil && !errors.Is(err, pgx.ErrNoRows) {
-			return err
-		}
-		if priorKey != nil && *priorKey == "owner" {
-			if err := requireTx(r.Context(), tx, p, "ownership.transfer", Scope{}); err != nil {
-				return err
-			}
-		}
-		if priorID != nil && roleID != nil && *priorID == *roleID {
-			return nil
-		}
-		if roleID == nil {
-			if _, err := tx.Exec(r.Context(), `DELETE FROM role_bindings WHERE tenant_id=$1::uuid AND principal_id=$2::uuid AND scope_type='workspace'`, p.TenantID, id); err != nil {
-				return err
-			}
-		} else {
-			if _, err := tx.Exec(r.Context(), `INSERT INTO role_bindings(tenant_id,principal_id,role_id,scope_type) VALUES($1::uuid,$2::uuid,$3::uuid,'workspace') ON CONFLICT (tenant_id,principal_id) WHERE scope_type='workspace' DO UPDATE SET role_id=EXCLUDED.role_id`, p.TenantID, id, *roleID); err != nil {
-				return err
-			}
-		}
-		err = appendEvent(r.Context(), tx, p, "authz.workspace_role_changed", map[string]any{"principal_id": id, "role_id": priorID}, map[string]any{"principal_id": id, "role_id": roleID})
-		return err
+		return m.setWorkspaceRoleTx(r.Context(), tx, p, id, roleID, false)
 	})
 	if errors.Is(err, errAliasTarget) {
 		apiFail(w, 409, "conflict", "principal_id", "An alias uses the person's role")
@@ -290,4 +230,84 @@ func (m *Module) putWorkspaceRole(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	reply(w, 200, result)
+}
+
+// setWorkspaceRoleTx is shared by the HTTP handler and host-only CLI. The
+// operator bypasses caller permissions, but cannot mint an owner binding.
+func (m *Module) setWorkspaceRoleTx(ctx context.Context, tx pgx.Tx, p tenant.Principal, id string, roleID *string, operator bool) error {
+	if operator {
+		if err := lockProjectMutation(ctx, tx, p.TenantID); err != nil {
+			return err
+		}
+	} else if err := m.authorizeMutation(ctx, tx, p, "members.manage", nil); err != nil {
+		return err
+	}
+	if roleID != nil {
+		targetRole, err := roleTx(ctx, tx, *roleID)
+		if err != nil {
+			return err
+		}
+		if targetRole.Builtin && targetRole.Key == "guest" {
+			return errGuestWorkspace
+		}
+		if targetRole.Key == "owner" {
+			if operator {
+				return errOperatorOwner
+			}
+			if err := requireTx(ctx, tx, p, "ownership.transfer", Scope{}); err != nil {
+				return err
+			}
+		}
+		if !operator {
+			if err := canGrantTx(ctx, tx, p, targetRole.Permissions); err != nil {
+				return err
+			}
+		}
+	}
+	var kind, status string
+	var legacy []string
+	var linked *string
+	if err := tx.QueryRow(ctx, `SELECT kind,status,roles,linked_to::text FROM principals WHERE tenant_id=$1::uuid AND id=$2::uuid FOR UPDATE`, p.TenantID, id).Scan(&kind, &status, &legacy, &linked); err != nil {
+		return err
+	}
+	if linked != nil {
+		return errAliasTarget
+	}
+	if status != "active" {
+		return ErrForbidden
+	}
+	if kind == "agent" {
+		for _, v := range legacy {
+			if v == "system" || v == "importer" || v == "operator" || v == "embedding" || strings.HasPrefix(v, "quote_") {
+				return ErrForbidden
+			}
+		}
+	}
+	var priorID *string
+	var priorKey *string
+	err := tx.QueryRow(ctx, `SELECT r.id::text,r.key FROM role_bindings b JOIN roles r ON r.tenant_id=b.tenant_id AND r.id=b.role_id WHERE b.tenant_id=$1::uuid AND b.principal_id=$2::uuid AND b.scope_type='workspace' FOR UPDATE OF b`, p.TenantID, id).Scan(&priorID, &priorKey)
+	if err != nil && !errors.Is(err, pgx.ErrNoRows) {
+		return err
+	}
+	if priorKey != nil && *priorKey == "owner" && !operator {
+		if err := requireTx(ctx, tx, p, "ownership.transfer", Scope{}); err != nil {
+			return err
+		}
+	}
+	if priorID != nil && roleID != nil && *priorID == *roleID {
+		return nil
+	}
+	if roleID == nil {
+		if priorID == nil {
+			return nil
+		}
+		if _, err := tx.Exec(ctx, `DELETE FROM role_bindings WHERE tenant_id=$1::uuid AND principal_id=$2::uuid AND scope_type='workspace'`, p.TenantID, id); err != nil {
+			return err
+		}
+	} else {
+		if _, err := tx.Exec(ctx, `INSERT INTO role_bindings(tenant_id,principal_id,role_id,scope_type) VALUES($1::uuid,$2::uuid,$3::uuid,'workspace') ON CONFLICT (tenant_id,principal_id) WHERE scope_type='workspace' DO UPDATE SET role_id=EXCLUDED.role_id`, p.TenantID, id, *roleID); err != nil {
+			return err
+		}
+	}
+	return appendEvent(ctx, tx, p, "authz.workspace_role_changed", map[string]any{"principal_id": id, "role_id": priorID}, map[string]any{"principal_id": id, "role_id": roleID})
 }

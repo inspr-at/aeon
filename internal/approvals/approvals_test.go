@@ -16,6 +16,7 @@ import (
 	"github.com/jackc/pgx/v5"
 	"github.com/jackc/pgx/v5/pgxpool"
 
+	"github.com/inspr-at/aeon/internal/authz"
 	"github.com/inspr-at/aeon/internal/db"
 	"github.com/inspr-at/aeon/internal/dbtest"
 	"github.com/inspr-at/aeon/internal/tenant"
@@ -88,17 +89,19 @@ func newFixture(t *testing.T) *fixture {
 	f.personB = insertPrincipal(t, f.db.Admin, f.tenantB, tenant.Person, "bea")
 	f.agentA = insertPrincipal(t, f.db.Admin, f.tenantA, tenant.Agent, "agent-a")
 	f.agentB = insertPrincipal(t, f.db.Admin, f.tenantA, tenant.Agent, "agent-b")
+	f.agentA.Scopes = []string{"approvals.read", "harness.read"}
+	f.agentB.Scopes = []string{"approvals.read", "harness.read"}
 	// Agents see project data only through a binding (ADR-003 P2).
 	dbtest.BindRole(t, f.db, f.tenantA, f.agentA.ID, "member")
 	dbtest.BindRole(t, f.db, f.tenantA, f.agentB.ID, "member")
-	f.wide = insertKey(t, f.db.Admin, f.agentA, []string{"run", "nodes.read"}, false)
+	f.wide = insertKey(t, f.db.Admin, f.agentA, []string{"run", "nodes.read", "approvals.read", "harness.read"}, false)
 	f.exact = insertKey(t, f.db.Admin, f.agentA, []string{"run.claim"}, false)
 	f.narrow = insertKey(t, f.db.Admin, f.agentA, []string{"nodes.read"}, false)
 	f.once = insertKey(t, f.db.Admin, f.agentA, []string{"run.claim.once"}, false)
 	f.claimant = insertKey(t, f.db.Admin, f.agentA, []string{"run.claimant"}, false)
 	f.empty = insertKey(t, f.db.Admin, f.agentA, []string{}, false)
 	f.revoked = insertKey(t, f.db.Admin, f.agentA, []string{"run.claim"}, true)
-	f.tokenB = insertKey(t, f.db.Admin, f.agentB, []string{"run", "nodes.read"}, false)
+	f.tokenB = insertKey(t, f.db.Admin, f.agentB, []string{"run", "nodes.read", "approvals.read", "harness.read"}, false)
 	f.nodeA = insertNode(t, f.db.Admin, f.tenantA, "ticket", "TKT-1", "Target")
 	f.deleted = insertNode(t, f.db.Admin, f.tenantA, "ticket", "TKT-2", "Gone")
 	if _, err := f.db.Admin.Exec(ctx, `UPDATE nodes SET deleted_at = now() WHERE id = $1::uuid`, f.deleted); err != nil {
@@ -623,5 +626,189 @@ func TestLiveGrantRejectsBadIDs(t *testing.T) {
 	w := f.do(f.agentA, f.wide, http.MethodPost, "/api/approvals", "")
 	if w.Code != http.StatusBadRequest {
 		t.Fatalf("empty body %d", w.Code)
+	}
+}
+
+func TestListAndGetApprovalAgentName(t *testing.T) {
+	f := newFixture(t)
+	ctx := t.Context()
+
+	created := f.do(f.agentA, f.wide, http.MethodPost, "/api/approvals", proposalJSON("run.claim", "tenant", nil, nil))
+	if created.Code != http.StatusCreated {
+		t.Fatalf("propose %d %s", created.Code, created.Body.String())
+	}
+	var raw map[string]any
+	if err := json.Unmarshal(created.Body.Bytes(), &raw); err != nil {
+		t.Fatal(err)
+	}
+	if raw["agent_name"] != f.agentA.Name {
+		t.Fatalf("propose agent_name %#v", raw["agent_name"])
+	}
+	proposal := decodeApproval(t, created)
+	var snap *string
+	if err := f.db.Admin.QueryRow(ctx, `
+		SELECT after->>'agent_name' FROM events
+		WHERE tenant_id = $1::uuid AND type = 'approval.proposed' AND after->>'id' = $2`,
+		f.tenantA, proposal.ID).Scan(&snap); err != nil {
+		t.Fatal(err)
+	}
+	if snap != nil {
+		t.Fatalf("event exposed agent_name %q", *snap)
+	}
+
+	if _, err := f.db.Admin.Exec(ctx, `UPDATE principals SET name = $2 WHERE id = $1::uuid`, f.agentA.ID, "Harbor Clerk"); err != nil {
+		t.Fatal(err)
+	}
+	listed := f.do(f.personA, "", http.MethodGet, "/api/approvals", "")
+	if listed.Code != http.StatusOK {
+		t.Fatalf("list %d %s", listed.Code, listed.Body.String())
+	}
+	var items []Approval
+	if err := json.Unmarshal(listed.Body.Bytes(), &items); err != nil {
+		t.Fatal(err)
+	}
+	if len(items) != 1 || items[0].AgentName == nil || *items[0].AgentName != "Harbor Clerk" || items[0].ID != proposal.ID {
+		t.Fatalf("list agent_name %#v", items)
+	}
+	if err := f.db.Admin.QueryRow(ctx, `
+		SELECT after->>'agent_name' FROM events
+		WHERE tenant_id = $1::uuid AND type = 'approval.proposed' AND after->>'id' = $2`,
+		f.tenantA, proposal.ID).Scan(&snap); err != nil {
+		t.Fatal(err)
+	}
+	if snap != nil {
+		t.Fatalf("event exposed agent_name after rename %q", *snap)
+	}
+
+	other := f.do(f.agentB, f.tokenB, http.MethodPost, "/api/approvals", proposalJSON("nodes.read", "tenant", nil, nil))
+	if other.Code != http.StatusCreated {
+		t.Fatalf("agent b propose %d %s", other.Code, other.Body.String())
+	}
+	if decodeApproval(t, other).AgentName == nil || *decodeApproval(t, other).AgentName != f.agentB.Name {
+		t.Fatalf("agent b name %s", other.Body.String())
+	}
+	mine := f.do(f.agentA, f.wide, http.MethodGet, "/api/approvals", "")
+	var own []Approval
+	if err := json.Unmarshal(mine.Body.Bytes(), &own); err != nil {
+		t.Fatal(err)
+	}
+	if len(own) != 1 || own[0].AgentName == nil || *own[0].AgentName != "Harbor Clerk" {
+		t.Fatalf("agent list leaked or dropped the name %#v", own)
+	}
+	foreign := f.do(f.personB, "", http.MethodGet, "/api/approvals", "")
+	var others []Approval
+	if err := json.Unmarshal(foreign.Body.Bytes(), &others); err != nil {
+		t.Fatal(err)
+	}
+	if foreign.Code != http.StatusOK || len(others) != 0 {
+		t.Fatalf("foreign list %d %s", foreign.Code, foreign.Body.String())
+	}
+
+	decided := f.do(f.personA, "", http.MethodPost, "/api/approvals/"+proposal.ID+"/decision", `{"decision":"approved","reason":"named"}`)
+	if decided.Code != http.StatusOK {
+		t.Fatalf("decide %d %s", decided.Code, decided.Body.String())
+	}
+	got := decodeApproval(t, decided)
+	if got.AgentName == nil || *got.AgentName != "Harbor Clerk" {
+		t.Fatalf("decide agent_name %#v", got.AgentName)
+	}
+}
+
+func TestApprovalAgentNameRequiresExistingNamePermission(t *testing.T) {
+	f := newFixture(t)
+	created := f.do(f.agentA, f.wide, http.MethodPost, "/api/approvals", proposalJSON("run.claim", "tenant", nil, nil))
+	if created.Code != http.StatusCreated {
+		t.Fatalf("propose %d %s", created.Code, created.Body.String())
+	}
+	role := func(key string, permissions ...string) tenant.Principal {
+		t.Helper()
+		p := insertPrincipal(t, f.db.Admin, f.tenantA, tenant.Person, key)
+		var roleID string
+		if err := f.db.Admin.QueryRow(t.Context(), `INSERT INTO roles(tenant_id,key,name) VALUES($1::uuid,$2,$2) RETURNING id::text`, f.tenantA, key).Scan(&roleID); err != nil {
+			t.Fatal(err)
+		}
+		for _, permission := range permissions {
+			if _, err := f.db.Admin.Exec(t.Context(), `INSERT INTO role_permissions(tenant_id,role_id,permission) VALUES($1::uuid,$2::uuid,$3)`, f.tenantA, roleID, permission); err != nil {
+				t.Fatal(err)
+			}
+		}
+		if _, err := f.db.Admin.Exec(t.Context(), `INSERT INTO role_bindings(tenant_id,principal_id,role_id,scope_type) VALUES($1::uuid,$2::uuid,$3::uuid,'workspace')`, f.tenantA, p.ID, roleID); err != nil {
+			t.Fatal(err)
+		}
+		return p
+	}
+	limited := role("approval_viewer", "approvals.read")
+	harness := role("approval_harness_reader", "approvals.read", "harness.read")
+	member := insertPrincipal(t, f.db.Admin, f.tenantA, tenant.Person, "approval member")
+	dbtest.BindRole(t, f.db, f.tenantA, member.ID, "member")
+	for _, tc := range []struct {
+		name string
+		p    tenant.Principal
+		want bool
+	}{
+		{"viewer without name permission", limited, false},
+		{"harness reader", harness, true},
+		{"member", member, true},
+		{"admin", f.personA, true},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			w := f.do(tc.p, "", http.MethodGet, "/api/approvals", "")
+			if w.Code != http.StatusOK {
+				t.Fatalf("list %d %s", w.Code, w.Body.String())
+			}
+			var raw []map[string]any
+			if err := json.Unmarshal(w.Body.Bytes(), &raw); err != nil {
+				t.Fatal(err)
+			}
+			if len(raw) != 1 {
+				t.Fatalf("approvals %#v", raw)
+			}
+			name, present := raw[0]["agent_name"]
+			if present != tc.want || (present && name != f.agentA.Name) {
+				t.Fatalf("agent_name present=%v value=%#v", present, name)
+			}
+		})
+	}
+}
+
+func TestProjectScopedApprovalNames(t *testing.T) {
+	f := newFixture(t)
+	projectA := insertNode(t, f.db.Admin, f.tenantA, "project", "PA-1", "Visible")
+	projectB := insertNode(t, f.db.Admin, f.tenantA, "project", "PB-1", "Hidden")
+	ticket := func(project, key string) string {
+		t.Helper()
+		var id string
+		if err := f.db.Admin.QueryRow(t.Context(), `INSERT INTO nodes(tenant_id,parent_id,kind_id,key,title) SELECT $1::uuid,$2::uuid,id,$3,$3 FROM node_kinds WHERE tenant_id=$1::uuid AND slug='ticket' RETURNING id::text`, f.tenantA, project, key).Scan(&id); err != nil {
+			t.Fatal(err)
+		}
+		return id
+	}
+	ticketA, ticketB := ticket(projectA, "PA-2"), ticket(projectB, "PB-2")
+	if w := f.do(f.agentA, f.wide, http.MethodPost, "/api/approvals", proposalJSON("run.claim", "tenant", nil, nil)); w.Code != http.StatusCreated {
+		t.Fatalf("workspace propose %d %s", w.Code, w.Body.String())
+	}
+	for _, id := range []string{ticketA, ticketB} {
+		w := f.do(f.agentA, f.narrow, http.MethodPost, "/api/approvals", proposalJSON("nodes.read", "node", &id, nil))
+		if w.Code != http.StatusCreated {
+			t.Fatalf("propose %d %s", w.Code, w.Body.String())
+		}
+	}
+	reader := insertPrincipal(t, f.db.Admin, f.tenantA, tenant.Person, "project reader")
+	if _, err := f.db.Admin.Exec(t.Context(), `INSERT INTO role_bindings(tenant_id,principal_id,role_id,scope_type,scope_id) SELECT $1::uuid,$2::uuid,id,'project',$3::uuid FROM roles WHERE tenant_id=$1::uuid AND key='member'`, f.tenantA, reader.ID, projectA); err != nil {
+		t.Fatal(err)
+	}
+	if !authz.ProjectFilteredRoutes["GET /api/approvals"] || authz.RequirePattern(authz.BindPool(tenant.WithPrincipal(t.Context(), reader), f.db.App), "GET /api/approvals", authz.Scope{AnyProject: true}) != nil {
+		t.Fatal("project reader cannot reach the filtered approvals route")
+	}
+	w := f.do(reader, "", http.MethodGet, "/api/approvals", "")
+	if w.Code != http.StatusOK {
+		t.Fatalf("list %d %s", w.Code, w.Body.String())
+	}
+	var items []Approval
+	if err := json.Unmarshal(w.Body.Bytes(), &items); err != nil {
+		t.Fatal(err)
+	}
+	if len(items) != 1 || items[0].ResourceID == nil || *items[0].ResourceID != ticketA || items[0].AgentName == nil || *items[0].AgentName != f.agentA.Name {
+		t.Fatalf("project-scoped approvals %#v", items)
 	}
 }

@@ -23,11 +23,19 @@ const (
 	eventRevoked  = "approval.revoked"
 )
 
+// approvalFrom carries the project's ID for the authorization decision. The
+// principal name is never serialized until the caller's effective permissions
+// have been checked at that scope.
 const approvalFrom = `
-	SELECT r.id::text, r.agent_principal_id::text, r.scope, r.resource_kind,
+	SELECT r.id::text, r.agent_principal_id::text, p.name, COALESCE(n.project_id, wn.project_id)::text, r.scope, r.resource_kind,
 	       r.resource_id::text, r.run_id::text, r.rationale, r.expires_at, r.proposed_at,
 	       d.decision, d.decided_by_principal_id::text
 	FROM approval_requests r
+	LEFT JOIN principals p
+	  ON p.tenant_id = r.tenant_id AND p.id = r.agent_principal_id
+	LEFT JOIN nodes n ON n.tenant_id = r.tenant_id AND n.id = r.resource_id AND r.resource_kind = 'node'
+	LEFT JOIN agent_runs ar ON ar.tenant_id = r.tenant_id AND ar.id = r.resource_id AND r.resource_kind = 'run'
+	LEFT JOIN nodes wn ON wn.tenant_id = ar.tenant_id AND wn.id = ar.work_order_id
 	LEFT JOIN approval_decisions d
 	  ON d.tenant_id = r.tenant_id AND d.request_id = r.id`
 
@@ -49,23 +57,72 @@ func (m *Module) list(ctx context.Context, p tenant.Principal, limit int) ([]App
 	}
 	var items []Approval
 	err := m.inTenant(ctx, m.pool, p.TenantID, func(tx pgx.Tx) error {
-		rows, err := tx.Query(ctx, approvalFrom+`
-			WHERE ($1::uuid IS NULL OR r.agent_principal_id = $1::uuid)
-			ORDER BY r.proposed_at DESC, r.id DESC
-			LIMIT $2`, agentID, limit)
-		if err != nil {
-			return err
-		}
-		defer rows.Close()
 		items = []Approval{}
-		for rows.Next() {
-			item, err := scanApproval(rows)
+		workspaceErr := authz.RequireTx(ctx, tx, p, "approvals.read", authz.Scope{})
+		if workspaceErr != nil && !errors.Is(workspaceErr, authz.ErrForbidden) {
+			return workspaceErr
+		}
+		workspaceReader := workspaceErr == nil
+		access := map[string]struct{ approval, name bool }{}
+		for offset := 0; len(items) < limit; offset += 200 {
+			rows, err := tx.Query(ctx, approvalFrom+`
+			WHERE ($1::uuid IS NULL OR r.agent_principal_id = $1::uuid)
+			  AND ($3::bool OR aeon_visible_all() OR COALESCE(n.project_id, wn.project_id) = ANY (aeon_visible_projects()))
+			ORDER BY r.proposed_at DESC, r.id DESC
+			LIMIT 200 OFFSET $2`, agentID, offset, workspaceReader)
 			if err != nil {
 				return err
 			}
-			items = append(items, item)
+			batch := []Approval{}
+			for rows.Next() {
+				item, err := scanApproval(rows)
+				if err != nil {
+					rows.Close()
+					return err
+				}
+				batch = append(batch, item)
+			}
+			err = rows.Err()
+			rows.Close()
+			if err != nil {
+				return err
+			}
+			for _, item := range batch {
+				project := ""
+				if item.projectID != nil {
+					project = *item.projectID
+				}
+				policy, ok := access[project]
+				if !ok {
+					err := approvalVisible(ctx, tx, p, item)
+					if err != nil && !errors.Is(err, authz.ErrForbidden) {
+						return err
+					}
+					policy.approval = err == nil
+					if policy.approval {
+						policy.name, err = canSeeAgentName(ctx, tx, p, item)
+						if err != nil {
+							return err
+						}
+					}
+					access[project] = policy
+				}
+				if !policy.approval {
+					continue
+				}
+				if !policy.name {
+					item.AgentName = nil
+				}
+				items = append(items, item)
+				if len(items) == limit {
+					break
+				}
+			}
+			if len(batch) < 200 {
+				break
+			}
 		}
-		return rows.Err()
+		return nil
 	})
 	return items, err
 }
@@ -99,9 +156,12 @@ func (m *Module) propose(ctx context.Context, p tenant.Principal, authorization 
 		if err != nil {
 			return err
 		}
+		if err := exposeAgentName(ctx, tx, p, &out); err != nil {
+			return err
+		}
 		_, err = events.Append(ctx, tx, p, events.Change{
 			Type:   eventProposed,
-			After:  out,
+			After:  withoutAgentName(out),
 			NodeID: nodeRef(out),
 		})
 		return err
@@ -175,14 +235,17 @@ func (m *Module) decide(ctx context.Context, p tenant.Principal, id, decision, r
 		if err != nil {
 			return err
 		}
+		if err := exposeAgentName(ctx, tx, p, &out); err != nil {
+			return err
+		}
 		eventType := eventDenied
 		if decision == "approved" {
 			eventType = eventApproved
 		}
 		_, err = events.Append(ctx, tx, p, events.Change{
 			Type:   eventType,
-			Before: before,
-			After:  out,
+			Before: withoutAgentName(before),
+			After:  withoutAgentName(out),
 			NodeID: nodeRef(out),
 		})
 		return err
@@ -217,6 +280,9 @@ func (m *Module) revoke(ctx context.Context, p tenant.Principal, id string) (App
 		if err != nil {
 			return err
 		}
+		if err := exposeAgentName(ctx, tx, p, &out); err != nil {
+			return err
+		}
 		if revokedAt != nil {
 			return nil
 		}
@@ -234,8 +300,8 @@ func (m *Module) revoke(ctx context.Context, p tenant.Principal, id string) (App
 		}
 		_, err = events.Append(ctx, tx, p, events.Change{
 			Type:   eventRevoked,
-			Before: out,
-			After:  approvalSnapshot{Approval: out, RevokedAt: &at},
+			Before: withoutAgentName(out),
+			After:  approvalSnapshot{Approval: withoutAgentName(out), RevokedAt: &at},
 			NodeID: nodeRef(out),
 		})
 		return err
@@ -273,6 +339,52 @@ func approvalPermission(scope string) string {
 		scope = scope[:last]
 	}
 	return ""
+}
+
+// A project-scoped approval is readable only with approvals.read at that
+// project. Tenant and unassigned resources require workspace access.
+func approvalVisible(ctx context.Context, tx pgx.Tx, p tenant.Principal, a Approval) error {
+	scope := authz.Scope{}
+	if a.projectID != nil {
+		scope.ProjectID = *a.projectID
+	}
+	return authz.RequireTx(ctx, tx, p, "approvals.read", scope)
+}
+
+func exposeAgentName(ctx context.Context, tx pgx.Tx, p tenant.Principal, a *Approval) error {
+	if a.AgentName == nil {
+		return nil
+	}
+	visible, err := canSeeAgentName(ctx, tx, p, *a)
+	if err != nil {
+		return err
+	}
+	if !visible {
+		a.AgentName = nil
+	}
+	return nil
+}
+
+func canSeeAgentName(ctx context.Context, tx pgx.Tx, p tenant.Principal, a Approval) (bool, error) {
+	scope := authz.Scope{}
+	if a.projectID != nil {
+		scope.ProjectID = *a.projectID
+	}
+	for _, permission := range []string{"members.read", "harness.read"} {
+		err := authz.RequireTx(ctx, tx, p, permission, scope)
+		if err == nil {
+			return true, nil
+		}
+		if !errors.Is(err, authz.ErrForbidden) {
+			return false, err
+		}
+	}
+	return false, nil
+}
+
+func withoutAgentName(a Approval) Approval {
+	a.AgentName = nil
+	return a
 }
 
 func verifyResource(ctx context.Context, tx pgx.Tx, agentID string, in proposal) error {
@@ -323,13 +435,18 @@ func lockRequest(ctx context.Context, tx pgx.Tx, id string) (Approval, bool, err
 	var resourceID, runID *string
 	var expired bool
 	err := tx.QueryRow(ctx, `
-		SELECT id::text, agent_principal_id::text, scope, resource_kind,
-		       resource_id::text, run_id::text, rationale, expires_at, proposed_at,
-		       expires_at <= now()
-		FROM approval_requests
-		WHERE id = $1::uuid
-		FOR UPDATE`, id).Scan(
-		&a.ID, &a.AgentPrincipalID, &a.Scope, &a.ResourceKind,
+		SELECT r.id::text, r.agent_principal_id::text, p.name, COALESCE(n.project_id, wn.project_id)::text, r.scope, r.resource_kind,
+		       r.resource_id::text, r.run_id::text, r.rationale, r.expires_at, r.proposed_at,
+		       r.expires_at <= now()
+		FROM approval_requests r
+		LEFT JOIN principals p
+		  ON p.tenant_id = r.tenant_id AND p.id = r.agent_principal_id
+		LEFT JOIN nodes n ON n.tenant_id = r.tenant_id AND n.id = r.resource_id AND r.resource_kind = 'node'
+		LEFT JOIN agent_runs ar ON ar.tenant_id = r.tenant_id AND ar.id = r.resource_id AND r.resource_kind = 'run'
+		LEFT JOIN nodes wn ON wn.tenant_id = ar.tenant_id AND wn.id = ar.work_order_id
+		WHERE r.id = $1::uuid
+		FOR UPDATE OF r`, id).Scan(
+		&a.ID, &a.AgentPrincipalID, &a.AgentName, &a.projectID, &a.Scope, &a.ResourceKind,
 		&resourceID, &runID, &a.Rationale, &a.ExpiresAt, &a.ProposedAt, &expired)
 	a.ResourceID = resourceID
 	a.RunID = runID
@@ -345,7 +462,7 @@ func scanApproval(row pgx.Row) (Approval, error) {
 	var a Approval
 	var resourceID, runID, decision, decidedBy *string
 	err := row.Scan(
-		&a.ID, &a.AgentPrincipalID, &a.Scope, &a.ResourceKind,
+		&a.ID, &a.AgentPrincipalID, &a.AgentName, &a.projectID, &a.Scope, &a.ResourceKind,
 		&resourceID, &runID, &a.Rationale, &a.ExpiresAt, &a.ProposedAt,
 		&decision, &decidedBy)
 	a.ResourceID = resourceID

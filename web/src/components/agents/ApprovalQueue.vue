@@ -12,7 +12,7 @@ import AppIcon from '../AppIcon.vue'
 type Held = ProjectMessage & { projectId: string }
 const props = defineProps<{
   pending: Approval[]; held: Held[]; history: Approval[]; now: number; cursor: string; canDecide: boolean; canDecideApproval: (approval: Approval) => boolean; canResolve: boolean; canRevoke: boolean; loaded: boolean
-  asker: (principalId: string) => Asker; resource: (approval: Approval) => Resource
+  asker: (principalId: string, fallbackName?: string | null) => Asker; resource: (approval: Approval) => Resource
   decide: (approval: Approval, decision: 'approved' | 'denied', reason: string) => Promise<void>
   revoke: (approval: Approval) => Promise<void>
   resolve: (request: Held, decision: 'resolved' | 'dismissed', note: string) => Promise<void>
@@ -70,8 +70,9 @@ function reasonKeys(event: KeyboardEvent, approval: Approval) {
   if (event.key === 'Enter' && !event.shiftKey) { event.preventDefault(); void submit(approval) }
   else if (event.key === 'Escape') { event.preventDefault(); event.stopPropagation(); cancel() }
 }
+const named = (approval: Approval) => props.asker(approval.agent_principal_id, approval.agent_name)
 async function revoke(approval: Approval) {
-  const ok = await confirmAction({ title: 'Revoke this permission?', body: `${props.asker(approval.agent_principal_id).name} loses “${scopeLabel(approval.scope)}” right away. Work it already started is not undone.`, confirmLabel: 'Revoke', danger: true })
+  const ok = await confirmAction({ title: 'Revoke this permission?', body: `${named(approval).name} loses “${scopeLabel(approval.scope)}” right away. Work it already started is not undone.`, confirmLabel: 'Revoke', danger: true })
   if (!ok) return
   try { await props.revoke(approval); revoked.value = new Set([...revoked.value, approval.id]) }
   catch (e) { error.value = e instanceof Error ? e.message : 'Revoking did not work. Please try again.' }
@@ -98,7 +99,7 @@ defineExpose({ begin, cancel, isOpen: () => !!open.value })
     <ul v-else class="items" aria-label="Requests waiting for you">
       <li
         v-for="approval in pending" :key="approval.id" class="item" :class="[riskFor(approval), { active: cursor === `a:${approval.id}`, open: open?.id === approval.id }]"
-        :data-row="`a:${approval.id}`" tabindex="-1" :aria-label="`${scopeLabel(approval.scope)}, asked by ${asker(approval.agent_principal_id).name}`"
+        :data-row="`a:${approval.id}`" tabindex="-1" :aria-label="`${scopeLabel(approval.scope)}, asked by ${named(approval).name}`"
         @click="emit('focusRow', `a:${approval.id}`)" @focusin="emit('focusRow', `a:${approval.id}`)"
       >
         <span class="mark"><AppIcon name="shield" :size="15" /></span>
@@ -110,15 +111,19 @@ defineExpose({ begin, cancel, isOpen: () => !!open.value })
           </p>
           <p class="line2">
             <button type="button" class="who" @click.stop="emit('openAgent', approval.agent_principal_id)">
-              <span v-if="asker(approval.agent_principal_id).harness" class="harness">{{ asker(approval.agent_principal_id).harness }}</span>{{ asker(approval.agent_principal_id).name }}
+              <span v-if="named(approval).harness" class="harness">{{ named(approval).harness }}</span>
+              <span v-else class="who-icon" aria-hidden="true"><AppIcon name="agent" :size="12" /></span>
+              <span class="who-name">{{ named(approval).name }}</span>
             </button>
             <!-- Two phrases that wrap as wholes: "asks for scope" and "on KEY Title". -->
             <span class="phrase"><span class="asks">asks for</span><code class="scope">{{ approval.scope }}</code></span>
             <span class="phrase">
               <span class="asks">on</span>
               <RouterLink v-if="resource(approval).href" class="res-key" :to="resource(approval).href!" @click.stop>{{ resource(approval).key }}</RouterLink>
+              <span v-else-if="resource(approval).key" class="res-key plain">{{ resource(approval).key }}</span>
               <span v-else class="res-label">{{ resource(approval).label }}</span>
-              <span v-if="resource(approval).title" class="res-title">{{ resource(approval).title }}</span>
+              <!-- The title follows a key; without a key the label already is the title. -->
+              <span v-if="resource(approval).title && resource(approval).key" class="res-title">{{ resource(approval).title }}</span>
             </span>
           </p>
           <p v-if="approval.rationale" class="why">“{{ approval.rationale }}”</p>
@@ -193,7 +198,7 @@ defineExpose({ begin, cancel, isOpen: () => !!open.value })
         <li v-for="approval in history.slice(0, 20)" :key="approval.id" class="past" :class="outcome(approval).toLowerCase()">
           <AppIcon :name="outcome(approval) === 'Approved' ? 'check' : outcome(approval) === 'Expired' ? 'clock' : 'close'" :size="13" class="past-icon" />
           <span class="past-what">{{ scopeLabel(approval.scope) }}</span>
-          <span class="past-who">{{ asker(approval.agent_principal_id).name }}</span>
+          <span class="past-who">{{ named(approval).name }}</span>
           <span class="past-outcome">{{ outcome(approval) }}</span>
           <time class="past-time" :datetime="approval.proposed_at">{{ relativeTime(approval.proposed_at, { now }) }}</time>
           <button v-if="approval.decision === 'approved' && !revoked.has(approval.id) && canRevoke" type="button" class="btn sm ghost revoke" @click="revoke(approval)">Revoke</button>
@@ -237,6 +242,8 @@ defineExpose({ begin, cancel, isOpen: () => !!open.value })
 .line2 { display: flex; align-items: center; flex-wrap: wrap; gap: 6px; font-size: 12.5px; color: var(--ink-2); }
 .phrase { display: inline-flex; align-items: center; flex-wrap: wrap; gap: 6px; min-width: 0; }
 .who { display: inline-flex; align-items: center; gap: 6px; height: 24px; padding: 0 8px 0 3px; border: 0; border-radius: 999px; background: var(--chip-bg); box-shadow: inset 0 0 0 1px var(--chip-line); color: var(--ink); font-size: 12.5px; font-weight: 600; }
+.who-icon { display: inline-grid; place-items: center; width: 18px; height: 18px; border-radius: 999px; background: var(--chip-teal-bg); color: var(--teal-ink); flex: none; }
+.who-name { line-height: 1.3; }
 .who:hover { box-shadow: inset 0 0 0 1px var(--chip-teal-line); color: var(--teal-ink); }
 .who:focus-visible { box-shadow: var(--focus-ring); }
 /* Phones: who asks, what for and on what stack as three short lines; the asker and
@@ -251,6 +258,8 @@ defineExpose({ begin, cancel, isOpen: () => !!open.value })
 .res-key { display: inline-flex; align-items: center; font: 600 11.5px/1 var(--mono); color: var(--teal-ink); text-decoration: none; padding: 3px 7px; border-radius: 6px; background: var(--chip-teal-bg); box-shadow: inset 0 0 0 1px var(--chip-teal-line); font-variant-ligatures: none; }
 @media (max-width: 600px) { .res-key { z-index: 1; min-height: 28px; padding: 0 8px; } }
 .res-key:hover { text-decoration: underline; }
+.res-key.plain { color: var(--ink-2); background: var(--chip-bg); }
+.res-key.plain:hover { text-decoration: none; }
 .res-title { min-width: 0; max-width: 42ch; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; color: var(--ink-2); }
 .res-label { color: var(--ink); }
 .why { font-size: 13px; color: var(--ink-2); line-height: 1.45; overflow: hidden; display: -webkit-box; -webkit-box-orient: vertical; -webkit-line-clamp: 2; line-clamp: 2; }

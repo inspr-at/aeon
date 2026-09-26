@@ -99,6 +99,12 @@ Required evidence before the window (AEON operator, consumer owners):
    stage/reporter adapters and pins by PR/check path. Exercise one safe stage
    evidence roundtrip each. Record request IDs and resulting AEON events.
    A failed consumer roundtrip closes the switch gate.
+   Copy handoff tuples (expires_at and digests) verbatim from GET
+   /api/stage-handoffs/{id}, never from the creating response (AEON-177:
+   create returned nanoseconds, storage keeps microseconds). Clients must send
+   a User-Agent: Cloudflare answers 403 to e.g. bare Python urllib, before
+   the request reaches AEON (no x-request-id). Janus passed 2026-09-26
+   10:24Z on disposable PRJ-36 (events 44766-44775, AEON-43).
    Before step 5, split consumer rollback by direction (paths on OPS-231):
    - Classic readers (e.g. Janus Flow host classic v1, csb1
      janus-flow-host.nix paimosOrigin; confirm GET/HEAD only) must name the

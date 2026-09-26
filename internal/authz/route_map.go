@@ -60,6 +60,7 @@ var RoutePermissions = map[string]string{
 	"GET /api/crm/providers/search":                                  "crm.read",
 	"GET /api/events":                                                "events.read",
 	"GET /api/events/stream":                                         "events.read",
+	"GET /api/from-classic":                                          "nodes.read",
 	"GET /api/harness-sessions":                                      "harness.read",
 	"GET /api/health":                                                "public",
 	"GET /api/imports":                                               "imports.read",

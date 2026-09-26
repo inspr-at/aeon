@@ -150,6 +150,7 @@ func TestLaunchHTTPRefusesMissingAndForeignOperation(t *testing.T) {
 	call := func(path, body string) *httptest.ResponseRecorder {
 		t.Helper()
 		r := httptest.NewRequest(http.MethodPost, path, strings.NewReader(body)).WithContext(tenant.WithPrincipal(ctx, owner))
+		r.Header.Set("Idempotency-Key", "55555555-5555-4555-8555-555555555555")
 		w := httptest.NewRecorder()
 		mux.ServeHTTP(w, r)
 		return w

@@ -610,6 +610,33 @@ paths:
           $ref: '#/components/responses/Error'
         '409':
           $ref: '#/components/responses/Error'
+  /from-classic:
+    get:
+      operationId: resolveFromClassic
+      summary: Resolve a classic Paimos browser link within the caller's visibility
+      description: Resolves only known classic paths. Missing, ambiguous and invisible targets all return the same home destination and notice. Query parameters on the classic path are accepted but are not forwarded to Aeon.
+      security: *auth
+      parameters:
+        - name: path
+          in: query
+          required: true
+          description: Original absolute classic browser path, with optional query string.
+          schema: {type: string, maxLength: 2048, example: '/issues/42?tab=activity'}
+      responses:
+        '200':
+          description: A safe, relative Aeon route and an optional notice for fallback destinations.
+          content:
+            application/json:
+              schema:
+                type: object
+                required: [path]
+                properties:
+                  path: {type: string, pattern: '^/', example: '/p/PAI/PAI-42'}
+                  notice: {type: string, description: Present only when the original link cannot be resolved.}
+        '400':
+          $ref: '#/components/responses/Error'
+        '401':
+          $ref: '#/components/responses/Error'
   /projects:
     get:
       operationId: listProjects
@@ -1906,6 +1933,7 @@ paths:
   /approvals:
     get:
       operationId: listApprovals
+      description: Workspace readers see their tenant's approvals. Project-only readers see approvals in projects where they hold approvals.read; workspace-level approvals require a workspace binding. agent_name is conditional as documented on Approval.
       security: *auth
       parameters: [{$ref: '#/components/parameters/Limit'}]
       responses:
@@ -2320,15 +2348,19 @@ paths:
         NUL + canonical JSON)). The JSON object has sorted keys, no whitespace
         and UTF-8, and is exactly artifact_digest_sha256, authority_epoch
         (a JSON number), handoff_id, release_node_id and reviewed_plan_digest.
-        Repeating the same artifact returns the same unconsumed, unexpired
-        admission and writes no second event. A consumed or expired admission
-        for that binding cannot be reissued. Refused when the handoff is
-        closed, stale, or not an active Pharos deploy.
+        Idempotency-Key is a required UUID. An exact replay by the same routed
+        principal and key returns the original admission without a new event,
+        even after consumption. A different body or principal using that key
+        returns 409 idempotency_conflict. A new key cannot issue a second live
+        admission. Replays end 24 hours after the handoff's terminal result.
+        Refused when the handoff is closed, stale, or not an active Pharos deploy.
       security: *auth
-      parameters: [{name: handoffId, in: path, required: true, schema: {type: string, format: uuid}}]
+      parameters:
+        - {name: handoffId, in: path, required: true, schema: {type: string, format: uuid}}
+        - {name: Idempotency-Key, in: header, required: true, schema: {type: string, format: uuid}}
       requestBody: {required: true, content: {application/json: {schema: {$ref: '#/components/schemas/StageArtifact'}}}}
       responses:
-        '200': {description: Unconsumed launch admission, content: {application/json: {schema: {$ref: '#/components/schemas/StageLaunchAdmission'}}}}
+        '200': {description: Original launch admission, content: {application/json: {schema: {$ref: '#/components/schemas/StageLaunchAdmission'}}}}
         '403': {$ref: '#/components/responses/Error'}
         '404': {$ref: '#/components/responses/Error'}
         '409': {$ref: '#/components/responses/Error'}
@@ -2337,15 +2369,23 @@ paths:
       operationId: consumeStageLaunch
       summary: Consume one launch admission
       description: >
-        Marks the admission consumed. Exactly one caller wins, including under
-        concurrent requests. A consumed admission can never be consumed again.
+        Marks the admission consumed. Exactly one new key wins, including under
+        concurrent requests. An exact replay with the original UUID
+        Idempotency-Key, routed principal and canonical body returns the
+        original receipt with consumed_at and no new event, including after a
+        terminal result. A different body or principal using that key returns
+        409 idempotency_conflict. A new key after consumption returns 409.
+        Replays end 24 hours after the handoff's terminal result.
         Consume recomputes binding_digest_sha256 from the current handoff, the
         stored candidate artifact and the qualifying launch_readiness row, and
         refuses when any of those drifted. The admission must belong to this
         handoff. Missing, foreign, expired and already-consumed admissions are
-        refused. Requires the same live stage.deploy grant as admission.
+        refused. A new consume requires the same live stage.deploy grant as
+        admission; an exact replay checks the active routed principal.
       security: *auth
-      parameters: [{name: handoffId, in: path, required: true, schema: {type: string, format: uuid}}]
+      parameters:
+        - {name: handoffId, in: path, required: true, schema: {type: string, format: uuid}}
+        - {name: Idempotency-Key, in: header, required: true, schema: {type: string, format: uuid}}
       requestBody: {required: true, content: {application/json: {schema: {$ref: '#/components/schemas/StageLaunchConsume'}}}}
       responses:
         '200': {description: Consumption receipt, content: {application/json: {schema: {$ref: '#/components/schemas/StageLaunchConsumption'}}}}
@@ -3727,6 +3767,16 @@ components:
             exact value. A different seal is refused. Clients do not recompute
             it as authority.
         result: {$ref: '#/components/schemas/StageResult'}
+        admission: {$ref: '#/components/schemas/StageHandoffAdmissionState'}
+    StageHandoffAdmissionState:
+      type: object
+      required: [admission_id, epoch, expires_at]
+      properties:
+        admission_id: {type: string, format: uuid}
+        epoch: {type: integer, minimum: 1}
+        expires_at: {type: string, format: date-time}
+        consumed_at: {type: string, format: date-time}
+        consumed_by_principal_id: {type: string, format: uuid}
     StageEvidenceWrite:
       type: object
       additionalProperties: false
@@ -3809,11 +3859,12 @@ components:
     StageLaunchConsumption:
       type: object
       additionalProperties: false
-      required: [handoff_id, admission_id, consumed]
+      required: [handoff_id, admission_id, consumed, consumed_at]
       properties:
         handoff_id: {type: string, format: uuid}
         admission_id: {type: string, format: uuid}
         consumed: {type: boolean, enum: [true]}
+        consumed_at: {type: string, format: date-time}
     PluginManifest:
       type: object
       required: [id, version, digest_sha256, owner, permissions, node_kinds, views, workflow_steps, agent_tools, integrations, background_jobs, installation]
@@ -4737,6 +4788,7 @@ components:
           properties:
             id: {type: string, format: uuid}
             agent_principal_id: {type: string, format: uuid}
+            agent_name: {type: string, description: "Present only when the caller holds members.read or harness.read at the approval's workspace or project scope and the proposing agent is visible; otherwise omitted."}
             risk: {type: string, enum: [low, medium, high], readOnly: true, description: "Tenant resource or control/deploy/delete scope segments are high; read-only scopes are low; others medium"}
             proposed_at: {type: string, format: date-time}
             decision: {type: [string, 'null'], enum: [approved, denied, null]}

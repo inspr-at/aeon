@@ -16,13 +16,15 @@ import (
 
 // ProjectFilteredRoutes may be authorized by a permission held in any of the
 // caller's project bindings (Scope.AnyProject). Each one reads only rows that
-// project row-level security confines to the caller's visible projects
-// (nodes, relations, events, knowledge, search, views pinned to a project),
+// project row-level security or handler-level authorization confines to the
+// caller's visible projects (nodes, relations, events, knowledge, search,
+// views and approvals pinned to a project),
 // workspace configuration every reader needs (kinds), or the caller's own
 // profile and preferences. Every other route without a project in its path is
 // authorized by the workspace binding alone, so a project-only principal never
 // reaches workspace-wide data such as members, quotes, CRM or hours.
 var ProjectFilteredRoutes = map[string]bool{
+	"GET /api/approvals":                          true,
 	"GET /api/projects":                           true,
 	"GET /api/nodes":                              true,
 	"GET /api/nodes/lookup":                       true,
@@ -30,6 +32,7 @@ var ProjectFilteredRoutes = map[string]bool{
 	"GET /api/search":                             true,
 	"GET /api/events":                             true,
 	"GET /api/events/stream":                      true,
+	"GET /api/from-classic":                       true,
 	"GET /api/knowledge":                          true,
 	"GET /api/knowledge/graph":                    true,
 	"GET /api/knowledge/resolve":                  true,

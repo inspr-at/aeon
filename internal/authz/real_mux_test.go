@@ -29,6 +29,7 @@ import (
 	"github.com/inspr-at/aeon/internal/business/quotes/confirmation"
 	publicquotes "github.com/inspr-at/aeon/internal/business/quotes/public"
 	"github.com/inspr-at/aeon/internal/events"
+	"github.com/inspr-at/aeon/internal/fromclassic"
 	"github.com/inspr-at/aeon/internal/greetings"
 	"github.com/inspr-at/aeon/internal/harness"
 	"github.com/inspr-at/aeon/internal/httpapi"
@@ -66,7 +67,7 @@ func TestRealMuxRouteCoverage(t *testing.T) {
 		t.Fatal(err)
 	}
 	modules := []httpapi.Module{
-		authModule, authz.New(nil), nodes.New(nil, nil), relations.New(nil),
+		authModule, authz.New(nil), nodes.New(nil, nil), fromclassic.New(nil), relations.New(nil),
 		events.New(nil), search.New(nil, nil), views.New(nil), activity.New(nil),
 		attachments.New(nil, attachments.Store{}), &greetings.Module{}, knowledge.New(nil),
 		projectgroups.New(nil), &releasehistory.Module{}, profile.New(nil, attachments.Store{}),

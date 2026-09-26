@@ -7,6 +7,12 @@ const tenantId='bbbbbbbb-bbbb-4bbb-8bbb-bbbbbbbbbbbb'
 const sectionId='11111111-1111-4111-8111-111111111111'
 const nodeId='22222222-2222-4222-8222-222222222222'
 const positionId='33333333-3333-4333-8333-333333333333'
+const shellIdentity={principal:{id:nodeId,name:'Test Person'},tenant:{id:tenantId,name:'Test Workspace'}}
+async function mockShell(page:Page){await page.route('**/api/**',route=>{
+  const path=new URL(route.request().url()).pathname
+  return route.fulfill({json:path==='/api/me'?shellIdentity:path==='/api/approvals'?[]:
+    ['/api/projects','/api/nodes','/api/project-groups','/api/harness-sessions','/api/plugins'].includes(path)?{items:[]}:{}})
+})}
 function documentFixture(){return {schema_version:1,minimum_writer_version:1,title:'Base',subtitle:'Original',project_ref:'',offer_date:'2026-09-24',valid_until:'2026-10-24',currency:'EUR',sender:{},recipient:{},legal:{},layout:{},sections:[{id:sectionId,heading:'Scope',body:'',nodes:[{id:nodeId,kind:'paragraph',text:'A😀B'}]}],positions:[{id:positionId,pricing_source:'manual',short_text:'Work',long_text:'',quantity:'1.25',unit_label:'hour',unit_price_cents:105,total_cents:131,currency:'EUR'}],net_total_cents:131}}
 type Doc=ReturnType<typeof documentFixture>
 function mockServer(){
@@ -68,6 +74,7 @@ test('loading cannot save and a late reload never replaces an edit made while it
   const doc=documentFixture()
   let requests=0, writes=0, releaseReload:()=>void=()=>{}
   const reloadGate=new Promise<void>(resolve=>{releaseReload=resolve})
+  await mockShell(page)
   await page.route(`**/api/quotes/${quoteId}/draft`,async route=>{
     if(route.request().method()==='PATCH'){writes++;await route.fulfill({status:500,body:'unexpected write'});return}
     requests++
@@ -96,6 +103,7 @@ test('loading cannot save and a late reload never replaces an edit made while it
 
 test('revision watch backs off after outages and rechecks immediately on focus',async({page})=>{
   let reads=0
+  await mockShell(page)
   await page.route(`**/api/quotes/${quoteId}/draft`,async route=>{
     reads++
     if(reads>1 && reads<5){await route.fulfill({status:503,json:{error:'temporarily unavailable'}});return}
