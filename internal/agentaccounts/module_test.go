@@ -230,14 +230,23 @@ func callStatus(t *testing.T, mod httpapi.Module, p *tenant.Principal, token, me
 	}
 }
 
-func mustRoute(t *testing.T, mod httpapi.Module, p tenant.Principal, token, runID string, estimates map[string]int64) RouteResult {
+func routeBody(t *testing.T, runID, daemonID string, accounts []Account, estimates map[string]int64) string {
 	t.Helper()
-	raw, err := json.Marshal(map[string]any{"run_id": runID, "estimated_units": estimates})
+	ids := make([]string, 0, len(accounts))
+	for _, account := range accounts {
+		ids = append(ids, account.ID)
+	}
+	raw, err := json.Marshal(map[string]any{"run_id": runID, "daemon_id": daemonID, "account_ids": ids, "estimated_units": estimates})
 	if err != nil {
 		t.Fatal(err)
 	}
+	return string(raw)
+}
+
+func mustRoute(t *testing.T, mod httpapi.Module, p tenant.Principal, token, runID, daemonID string, accounts []Account, estimates map[string]int64) RouteResult {
+	t.Helper()
 	var out RouteResult
-	callStatus(t, mod, &p, token, http.MethodPost, "/api/agent-accounts/route", string(raw), http.StatusOK, &out)
+	callStatus(t, mod, &p, token, http.MethodPost, "/api/agent-accounts/route", routeBody(t, runID, daemonID, accounts, estimates), http.StatusOK, &out)
 	return out
 }
 
@@ -281,15 +290,15 @@ func TestAccountPoolRoutingAndLedger(t *testing.T) {
 	callStatus(t, mod, &admin, "", http.MethodPost, "/api/agent-accounts/"+account.ID+"/windows", windowBody(start, end, "tokens", 100, "unrestricted"), http.StatusCreated, &tokens)
 
 	runID := insertRun(t, admin, runner, profileID)
-	callStatus(t, mod, &runner, token, http.MethodPost, "/api/agent-accounts/route", fmt.Sprintf(`{"run_id":%q,"estimated_units":{"requests":10}}`, runID), http.StatusConflict, nil)
+	callStatus(t, mod, &runner, token, http.MethodPost, "/api/agent-accounts/route", routeBody(t, runID, "daemon-a", []Account{account}, map[string]int64{"requests": 10}), http.StatusConflict, nil)
 	if scalar(t, admin, `SELECT coalesce(sum(reserved),0) FROM account_allowance_windows`) != 0 {
 		t.Fatal("partial reservation was committed")
 	}
-	routed := mustRoute(t, mod, runner, token, runID, map[string]int64{"requests": 10, "tokens": 10})
+	routed := mustRoute(t, mod, runner, token, runID, "daemon-a", []Account{account}, map[string]int64{"requests": 10, "tokens": 10})
 	if routed.AccountID != account.ID || routed.DaemonID != "daemon-a" || len(routed.Reservations) != 2 {
 		t.Fatalf("route %+v", routed)
 	}
-	replay := mustRoute(t, mod, runner, token, runID, map[string]int64{"requests": 10, "tokens": 10})
+	replay := mustRoute(t, mod, runner, token, runID, "daemon-a", []Account{account}, map[string]int64{"requests": 10, "tokens": 10})
 	if replay.Reservations[0].ReservationID != routed.Reservations[0].ReservationID {
 		t.Fatal("retry did not replay the reservation")
 	}
@@ -344,7 +353,7 @@ func TestAccountPoolRoutingAndLedger(t *testing.T) {
 
 	live := insertRun(t, admin, runner, profileID)
 	// The settled account is still available and under its parallel cap.
-	liveRoute := mustRoute(t, mod, runner, token, live, map[string]int64{"requests": 4, "tokens": 4})
+	liveRoute := mustRoute(t, mod, runner, token, live, "daemon-a", []Account{account}, map[string]int64{"requests": 4, "tokens": 4})
 	if liveRoute.AccountID != account.ID {
 		t.Fatal("second run was not routed")
 	}
@@ -388,7 +397,7 @@ func TestRankDrainGrantAndStaleProbe(t *testing.T) {
 
 	var low, high Account
 	callStatus(t, mod, &runner, token, http.MethodPost, "/api/agent-accounts", `{"account_key":"low","harness":"codex","daemon_id":"daemon-low","label":"Low","max_parallel_runs":1}`, http.StatusCreated, &low)
-	callStatus(t, mod, &runner, token, http.MethodPost, "/api/agent-accounts", `{"account_key":"high","harness":"codex","daemon_id":"daemon-high","label":"High","max_parallel_runs":1}`, http.StatusCreated, &high)
+	callStatus(t, mod, &runner, token, http.MethodPost, "/api/agent-accounts", `{"account_key":"high","harness":"codex","daemon_id":"daemon-low","label":"High","max_parallel_runs":1}`, http.StatusCreated, &high)
 	for _, account := range []Account{low, high} {
 		callStatus(t, mod, &runner, token, http.MethodPost, "/api/agent-accounts/"+account.ID+"/probe", fmt.Sprintf(`{"daemon_id":%q,"daemon_generation":"g1","available":true}`, account.DaemonID), http.StatusOK, nil)
 		callStatus(t, mod, &admin, "", http.MethodPost, "/api/agent-accounts/"+account.ID+"/windows", windowBody(start, end, "requests", 100, "unrestricted"), http.StatusCreated, nil)
@@ -401,19 +410,19 @@ func TestRankDrainGrantAndStaleProbe(t *testing.T) {
 		t.Fatalf("usage: %v", err)
 	}
 	runLow := insertRun(t, admin, runner, profileID)
-	got := mustRoute(t, mod, runner, token, runLow, map[string]int64{"requests": 10})
+	got := mustRoute(t, mod, runner, token, runLow, "daemon-low", []Account{low, high}, map[string]int64{"requests": 10})
 	if got.AccountID != low.ID {
 		t.Fatalf("ranked %s, want low usage %s", got.AccountID, low.ID)
 	}
 	// The low account is now at its parallel cap. The next run uses the fuller account.
 	runNext := insertRun(t, admin, runner, profileID)
-	got = mustRoute(t, mod, runner, token, runNext, map[string]int64{"requests": 10})
+	got = mustRoute(t, mod, runner, token, runNext, "daemon-low", []Account{low, high}, map[string]int64{"requests": 10})
 	if got.AccountID != high.ID {
 		t.Fatalf("parallel occupancy did not move the route, got %s", got.AccountID)
 	}
 	callStatus(t, mod, &admin, "", http.MethodPatch, "/api/agent-accounts/"+high.ID, `{"state":"draining"}`, http.StatusOK, nil)
 	blocked := insertRun(t, admin, runner, profileID)
-	callStatus(t, mod, &runner, token, http.MethodPost, "/api/agent-accounts/route", fmt.Sprintf(`{"run_id":%q,"estimated_units":{"requests":10}}`, blocked), http.StatusConflict, nil)
+	callStatus(t, mod, &runner, token, http.MethodPost, "/api/agent-accounts/route", routeBody(t, blocked, "daemon-low", []Account{low, high}, map[string]int64{"requests": 10}), http.StatusConflict, nil)
 	// Draining does not drop the run already reserved on that account.
 	if scalar(t, admin, `SELECT count(*) FROM account_reservations WHERE state = 'active'`) != 2 {
 		t.Fatal("drain released an owned reservation")
@@ -445,15 +454,19 @@ func TestRankDrainGrantAndStaleProbe(t *testing.T) {
 	if err != nil {
 		t.Fatalf("complete low: %v", err)
 	}
-	callStatus(t, mod, &runner, token, http.MethodPost, "/api/agent-accounts/route", fmt.Sprintf(`{"run_id":%q,"estimated_units":{"requests":10}}`, blocked), http.StatusConflict, nil)
+	callStatus(t, mod, &runner, token, http.MethodPost, "/api/agent-accounts/route", routeBody(t, blocked, "daemon-low", []Account{low, high}, map[string]int64{"requests": 10}), http.StatusConflict, nil)
 
 	fresh := insertRun(t, admin, runner, profileID)
 	callStatus(t, mod, &runner, token, http.MethodPost, "/api/agent-accounts/"+low.ID+"/probe", `{"daemon_id":"daemon-low","daemon_generation":"g2","available":true}`, http.StatusOK, nil)
 	grantClaim(t, admin, claimer, fresh)
-	callStatus(t, mod, &stranger, issueKey(t, stranger, []string{"run.claim"}), http.MethodPost, "/api/agent-accounts/route", fmt.Sprintf(`{"run_id":%q,"estimated_units":{"requests":1}}`, fresh), http.StatusForbidden, nil)
-	callStatus(t, mod, &claimer, issueKey(t, claimer, nil), http.MethodPost, "/api/agent-accounts/route", fmt.Sprintf(`{"run_id":%q,"estimated_units":{"requests":1}}`, fresh), http.StatusForbidden, nil)
-	claimed := mustRoute(t, mod, claimer, issueKey(t, claimer, []string{"run.claim"}), fresh, map[string]int64{"requests": 1})
-	if claimed.AccountID != low.ID {
+	callStatus(t, mod, &stranger, issueKey(t, stranger, []string{"run.claim"}), http.MethodPost, "/api/agent-accounts/route", routeBody(t, fresh, "daemon-low", []Account{low}, map[string]int64{"requests": 1}), http.StatusForbidden, nil)
+	callStatus(t, mod, &claimer, issueKey(t, claimer, nil), http.MethodPost, "/api/agent-accounts/route", routeBody(t, fresh, "daemon-low", []Account{low}, map[string]int64{"requests": 1}), http.StatusForbidden, nil)
+	var claimerAccount Account
+	callStatus(t, mod, &claimer, issueKey(t, claimer, []string{"account.manage"}), http.MethodPost, "/api/agent-accounts", `{"account_key":"claimer","harness":"codex","daemon_id":"claimer-daemon","label":"Claimer"}`, http.StatusCreated, &claimerAccount)
+	callStatus(t, mod, &claimer, issueKey(t, claimer, []string{"account.probe"}), http.MethodPost, "/api/agent-accounts/"+claimerAccount.ID+"/probe", `{"daemon_id":"claimer-daemon","daemon_generation":"g1","available":true}`, http.StatusOK, nil)
+	callStatus(t, mod, &admin, "", http.MethodPost, "/api/agent-accounts/"+claimerAccount.ID+"/windows", windowBody(start, end, "requests", 100, "unrestricted"), http.StatusCreated, nil)
+	claimed := mustRoute(t, mod, claimer, issueKey(t, claimer, []string{"run.claim"}), fresh, "claimer-daemon", []Account{claimerAccount}, map[string]int64{"requests": 1})
+	if claimed.AccountID != claimerAccount.ID {
 		t.Fatalf("grant route picked %s", claimed.AccountID)
 	}
 
@@ -463,6 +476,87 @@ func TestRankDrainGrantAndStaleProbe(t *testing.T) {
 	if len(listed) != 0 {
 		t.Fatal("accounts leaked across tenants")
 	}
+}
+
+func TestRouteOnlyClaimsLocalDaemonEnrollment(t *testing.T) {
+	reset(t)
+	admin := makePrincipal(t, "alpha", "person", "Ada", []string{"admin"})
+	runner := addPrincipal(t, admin.TenantID, "agent", "runner", nil)
+	otherAgent := addPrincipal(t, admin.TenantID, "agent", "other", nil)
+	profileID := codexProfile(t, admin)
+	token := issueKey(t, runner, []string{"account.manage"})
+	mod := accountsMod()
+	start := time.Now().Add(-time.Minute).UTC()
+	end := time.Now().Add(time.Hour).UTC()
+
+	register := func(p tenant.Principal, key, daemon string) Account {
+		t.Helper()
+		var account Account
+		callStatus(t, mod, &p, issueKey(t, p, []string{"account.manage"}), http.MethodPost, "/api/agent-accounts",
+			fmt.Sprintf(`{"account_key":%q,"harness":"codex","daemon_id":%q,"label":"Codex"}`, key, daemon), http.StatusCreated, &account)
+		callStatus(t, mod, &p, issueKey(t, p, []string{"account.probe"}), http.MethodPost, "/api/agent-accounts/"+account.ID+"/probe",
+			fmt.Sprintf(`{"daemon_id":%q,"daemon_generation":"g1","available":true}`, daemon), http.StatusOK, nil)
+		callStatus(t, mod, &admin, "", http.MethodPost, "/api/agent-accounts/"+account.ID+"/windows",
+			windowBody(start, end, "requests", 100, "unrestricted"), http.StatusCreated, nil)
+		return account
+	}
+	local := register(runner, "local", "daemon-a")
+	foreignDaemon := register(runner, "foreign-daemon", "daemon-b")
+	unenrolled := register(runner, "unenrolled", "daemon-a")
+	foreignOwner := register(otherAgent, "foreign-owner", "daemon-a")
+
+	// All three competing accounts have lower projected usage, but none is
+	// enrolled by this daemon. The caller's selected account must still win.
+	if err := db.InTenant(dbtest.Seed(t.Context()), appPool, admin.TenantID, func(tx pgx.Tx) error {
+		_, err := tx.Exec(t.Context(), `UPDATE account_allowance_windows SET used = 50 WHERE account_id = $1::uuid`, local.ID)
+		return err
+	}); err != nil {
+		t.Fatalf("seed usage: %v", err)
+	}
+	run := insertRun(t, admin, runner, profileID)
+	callStatus(t, mod, &runner, token, http.MethodPost, "/api/agent-accounts/route",
+		routeBody(t, run, "daemon-a", nil, map[string]int64{"requests": 1}), http.StatusBadRequest, nil)
+	selected := mustRoute(t, mod, runner, token, run, "daemon-a", []Account{local}, map[string]int64{"requests": 1})
+	if selected.AccountID != local.ID {
+		t.Fatalf("route picked %s, want local %s", selected.AccountID, local.ID)
+	}
+	for _, wrong := range []struct {
+		daemon   string
+		accounts []Account
+	}{
+		{"daemon-b", []Account{foreignDaemon}},
+		{"daemon-a", []Account{unenrolled}},
+	} {
+		callStatus(t, mod, &runner, token, http.MethodPost, "/api/agent-accounts/route",
+			routeBody(t, run, wrong.daemon, wrong.accounts, map[string]int64{"requests": 1}), http.StatusConflict, nil)
+	}
+	if scalar(t, admin, `SELECT count(*) FROM events WHERE type = 'account.reserved'`) != 1 {
+		t.Fatal("rejected replay wrote an event")
+	}
+
+	// The local account is occupied. Neither a different daemon nor another
+	// account on this daemon may be used as an implicit fallback.
+	blocked := insertRun(t, admin, runner, profileID)
+	callStatus(t, mod, &runner, token, http.MethodPost, "/api/agent-accounts/route",
+		routeBody(t, blocked, "daemon-a", []Account{local}, map[string]int64{"requests": 1}), http.StatusConflict, nil)
+	callStatus(t, mod, &runner, token, http.MethodPost, "/api/agent-accounts/route",
+		routeBody(t, blocked, "daemon-a", []Account{foreignOwner}, map[string]int64{"requests": 1}), http.StatusConflict, nil)
+	if scalar(t, admin, `SELECT count(*) FROM agent_runs WHERE id = $1::uuid AND account_id IS NOT NULL`, blocked) != 0 {
+		t.Fatal("failed route bound the queued run")
+	}
+	if scalar(t, admin, `SELECT count(*) FROM account_reservations WHERE run_id = $1::uuid`, blocked) != 0 {
+		t.Fatal("failed route reserved allowance")
+	}
+	if got := mustRoute(t, mod, runner, token, blocked, "daemon-b", []Account{foreignDaemon}, map[string]int64{"requests": 1}); got.AccountID != foreignDaemon.ID {
+		t.Fatalf("second daemon route picked %s", got.AccountID)
+	}
+
+	otherTenant := makePrincipal(t, "beta", "person", "Bea", []string{"admin"})
+	otherRunner := addPrincipal(t, otherTenant.TenantID, "agent", "beta-runner", nil)
+	otherProfile := codexProfile(t, otherTenant)
+	otherRun := insertRun(t, otherTenant, otherRunner, otherProfile)
+	callStatus(t, mod, &otherRunner, issueKey(t, otherRunner, nil), http.MethodPost, "/api/agent-accounts/route",
+		routeBody(t, otherRun, "daemon-a", []Account{unenrolled}, map[string]int64{"requests": 1}), http.StatusConflict, nil)
 }
 
 func grantClaim(t *testing.T, person, agent tenant.Principal, runID string) {

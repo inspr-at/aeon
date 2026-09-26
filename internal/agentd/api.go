@@ -64,10 +64,10 @@ func (r *Remote) WorkOrder(ctx context.Context, id string) (WorkOrder, error) {
 	return order, err
 }
 
-func (r *Remote) Route(ctx context.Context, runID string, estimates map[string]int64) (Route, error) {
+func (r *Remote) Route(ctx context.Context, runID, daemonID string, accountIDs []string, estimates map[string]int64) (Route, error) {
 	var route Route
 	err := r.Client.Do(ctx, "POST", "/api/agent-accounts/route", map[string]any{
-		"run_id": runID, "estimated_units": estimates,
+		"run_id": runID, "daemon_id": daemonID, "account_ids": accountIDs, "estimated_units": estimates,
 	}, &route)
 	return route, err
 }

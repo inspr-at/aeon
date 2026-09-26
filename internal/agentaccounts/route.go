@@ -6,6 +6,7 @@ import (
 	"context"
 	"net/http"
 	"sort"
+	"strings"
 	"time"
 
 	"github.com/jackc/pgx/v5"
@@ -39,9 +40,22 @@ func lockRun(ctx context.Context, tx pgx.Tx, id string) (runRow, error) {
 	return run, err
 }
 
-func reserve(ctx context.Context, tx pgx.Tx, r *http.Request, p tenant.Principal, runID string, estimates map[string]int64) (RouteResult, error) {
+func reserve(ctx context.Context, tx pgx.Tx, r *http.Request, p tenant.Principal, runID, daemonID string, accountIDs []string, estimates map[string]int64) (RouteResult, error) {
 	if err := validateEstimates(estimates); err != nil {
 		return RouteResult{}, err
+	}
+	cleanDaemonID, err := cleanText(daemonID, 128)
+	if err != nil || cleanDaemonID != daemonID || len(accountIDs) == 0 || len(accountIDs) > 256 {
+		return RouteResult{}, fail(http.StatusBadRequest, "daemon and enrolled accounts are required")
+	}
+	enrolled := make(map[string]bool, len(accountIDs))
+	for i, id := range accountIDs {
+		if !uuidRE.MatchString(id) {
+			return RouteResult{}, fail(http.StatusBadRequest, "invalid enrolled account")
+		}
+		id = strings.ToLower(id)
+		accountIDs[i] = id
+		enrolled[id] = true
 	}
 	run, err := lockRun(ctx, tx, runID)
 	if err != nil {
@@ -50,7 +64,7 @@ func reserve(ctx context.Context, tx pgx.Tx, r *http.Request, p tenant.Principal
 	if err := authorizeRoute(ctx, tx, r, p, run.AgentID, run.ID); err != nil {
 		return RouteResult{}, err
 	}
-	if existing, ok, err := activeRoute(ctx, tx, run.ID); err != nil || ok {
+	if existing, ok, err := activeRoute(ctx, tx, run.ID, p.ID, daemonID, enrolled); err != nil || ok {
 		return existing, err
 	}
 	if run.Status != "queued" || (run.AccountID != nil && *run.AccountID != "") {
@@ -71,7 +85,7 @@ func reserve(ctx context.Context, tx pgx.Tx, r *http.Request, p tenant.Principal
 	if err != nil {
 		return RouteResult{}, err
 	}
-	account, windows, err := selectAccount(ctx, tx, harness, estimates, now)
+	account, windows, err := selectAccount(ctx, tx, p.ID, harness, daemonID, accountIDs, estimates, now)
 	if err != nil {
 		return RouteResult{}, err
 	}
@@ -153,9 +167,10 @@ func authorizeRoute(ctx context.Context, tx pgx.Tx, r *http.Request, p tenant.Pr
 	return nil
 }
 
-func activeRoute(ctx context.Context, tx pgx.Tx, runID string) (RouteResult, bool, error) {
+func activeRoute(ctx context.Context, tx pgx.Tx, runID, principalID, daemonID string, enrolled map[string]bool) (RouteResult, bool, error) {
 	rows, err := tx.Query(ctx, `
-		SELECT r.id::text, r.window_id::text, w.unit, a.id::text, a.account_key, a.daemon_id
+		SELECT r.id::text, r.window_id::text, w.unit, a.id::text, a.account_key, a.daemon_id,
+		       a.registered_by_principal_id::text
 		FROM account_reservations r
 		JOIN account_allowance_windows w ON w.tenant_id = r.tenant_id AND w.id = r.window_id
 		JOIN agent_accounts a ON a.tenant_id = w.tenant_id AND a.id = w.account_id
@@ -168,14 +183,17 @@ func activeRoute(ctx context.Context, tx pgx.Tx, runID string) (RouteResult, boo
 	var result RouteResult
 	for rows.Next() {
 		var item Reservation
-		var accountID, key, daemonID string
-		if err := rows.Scan(&item.ReservationID, &item.WindowID, &item.Unit, &accountID, &key, &daemonID); err != nil {
+		var accountID, key, ownerDaemonID, ownerID string
+		if err := rows.Scan(&item.ReservationID, &item.WindowID, &item.Unit, &accountID, &key, &ownerDaemonID, &ownerID); err != nil {
 			return RouteResult{}, false, err
+		}
+		if ownerDaemonID != daemonID || ownerID != principalID || !enrolled[accountID] {
+			return RouteResult{}, false, fail(http.StatusConflict, "run is routed outside daemon enrollment")
 		}
 		if result.AccountID == "" {
 			result.AccountID = accountID
 			result.AccountKey = key
-			result.DaemonID = daemonID
+			result.DaemonID = ownerDaemonID
 		} else if result.AccountID != accountID {
 			return RouteResult{}, false, fail(http.StatusConflict, "run reservations span accounts")
 		}
@@ -196,15 +214,16 @@ type ranked struct {
 	ratio   float64
 }
 
-func selectAccount(ctx context.Context, tx pgx.Tx, harness string, estimates map[string]int64, now time.Time) (Account, []Window, error) {
+func selectAccount(ctx context.Context, tx pgx.Tx, principalID, harness, daemonID string, accountIDs []string, estimates map[string]int64, now time.Time) (Account, []Window, error) {
 	rows, err := tx.Query(ctx, `
 		SELECT id::text, account_key, harness, daemon_id, label, max_parallel_runs,
 		       registered_by_principal_id::text, state, last_probe_at, last_probe_ok,
 		       last_daemon_generation, created_at
 		FROM agent_accounts
-		WHERE harness = $1 AND state = 'available'
+		WHERE harness = $1 AND daemon_id = $2 AND registered_by_principal_id = $3::uuid
+		  AND id::text = ANY($4::text[]) AND state = 'available'
 		ORDER BY id
-		FOR UPDATE`, harness)
+		FOR UPDATE`, harness, daemonID, principalID, accountIDs)
 	if err != nil {
 		return Account{}, nil, err
 	}

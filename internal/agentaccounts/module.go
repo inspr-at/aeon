@@ -190,6 +190,8 @@ func (m *Module) route(w http.ResponseWriter, r *http.Request) {
 	}
 	var body struct {
 		RunID          string           `json:"run_id"`
+		DaemonID       string           `json:"daemon_id"`
+		AccountIDs     []string         `json:"account_ids"`
 		EstimatedUnits map[string]int64 `json:"estimated_units"`
 	}
 	if err := decodeJSON(w, r, &body); err != nil {
@@ -199,7 +201,7 @@ func (m *Module) route(w http.ResponseWriter, r *http.Request) {
 	var out RouteResult
 	err := m.in(r.Context(), p.TenantID, func(tx pgx.Tx) error {
 		var err error
-		out, err = reserve(r.Context(), tx, r, p, body.RunID, body.EstimatedUnits)
+		out, err = reserve(r.Context(), tx, r, p, body.RunID, body.DaemonID, body.AccountIDs, body.EstimatedUnits)
 		return err
 	})
 	if err != nil {

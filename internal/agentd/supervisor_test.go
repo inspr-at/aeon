@@ -13,14 +13,16 @@ import (
 )
 
 type fakeAPI struct {
-	mu      sync.Mutex
-	run     Run
-	profile Profile
-	claims  int
-	reports []Telemetry
-	acks    int
-	page    InboxPage
-	pageFn  func(int64) InboxPage
+	mu            sync.Mutex
+	run           Run
+	profile       Profile
+	claims        int
+	reports       []Telemetry
+	acks          int
+	page          InboxPage
+	pageFn        func(int64) InboxPage
+	routeDaemon   string
+	routeAccounts []string
 }
 
 func (*fakeAPI) Identity(context.Context) (string, string, error) { return "tenant", "agent", nil }
@@ -33,7 +35,9 @@ func (*fakeAPI) Node(context.Context, string) (Node, error) {
 func (*fakeAPI) WorkOrder(context.Context, string) (WorkOrder, error) {
 	return WorkOrder{NodeID: "order", Status: "ready"}, nil
 }
-func (*fakeAPI) Route(context.Context, string, map[string]int64) (Route, error) {
+func (a *fakeAPI) Route(_ context.Context, _ string, daemonID string, accountIDs []string, _ map[string]int64) (Route, error) {
+	a.routeDaemon = daemonID
+	a.routeAccounts = append([]string(nil), accountIDs...)
 	return Route{AccountID: "account", AccountKey: "local", DaemonID: "daemon", Reservations: []Reservation{{ID: "reservation"}}}, nil
 }
 func (a *fakeAPI) Claim(context.Context, string, string, string, []string) error {
@@ -120,6 +124,9 @@ func TestSupervisorClaimControlReplayAndScope(t *testing.T) {
 	}
 	if a.claims != 1 || len(a.reports) != 1 || a.reports[0].Kind != "started" {
 		t.Fatalf("claim/report: %d %#v", a.claims, a.reports)
+	}
+	if a.routeDaemon != "daemon" || len(a.routeAccounts) != 1 || a.routeAccounts[0] != "account" {
+		t.Fatalf("route enrollment: daemon=%q accounts=%v", a.routeDaemon, a.routeAccounts)
 	}
 	req := ControlRequest{TenantID: "tenant", PrincipalID: "agent", RunID: "run", Generation: s.Generation(), CorrelationID: "control-1", Operation: "steer", Text: "next"}
 	first, err := s.Control(ctx, req)

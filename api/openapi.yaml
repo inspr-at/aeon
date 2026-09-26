@@ -2060,7 +2060,7 @@ paths:
   /agent-accounts/route:
     post:
       operationId: reserveAgentAccount
-      description: Atomically select an eligible attached account for a queued run and reserve allowance. Routing uses remaining allowance, recent usage, pace target and active run count; fail closed when estimates are absent or no account fits. The daemon resolves the opaque key to its local credential.
+      description: Atomically select an eligible account enrolled on the requesting daemon for a queued run and reserve allowance. Routing uses remaining allowance, recent usage, pace target and active run count; fail closed when estimates are absent or no account fits. The daemon resolves the opaque key to its local credential.
       security: [{agentKey: []}]
       requestBody: {required: true, content: {application/json: {schema: {$ref: '#/components/schemas/AccountRouteRequest'}}}}
       responses:
@@ -4888,9 +4888,16 @@ components:
             reserved: {type: integer, format: int64}
     AccountRouteRequest:
       type: object
-      required: [run_id, estimated_units]
+      required: [run_id, daemon_id, account_ids, estimated_units]
       properties:
         run_id: {type: string, format: uuid}
+        daemon_id: {type: string, minLength: 1, maxLength: 128}
+        account_ids:
+          type: array
+          description: IDs of locally enrolled accounts available to the requesting daemon.
+          minItems: 1
+          maxItems: 256
+          items: {type: string, format: uuid}
         estimated_units:
           type: object
           description: Required estimates for every configured active unit; omit only units with no active window.

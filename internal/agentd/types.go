@@ -98,7 +98,7 @@ type API interface {
 	Profiles(context.Context) ([]Profile, error)
 	Node(context.Context, string) (Node, error)
 	WorkOrder(context.Context, string) (WorkOrder, error)
-	Route(context.Context, string, map[string]int64) (Route, error)
+	Route(context.Context, string, string, []string, map[string]int64) (Route, error)
 	Claim(context.Context, string, string, string, []string) error
 	Report(context.Context, string, Telemetry) error
 	Inbox(context.Context, int64) (InboxPage, error)

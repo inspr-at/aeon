@@ -114,7 +114,8 @@ func (s *seeder) work() error {
 		} `json:"reservations"`
 	}
 	if err := s.api.do(s.scribe, s.scribeKey, http.MethodPost, "/api/agent-accounts/route", map[string]any{
-		"run_id": run.ID, "estimated_units": map[string]int64{"requests": 1},
+		"run_id": run.ID, "daemon_id": daemonID, "account_ids": []string{account.ID},
+		"estimated_units": map[string]int64{"requests": 1},
 	}, http.StatusOK, &routed, nil); err != nil {
 		return fmt.Errorf("route: %w", err)
 	}
