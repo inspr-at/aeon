@@ -2,6 +2,11 @@
 
 // Package stagehandoff implements one fenced request, ordered evidence and a
 // terminal result for compiled stage plugins. The coordinator mounts New.
+// Evidence, result, launch admission and launch consumption require an active
+// agent principal in the handoff's tenant whose stored name is the routed
+// plugin ID (Janus for prepare/apply, Pharos for deploy/verify), plus that
+// agent's scoped key and live grant. Each write checks the principal while
+// holding the handoff lock in the same tenant transaction.
 //
 // # Launch readiness
 //

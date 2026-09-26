@@ -3482,11 +3482,12 @@ components:
         reason: {type: string, description: Current blocker or empty when admission can proceed}
     JourneyStage:
       type: object
-      required: [key, state]
+      required: [key, state, gate_live]
       properties:
         key: {type: string, enum: [inspire, shape, requirements, plan, build, deploy, access, live]}
         state: {type: string, enum: [done, current, later, skipped, blocked]}
         gate_approval_id: {type: [string, 'null'], format: uuid}
+        gate_live: {type: boolean, description: Whether any approval and grant for the stage gate are currently valid; false when no gate is recorded}
         handoff_id: {type: [string, 'null'], format: uuid}
     JourneyNextAction:
       type: object

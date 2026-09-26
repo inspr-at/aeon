@@ -132,6 +132,7 @@ type facts struct {
 	CandidateGateID            string
 	DeployGateID               string
 	AccessGateID               string
+	GateLiveByID               map[string]bool
 	DeployHandoffID            string
 	AccessHandoffID            string
 	DeployOutcome              string
@@ -526,9 +527,11 @@ func stageRail(f facts, current string, blocked bool) []JourneyStage {
 	priorLive := f.PriorReleased && current == stagePlan
 	out := make([]JourneyStage, 0, len(stageOrder))
 	for i, key := range stageOrder {
+		gateID := gateIDFor(f, key)
 		st := JourneyStage{
 			Key:            key,
-			GateApprovalID: strPtr(gateIDFor(f, key)),
+			GateApprovalID: strPtr(gateID),
+			GateLive:       f.GateLiveByID[gateID],
 			HandoffID:      strPtr(handoffIDFor(f, key)),
 		}
 		switch {
