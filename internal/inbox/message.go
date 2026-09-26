@@ -314,6 +314,18 @@ func (m *module) ack(ctx context.Context, p tenant.Principal, id string) (Messag
 		if _, err := events.Append(ctx, tx, p, events.Change{Type: "inbox.acked", Before: before, After: after}); err != nil {
 			return err
 		}
+		// A direct recipient acknowledgement is the receiver confirmation.
+		// Compat messages have a separate adapter confirmation path, and a
+		// recipient ack must not claim that adapter has handed the message off.
+		var managed bool
+		if err := tx.QueryRow(ctx, `SELECT EXISTS (SELECT 1 FROM inbox_compat_messages WHERE inbox_message_id = $1::uuid)`, id).Scan(&managed); err != nil {
+			return err
+		}
+		if !managed {
+			if err := advanceReceipt(ctx, tx, p, id, "handed_off", "", "", receiptTarget{}); err != nil {
+				return err
+			}
+		}
 		out = updated
 		return nil
 	})

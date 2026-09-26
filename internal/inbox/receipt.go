@@ -14,10 +14,10 @@ import (
 	"github.com/jackc/pgx/v5"
 )
 
-// Receipt is the sender's proof that a message was handed to the receiver's
-// adapter. State moves queued → handed_off only after that adapter confirms,
-// or queued → failed on a terminal failure. Neither terminal state moves again,
-// and handed_off_at is written once.
+// Receipt is the sender's proof of receiver confirmation. State moves
+// queued → handed_off only after a direct recipient acknowledgement or managed
+// adapter confirmation, or queued → failed on a terminal failure. Neither
+// terminal state moves again, and handed_off_at is written once.
 type Receipt struct {
 	MessageID            string  `json:"message_id"`
 	IdempotencyKey       string  `json:"idempotency_key"`
@@ -68,10 +68,10 @@ func (m *module) receipt(ctx context.Context, p tenant.Principal, id string) (Re
 			       m.sender_principal_id::text, m.recipient_principal_id::text,
 			       r.target_id::text, r.target_version, COALESCE(r.adapter, ''),
 			       COALESCE(r.address, ''), COALESCE(r.effective_level, ''),
-			       COALESCE(r.state, 'queued'), r.handed_off_at, COALESCE(r.failure_reason, '')
+			       r.state, r.handed_off_at, r.failure_reason
 			FROM inbox_messages m
 			JOIN tenants t ON t.id = m.tenant_id
-			LEFT JOIN inbox_receipts r ON r.tenant_id = m.tenant_id AND r.message_id = m.id
+			JOIN inbox_receipts r ON r.tenant_id = m.tenant_id AND r.message_id = m.id
 			WHERE m.id = $1::uuid AND m.sender_principal_id = $2::uuid`, id, p.ID).Scan(
 			&out.MessageID, &out.IdempotencyKey, &out.Tenant,
 			&out.SenderPrincipalID, &out.RecipientPrincipalID,

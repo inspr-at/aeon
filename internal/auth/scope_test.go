@@ -156,7 +156,11 @@ func TestEmptyAgentKeyDeniedAcrossRegisteredAPIRoutes(t *testing.T) {
 		req.Header.Set("Authorization", "Bearer "+key.Token)
 		res := httptest.NewRecorder()
 		handler.ServeHTTP(res, req)
-		if res.Code != http.StatusForbidden {
+		want := http.StatusForbidden
+		if pattern == "GET /api/inbox/messages/{messageId}/receipt" {
+			want = http.StatusNotFound // Sender-only receipts conceal permission denial.
+		}
+		if res.Code != want {
 			t.Errorf("%s: %d %s", pattern, res.Code, res.Body.String())
 		}
 	}
