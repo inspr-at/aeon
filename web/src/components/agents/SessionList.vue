@@ -1,8 +1,8 @@
 <!-- SPDX-License-Identifier: AGPL-3.0-only -->
 <script setup lang="ts">
-import { computed, ref } from 'vue'
+import { computed, ref, watch } from 'vue'
 import type { SessionControl } from '../../lib/agents'
-import { GROUPS, controlBlocked, elapsed, type SessionGroup } from '../../lib/agentState'
+import { GROUPS, controlBlocked, elapsed, sessionForest, type SessionBranch, type SessionGroup } from '../../lib/agentState'
 import { relativeTime } from '../../lib/work'
 import type { Availability, SessionView } from '../../stores/agents'
 import AppIcon from '../AppIcon.vue'
@@ -10,7 +10,8 @@ import FloatingPanel from '../work/FloatingPanel.vue'
 import ConnectHint from './ConnectHint.vue'
 import LiveDot from './LiveDot.vue'
 
-// Live sessions as rows, grouped by what they need: Markus, work, nothing, or history.
+// Session families stay together across status groups. Stopped workers fold after
+// thirty seconds, with explicit history controls and stable keyboard focus.
 const props = defineProps<{
   groups: Record<SessionGroup, SessionView[]>; now: number; cursor: string; selected: string; state: Availability; error: string
   loaded: boolean; controls: Record<string, SessionControl>; canControl: boolean
@@ -19,7 +20,65 @@ const emit = defineEmits<{ open: [id: string]; control: [view: SessionView, kind
 const showStopped = ref(false)
 const total = computed(() => GROUPS.reduce((sum, g) => sum + props.groups[g.id].length, 0))
 const live = computed(() => total.value - props.groups.stopped.length)
-const visible = (group: SessionGroup) => group === 'stopped' && !showStopped.value ? [] : props.groups[group].slice(0, group === 'stopped' ? 30 : undefined)
+type Branch = SessionBranch<SessionView>
+const forest = computed(() => sessionForest(GROUPS.flatMap(g => props.groups[g.id]), props.now))
+const roots = (group: SessionGroup) => forest.value.filter(branch => branch.group === group)
+const expanded = ref<Record<string, boolean>>({})
+const history = ref<Record<string, boolean>>({})
+const containsSelected = (branch: Branch): boolean => branch.view.session.id === props.selected || branch.children.some(containsSelected)
+const retained = (branch: Branch): boolean => containsSelected(branch) || branch.view.session.id === props.cursor.slice(2) || branch.children.some(retained)
+const candidates = (branch: Branch, includeHistory = false) => branch.children.filter(child => includeHistory || history.value[branch.view.session.id] || child.recent || retained(child))
+const isExpanded = (branch: Branch, includeHistory = false): boolean => {
+  return candidates(branch, includeHistory).length > 0 && (expanded.value[branch.view.session.id] ?? true)
+}
+function toggle(branch: Branch) {
+  const id = branch.view.session.id
+  const wasOpen = isExpanded(branch)
+  if (!wasOpen && !candidates(branch).length) history.value[id] = true
+  expanded.value[id] = !wasOpen
+}
+function toggleHistory(branch: Branch) {
+  const id = branch.view.session.id
+  history.value[id] = !history.value[id]
+  expanded.value[id] = true
+}
+const stoppedChildren = (branch: Branch) => branch.children.reduce((sum, child) => sum + child.count - child.liveCount, 0)
+const workerLabel = (branch: Branch) => `${branch.count - 1} ${branch.count === 2 ? 'worker' : 'workers'}`
+const visible = (group: SessionGroup) => {
+  const out: { view: SessionView; branch: Branch; depth: number; parent: string; open: boolean }[] = []
+  function walk(branch: Branch, depth: number, parent = '', includeHistory = false) {
+    const open = isExpanded(branch, includeHistory)
+    out.push({ view: branch.view, branch, depth, parent, open })
+    if (open) for (const child of candidates(branch, includeHistory)) walk(child, depth + 1, branch.view.name, includeHistory || history.value[branch.view.session.id])
+  }
+  for (const branch of roots(group)) {
+    // A lead stopping with its last worker still gets the same grace period.
+    if (group !== 'stopped' || showStopped.value || (branch.children.length && branch.recent) || retained(branch)) walk(branch, 0)
+  }
+  return out
+}
+// Open the route's ancestors on navigation or when that session first arrives;
+// subsequent ticks must not undo a person's explicit collapse.
+const selectedPath = computed(() => {
+  function find(branch: Branch): string[] | null {
+    if (branch.view.session.id === props.selected) return [props.selected]
+    for (const child of branch.children) {
+      const path = find(child)
+      if (path) return [branch.view.session.id, ...path]
+    }
+    return null
+  }
+  for (const branch of forest.value) {
+    const path = find(branch)
+    if (path) return path.join('/')
+  }
+  return ''
+})
+watch(selectedPath, path => {
+  if (!path) return
+  for (const id of path.split('/').slice(0, -1)) expanded.value[id] = true
+  if (roots('stopped').some(containsSelected)) showStopped.value = true
+}, { immediate: true })
 
 const controlBlock = (view: SessionView, kind: SessionControl['kind']) => controlBlocked(view.session, kind, view.name, props.canControl, props.controls[view.session.id])
 // Phones get one overflow button per row; the menu offers the same two controls.
@@ -71,25 +130,32 @@ function rowClick(event: MouseEvent, id: string) {
         <span role="columnheader" class="right">Heartbeat</span><span role="columnheader" class="right c-elapsed">Running</span><span role="columnheader"><span class="sr-only">Actions</span></span>
       </div>
       <template v-for="group in GROUPS" :key="group.id">
-        <div v-if="groups[group.id].length" class="group-row" :class="group.id" role="row">
+        <div v-if="roots(group.id).length" class="group-row" :class="group.id" role="row">
           <span role="rowheader" class="group-label">
             <button v-if="group.id === 'stopped'" type="button" class="group-toggle" :aria-expanded="showStopped" @click="showStopped = !showStopped">
-              <AppIcon name="chevron-right" :size="12" class="chev" :class="{ turned: showStopped }" />{{ group.label }}<span class="mono">{{ groups[group.id].length }}</span>
+              <AppIcon name="chevron-right" :size="12" class="chev" :class="{ turned: showStopped }" />{{ group.label }}<span class="mono">{{ roots(group.id).length }}</span>
             </button>
-            <template v-else>{{ group.label }}<span class="mono">{{ groups[group.id].length }}</span></template>
+            <template v-else>{{ group.label }}<span class="mono">{{ roots(group.id).length }}</span></template>
           </span>
         </div>
         <div
-          v-for="view in visible(group.id)" :key="view.session.id" class="row" role="row" :data-row="`s:${view.session.id}`" tabindex="-1"
-          :class="[view.status.group, { active: cursor === `s:${view.session.id}`, selected: selected === view.session.id }]" @click="rowClick($event, view.session.id)"
+          v-for="{ view, branch, depth, parent, open } in visible(group.id)" :key="view.session.id" class="row" role="row" :data-row="`s:${view.session.id}`" :data-parent="view.session.parent_harness_session_id || undefined" :data-depth="depth" :style="{ '--depth': Math.min(depth, 4) }" tabindex="-1" @focusin="emit('focusRow', `s:${view.session.id}`)"
+          :class="[view.status.group, { worker: depth > 0, active: cursor === `s:${view.session.id}`, selected: selected === view.session.id }]" @click="rowClick($event, view.session.id)"
         >
           <span role="cell" class="c-state"><LiveDot :tone="view.status.tone" /><span class="state-label">{{ pendingLabel(view) || view.status.label }}</span></span>
           <span role="cell" class="c-agent">
+            <span v-if="depth" class="sr-only">Worker of {{ parent }}. </span>
             <RouterLink class="agent-link" :to="`/agents/${view.session.id}`" :aria-label="`${view.harness} ${view.name}, ${view.status.label}`">
               <span class="harness" :class="view.session.harness">{{ view.harness }}</span>
               <span class="who"><span class="agent-name">{{ view.name }}</span><span v-if="view.session.host && view.session.host !== view.name" class="host mono">on {{ view.session.host }}</span></span>
             </RouterLink>
             <span v-if="view.session.role === 'coordinator'" class="role" data-tip="Coordinates other sessions">Lead</span>
+            <span v-if="branch.children.length" class="worker-tools">
+              <button type="button" class="worker-toggle" :aria-expanded="open" :aria-label="`${open ? 'Collapse' : 'Expand'} ${workerLabel(branch)} of ${view.name}`" @click="toggle(branch)">
+                <AppIcon name="chevron-right" :size="12" class="chev" :class="{ turned: open }" />{{ workerLabel(branch) }}
+              </button>
+              <button v-if="stoppedChildren(branch)" type="button" class="worker-toggle history-toggle" :aria-pressed="!!history[view.session.id]" :aria-label="`${history[view.session.id] ? 'Hide' : 'Show'} stopped workers of ${view.name}`" @click="toggleHistory(branch)">{{ stoppedChildren(branch) }} stopped</button>
+            </span>
           </span>
           <span role="cell" class="c-ticket">
             <RouterLink v-if="view.ticket" class="ticket-chip" :to="view.ticket.href" :data-tip="view.ticket.title">{{ view.ticket.key }}</RouterLink>
@@ -158,11 +224,21 @@ function rowClick(event: MouseEvent, id: string) {
 @media (hover: hover) { .row:hover { background: var(--row-hover); } }
 .row.active { background: var(--row-selected); box-shadow: inset 0 0 0 1px var(--chip-teal-line); }
 .row.selected { background: var(--row-selected); }
-.row.stopped { color: var(--ink-2); }
+.row { transition: background-color .3s ease, color .3s ease; }
+.row.stopped { color: var(--ink-2); background: var(--chip-bg); }
+.row.stopped .agent-name { font-weight: 450; color: var(--ink-2); }
+.row.worker .c-agent { padding-left: calc(8px + var(--depth) * 16px); }
+.worker-tools { display: flex; flex-wrap: wrap; gap: 2px 6px; flex-basis: 100%; padding: 2px 0 4px; }
+.worker-toggle { display: inline-flex; align-items: center; justify-content: center; gap: 4px; min-height: 28px; padding: 2px 6px; border: 0; border-radius: 6px; background: var(--chip-bg); color: var(--ink); font-size: 11.5px; font-weight: 550; white-space: nowrap; }
+.worker-toggle:hover { background: var(--row-hover); }
+.worker-toggle:focus-visible { box-shadow: var(--focus-ring); }
+.history-toggle { color: var(--ink-2); font-weight: 450; }
+.chev { transition: transform .2s ease; }
+@media (prefers-reduced-motion: reduce) { .row, .chev { transition: none; } }
 .c-state { display: inline-flex; align-items: center; gap: 9px; }
 .state-label { font-size: 12.5px; color: var(--ink-2); white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
 .row.needs .state-label { color: var(--gold-ink); font-weight: 600; }
-.c-agent { display: inline-flex; align-items: center; gap: 8px; min-width: 0; }
+.row > .c-agent { display: inline-flex; align-items: center; flex-wrap: wrap; gap: 4px 8px; min-width: 0; padding-block: 6px; }
 .agent-link { display: inline-flex; align-items: center; gap: 8px; min-width: 0; color: var(--ink); text-decoration: none; }
 .agent-link:focus-visible { box-shadow: var(--focus-ring); border-radius: 6px; }
 .who { display: grid; min-width: 0; line-height: 1.25; }
@@ -221,6 +297,8 @@ function rowClick(event: MouseEvent, id: string) {
   .row { display: grid; grid-template-columns: auto minmax(0, 1fr) auto 44px; grid-template-areas: "agent agent beat actions" "state ticket ticket actions"; row-gap: 6px; column-gap: 0; min-height: 64px; margin: 0 6px; padding: 10px 4px 10px 10px; }
   .row > span { padding: 0; }
   .c-agent { grid-area: agent; }
+  .row.worker .c-agent { padding-left: calc(var(--depth) * 10px); }
+  .worker-toggle { min-height: 44px; padding-inline: 8px; }
   .c-state { grid-area: state; margin-right: 10px; }
   .c-ticket { grid-area: ticket; justify-self: start; }
   .c-beat { grid-area: beat; }

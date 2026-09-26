@@ -7,6 +7,7 @@ import { api, APIError } from './api.ts'
 export type Harness = 'codex' | 'claude' | 'pi' | 'cursor' | 'grok'
 export interface HarnessSession {
   id: string; project_id: string; agent_principal_id: string
+  display_label?: string | null
   run_id: string | null; ticket_node_id: string | null; work_order_id: string | null; parent_harness_session_id: string | null
   harness: Harness; host: string; management_mode: 'managed' | 'unmanaged'; role: 'coordinator' | 'worker'
   work_shape: 'unknown' | 'ship' | 'scout'; advertised_capabilities: string[]
@@ -109,14 +110,14 @@ export function paceFraction(model: AllowanceWrite['pace_model'], elapsed: numbe
 }
 
 // Named server events that change what the agents workspace shows. They are wake
-// hints only: the caller re-reads the authorized projections. Heartbeats are left
-// out: they are frequent, and the page's clock and poll keep them current.
+// hints only: the caller re-reads the authorized projections. Heartbeats use the
+// periodic refresh; registration/stop and reconnect wake the consumer immediately.
 const HARNESS_EVENTS = ['registered', 'bound', 'yielded', 'stopped', 'control_requested', 'control_claimed', 'control_completed']
 const OTHER_EVENTS = ['approval.proposed', 'approval.approved', 'approval.denied', 'approval.revoked', 'run.created', 'run.claimed', 'run.telemetry', 'work_order.started', 'work_order.updated', 'inbox.compat_sent', 'inbox.delivery_queued', 'inbox.reply_obligation_closed', 'inbox.action_resolved']
 export function subscribeAgents(changed: () => void, connection: (live: boolean) => void = () => {}): () => void {
   if (typeof EventSource === 'undefined') return () => {}
   const stream = new EventSource('/api/events/stream')
-  stream.onopen = () => connection(true)
+  stream.onopen = () => { connection(true); changed() }
   stream.onerror = () => connection(false)
   for (const name of [...HARNESS_EVENTS.map(kind => `harness.${kind}`), ...OTHER_EVENTS]) stream.addEventListener(name, changed)
   return () => stream.close()

@@ -25,6 +25,8 @@ const route = useRoute()
 const router = useRouter()
 const cursor = ref('')
 const live = ref(false)
+const stale = computed(() => agents.sessionsState === 'error' || (agents.sessionsUpdatedAt !== null && agents.now - agents.sessionsUpdatedAt > 45_000))
+const updatedTime = computed(() => agents.sessionsUpdatedAt === null ? '' : new Date(agents.sessionsUpdatedAt).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit', second: '2-digit' }))
 const queue = ref<InstanceType<typeof ApprovalQueue>>()
 
 const sessionId = computed(() => typeof route.params.sessionId === 'string' ? route.params.sessionId : '')
@@ -186,19 +188,28 @@ let poll: ReturnType<typeof setInterval> | undefined
 let clock: ReturnType<typeof setInterval> | undefined
 let debounce: ReturnType<typeof setTimeout> | undefined
 function changed() {
-  clearTimeout(debounce)
-  debounce = setTimeout(() => void agents.loadAll(), 400)
+  if (document.visibilityState === 'hidden' || debounce) return
+  // A fixed batch window cannot be starved by a stream of new worker events.
+  debounce = setTimeout(() => { debounce = undefined; void agents.loadAll() }, 400)
+}
+function visibilityChanged() {
+  if (document.visibilityState !== 'visible') return
+  clearTimeout(debounce); debounce = undefined
+  agents.tick()
+  void agents.loadAll()
 }
 onMounted(() => {
   void agents.loadAll()
   stop = subscribeAgents(changed, value => { live.value = value })
-  poll = setInterval(() => void agents.loadAll(), 20_000)
-  clock = setInterval(() => agents.tick(), 15_000)
+  poll = setInterval(() => { if (document.visibilityState !== 'hidden') void agents.loadAll() }, 20_000)
+  clock = setInterval(() => agents.tick(), 1000)
   window.addEventListener('keydown', keydown)
+  document.addEventListener('visibilitychange', visibilityChanged)
 })
 onBeforeUnmount(() => {
   stop?.(); clearInterval(poll); clearInterval(clock); clearTimeout(debounce)
   window.removeEventListener('keydown', keydown)
+  document.removeEventListener('visibilitychange', visibilityChanged)
 })
 watch(sessionId, id => { if (id) cursor.value = `s:${id}` }, { immediate: true })
 </script>
@@ -213,9 +224,15 @@ watch(sessionId, id => { if (id) cursor.value = `s:${id}` }, { immediate: true }
       </div>
       <div class="head-side">
         <RouterLink v-if="can('keys.manage')" class="context-link" to="/settings/access/agents">Agent keys<AppIcon name="arrow" :size="13" /></RouterLink>
-        <p class="live" :class="{ on: live }" :data-tip="live ? 'Updates arrive as they happen' : 'Refreshing every 20 seconds'">
-          <span class="live-mark" aria-hidden="true" />{{ live ? 'Live' : 'Polling' }}
-        </p>
+        <div class="freshness">
+          <p class="live" :class="{ on: live && !stale }" :data-tip="live ? 'Connected to live updates' : 'Refreshing every 20 seconds'">
+            <span class="live-mark" aria-hidden="true" />{{ stale ? 'Update delayed' : live ? 'Live' : 'Polling' }}
+          </p>
+          <span class="last-updated" role="status">
+            <template v-if="agents.sessionsUpdatedAt !== null">Updated <time :datetime="new Date(agents.sessionsUpdatedAt).toISOString()">{{ updatedTime }}</time></template>
+            <template v-else>Waiting for first update</template>
+          </span>
+        </div>
       </div>
     </header>
 
@@ -267,6 +284,8 @@ watch(sessionId, id => { if (id) cursor.value = `s:${id}` }, { immediate: true }
 .context-link:focus-visible { box-shadow: var(--focus-ring); }
 .summary { margin-top: 6px; min-height: 20px; font-size: 13.5px; color: var(--ink-2); }
 .summary-skeleton { display: inline-block; width: 220px; }
+.freshness { display: flex; flex-wrap: wrap; align-items: center; justify-content: flex-end; gap: 6px 10px; }
+.last-updated { color: var(--ink-2); font-size: 12px; font-variant-numeric: tabular-nums; white-space: nowrap; }
 .live { display: inline-flex; align-items: center; gap: 8px; height: 28px; padding: 0 12px; border-radius: 999px; background: var(--chip-bg); box-shadow: inset 0 0 0 1px var(--chip-line); font-size: 12px; color: var(--ink-2); }
 .live-mark { width: 7px; height: 7px; border-radius: 50%; background: var(--st-backlog); }
 .live.on .live-mark { background: var(--ok); box-shadow: 0 0 0 3px rgba(47, 122, 90, .16); }

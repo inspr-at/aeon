@@ -145,6 +145,7 @@ components:
         ticket_node_id: {type: [string, 'null'], format: uuid}
         work_order_id: {type: [string, 'null'], format: uuid}
         parent_harness_session_id: {type: [string, 'null'], format: uuid}
+        display_label: {type: [string, 'null'], maxLength: 128, description: Optional public label. Trimmed; empty becomes null. Control characters are rejected. Part of exact registration replay.}
         harness: {type: string, enum: [codex, claude, pi, cursor, grok]}
         host: {type: string, maxLength: 128}
         management_mode: {type: string, enum: [managed, unmanaged]}
