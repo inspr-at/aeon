@@ -92,6 +92,55 @@ func TestRemoteUsesAeonRunAndInboxContract(t *testing.T) {
 	}
 }
 
+func TestRemoteRunToolsUseScopedExistingRoutes(t *testing.T) {
+	seen := map[string]map[string]any{}
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if r.Header.Get("Authorization") != "Bearer scoped-key" {
+			t.Error("daemon key missing from Aeon request")
+		}
+		var body map[string]any
+		if r.Body != nil {
+			_ = json.NewDecoder(r.Body).Decode(&body)
+		}
+		seen[r.Method+" "+r.URL.Path] = body
+		w.Header().Set("Content-Type", "application/json")
+		if r.URL.Path == "/api/work-orders/order" {
+			_, _ = w.Write([]byte(`{"node_id":"order","status":"blocked","revision":5}`))
+			return
+		}
+		_, _ = w.Write([]byte(`{}`))
+	}))
+	defer server.Close()
+	r := NewRemote(server.URL, "scoped-key")
+	ctx := t.Context()
+	if err := r.Comment(ctx, "order", "progress"); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := r.SetWorkStatus(ctx, "order", 4, "blocked"); err != nil {
+		t.Fatal(err)
+	}
+	if err := r.CheckCriterion(ctx, "order", "criterion", true); err != nil {
+		t.Fatal(err)
+	}
+	if err := r.Evidence(ctx, "order", "run", "criterion", "tests pass"); err != nil {
+		t.Fatal(err)
+	}
+	if err := r.RequestApproval(ctx, "run", "git.push", "reason", "2026-09-26T18:00:00Z"); err != nil {
+		t.Fatal(err)
+	}
+	if err := r.ReplyInbox(ctx, "message", "sender", "answer", "reply-1"); err != nil {
+		t.Fatal(err)
+	}
+	for _, route := range []string{"POST /api/nodes/order/comments", "PATCH /api/work-orders/order", "POST /api/work-orders/order/criteria/criterion/check", "POST /api/work-orders/order/evidence", "POST /api/approvals", "POST /api/inbox/messages"} {
+		if _, ok := seen[route]; !ok {
+			t.Errorf("missing %s", route)
+		}
+	}
+	if seen["POST /api/work-orders/order/evidence"]["run_id"] != "run" || seen["POST /api/work-orders/order/evidence"]["criterion_id"] != "criterion" || seen["POST /api/inbox/messages"]["reply_to_id"] != "message" || seen["POST /api/inbox/messages"]["recipient_principal_id"] != "sender" {
+		t.Fatal("run or inbox binding was lost")
+	}
+}
+
 func TestRemoteManagedHarnessContract(t *testing.T) {
 	seen := map[string]bool{}
 	var mu sync.Mutex

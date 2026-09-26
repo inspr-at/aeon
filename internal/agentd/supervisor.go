@@ -11,6 +11,7 @@ import (
 	"errors"
 	"fmt"
 	"os"
+	"os/exec"
 	"path/filepath"
 	"strings"
 	"sync"
@@ -59,6 +60,10 @@ type owned struct {
 	inboxCapable  bool
 	pending       []HarnessControl
 	process       Process
+	tools         *managedToolServer
+	replies       map[string]string // delivered message ID -> sender principal
+	replyOrder    []string
+	doneRequested bool
 	monitorDone   chan struct{}
 	stopRequested bool
 }
@@ -297,6 +302,15 @@ func (s *Supervisor) StartRun(ctx context.Context, run Run) error {
 	if node.Body != "" {
 		prompt += "\n\n" + node.Body
 	}
+	prompt += "\n\nAcceptance criteria (check each in Aeon and attach evidence):"
+	for _, criterion := range order.Criteria {
+		prompt += "\n- " + criterion.ID + ": " + criterion.Description
+	}
+	branch := ""
+	if output, branchErr := exec.CommandContext(ctx, "git", "-C", s.workspace, "branch", "--show-current").Output(); branchErr == nil {
+		branch = strings.TrimSpace(string(output))
+	}
+	prompt += "\n\nRun contract: You are bound to work order " + node.Key + " and run " + run.ID + ". Work only in this workspace. Current branch: " + branch + ". Use the Aeon tools to comment, check criteria, attach evidence, request approval, reply, and set status. Use aeon_terminal for tests and a local commit; never push without person approval. Report the commit ID and remaining blockers in your final reply."
 	if len(prompt) > 256<<10 {
 		return errors.New("work order prompt exceeds local bound")
 	}
@@ -343,7 +357,7 @@ func (s *Supervisor) StartRun(ctx context.Context, run Run) error {
 	if err := s.journal.Put(rec); err != nil {
 		return err
 	}
-	entry := &owned{record: rec}
+	entry := &owned{record: rec, replies: map[string]string{}}
 	s.mu.Lock()
 	s.runs[run.ID] = entry
 	s.mu.Unlock()
@@ -388,10 +402,42 @@ func (s *Supervisor) StartRun(ctx context.Context, run Run) error {
 		defer cancel()
 		_ = s.api.StopHarness(cleanup, entry.harness, reason)
 	}
+	var runTools *RunTools
+	if toolAPI, ok := s.api.(RunToolAPI); ok {
+		if signer, ok := s.api.(interface {
+			runCredential(string, string, string, string) string
+		}); ok {
+			active := func() bool {
+				entry.mu.Lock()
+				defer entry.mu.Unlock()
+				return entry.record.Generation == s.generation && (entry.record.State == "starting" || entry.record.State == "running")
+			}
+			replySender := func(messageID string) (string, bool) {
+				entry.mu.Lock()
+				defer entry.mu.Unlock()
+				sender, ok := entry.replies[messageID]
+				return sender, ok
+			}
+			requestDone := func() {
+				entry.mu.Lock()
+				entry.doneRequested = true
+				entry.mu.Unlock()
+			}
+			entry.tools, err = startManagedTools(signer.runCredential(s.tenantID, s.principalID, run.ID, s.generation),
+				toolBinding{api: toolAPI, workOrderID: run.WorkOrderID, runID: run.ID, workspace: s.workspace, branch: branch, active: active, replySender: replySender, requestDone: requestDone})
+			if err != nil {
+				_ = s.update(ctx, entry, Telemetry{Kind: "finished", Status: "failed", ErrorCode: "child_exit_failed"})
+				closeHarness("process_failed")
+				return err
+			}
+			runTools = &entry.tools.tools
+		}
+	}
 	observe := func(ev AdapterEvent) { s.observe(entry, ev) }
 	proc, err := adapter.Start(ctx, StartRequest{TenantID: s.tenantID, PrincipalID: s.principalID, Run: run, Profile: profile,
-		AccountKey: route.AccountKey, Workspace: s.workspace, StateRoot: filepath.Dir(s.journal.JournalPath()), Prompt: prompt, Generation: s.generation}, observe)
+		AccountKey: route.AccountKey, Workspace: s.workspace, StateRoot: filepath.Dir(s.journal.JournalPath()), Prompt: prompt, Generation: s.generation, Tools: runTools}, observe)
 	if err != nil {
+		_ = entry.tools.Close()
 		_ = s.update(ctx, entry, Telemetry{Kind: "finished", Status: "failed", ErrorCode: "child_exit_failed"})
 		closeHarness("process_failed")
 		return err
@@ -403,11 +449,13 @@ func (s *Supervisor) StartRun(ctx context.Context, run Run) error {
 	saveErr := s.journal.Put(entry.record)
 	entry.mu.Unlock()
 	if saveErr != nil {
+		_ = entry.tools.Close()
 		_ = proc.Stop(ctx)
 		closeHarness("process_failed")
 		return saveErr
 	}
 	if err := s.update(ctx, entry, Telemetry{Kind: "started", Status: "running"}); err != nil {
+		_ = entry.tools.Close()
 		_ = proc.Stop(ctx)
 		closeHarness("process_failed")
 		return err
@@ -506,6 +554,7 @@ func (s *Supervisor) monitor(entry *owned) {
 	if proc == nil {
 		return
 	}
+	defer entry.tools.Close()
 	err := proc.Wait()
 	entry.harnessMu.Lock()
 	defer entry.harnessMu.Unlock()
@@ -533,7 +582,21 @@ func (s *Supervisor) monitor(entry *owned) {
 	}
 	ctx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
 	defer cancel()
-	_ = s.update(ctx, entry, Telemetry{Kind: "finished", Status: status, ErrorCode: code})
+	reportErr := s.update(ctx, entry, Telemetry{Kind: "finished", Status: status, ErrorCode: code})
+	entry.mu.Lock()
+	doneRequested := entry.doneRequested
+	entry.mu.Unlock()
+	if reportErr == nil && status == "completed" && doneRequested {
+		if toolAPI, ok := s.api.(RunToolAPI); ok {
+			order, err := s.api.WorkOrder(ctx, entry.record.WorkOrderID)
+			if err == nil {
+				_, err = toolAPI.SetWorkStatus(ctx, order.NodeID, order.Revision, "done")
+			}
+			if err != nil {
+				_ = toolAPI.Comment(ctx, entry.record.WorkOrderID, "The run completed, but the requested done transition was rejected. Check the work-order criteria, evidence, and revision.")
+			}
+		}
+	}
 	reason := "process_exited"
 	if status == "failed" {
 		reason = "process_failed"
@@ -585,14 +648,33 @@ func (s *Supervisor) serviceHarness(ctx context.Context, entry *owned) error {
 			if len(item.Body) > 64<<10 {
 				return errors.New("harness delivery exceeds local bound")
 			}
+			messageText := item.Body
+			if item.MessageID != "" && item.SenderPrincipalID != "" {
+				messageText = "Aeon inbox message " + item.MessageID + " from " + item.SenderPrincipalID + ":\n" + item.Body
+			}
+			if len(messageText) > 64<<10 {
+				messageText = item.Body
+			}
 			req := ControlRequest{TenantID: s.tenantID, PrincipalID: s.principalID,
 				RunID: entry.record.RunID, Generation: s.generation, CorrelationID: item.ID,
-				Operation: "steer", Text: item.Body}
+				Operation: "steer", Text: messageText}
 			if item.SenderPrincipalID == s.principalID {
 				var in inboxControl
 				if json.Unmarshal([]byte(item.Body), &in) == nil && in.RunID != "" {
 					req.RunID, req.Generation, req.Operation, req.Text = in.RunID, in.Generation, in.Operation, in.Text
 				}
+			}
+			if item.MessageID != "" && item.SenderPrincipalID != "" && item.SenderPrincipalID != s.principalID {
+				entry.mu.Lock()
+				if _, seen := entry.replies[item.MessageID]; !seen {
+					if len(entry.replyOrder) == 256 {
+						delete(entry.replies, entry.replyOrder[0])
+						entry.replyOrder = entry.replyOrder[1:]
+					}
+					entry.replyOrder = append(entry.replyOrder, item.MessageID)
+				}
+				entry.replies[item.MessageID] = item.SenderPrincipalID
+				entry.mu.Unlock()
 			}
 			if _, err := s.Control(ctx, req); err != nil {
 				return err
