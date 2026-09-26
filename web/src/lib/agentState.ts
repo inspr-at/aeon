@@ -41,13 +41,58 @@ export function stopReasonLabel(reason: string | null | undefined) {
   return reason.replace(/[_-]+/g, ' ').replace(/^./, c => c.toUpperCase())
 }
 
-// The agent's name: the name part of its message address ("claude:camy" is camy),
+// Prefer the session's public label; otherwise the name part of its message address ("claude:camy" is camy),
 // else the agent principal's own name (aeon-coordinator); the machine it runs on
 // only as a last resort, since a host name is not who the agent is.
-export function agentName(session: Pick<HarnessSession, 'agent_principal_id' | 'host' | 'agent'>, addresses: Record<string, string>) {
+export function agentName(session: Pick<HarnessSession, 'agent_principal_id' | 'host' | 'agent' | 'display_label'>, addresses: Record<string, string>) {
   const address = addresses[session.agent_principal_id]
   const name = address?.split(':')[1]
-  return name || session.agent?.name || session.host
+  return session.display_label?.trim() || name || session.agent?.name || session.host
+}
+
+export const STOPPED_WORKER_GRACE_MS = 30_000
+export interface SessionBranch<T> {
+  view: T; children: SessionBranch<T>[]; group: SessionGroup; liveCount: number; count: number; recent: boolean
+}
+
+// Parent UUIDs, never shared principals or names, establish the tree. A missing
+// or invalid parent leaves a visible root; even malformed cycles lose no rows.
+// Group by the most urgent member so a stopped lead cannot hide working children.
+export function sessionForest<T extends { session: HarnessSession; status: SessionStatus }>(views: T[], now: number): SessionBranch<T>[] {
+  const branches = new Map(views.map(view => [view.session.id, { view, children: [], group: view.status.group, liveCount: 0, count: 0, recent: false } as SessionBranch<T>]))
+  const roots: SessionBranch<T>[] = []
+  for (const branch of branches.values()) {
+    const s = branch.view.session
+    let parent = s.parent_harness_session_id ? branches.get(s.parent_harness_session_id) : undefined
+    if (parent?.view.session.project_id !== s.project_id) parent = undefined
+    const seen = new Set([s.id])
+    for (let ancestor = parent; ancestor;) {
+      const id = ancestor.view.session.id
+      if (seen.has(id)) { parent = undefined; break }
+      seen.add(id)
+      ancestor = branches.get(ancestor.view.session.parent_harness_session_id ?? '')
+    }
+    if (parent) parent.children.push(branch)
+    else roots.push(branch)
+  }
+  const rank = (group: SessionGroup) => GROUPS.findIndex(g => g.id === group)
+  const summarize = (branch: SessionBranch<T>) => {
+    const s = branch.view.session
+    branch.liveCount = branch.view.status.group === 'stopped' ? 0 : 1
+    branch.count = 1
+    branch.recent = branch.liveCount > 0 || now - Date.parse(s.stopped_at ?? s.created_at) < STOPPED_WORKER_GRACE_MS
+    for (const child of branch.children) {
+      summarize(child)
+      branch.count += child.count
+      branch.liveCount += child.liveCount
+      branch.recent ||= child.recent
+      if (rank(child.group) < rank(branch.group)) branch.group = child.group
+    }
+    // Stable start order prevents heartbeat updates moving focused workers.
+    branch.children.sort((a, b) => a.view.session.created_at.localeCompare(b.view.session.created_at) || a.view.session.id.localeCompare(b.view.session.id))
+  }
+  roots.forEach(summarize)
+  return roots
 }
 
 export function needsYou(session: HarnessSession, pending: Approval[], held: ProjectMessage[]) {

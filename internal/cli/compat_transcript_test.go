@@ -344,13 +344,13 @@ func TestHarnessRegistrationFileTranscript(t *testing.T) {
 	if err := os.WriteFile(path, []byte(`{"harness_session_ref":"`+ref+`","worker_lease":"`+lease+`"}`), 0600); err != nil {
 		t.Fatal(err)
 	}
-	args := []string{"paimos", "--config", filepath.Join(t.TempDir(), "missing"), "--json", "harness", "register", "--project", "AEON", "--agent", "worker", "--harness", "codex", "--host", "local", "--registration-file", path}
+	args := []string{"paimos", "--config", filepath.Join(t.TempDir(), "missing"), "--json", "harness", "register", "--project", "AEON", "--agent", "worker", "--harness", "codex", "--host", "local", "--label", "AC4 hierarchy worker", "--registration-file", path}
 	code, out, stderr := runCLI(args, "")
 	if code != 0 || strings.TrimSpace(out) != `{"ok":true}` || stderr != "" {
 		t.Fatalf("register exit %d out %q stderr %q", code, out, stderr)
 	}
 	last := calls[len(calls)-1]
-	if last.method != "POST" || last.path != "/api/projects/"+transcriptProjectID+"/harness-sessions" || last.body["harness_session_ref"] != ref || last.body["worker_lease"] != lease {
+	if last.method != "POST" || last.path != "/api/projects/"+transcriptProjectID+"/harness-sessions" || last.body["harness_session_ref"] != ref || last.body["worker_lease"] != lease || last.body["display_label"] != "AC4 hierarchy worker" {
 		t.Fatalf("request path/body mismatch: %s %s", last.method, last.path)
 	}
 	if strings.Contains(out+stderr, ref) || strings.Contains(out+stderr, lease) {

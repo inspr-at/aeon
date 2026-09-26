@@ -237,7 +237,7 @@ func (rt *runtime) harnessTicket(projectID, key string, classicID int) (*string,
 }
 
 func (rt *runtime) harnessRegister() *Command {
-	var project, agent, harness, host, refFile, leaseFile, registrationFile, management, role, parent, ticket, shape, runID, orderID string
+	var project, agent, harness, host, label, refFile, leaseFile, registrationFile, management, role, parent, ticket, shape, runID, orderID string
 	var ticketIDFlag int
 	var caps []string
 	return &Command{Name: "register", Short: "Register one public harness generation", Use: "harness register --project KEY --agent NAME --harness KIND --host HOST --harness-session-file PATH --worker-lease-file PATH", addFlags: func(fs *flagSet) {
@@ -245,6 +245,7 @@ func (rt *runtime) harnessRegister() *Command {
 		fs.string(&agent, "agent", 0, "agent principal name")
 		fs.string(&harness, "harness", 0, "adapter family")
 		fs.string(&host, "host", 0, "non-secret host label")
+		fs.string(&label, "label", 0, "public session display label (up to 128 characters)")
 		fs.string(&refFile, "harness-session-file", 0, "private external reference file")
 		fs.string(&leaseFile, "worker-lease-file", 0, "private generation lease file")
 		fs.string(&registrationFile, "registration-file", 0, "private JSON with both registration secrets, or - for stdin")
@@ -338,7 +339,7 @@ func (rt *runtime) harnessRegister() *Command {
 			order = &orderID
 		}
 		var out any
-		err = rt.harnessDo(http.MethodPost, harnessPath(projectID, ""), "", map[string]any{"agent_principal_id": me.Principal.ID, "harness": harness, "host": host, "harness_session_ref": ref, "worker_lease": lease, "management_mode": management, "role": role, "parent_harness_session_id": parentID, "ticket_node_id": ticketID, "work_shape": shape, "work_order_id": order, "run_id": run, "advertised_capabilities": caps}, &out)
+		err = rt.harnessDo(http.MethodPost, harnessPath(projectID, ""), "", map[string]any{"agent_principal_id": me.Principal.ID, "harness": harness, "host": host, "display_label": label, "harness_session_ref": ref, "worker_lease": lease, "management_mode": management, "role": role, "parent_harness_session_id": parentID, "ticket_node_id": ticketID, "work_shape": shape, "work_order_id": order, "run_id": run, "advertised_capabilities": caps}, &out)
 		if err != nil {
 			return err
 		}

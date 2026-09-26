@@ -3,7 +3,7 @@ import { test } from 'node:test'
 import assert from 'node:assert/strict'
 import {
   agentName, bindingWindow, controlBlocked, cost, decidedApprovals, duration, expiresIn, groupSessions, heldRequests, needsYou,
-  pendingApprovals, riskFor, riskOf, runDuration, scopeLabel, sessionStatus, tokens, windowSummary,
+  pendingApprovals, riskFor, riskOf, runDuration, scopeLabel, sessionStatus, sessionForest, STOPPED_WORKER_GRACE_MS, tokens, windowSummary,
 } from '../src/lib/agentState.ts'
 import type { AllowanceWindow, Approval, HarnessSession, ProjectMessage } from '../src/lib/agents.ts'
 
@@ -22,6 +22,46 @@ function approval(fields: Partial<Approval> = {}): Approval {
 function message(fields: Partial<ProjectMessage> = {}): ProjectMessage {
   return { id: 'm1', sender_principal_id: 'a2', recipient_principal_id: 'a1', to: 'claude:camy', body: 'x', sent_event_id: 1, is_action_request: false, expects_reply: false, delivery_level: 'simple', status: 'accepted', reply_obligation: 'none', ...fields }
 }
+
+test('per-session labels distinguish workers sharing a principal and address', () => {
+  const shared = { a1: 'claude:coordinator' }
+  assert.equal(agentName(session({ display_label: 'AC4 hierarchy' }), shared), 'AC4 hierarchy')
+  assert.equal(agentName(session({ display_label: 'AC5 launch' }), shared), 'AC5 launch')
+  assert.equal(agentName(session({ display_label: '  ' }), shared), 'coordinator')
+})
+
+test('session families cross status groups without losing any worker or orphan', () => {
+  const sessions = [
+    session({ id: 'child', parent_harness_session_id: 'lead' }),
+    session({ id: 'lead', role: 'coordinator', phase: 'stopped', stopped_at: ago(5) }),
+    session({ id: 'grandchild', parent_harness_session_id: 'child', activity: 'idle' }),
+    session({ id: 'orphan', parent_harness_session_id: 'unavailable' }),
+    session({ id: 'foreign-project', project_id: 'p2', parent_harness_session_id: 'lead' }),
+  ]
+  const views = sessions.map(s => ({ session: s, status: sessionStatus(s, now) }))
+  const tree = sessionForest(views, now)
+  assert.deepEqual(tree.map(n => n.view.session.id), ['lead', 'orphan', 'foreign-project'])
+  assert.equal(tree[0]!.group, 'working')
+  assert.equal(tree[0]!.count, 3)
+  assert.equal(tree[0]!.liveCount, 2)
+  assert.equal(tree[0]!.children[0]!.children[0]!.view.session.id, 'grandchild')
+  assert.equal(views[1]!.status.label, 'Stopped')
+})
+
+test('finished workers remain recent for thirty seconds, with no fabricated stop from a stale heartbeat', () => {
+  const stopped = session({ phase: 'stopped', stopped_at: new Date(now).toISOString() })
+  const view = { session: stopped, status: sessionStatus(stopped, now) }
+  assert.equal(sessionForest([view], now + STOPPED_WORKER_GRACE_MS - 1)[0]!.recent, true)
+  assert.equal(sessionForest([view], now + STOPPED_WORKER_GRACE_MS)[0]!.recent, false)
+  const stale = session({ heartbeat_at: ago(30) })
+  assert.equal(sessionForest([{ session: stale, status: sessionStatus(stale, now) }], now)[0]!.liveCount, 1)
+})
+
+test('invalid cyclic session bindings remain visible instead of recursing or disappearing', () => {
+  const sessions = [session({ id: 'a', parent_harness_session_id: 'b' }), session({ id: 'b', parent_harness_session_id: 'a' }), session({ id: 'self', parent_harness_session_id: 'self' })]
+  const tree = sessionForest(sessions.map(s => ({ session: s, status: sessionStatus(s, now) })), now)
+  assert.deepEqual(tree.map(n => n.view.session.id), ['a', 'b', 'self'])
+})
 
 test('session states: working, starting, stopping, waiting, idle, no heartbeat, stopped', () => {
   assert.deepEqual(sessionStatus(session(), now), { group: 'working', tone: 'busy', label: 'Working' })

@@ -21,7 +21,6 @@ export interface SessionView {
 export type HeldRequest = ProjectMessage & { projectId: string }
 
 const FAN_OUT = 6
-const SESSION_PAGES = 2
 const availability = (e: unknown): Availability => e instanceof APIError && e.status === 403 ? 'forbidden' : 'error'
 const describe = (e: unknown) => e instanceof APIError ? `The server answered “${e.message}” (${e.status}).` : message(e)
 async function all<T>(items: T[], work: (item: T) => Promise<void>) {
@@ -36,6 +35,11 @@ export const useAgents = defineStore('agents', () => {
   const sessions = ref<HarnessSession[]>([])
   const sessionsState = ref<Availability>('idle')
   const sessionsError = ref('')
+  const sessionsUpdatedAt = ref<number | null>(null)
+  let sessionsFlight: Promise<void> | undefined
+  let sessionsAgain = false
+  let loadFlight: Promise<void> | undefined
+  let loadAgain = false
   const approvals = ref<Approval[]>([])
   const approvalsState = ref<Availability>('idle')
   const approvalsError = ref('')
@@ -79,19 +83,30 @@ export const useAgents = defineStore('agents', () => {
   }
   async function refreshModels() { if (!models.value.length) try { models.value = await listModels() } catch { /* model names fall back to the run's */ } }
   // Tenant-wide, newest first, with project and ticket summaries.
-  async function refreshSessions() {
-    try {
-      const out: HarnessSession[] = []
-      let cursor: string | undefined
-      for (let page = 0; page < SESSION_PAGES; page++) {
-        const result = await listAllSessions({ cursor })
-        out.push(...result.items)
-        if (!result.next_cursor) break
-        cursor = result.next_cursor
-      }
-      sessions.value = out
-      sessionsState.value = 'ready'; sessionsError.value = ''
-    } catch (e) { sessionsState.value = availability(e); sessionsError.value = describe(e) }
+  function refreshSessions(): Promise<void> {
+    if (sessionsFlight) { sessionsAgain = true; return sessionsFlight }
+    sessionsFlight = (async () => {
+      do {
+        sessionsAgain = false
+        try {
+          const out = new Map<string, HarnessSession>()
+          const cursors = new Set<string>()
+          let cursor: string | undefined
+          do {
+            const result = await listAllSessions({ cursor })
+            for (const item of result.items) out.set(item.id, item)
+            cursor = result.next_cursor ?? undefined
+            if (cursor && cursors.has(cursor)) throw new Error('Session pagination did not advance. Please retry.')
+            if (cursor) cursors.add(cursor)
+          } while (cursor)
+          sessions.value = [...out.values()]
+          sessionsUpdatedAt.value = Date.now()
+          now.value = Date.now()
+          sessionsState.value = 'ready'; sessionsError.value = ''
+        } catch (e) { sessionsState.value = availability(e); sessionsError.value = describe(e) }
+      } while (sessionsAgain)
+    })().finally(() => { sessionsFlight = undefined })
+    return sessionsFlight
   }
   // The newest runs cover the rows' account, model and telemetry in one read.
   async function refreshRuns() {
@@ -124,15 +139,22 @@ export const useAgents = defineStore('agents', () => {
     await all(ids, async id => { const node = await getNode(id); nodes.value = { ...nodes.value, [id]: { id, key: node.key, title: node.title } } })
   }
 
-  async function loadAll() {
+  function loadAll(): Promise<void> {
+    // A slow optional detail read must never hold up a new session wake.
+    const sessionRead = refreshSessions()
+    if (loadFlight) { loadAgain = true; return Promise.all([loadFlight, sessionRead]).then(() => {}) }
     loading.value = true
-    try {
-      await projects.load()
-      await Promise.all([refreshApprovals(), refreshSessions(), refreshRuns(), refreshAccounts(), refreshModels()])
-      await Promise.all([refreshMessaging(), resourceNodes()])
-      loaded.value = true
-      needsAt = Date.now()
-    } finally { loading.value = false; now.value = Date.now() }
+    loadFlight = (async () => {
+      do {
+        loadAgain = false
+        // Sessions do not wait for optional project or account metadata.
+        await Promise.all([projects.load(), refreshApprovals(), sessionRead, refreshRuns(), refreshAccounts(), refreshModels()])
+        await Promise.all([refreshMessaging(), resourceNodes()])
+        loaded.value = true
+        needsAt = Date.now()
+      } while (loadAgain)
+    })().finally(() => { loadFlight = undefined; loading.value = false; now.value = Date.now() })
+    return loadFlight
   }
   // The header badge: approvals and held action requests, at most every 30 seconds.
   async function loadNeeds(force = false) {
@@ -263,7 +285,7 @@ export const useAgents = defineStore('agents', () => {
   function tick() { now.value = Date.now() }
 
   return {
-    now, sessions, sessionsState, sessionsError, approvals, approvalsState, approvalsError, accounts, accountsState, messagingState, runs, nodes, controls,
+    now, sessions, sessionsState, sessionsError, sessionsUpdatedAt, approvals, approvalsState, approvalsError, accounts, accountsState, messagingState, runs, nodes, controls,
     loading, loaded, pending, held, needsCount, views, grouped,
     loadAll, loadNeeds, ensureTicket, refreshApprovals, refreshSessions, refreshThread, refreshAgentRuns, tick,
     viewOf, byAgent, forTicket, recentRuns, askerName, thread, addressOf, decide, revoke, resolve, control, send, setAccount,
