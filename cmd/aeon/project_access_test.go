@@ -270,6 +270,59 @@ func TestProjectAccessOverHTTP(t *testing.T) {
 	}
 	w.expect(guest, "GET", "/api/audit?category=access", "", 403)
 	w.noLeak(guest, "/api/events after removal", w.expect(guest, "GET", "/api/events?limit=200", "", 200))
+
+	// Review findings 1 and 2. The owner moves B's work into A: a plain move,
+	// a project move with its journey, and a move by a member of both.
+	lastEvent := func(node, typ string) string {
+		t.Helper()
+		var id string
+		if err := w.d.Admin.QueryRow(ctx, `SELECT id::text FROM events WHERE node_id=$1 AND type=$2 AND undo_of IS NULL ORDER BY id DESC LIMIT 1`, w.ids[node], typ).Scan(&id); err != nil {
+			t.Fatalf("event %s on %s: %v", typ, node, err)
+		}
+		return id
+	}
+	w.expect("owner", "POST", "/api/nodes/"+w.ids["TB2"]+"/move", `{"parent_id":"`+w.ids["A"]+`"}`, 200)
+	w.expect("owner", "POST", "/api/nodes/"+w.ids["TB3"]+"/project-move", `{"project_id":"`+w.ids["A"]+`"}`, 200)
+	w.expect("mixed2", "POST", "/api/nodes/"+w.ids["TB4"]+"/move", `{"parent_id":"`+w.ids["A"]+`"}`, 200)
+
+	// Finding 2: the guest of A sees the moved tickets, but none of the
+	// history that names B (former parent, former project, journey, links).
+	for _, node := range []string{"TB2", "TB3", "TB4"} {
+		w.expect(guest, "GET", "/api/nodes/"+w.ids[node], "", 200)
+		for _, path := range []string{"/api/events?node_id=" + w.ids[node], "/api/nodes/" + w.ids[node] + "/activity"} {
+			w.noLeak(guest, path, w.expect(guest, "GET", path, "", 200))
+		}
+	}
+	w.noLeak(guest, "/api/events after moves", w.expect(guest, "GET", "/api/events?limit=200", "", 200))
+	w.noLeak(guest, "/api/events/stream after moves", w.stream(guest))
+
+	// Finding 1: undo is decided in every project it writes to. A project
+	// admin on A who is only a guest on B cannot send the work back into B or
+	// undo links to B; the author of a move cannot either once demoted on B.
+	w.expect("admin-a", "POST", "/api/events/"+lastEvent("TB2", "node.moved")+"/undo", "", 403)
+	w.expect("admin-a", "POST", "/api/events/"+lastEvent("TB3", "node.project_moved")+"/undo", "", 403)
+	var crossRelation struct{ ID string }
+	w.decode(w.expect("owner", "POST", "/api/relations", `{"source_node_id":"`+w.ids["TA2"]+`","target_node_id":"`+w.ids["TB"]+`","type":"blocks"}`, 201), &crossRelation)
+	w.expect("admin-a", "POST", "/api/events/"+lastEvent("TA2", "relation.created")+"/undo", "", 403)
+	w.expect("owner", "DELETE", "/api/relations/"+crossRelation.ID, "", 204)
+	w.expect("admin-a", "POST", "/api/events/"+lastEvent("TA2", "relation.deleted")+"/undo", "", 403)
+	if _, err := w.d.Admin.Exec(ctx, `UPDATE role_bindings SET role_id=$1 WHERE principal_id=$2 AND scope_id=$3`, w.ids["role:guest"], w.people["mixed2"], w.ids["B"]); err != nil {
+		t.Fatal(err)
+	}
+	w.expect("mixed2", "POST", "/api/events/"+lastEvent("TB4", "node.moved")+"/undo", "", 403)
+	var stillA int
+	if err := w.d.Admin.QueryRow(ctx, `SELECT count(*) FROM nodes WHERE id = ANY($1::uuid[]) AND project_id=$2`, []string{w.ids["TB2"], w.ids["TB3"], w.ids["TB4"]}, w.ids["A"]).Scan(&stillA); err != nil || stillA != 3 {
+		t.Errorf("moved tickets back in B: %d of 3 still in A (%v)", stillA, err)
+	}
+	var journeyProject string
+	if err := w.d.Admin.QueryRow(ctx, `SELECT project_node_id::text FROM journey_tickets WHERE ticket_node_id=$1`, w.ids["TB3"]).Scan(&journeyProject); err != nil || journeyProject != w.ids["A"] {
+		t.Errorf("project move undone into B: journey project %s (%v)", journeyProject, err)
+	}
+	// With write access in both projects, the same undos work.
+	w.expect("owner", "POST", "/api/events/"+lastEvent("TB2", "node.moved")+"/undo", "", 201)
+	w.expect("owner", "POST", "/api/events/"+lastEvent("TB3", "node.project_moved")+"/undo", "", 201)
+	w.expect("owner", "POST", "/api/events/"+lastEvent("TA2", "relation.deleted")+"/undo", "", 201)
+	w.noLeak(guest, "/api/events after undo", w.expect(guest, "GET", "/api/events?limit=200", "", 200))
 }
 
 func contains(list []string, want string) bool {
@@ -312,6 +365,10 @@ func (w *accessWorld) seed() {
 		node("TA", "ticket", "TA-1", "A")
 		node("TA2", "ticket", "TA-2", "A")
 		node("TB", "ticket", "TB-1", "B")
+		// Work of B that is moved into A later (review findings 1 and 2).
+		node("TB2", "ticket", "TB-2", "B")
+		node("TB3", "ticket", "TB-3", "B")
+		node("TB4", "ticket", "TB-4", "B")
 		node("GA", "guideline", "GA-1", "A")
 		node("GB", "guideline", "GB-1", "B")
 		var ticketKind string
@@ -351,6 +408,9 @@ func (w *accessWorld) seed() {
 			if _, err := tx.Exec(ctx, `INSERT INTO journey_projects(tenant_id,project_node_id) VALUES($1,$2)`, w.tid, w.ids[p]); err != nil {
 				return err
 			}
+		}
+		if _, err := tx.Exec(ctx, `INSERT INTO journey_tickets(tenant_id,ticket_node_id,project_node_id,walker_position,source) VALUES($1,$2,$3,0,'manual')`, w.tid, w.ids["TB3"], w.ids["B"]); err != nil {
+			return err
 		}
 		// Operational history recorded on project A's node stays with the
 		// workspace: agent sessions and access changes are not project work.
@@ -397,10 +457,18 @@ func (w *accessWorld) seed() {
 		dbtest.BindRole(t, w.d, w.tid, person(role), role)
 	}
 	bindProject(person("guest"), "guest", "A")
+	// A project admin on A who is only a guest on B, and a member of both
+	// who is demoted to guest on B after acting there.
+	adminA := person("admin-a")
+	bindProject(adminA, "admin", "A")
+	bindProject(adminA, "guest", "B")
+	mixed2 := person("mixed2")
+	bindProject(mixed2, "member", "A")
+	bindProject(mixed2, "member", "B")
 	mixed := person("mixed")
 	bindProject(mixed, "member", "A")
 	bindProject(mixed, "guest", "B")
-	for _, name := range []string{"owner", "member", "viewer", "customer", "guest", "mixed"} {
+	for _, name := range []string{"owner", "member", "viewer", "customer", "guest", "mixed", "admin-a", "mixed2"} {
 		jar, _ := cookiejar.New(nil)
 		client := &http.Client{Jar: jar, Timeout: 20 * time.Second}
 		resp, err := client.Post(w.base+"/api/auth/dev-login", "application/json", strings.NewReader(`{"email":"`+name+`@p2.example.test","tenant":"p2-http"}`))

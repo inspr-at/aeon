@@ -14,6 +14,7 @@ import (
 
 	"github.com/jackc/pgx/v5"
 
+	"github.com/inspr-at/aeon/internal/authz"
 	"github.com/inspr-at/aeon/internal/events"
 	"github.com/inspr-at/aeon/internal/principallink"
 	"github.com/inspr-at/aeon/internal/tenant"
@@ -549,12 +550,39 @@ func undoBulk(ctx context.Context, tx pgx.Tx, p tenant.Principal, e events.Event
 	for _, t := range loaded {
 		current[t.node.ID] = t.node
 	}
-	var was, restored []bulkSnap
+	// Decide the whole batch before writing anything: an edit needs
+	// nodes.write in the node's project, a move nodes.move in every project it
+	// changes (ADR-003 P2).
+	projects := map[string]string{}
+	for _, t := range loaded {
+		projects[t.node.ID] = deref(t.projectID)
+	}
 	for i, want := range after.Items {
 		now, ok := current[want.ID]
 		if !ok || !now.UpdatedAt.Equal(want.UpdatedAt) {
 			return events.Change{}, events.ErrConflict
 		}
+		old := before.Items[i]
+		if old.State != now.State || !sameJSON(old.Fields, now.Fields) {
+			if err := authz.RequireInProjects(ctx, tx, p, "nodes.write", projects[now.ID]); err != nil {
+				return events.Change{}, events.ErrForbidden
+			}
+		}
+		if !sameString(old.ParentID, now.ParentID) {
+			if err := requireMove(ctx, tx, p, now.ID, old.ParentID); err != nil {
+				if errors.Is(err, errMoveForbidden) {
+					return events.Change{}, events.ErrForbidden
+				}
+				if errors.Is(err, pgx.ErrNoRows) {
+					return events.Change{}, events.ErrConflict
+				}
+				return events.Change{}, err
+			}
+		}
+	}
+	var was, restored []bulkSnap
+	for i, want := range after.Items {
+		now := current[want.ID]
 		old := before.Items[i]
 		latest := now
 		if old.State != now.State || !sameJSON(old.Fields, now.Fields) {

@@ -677,35 +677,68 @@ func scanNode(row pgx.Row) (nodeJSON, error) {
 	return n, nil
 }
 
-// requireMoveTarget: the route was authorized in the node's current project.
-// A move into another project (or out of every project) also needs nodes.move
-// there, so a project binding never carries work into a project where the
-// caller holds less (ADR-003 P2).
-func requireMoveTarget(ctx context.Context, tx pgx.Tx, p tenant.Principal, nodeID string, parentID *string) error {
-	var source, target *string
-	if err := tx.QueryRow(ctx, `SELECT project_id::text FROM nodes WHERE id=$1::uuid`, nodeID).Scan(&source); err != nil {
+// errMoveForbidden: the caller lacks nodes.move in a project a move changes.
+var errMoveForbidden = errors.New("move not permitted")
+
+// moveScopes lists the projects a re-parenting changes, "" standing for the
+// workspace: the node's own project, the project of its current parent and
+// the project of its new parent (no parent, or a parent outside every
+// project, is the workspace). A parent the caller cannot see resolves to
+// pgx.ErrNoRows for the new parent and to the workspace for the current one.
+func moveScopes(ctx context.Context, tx pgx.Tx, nodeID string, newParent *string) ([]string, error) {
+	var own, currentParentProject *string
+	var hasParent, parentVisible bool
+	if err := tx.QueryRow(ctx, `SELECT n.project_id::text, n.parent_id IS NOT NULL, p.id IS NOT NULL, p.project_id::text
+		FROM nodes n LEFT JOIN nodes p ON p.tenant_id=n.tenant_id AND p.id=n.parent_id
+		WHERE n.id=$1::uuid`, nodeID).Scan(&own, &hasParent, &parentVisible, &currentParentProject); err != nil {
+		return nil, err
+	}
+	scopes := []string{deref(own), ""}
+	if hasParent && parentVisible {
+		scopes[1] = deref(currentParentProject)
+	}
+	if newParent == nil {
+		return append(scopes, ""), nil
+	}
+	var target *string
+	if err := tx.QueryRow(ctx, `SELECT project_id::text FROM nodes WHERE id=$1::uuid AND deleted_at IS NULL`, *newParent).Scan(&target); err != nil {
+		return nil, err
+	}
+	return append(scopes, deref(target)), nil
+}
+
+// requireMove decides a re-parenting in every project it changes (ADR-003
+// P2): moving work out of a project, into another or back by undo needs
+// nodes.move in each, so a project binding never carries work into (or out
+// of) a project where the caller holds less.
+func requireMove(ctx context.Context, tx pgx.Tx, p tenant.Principal, nodeID string, newParent *string) error {
+	scopes, err := moveScopes(ctx, tx, nodeID, newParent)
+	if err != nil {
 		return err
 	}
-	if parentID != nil {
-		err := tx.QueryRow(ctx, `SELECT project_id::text FROM nodes WHERE id=$1::uuid AND deleted_at IS NULL`, *parentID).Scan(&target)
-		if errors.Is(err, pgx.ErrNoRows) {
-			return notFound("parent not found")
-		}
-		if err != nil {
-			return err
-		}
-	}
-	if sameString(source, target) {
-		return nil
-	}
-	scope := authz.Scope{}
-	if target != nil {
-		scope.ProjectID = *target
-	}
-	if authz.RequireTx(ctx, tx, p, "nodes.move", scope) != nil {
-		return &httpError{status: http.StatusForbidden, msg: "permission denied"}
+	if authz.RequireInProjects(ctx, tx, p, "nodes.move", scopes...) != nil {
+		return errMoveForbidden
 	}
 	return nil
+}
+
+func deref(s *string) string {
+	if s == nil {
+		return ""
+	}
+	return *s
+}
+
+// requireMoveTarget is requireMove for the move routes, as an API error.
+func requireMoveTarget(ctx context.Context, tx pgx.Tx, p tenant.Principal, nodeID string, parentID *string) error {
+	err := requireMove(ctx, tx, p, nodeID, parentID)
+	switch {
+	case errors.Is(err, errMoveForbidden):
+		return &httpError{status: http.StatusForbidden, msg: "permission denied"}
+	case errors.Is(err, pgx.ErrNoRows):
+		return notFound("parent not found")
+	}
+	return err
 }
 
 // requireCreateTarget decides node creation in the project the new node joins

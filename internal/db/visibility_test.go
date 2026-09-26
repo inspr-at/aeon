@@ -4,6 +4,9 @@ package db_test
 
 import (
 	"context"
+	"encoding/json"
+	"fmt"
+	"reflect"
 	"strings"
 	"testing"
 
@@ -318,7 +321,16 @@ func TestProjectAccessMigrationsRunUnderForcedRLS(t *testing.T) {
 	if _, err := d.Admin.Exec(ctx, `ALTER TABLE role_bindings ENABLE TRIGGER role_bindings_guest_project_only`); err != nil {
 		t.Fatal(err)
 	}
-	for _, name := range []string{"0820_node_project_root.sql", "0822_guest_project_only.sql"} {
+	// An event naming both tickets, with its recorded references cleared.
+	if _, err := d.Admin.Exec(ctx, `INSERT INTO events(tenant_id,actor_principal_id,node_id,type,after) VALUES($1,$2,$3::uuid,'relation.created',jsonb_build_object('source_node_id',$3::text,'target_node_id',$4::text))`, one.tenant, one.actor, one.ticketA, one.ticketB); err != nil {
+		t.Fatal(err)
+	}
+	for _, stmt := range []string{`ALTER TABLE events DISABLE TRIGGER events_no_update_delete`, `UPDATE events SET node_refs='{}'`, `ALTER TABLE events ENABLE TRIGGER events_no_update_delete`} {
+		if _, err := d.Admin.Exec(ctx, stmt); err != nil {
+			t.Fatal(err)
+		}
+	}
+	for _, name := range []string{"0820_node_project_root.sql", "0822_guest_project_only.sql", "0823_event_reference_visibility.sql"} {
 		body, err := migrationFiles.ReadFile("migrations/" + name)
 		if err != nil {
 			t.Fatal(err)
@@ -344,6 +356,13 @@ func TestProjectAccessMigrationsRunUnderForcedRLS(t *testing.T) {
 		if missing != 0 || wrong != 0 {
 			t.Fatalf("tenant %s backfill: %d missing, %d wrong", f.tenant, missing, wrong)
 		}
+	}
+	var refs []string
+	if err := d.Admin.QueryRow(ctx, `SELECT array(SELECT unnest(node_refs)::text ORDER BY 1) FROM events WHERE type='relation.created' AND tenant_id=$1`, one.tenant).Scan(&refs); err != nil {
+		t.Fatal(err)
+	}
+	if want := []string{min(one.ticketA, one.ticketB), max(one.ticketA, one.ticketB)}; len(refs) != 2 || refs[0] != want[0] || refs[1] != want[1] {
+		t.Fatalf("backfilled references %v, want %v", refs, want)
 	}
 	var guests, events int
 	if err := d.Admin.QueryRow(ctx, `SELECT
@@ -372,4 +391,101 @@ func TestProjectAccessMigrationsRunUnderForcedRLS(t *testing.T) {
 	if err == nil || !strings.Contains(err.Error(), "guest is a project role") {
 		t.Fatalf("workspace guest binding: %v", err)
 	}
+}
+
+// Review finding 2: an event about a visible node is hidden from a caller who
+// does not see every node it names (former parent, former project, journey
+// references, relation ends, classic relation targets, ID lists); a value
+// that is no node ID hides it too. A caller who sees both projects reads all.
+func TestEventReferencesFollowVisibility(t *testing.T) {
+	d := dbtest.Open(t)
+	f := newVisibilityFixture(t, d, "p2-event-refs")
+	ctx := t.Context()
+	a, b := f.projectA, f.projectB
+	events := []struct {
+		name, typ, before, after string
+		hiddenFromA              bool
+	}{
+		{"moved from B", "node.moved", `{"id":"` + f.ticketA + `","parent_id":"` + b + `"}`, `{"id":"` + f.ticketA + `","parent_id":"` + a + `"}`, true},
+		{"moved within A", "node.moved", `{"id":"` + f.ticketA + `","parent_id":"` + a + `"}`, `{"id":"` + f.ticketA + `","parent_id":"` + a + `"}`, false},
+		{"project move from B", "node.project_moved", `{"node":{"parent_id":"` + b + `","key":"PB-9"},"journey":{"project_id":"` + b + `","feature_id":null,"release_id":null}}`, `{"node":{"parent_id":"` + a + `"},"journey":{"project_id":"` + a + `"}}`, true},
+		{"classic parent change", "import.parent_changed", `{"parent_id":"` + a + `","project_id":"` + b + `"}`, `{"parent_id":"` + a + `","project_id":"` + a + `"}`, true},
+		{"relation to B", "relation.created", ``, `{"source_node_id":"` + f.ticketA + `","target_node_id":"` + f.ticketB + `"}`, true},
+		{"classic relation to B", "import.relation", ``, `{"record":{"target_key":"TB-1","target_title":"secret"}}`, true},
+		{"classic relation within A", "import.relation", ``, `{"record":{"target_key":"PA-1"}}`, false},
+		{"classic relation to nowhere", "import.relation", ``, `{"record":{"target_key":"NONE-1"}}`, true},
+		{"plan naming B", "journey.release_planned", ``, `{"ordered_ticket_ids":["` + f.ticketA + `","` + f.ticketB + `"]}`, true},
+		{"plan within A", "journey.release_planned", ``, `{"ordered_ticket_ids":["` + f.ticketA + `"]}`, false},
+		{"malformed reference", "node.updated", ``, `{"parent_id":"not-a-node"}`, true},
+		{"numeric reference", "node.updated", ``, `{"parent_id":7}`, true},
+		{"classic record numbers", "import.history", ``, `{"record":{"issue_id":7,"project_id":9}}`, false},
+		{"free-form fields", "node.updated", ``, `{"parent_id":"` + a + `","fields":{"release":{"id":3}}}`, false},
+		{"plain comment", "comment.created", ``, `{"body_markdown":"hi"}`, false},
+	}
+	err := db.InTenant(dbtest.Seed(ctx), d.App, f.tenant, func(tx pgx.Tx) error {
+		for _, e := range events {
+			var before any
+			if e.before != "" {
+				before = e.before
+			}
+			if _, err := tx.Exec(ctx, `INSERT INTO events(tenant_id,actor_principal_id,node_id,type,before,after) VALUES($1,$2,$3,$4,$5::jsonb,$6::jsonb)`,
+				f.tenant, f.actor, f.ticketA, e.typ, before, e.after); err != nil {
+				return fmt.Errorf("%s: %w", e.name, err)
+			}
+		}
+		return nil
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	visible := func(ctx context.Context) map[string]bool {
+		out := map[string]bool{}
+		err := db.InTenant(ctx, d.App, f.tenant, func(tx pgx.Tx) error {
+			rows, err := tx.Query(ctx, `SELECT type, coalesce(before::text,''), after::text FROM events WHERE node_id=$1`, f.ticketA)
+			if err != nil {
+				return err
+			}
+			defer rows.Close()
+			for rows.Next() {
+				var typ, before, after string
+				if err := rows.Scan(&typ, &before, &after); err != nil {
+					return err
+				}
+				for _, e := range events {
+					if e.typ == typ && jsonEqual(t, e.after, after) && (e.before == "" && before == "" || e.before != "" && before != "" && jsonEqual(t, e.before, before)) {
+						out[e.name] = true
+					}
+				}
+			}
+			return rows.Err()
+		})
+		if err != nil {
+			t.Fatal(err)
+		}
+		return out
+	}
+	onlyA := visible(db.OnlyProjects(ctx, a))
+	both := visible(db.OnlyProjects(ctx, a, b))
+	all := visible(db.AllProjects(ctx, "test"))
+	for _, e := range events {
+		if onlyA[e.name] == e.hiddenFromA {
+			t.Errorf("%s: visible to a caller of A only = %v", e.name, onlyA[e.name])
+		}
+		if !all[e.name] {
+			t.Errorf("%s: hidden from every-project visibility", e.name)
+		}
+		wantBoth := !strings.Contains(e.name, "malformed") && !strings.Contains(e.name, "numeric") && !strings.Contains(e.name, "nowhere")
+		if both[e.name] != wantBoth {
+			t.Errorf("%s: visible to a caller of A and B = %v, want %v", e.name, both[e.name], wantBoth)
+		}
+	}
+}
+
+func jsonEqual(t *testing.T, a, b string) bool {
+	t.Helper()
+	var x, y any
+	if json.Unmarshal([]byte(a), &x) != nil || json.Unmarshal([]byte(b), &y) != nil {
+		return false
+	}
+	return reflect.DeepEqual(x, y)
 }

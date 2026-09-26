@@ -87,6 +87,24 @@ func requireTx(ctx context.Context, tx pgx.Tx, p tenant.Principal, permission st
 	return permitEffective(p, permission, effective, scope)
 }
 
+// RequireInProjects decides permission in each listed project separately; ""
+// stands for the workspace (a node outside every project). A write that
+// changes several projects, such as a move or its undo, needs the permission
+// in every one of them, never just in the project its route was decided in.
+func RequireInProjects(ctx context.Context, tx pgx.Tx, p tenant.Principal, permission string, projectIDs ...string) error {
+	seen := map[string]bool{}
+	for _, id := range projectIDs {
+		if seen[id] {
+			continue
+		}
+		seen[id] = true
+		if err := requireTx(ctx, tx, p, permission, Scope{ProjectID: id}); err != nil {
+			return err
+		}
+	}
+	return nil
+}
+
 // RequireTx makes a decision inside an existing db.InTenant transaction. It
 // is used by handlers whose resource lock and access check must be atomic.
 func RequireTx(ctx context.Context, tx pgx.Tx, p tenant.Principal, permission string, scope Scope) error {

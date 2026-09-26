@@ -25,7 +25,10 @@
 // visibility), or any bound project for ProjectFilteredRoutes, whose data RLS
 // confines. ProjectDecidedRoutes create items named in the body; their
 // handlers require the permission in the item's project. RouteScope carries
-// the decision to handlers that recheck.
+// the decision to handlers that recheck. A write that changes several
+// projects (a move, a relation, the undo of either) needs the permission in
+// every one of them (RequireInProjects), never only where its route was
+// decided.
 // Deactivated principals have no effective permissions. Database triggers
 // revoke their sessions and keys and protect the last active workspace owner.
 // Service principals have no binding and use explicit internal call paths.
