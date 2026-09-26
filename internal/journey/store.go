@@ -802,6 +802,22 @@ func requirePerson(ctx context.Context, tx pgx.Tx, p tenant.Principal) error {
 }
 
 func writeEvent(ctx context.Context, tx pgx.Tx, p tenant.Principal, projectID, eventType string, before, after any) (int64, error) {
+	production, _ := ctx.Value(productionContextKey{}).(bool)
+	if production {
+		encoded, err := json.Marshal(after)
+		if err != nil {
+			return 0, err
+		}
+		var fields map[string]json.RawMessage
+		if err := json.Unmarshal(encoded, &fields); err != nil {
+			return 0, err
+		}
+		if fields == nil {
+			return 0, errors.New("production event requires an object snapshot")
+		}
+		fields["production"] = json.RawMessage("true")
+		after = fields
+	}
 	ev, err := events.Append(ctx, tx, p, events.Change{
 		NodeID: &projectID,
 		Type:   eventType,

@@ -21,7 +21,7 @@ import (
 	"github.com/inspr-at/aeon/internal/tenantbootstrap"
 )
 
-const operatorUsage = "usage: aeon journey mark-disposable --tenant SLUG --project KEY | aeon journey seed --tenant SLUG --project KEY --to-stage build|candidate|deploy"
+const operatorUsage = "usage: aeon journey mark-disposable --tenant SLUG --project KEY | aeon journey seed --tenant SLUG --project KEY --to-stage build|candidate|deploy [--production --confirm-project KEY]"
 
 // OperatorResult is the value-free result of a host-only journey command.
 type OperatorResult struct {
@@ -36,32 +36,18 @@ type OperatorResult struct {
 
 // RunOperator implements the host CLI's `aeon journey` subcommands. The
 // coordinator wires it into cmd/aeon; no HTTP route exposes these operations.
-// Both subcommands require AEON_ENV=dev, an explicit tenant and exact node key.
+// Production requires an explicit flag and matching project confirmation.
 func RunOperator(ctx context.Context, pool *pgxpool.Pool, args []string, stdout io.Writer) error {
-	if os.Getenv("AEON_ENV") != "dev" {
-		return errors.New("journey operator commands require AEON_ENV=dev")
+	opts, err := parseOperator(args)
+	if err != nil {
+		return err
 	}
-	if len(args) == 0 || args[0] != "mark-disposable" && args[0] != "seed" {
-		return errors.New(operatorUsage)
-	}
-	fs := flag.NewFlagSet("aeon journey "+args[0], flag.ContinueOnError)
-	fs.SetOutput(io.Discard)
-	slug := fs.String("tenant", "", "tenant slug")
-	project := fs.String("project", "", "project node key")
-	var toStage *string
-	if args[0] == "seed" {
-		toStage = fs.String("to-stage", "", "target stage")
-	}
-	if err := fs.Parse(args[1:]); err != nil || fs.NArg() != 0 || *slug == "" || *project == "" ||
-		args[0] == "seed" && (*toStage != "build" && *toStage != "candidate" && *toStage != "deploy") {
-		return errors.New(operatorUsage)
-	}
+	ctx = context.WithValue(ctx, productionContextKey{}, opts.production)
 	var out OperatorResult
-	var err error
-	if args[0] == "mark-disposable" {
-		out, err = MarkDisposable(ctx, pool, *slug, *project)
+	if opts.command == "mark-disposable" {
+		out, err = markDisposable(ctx, pool, opts.slug, opts.project, opts.production)
 	} else {
-		out, err = SeedDisposable(ctx, pool, *slug, *project, *toStage)
+		out, err = seedDisposable(ctx, pool, opts.slug, opts.project, opts.toStage, opts.production)
 	}
 	if err != nil {
 		return err
@@ -69,9 +55,59 @@ func RunOperator(ctx context.Context, pool *pgxpool.Pool, args []string, stdout 
 	return json.NewEncoder(stdout).Encode(out)
 }
 
-func operatorContext(ctx context.Context) (context.Context, error) {
-	if os.Getenv("AEON_ENV") != "dev" {
-		return nil, errors.New("journey operator commands require AEON_ENV=dev")
+type operatorOptions struct {
+	command, slug, project, toStage string
+	production                      bool
+}
+
+// ValidateOperator checks the host CLI before it opens a database connection.
+func ValidateOperator(args []string) error {
+	_, err := parseOperator(args)
+	return err
+}
+
+func parseOperator(args []string) (operatorOptions, error) {
+	if os.Getenv("AEON_ENV") != "dev" && os.Getenv("AEON_ENV") != "prod" {
+		return operatorOptions{}, errors.New("journey operator commands require AEON_ENV=dev or AEON_ENV=prod with --production and --confirm-project")
+	}
+	if len(args) == 0 || args[0] != "mark-disposable" && args[0] != "seed" {
+		return operatorOptions{}, errors.New(operatorUsage)
+	}
+	fs := flag.NewFlagSet("aeon journey "+args[0], flag.ContinueOnError)
+	fs.SetOutput(io.Discard)
+	slug := fs.String("tenant", "", "tenant slug")
+	project := fs.String("project", "", "project node key")
+	production := fs.Bool("production", false, "allow production operator command")
+	confirm := fs.String("confirm-project", "", "exact project node key confirmation")
+	var toStage *string
+	if args[0] == "seed" {
+		toStage = fs.String("to-stage", "", "target stage")
+	}
+	if err := fs.Parse(args[1:]); err != nil || fs.NArg() != 0 || *slug == "" || *project == "" ||
+		args[0] == "seed" && (*toStage != "build" && *toStage != "candidate" && *toStage != "deploy") {
+		return operatorOptions{}, errors.New(operatorUsage)
+	}
+	if os.Getenv("AEON_ENV") == "prod" && (!*production || *confirm == "") {
+		return operatorOptions{}, errors.New("production journey command requires --production and --confirm-project matching --project")
+	}
+	if *confirm != "" && *confirm != *project {
+		return operatorOptions{}, errors.New("--confirm-project must exactly match --project")
+	}
+	if os.Getenv("AEON_ENV") == "dev" && (*production || *confirm != "") {
+		return operatorOptions{}, errors.New("production flags require AEON_ENV=prod")
+	}
+	stage := ""
+	if toStage != nil {
+		stage = *toStage
+	}
+	return operatorOptions{args[0], *slug, *project, stage, *production}, nil
+}
+
+type productionContextKey struct{}
+
+func operatorContext(ctx context.Context, production bool) (context.Context, error) {
+	if os.Getenv("AEON_ENV") != "dev" && !(os.Getenv("AEON_ENV") == "prod" && production) {
+		return nil, errors.New("journey operator commands require AEON_ENV=dev or confirmed production host CLI")
 	}
 	return db.AllProjects(ctx, "disposable journey operator command"), nil
 }
@@ -90,10 +126,14 @@ func projectByKey(ctx context.Context, tx pgx.Tx, key string) (string, error) {
 	return id, err
 }
 
-// MarkDisposable records an explicit, irreversible development marker. A live
+// MarkDisposable records an explicit, irreversible disposable marker in dev. A live
 // or previously released project cannot be marked. A replay makes no changes.
 func MarkDisposable(ctx context.Context, pool *pgxpool.Pool, slug, key string) (OperatorResult, error) {
-	ctx, err := operatorContext(ctx)
+	return markDisposable(ctx, pool, slug, key, false)
+}
+
+func markDisposable(ctx context.Context, pool *pgxpool.Pool, slug, key string, production bool) (OperatorResult, error) {
+	ctx, err := operatorContext(ctx, production)
 	if err != nil {
 		return OperatorResult{}, err
 	}
@@ -115,15 +155,15 @@ func MarkDisposable(ctx context.Context, pool *pgxpool.Pool, slug, key string) (
 			if err := tx.QueryRow(ctx, `SELECT EXISTS(SELECT 1 FROM journey_disposable_projects WHERE project_node_id=$1::uuid)`, id).Scan(&already); err != nil {
 				return err
 			}
+			var live bool
+			if err := tx.QueryRow(ctx, `SELECT EXISTS(SELECT 1 FROM journey_releases WHERE project_node_id=$1::uuid AND state IN ('released','superseded','deploying','access'))`, id).Scan(&live); err != nil {
+				return err
+			}
+			if live {
+				return errors.New("cannot mark a deployed or released project disposable")
+			}
 			if !already {
-				var live bool
-				if err := tx.QueryRow(ctx, `SELECT EXISTS(SELECT 1 FROM journey_releases WHERE project_node_id=$1::uuid AND state IN ('released','superseded','deploying','access'))`, id).Scan(&live); err != nil {
-					return err
-				}
-				if live {
-					return errors.New("cannot mark a deployed or released project disposable")
-				}
-				actorID, err := operatoractor.Ensure(ctx, tx, tid)
+				actorID, err := operatoractor.EnsureWithProduction(ctx, tx, tid, production)
 				if err != nil {
 					return err
 				}
@@ -149,7 +189,11 @@ func MarkDisposable(ctx context.Context, pool *pgxpool.Pool, slug, key string) (
 // work prerequisites roll back all transitions. A pending human gate commits
 // valid preparation and returns the next action; rerun after the UI decision.
 func SeedDisposable(ctx context.Context, pool *pgxpool.Pool, slug, key, target string) (OperatorResult, error) {
-	ctx, err := operatorContext(ctx)
+	return seedDisposable(ctx, pool, slug, key, target, false)
+}
+
+func seedDisposable(ctx context.Context, pool *pgxpool.Pool, slug, key, target string, production bool) (OperatorResult, error) {
+	ctx, err := operatorContext(ctx, production)
 	if err != nil {
 		return OperatorResult{}, err
 	}
@@ -176,7 +220,7 @@ func SeedDisposable(ctx context.Context, pool *pgxpool.Pool, slug, key, target s
 			if !disposable {
 				return errors.New("project is not disposable")
 			}
-			actorID, err = operatoractor.Ensure(ctx, tx, tid)
+			actorID, err = operatoractor.EnsureWithProduction(ctx, tx, tid, production)
 			return err
 		}); err != nil {
 			return err
