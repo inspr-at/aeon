@@ -30,6 +30,20 @@ Named instances and the default live in `~/.aeon/config.yaml`. The agent API key
 
 Versioning: INSPR Calendar Versioning v2 (`inspr-calendar-v2`, `YYMMDDhhmmss.0.0`); the version display uses the pinned INSPR presentation bundle, checked by `just release-check`.
 
+## Install the CLI
+
+Nix installs `bin/aeon` and a `bin/paimos` symlink:
+
+```sh
+nix profile install github:inspr-at/aeon#aeon
+```
+
+The repository will be renamed to `inspr-at/paimos` at cutover. GitHub redirects the old name, so this flake reference keeps resolving.
+
+GitHub release assets, next to `aeon-agentd` and listed in the same `SHA256SUMS`: `aeon-cli-darwin-amd64`, `aeon-cli-darwin-arm64`, `aeon-cli-linux-amd64`, `aeon-cli-linux-arm64`. Put the file on `PATH` as `aeon` and symlink `paimos` to it.
+
+Invoking the binary as `paimos` gives the paimos-compatible CLI. `PAIMOS_URL` (with `PAIMOS_API_KEY` or `PAIMOS_API_KEY_FILE`) is the process-only target.
+
 ## UI shell (P0.5 / AEON-10)
 
 The Vue shell includes an authenticated workspace, sign-in, a 404, an account
