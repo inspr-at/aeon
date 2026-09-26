@@ -82,6 +82,8 @@ export interface AccessWorld {
   available: boolean
   // The session ended: every call answers 401, as the server does.
   sessionEnded?: boolean
+  // Milliseconds before a create (invite, key) answers, to catch a sheet closed meanwhile.
+  slow?: number
 }
 export function accessWorld(options: { role?: 'owner' | 'admin' | 'member' | 'viewer' | 'guest'; secondOwner?: boolean; available?: boolean } = {}): AccessWorld {
   const role = (key: string) => `role-${key}`
@@ -291,6 +293,7 @@ export async function mockAccess(page: Page, world: AccessWorld, options: { also
         return route.fulfill({ status: 204 })
       }
     }
+    if (world.slow && method === 'POST' && (path === '/api/members/invites' || path === '/api/agent-keys')) await new Promise(resolve => setTimeout(resolve, world.slow))
     if (path === '/api/members/invites' && method === 'POST') {
       if (!need('members.manage')) return fail(route, 403, 'forbidden', 'You need Manage members to invite people.')
       const email = String(body.email ?? '').trim().toLowerCase()
@@ -341,7 +344,10 @@ export async function mockAccess(page: Page, world: AccessWorld, options: { also
         const target = world.roles.find(r => r.id === roleId)
         if (!target) return fail(route, 400, 'invalid', 'Choose a role in this workspace', 'role_id')
         if (target.builtin && (target.key === 'owner' || target.key === 'customer')) return fail(route, 400, 'invalid', 'Owner and Customer are workspace roles; choose a project role', 'role_id')
-        if (target.permissions.some(k => !mine(world).has(k))) return fail(route, 403, 'forbidden', 'You cannot grant a role with permissions you do not hold', 'role_id')
+        // Like the server: only the role's project-grantable permissions, against mine on this project.
+        const myBinding = world.bindings.find(b => b.principal_id === world.me && b.project_id === projectId)
+        const onProject = new Set([...mine(world), ...(world.roles.find(r => r.id === myBinding?.role_id)?.permissions ?? [])])
+        if (target.permissions.filter(k => REGISTRY.find(p => p.key === k)?.grantable_at.includes('project')).some(k => !onProject.has(k))) return fail(route, 403, 'forbidden', 'You cannot grant a role with permissions you do not hold', 'role_id')
         const before = existing ? roleRef(existing.role_id) : null
         if (existing) existing.role_id = roleId; else world.bindings.push({ principal_id: principal, project_id: projectId, role_id: roleId })
         event('binding.set', before ? { principal_id: principal, scope_type: 'project', project_id: projectId, role: before } : null, { principal_id: principal, scope_type: 'project', project_id: projectId, role: roleRef(roleId) })

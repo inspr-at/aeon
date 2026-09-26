@@ -147,7 +147,7 @@ watch(() => props.project.id, load)
     <ChoicePicker v-if="adding" :anchor="adding" :label="`Add to ${project.title}`" :choices="addChoices" current="" placeholder="Find a person or agent…" @choose="pickPerson" @close="adding = null" />
     <RolePicker
       v-if="picker" :anchor="picker.anchor" :subject="picker.name" :place="project.title" :roles="access.roles" :current="picker.current" :registry="access.registry"
-      :mine="myPermissions()" scope="project" :busy="busy" :can-apply="can('members.manage', project.id)" :error="roleError" @choose="choose" @close="picker = null"
+      :mine="myPermissions(project.id)" scope="project" :busy="busy" :can-apply="can('members.manage', project.id)" :error="roleError" @choose="choose" @close="picker = null"
     />
   </div>
 </template>

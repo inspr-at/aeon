@@ -11,7 +11,7 @@ import PersonalSection from '../components/settings/PersonalSection.vue'
 import ProjectsSection from '../components/settings/ProjectsSection.vue'
 import WorkspaceSection from '../components/settings/WorkspaceSection.vue'
 import AccessSection from '../components/access/AccessSection.vue'
-import { SETTINGS_SECTIONS, sectionOf, visibleSections, type SectionId } from '../lib/settings'
+import { SETTINGS_SECTIONS, anyOf, sectionOf, visibleSections, type SectionId } from '../lib/settings'
 import { useSession } from '../stores/session'
 
 // Settings: Personal for everyone; Workspace, Business and Projects for admins;
@@ -28,7 +28,7 @@ watch(liveSections, now => { if (!permissionsRevoked()) sections.value = now })
 const shown = new Set<SectionId>()
 const current = computed(() => sectionOf(route.params.section))
 const meta = computed(() => SETTINGS_SECTIONS.find(section => section.id === current.value)!)
-const granted = computed(() => meta.value.permission ? can(meta.value.permission) : !meta.value.admin || admin.value)
+const granted = computed(() => meta.value.permission ? anyOf(meta.value.permission, permission => can(permission)) : !meta.value.admin || admin.value)
 watch(granted, ok => { if (ok) shown.add(current.value) }, { immediate: true })
 const allowed = computed(() => granted.value || (permissionsRevoked() && shown.has(current.value)))
 // A permission-gated section waits for my permissions before it says no.

@@ -68,7 +68,7 @@ async function copy() { if (!created.value) return; try { await navigator.clipbo
 </script>
 
 <template>
-  <AccessSheet :title="created ? 'Key ready' : `New key for ${agent.name}`" size="center" @close="emit('close')">
+  <AccessSheet :title="created ? 'Key ready' : `New key for ${agent.name}`" size="center" @close="busy || emit('close')">
     <div v-if="!created" class="body">
       <p class="note"><AppIcon name="shield" :size="14" /><span>The key does only what you tick below, and never more than {{ agent.name }}’s role{{ role ? ` (${role})` : '' }} allows. Revoking it stops it at once.</span></p>
       <fieldset class="lifetimes">
@@ -109,7 +109,7 @@ async function copy() { if (!created.value) return; try { await navigator.clipbo
     </div>
     <template #foot>
       <template v-if="!created">
-        <button type="button" class="btn" @click="emit('close')">Cancel</button>
+        <button type="button" class="btn" :disabled="busy" @click="emit('close')">Cancel</button>
         <button type="button" class="btn primary" :disabled="busy || !allowed" :data-tip="allowed ? undefined : lostPermission('keys.manage')" @click="create"><AppIcon name="key" :size="13" />{{ busy ? 'Creating…' : 'Create key' }}</button>
       </template>
       <button v-else type="button" class="btn primary" @click="emit('close')">Done</button>

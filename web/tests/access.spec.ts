@@ -456,6 +456,49 @@ test('review r3 #2: open dialogs keep their draft but cannot submit once the per
   expect(calls(world, 'POST', /\/agent-keys$/)).toHaveLength(0)
 })
 
+test('review r4 #1: on a project only its project-grantable permissions must be mine', async ({ page }) => {
+  await mockWork(page, fixtures())
+  const world = accessWorld({ role: 'admin' })
+  // workspace.manage is workspace-only: it does not count on a project, so an admin may give this role there.
+  world.roles.push({ id: 'role-wide', key: 'wide-lead', name: 'Wide lead', description: 'Leads a project; also appoints owners.', builtin: false, permissions: ['nodes.read', 'nodes.write', 'workspace.manage'], based_on: null })
+  await mockAccess(page, world)
+  await page.goto('/settings/access/projects/p-pharos')
+  const list = page.getByRole('list', { name: 'People on Pharos' })
+  await list.getByRole('listitem').filter({ hasText: 'Jonas Weber' }).getByRole('button', { name: /Delivery lead/ }).click()
+  const picker = page.getByRole('dialog', { name: 'Role of Jonas Weber on Pharos' })
+  await expect(picker.getByRole('radio', { name: /^Wide lead/ })).not.toHaveClass(/off/)
+  await picker.getByRole('radio', { name: /^Wide lead/ }).click()
+  await picker.getByRole('button', { name: 'Give Jonas Weber Wide lead on Pharos' }).click()
+  await expect(list.getByRole('listitem').filter({ hasText: 'Jonas Weber' })).toContainText('Wide lead')
+  expect(calls(world, 'PUT', /\/projects\/p-pharos\/members\//).at(-1)!.body).toEqual({ role_id: 'role-wide' })
+})
+
+test('review r4 #3: a sheet cannot be dismissed while its one-time link is being made', async ({ page }) => {
+  const world = await open(page, '/settings/access/invites')
+  world.slow = 900
+  await page.getByRole('button', { name: 'Invite people' }).click()
+  const sheet = page.getByRole('dialog', { name: 'Invite people' })
+  await sheet.getByLabel('Email').fill('slow@studio.at')
+  await sheet.getByRole('button', { name: 'Create invite link' }).click()
+  await expect(sheet.getByRole('button', { name: 'Cancel' })).toBeDisabled()
+  await page.keyboard.press('Escape')
+  await expect(sheet).toBeVisible()
+  await expect(page.getByRole('dialog', { name: 'Invite ready' }).getByRole('textbox')).toHaveValue(/join/)
+})
+
+test('review r4 #4: the access log alone opens Access, without the member data', async ({ page }) => {
+  await mockWork(page, fixtures())
+  const world = accessWorld()
+  world.roles.push({ id: 'role-auditor', key: 'auditor', name: 'Auditor', description: 'Reads the access log.', builtin: false, permissions: ['audit.read'], based_on: null })
+  world.people.find(p => p.principal_id === ME)!.workspace_role = 'role-auditor'
+  await mockAccess(page, world)
+  await page.goto('/settings')
+  await page.locator('.section-nav').getByRole('link', { name: /^Access/ }).click()
+  await expect(page.getByRole('tab')).toHaveText([/Access log/])
+  await expect(page.locator('.event').first()).toBeVisible()
+  expect(calls(world, 'GET', /\/api\/members$/)).toHaveLength(0)
+})
+
 test('tabs are a tablist: arrows move between them', async ({ page }) => {
   await open(page)
   await page.getByRole('tab', { name: /People/ }).focus()

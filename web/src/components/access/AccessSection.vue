@@ -37,7 +37,7 @@ const tabs = ref(liveTabs.value)
 watch(liveTabs, now => { if (!permissionsRevoked()) tabs.value = now })
 const ended = computed(() => permissionsRevoked())
 function signIn() { window.open('/signin?error=expired', '_blank', 'noopener') }
-const tab = computed<Tab>(() => { const wanted = route.params.tab as Tab | undefined; return tabs.value.some(t => t.id === wanted) ? wanted! : 'people' })
+const tab = computed<Tab>(() => { const wanted = route.params.tab as Tab | undefined; return tabs.value.some(t => t.id === wanted) ? wanted! : tabs.value[0]?.id ?? 'people' })
 const current = computed(() => TABS.find(t => t.id === tab.value)!)
 const detail = computed(() => typeof route.params.id === 'string' ? route.params.id : '')
 const count = (id: Tab) => id === 'people' ? access.people.length : id === 'invites' ? access.invites.filter(i => i.status === 'pending').length
@@ -56,7 +56,10 @@ function tabKeys(event: KeyboardEvent) {
   const next = event.key === 'Home' ? 0 : event.key === 'End' ? ids.length - 1 : (at + (event.key === 'ArrowRight' ? 1 : -1) + ids.length) % ids.length
   void go(ids[next]!).then(() => nextTick()).then(() => tabBar.value?.querySelector<HTMLElement>('[aria-selected="true"]')?.focus())
 }
-onMounted(() => { void access.load() })
+// The member data needs See members; with only the access log, none is asked for.
+const needsMembers = computed(() => can('members.read'))
+onMounted(() => { if (needsMembers.value) void access.load() })
+watch(needsMembers, yes => { if (yes) void access.load() })
 </script>
 
 <template>
@@ -79,8 +82,8 @@ onMounted(() => { void access.load() })
         </RouterLink>
       </div>
       <div :id="`access-panel-${tab}`" class="panel" role="tabpanel" :aria-labelledby="`access-tab-${tab}`">
-        <div v-if="access.state === 'loading' || access.state === 'idle'" class="set-skeleton" role="status" aria-label="Loading access"><span class="skeleton" /><span class="skeleton" /><span class="skeleton" /><span class="skeleton" /></div>
-        <p v-else-if="access.state === 'error'" class="set-note error" role="alert"><AppIcon name="alert" :size="14" />{{ access.error || 'Access could not be loaded.' }}<button type="button" class="btn sm" @click="access.load(true)">Try again</button></p>
+        <div v-if="tab !== 'audit' && (access.state === 'loading' || access.state === 'idle')" class="set-skeleton" role="status" aria-label="Loading access"><span class="skeleton" /><span class="skeleton" /><span class="skeleton" /><span class="skeleton" /></div>
+        <p v-else-if="tab !== 'audit' && access.state === 'error'" class="set-note error" role="alert"><AppIcon name="alert" :size="14" />{{ access.error || 'Access could not be loaded.' }}<button type="button" class="btn sm" @click="access.load(true)">Try again</button></p>
         <component :is="current.component" v-else v-bind="tab === 'roles' || tab === 'projects' ? { detail } : {}" @invite="(prefill?: InvitePrefill) => { invitePrefill = prefill ?? null; inviting = true }" />
       </div>
     </section>

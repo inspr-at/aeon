@@ -1,7 +1,7 @@
 <!-- SPDX-License-Identifier: AGPL-3.0-only -->
 <script setup lang="ts">
 import { computed, nextTick, onMounted, ref, useId, watch } from 'vue'
-import { beyond, diff, effectLine, LAST_OWNER_REASON, lostPermission, OWNER_TRANSFER_REASON, ownerChangeNeedsTransfer, type Permission, permissionLabel, projectRolesOf, type Role, workspaceRolesOf } from '../../lib/access'
+import { beyond, diff, effectLine, LAST_OWNER_REASON, lostPermission, neededToGive, OWNER_TRANSFER_REASON, ownerChangeNeedsTransfer, type Permission, permissionLabel, projectRolesOf, type Role, workspaceRolesOf } from '../../lib/access'
 import AppIcon from '../AppIcon.vue'
 import FloatingPanel from '../work/FloatingPanel.vue'
 import RiskBadge from './RiskBadge.vue'
@@ -34,7 +34,7 @@ const pickedRole = computed(() => props.roles.find(role => role.id === picked.va
 function reasonFor(role: Role | null): string {
   if (lockReason.value && (role?.id ?? null) !== props.current) return lockReason.value
   if (!role) return ''
-  const missing = beyond(role.permissions, props.mine)
+  const missing = beyond(neededToGive(role, props.scope, props.registry), props.mine)
   if (missing.length) return `Includes ${missing.length === 1 ? 'a permission' : 'permissions'} you do not hold: ${missing.slice(0, 3).map(permissionLabel).join(', ')}${missing.length > 3 ? ` and ${missing.length - 3} more` : ''}.`
   return ''
 }

@@ -189,6 +189,10 @@ export const OWNER_TRANSFER = 'ownership.transfer'
 export const ownerChangeNeedsTransfer = (current: Role | null | undefined, mine: Set<string>) => !!current?.builtin && current.key === 'owner' && !mine.has(OWNER_TRANSFER)
 export const OWNER_TRANSFER_REASON = 'Changing an owner’s role needs Transfer ownership, which you do not hold. An owner can change it.'
 // An open dialog whose permission went away keeps its draft and cannot submit.
+// What giving a role asks of me: in the workspace every permission in it; on a
+// project only those grantable on a project, against what I hold there.
+export const neededToGive = (role: Pick<Role, 'permissions'>, scope: Scope, registry: Permission[]) =>
+  scope === 'workspace' ? role.permissions : role.permissions.filter(key => registry.find(p => p.key === key)?.grantable_at.includes('project'))
 export const lostPermission = (permission: string) => `You no longer have ${permissionLabel(permission)}, so this cannot be saved. What you chose stays here.`
 export const LAST_OWNER_REASON = 'The last active owner keeps Owner, so the workspace always has someone who can manage it. Make another person an owner first.'
 export function projectSummary(roles: ProjectRole[]): string {

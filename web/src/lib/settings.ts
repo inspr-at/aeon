@@ -6,11 +6,13 @@ import { sessionGone } from './authz.ts'
 
 export type SectionId = 'personal' | 'workspace' | 'access' | 'business' | 'projects'
 // permission: the section shows to whoever holds it (can()), instead of by role.
-export interface SettingsSection { id: SectionId; label: string; summary: string; admin: boolean; permission?: string }
+// permission: one, or any of several (Access opens for See members or, alone, the access log).
+export interface SettingsSection { id: SectionId; label: string; summary: string; admin: boolean; permission?: string | string[] }
+export const anyOf = (permission: string | string[], allowed: (permission: string) => boolean) => (Array.isArray(permission) ? permission : [permission]).some(allowed)
 export const SETTINGS_SECTIONS: readonly SettingsSection[] = [
   { id: 'personal', label: 'Personal', summary: 'Theme, greeting and keys', admin: false },
   { id: 'workspace', label: 'Workspace', summary: 'Name and your role', admin: true },
-  { id: 'access', label: 'Access', summary: 'People, roles and agents', admin: true, permission: 'members.read' },
+  { id: 'access', label: 'Access', summary: 'People, roles and agents', admin: true, permission: ['members.read', 'audit.read'] },
   { id: 'business', label: 'Business', summary: 'Parts and quote settings', admin: true },
   { id: 'projects', label: 'Projects', summary: 'Ticket types', admin: true },
 ]
@@ -19,7 +21,7 @@ export function sectionOf(param: unknown): SectionId {
   return SETTINGS_SECTIONS.find(section => section.id === value)?.id ?? 'personal'
 }
 export const visibleSections = (admin: boolean, allowed: (permission: string) => boolean = () => false) =>
-  SETTINGS_SECTIONS.filter(section => section.permission ? allowed(section.permission) : admin || !section.admin)
+  SETTINGS_SECTIONS.filter(section => section.permission ? anyOf(section.permission, allowed) : admin || !section.admin)
 // Deep links into a section: /settings/business#quotes.
 export const settingsLink = (section: SectionId, anchor?: string) => `/settings/${section}${anchor ? `#${anchor}` : ''}`
 

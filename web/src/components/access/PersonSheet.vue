@@ -181,7 +181,7 @@ onMounted(async () => {
     />
     <RolePicker
       v-if="projectRole" :anchor="projectRole.anchor" :subject="person.name" :place="projectRole.project.title" :roles="access.roles" :current="projectRole.current" :registry="access.registry"
-      :mine="myPermissions()" scope="project" :busy="busy" :can-apply="can('members.manage', projectRole.project.id)" :error="roleError" @choose="chooseProject" @close="projectRole = null"
+      :mine="myPermissions(projectRole.project.id)" scope="project" :busy="busy" :can-apply="can('members.manage', projectRole.project.id)" :error="roleError" @choose="chooseProject" @close="projectRole = null"
     />
     <ChoicePicker v-if="adding" :anchor="adding" label="Add to project" :choices="addChoices" current="" placeholder="Find a project…" @choose="pickProject" @close="adding = null" />
   </AccessSheet>

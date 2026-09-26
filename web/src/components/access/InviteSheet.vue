@@ -5,7 +5,7 @@ export interface InvitePrefill { email: string; workspaceRoleId: string | null; 
 <script setup lang="ts">
 import { brand } from '../../lib/brand'
 import { computed, nextTick, onMounted, ref } from 'vue'
-import { beyond, defaultProjectRole, defaultWorkspaceRole, effectLine, EXPIRY_DAYS, type Invite, lostPermission, permissionLabel, projectRolesOf, validEmail, workspaceRolesOf } from '../../lib/access'
+import { beyond, defaultProjectRole, defaultWorkspaceRole, effectLine, EXPIRY_DAYS, type Invite, lostPermission, neededToGive, permissionLabel, projectRolesOf, validEmail, workspaceRolesOf } from '../../lib/access'
 import { can, myPermissions } from '../../lib/authz'
 import { absoluteTime } from '../../lib/work'
 import { useAccess } from '../../stores/access'
@@ -29,11 +29,12 @@ const projectRoles = computed(() => projectRolesOf(access.roles, access.registry
 // Guest is a project role; it is offered on projects only.
 const workspaceRoles = computed(() => workspaceRolesOf(access.roles))
 const okWorkspace = (id: string) => workspaceRoles.value.some(r => r.id === id) && grantable(id)
-const okProject = (id: string) => projectRoles.value.some(r => r.id === id) && grantable(id)
+const grantableOn = (roleId: string, projectId: string) => { const role = access.roleById.get(roleId); return !!role && !beyond(neededToGive(role, 'project', access.registry), myPermissions(projectId)).length }
+const okProject = (id: string, projectId?: string) => projectRoles.value.some(r => r.id === id) && (projectId ? grantableOn(id, projectId) : grantable(id))
 // A default or an "Invite again" prefill keeps only roles I may give there.
 const start = props.prefill ? props.prefill.workspaceRoleId ?? '' : defaultWorkspaceRole(access.roles)
 const workspaceRole = ref<string>(start && okWorkspace(start) ? start : '')
-const projectRows = ref<{ project_id: string; role_id: string }[]>(props.prefill?.projectRoles.filter(r => okProject(r.role_id)).map(r => ({ ...r })) ?? [])
+const projectRows = ref<{ project_id: string; role_id: string }[]>(props.prefill?.projectRoles.filter(r => okProject(r.role_id, r.project_id)).map(r => ({ ...r })) ?? [])
 const days = ref<number>(14)
 const errors = ref<Record<string, string>>({})
 const saving = ref(false)
@@ -42,7 +43,10 @@ const copied = ref(false)
 const whyNot = (roleId: string) => { const missing = beyond(access.roleById.get(roleId)?.permissions ?? [], mine.value); return missing.length ? `needs ${missing.slice(0, 2).map(permissionLabel).join(', ')}${missing.length > 2 ? ' and more' : ''}, which you do not hold` : '' }
 const effect = computed(() => { const role = access.roleById.get(workspaceRole.value); return role ? effectLine(role.permissions, access.registry) : 'No workspace access: only the projects below.' })
 const freeProjects = (row: { project_id: string }) => projects.projects.filter(p => p.id === row.project_id || !projectRows.value.some(r => r.project_id === p.id))
+// The server takes at most 50 projects on one invite.
+const MAX_PROJECTS = 50
 function addProject() {
+  if (projectRows.value.length >= MAX_PROJECTS) return
   const next = projects.projects.find(p => !projectRows.value.some(r => r.project_id === p.id))
   if (!next) return
   projectRows.value.push({ project_id: next.id, role_id: defaultProjectRole(projectRoles.value) })
@@ -53,7 +57,7 @@ function validate(): boolean {
   if (!validEmail(email.value)) out.email = email.value.trim() ? 'Enter an email address like name@example.com.' : 'Enter the email address they sign in with.'
   if (!workspaceRole.value && !projectRows.value.length) out.access = 'Give a workspace role or at least one project, or they could not see anything.'
   else if (workspaceRole.value && !okWorkspace(workspaceRole.value)) out.access = 'Choose a workspace role you can give.'
-  else if (projectRows.value.some(r => !okProject(r.role_id))) out.access = 'Choose a project role you can give for every project.'
+  else if (projectRows.value.some(r => !okProject(r.role_id, r.project_id))) out.access = 'Choose a project role you can give for every project.'
   errors.value = out
   return !Object.keys(out).length
 }
@@ -81,7 +85,7 @@ onMounted(() => { void projects.load() })
 </script>
 
 <template>
-  <AccessSheet :title="result ? 'Invite ready' : 'Invite people'" size="center" wide @close="emit('close')">
+  <AccessSheet :title="result ? 'Invite ready' : 'Invite people'" size="center" wide @close="saving || emit('close')">
     <form v-if="!result" class="invite-form" novalidate @submit.prevent="submit">
       <p class="intro"><BizIcon name="mail" :size="14" /><span>{{ brand.short_name }} never sends email. You get a link to send yourself; it works once, for this address.</span></p>
       <div class="field-row">
@@ -105,11 +109,12 @@ onMounted(() => { void projects.load() })
             <option v-for="p in freeProjects(row)" :key="p.id" :value="p.id">{{ p.title }}</option>
           </select>
           <select v-model="row.role_id" class="field" :aria-label="`Role on project ${index + 1}`">
-            <option v-for="role in projectRoles" :key="role.id" :value="role.id" :disabled="!grantable(role.id)">{{ role.name }}{{ grantable(role.id) ? '' : ' (you cannot give this)' }}</option>
+            <option v-for="role in projectRoles" :key="role.id" :value="role.id" :disabled="!grantableOn(role.id, row.project_id)">{{ role.name }}{{ grantableOn(role.id, row.project_id) ? '' : ' (you cannot give this)' }}</option>
           </select>
           <button type="button" class="icon-btn sm flat" :aria-label="`Remove project ${index + 1}`" @click="projectRows.splice(index, 1)"><AppIcon name="close" :size="13" /></button>
         </div>
-        <button v-if="projectRows.length < projects.projects.length" type="button" class="btn sm ghost add" @click="addProject"><AppIcon name="plus" :size="13" />Add a project</button>
+        <p v-if="projectRows.length >= MAX_PROJECTS" class="cap">An invite can name at most {{ MAX_PROJECTS }} projects. Give a workspace role instead, or send a second invite for the rest.</p>
+        <button v-else-if="projectRows.length < projects.projects.length" type="button" class="btn sm ghost add" @click="addProject"><AppIcon name="plus" :size="13" />Add a project</button>
         <span v-if="errors.access" class="error" role="alert"><AppIcon name="alert" :size="12" />{{ errors.access }}</span>
       </fieldset>
       <div class="field-row short">
@@ -132,7 +137,7 @@ onMounted(() => { void projects.load() })
     </div>
     <template #foot>
       <template v-if="!result">
-        <button type="button" class="btn" @click="emit('close')">Cancel</button>
+        <button type="button" class="btn" :disabled="saving" @click="emit('close')">Cancel</button>
         <p v-if="!allowed" class="lost" role="alert">{{ lostPermission('members.manage') }}</p>
         <button type="button" class="btn primary" :disabled="saving || !allowed" @click="submit"><AppIcon name="send" :size="13" />{{ saving ? 'Creating…' : 'Create invite link' }}</button>
       </template>
@@ -170,4 +175,5 @@ select.field { appearance: auto; padding-right: 8px; }
   .add { height: 44px; }
 }
 .lost { flex: 1 1 100%; margin: 0; font-size: 12.5px; line-height: 1.45; color: var(--danger); }
+.cap { font-size: 12.5px; line-height: 1.45; color: var(--ink-2); }
 </style>

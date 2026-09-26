@@ -92,4 +92,11 @@ export function permissionsKnown(projectId?: string): boolean {
 }
 export function permissionsAvailable(): boolean { revision.value; return !!cache.get('') }
 export function myWorkspaceRole(): Grant['role'] { revision.value; return cache.get('')?.workspace.role ?? null }
-export function myPermissions(): Set<string> { revision.value; return new Set(cache.get('')?.workspace.permissions ?? []) }
+export function myPermissions(projectId?: string): Set<string> {
+  revision.value
+  if (!projectId) return new Set(cache.get('')?.workspace.permissions ?? [])
+  // On a project: my workspace permissions plus that project's, as can() sees them.
+  const answer = cache.get(keyOf(projectId))
+  if (answer === undefined && !revoked) void refreshPermissions(projectId)
+  return new Set([...(answer?.workspace.permissions ?? []), ...(answer?.project?.permissions ?? [])])
+}

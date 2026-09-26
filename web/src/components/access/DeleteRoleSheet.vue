@@ -1,6 +1,6 @@
 <!-- SPDX-License-Identifier: AGPL-3.0-only -->
 <script setup lang="ts">
-import { computed, ref } from 'vue'
+import { computed, ref, watch } from 'vue'
 import { beyond, deleteRole, lostPermission, projectRolesOf, type Role, workspaceRolesOf } from '../../lib/access'
 import { can, myPermissions } from '../../lib/authz'
 import { toast } from '../../lib/toast'
@@ -25,9 +25,12 @@ const busy = ref(false)
 const holders = computed(() => props.role.member_count === 1 ? '1 person or agent holds' : `${props.role.member_count} people and agents hold`)
 const targetName = computed(() => access.roleById.get(reassign.value)?.name ?? '')
 const permitted = computed(() => can('roles.manage'))
+// The chosen replacement must still be one I may give; if not, the first that is.
+const reassignOk = computed(() => !inUse.value || targets.value.some(r => r.id === reassign.value && allowed(r)))
+watch(reassignOk, ok => { if (!ok) reassign.value = targets.value.find(allowed)?.id ?? '' })
 async function remove() {
   if (!permitted.value) { error.value = lostPermission('roles.manage'); return }
-  if (inUse.value && !reassign.value) { error.value = 'Choose the role they get instead.'; return }
+  if (inUse.value && !reassignOk.value) { error.value = reassign.value ? 'You can no longer give that role; choose another.' : 'Choose the role they get instead.'; return }
   busy.value = true
   try {
     await deleteRole(props.role.id, inUse.value ? reassign.value : undefined)
@@ -62,7 +65,7 @@ async function remove() {
     </div>
     <template #foot>
       <button type="button" class="btn" @click="emit('close')">Keep the role</button>
-      <button type="button" class="btn danger-solid" :disabled="busy || !permitted" :data-tip="permitted ? undefined : lostPermission('roles.manage')" @click="remove">{{ inUse && targetName ? `Delete and give ${targetName}` : 'Delete role' }}</button>
+      <button type="button" class="btn danger-solid" :disabled="busy || !permitted || !reassignOk" :data-tip="permitted ? undefined : lostPermission('roles.manage')" @click="remove">{{ inUse && targetName ? `Delete and give ${targetName}` : 'Delete role' }}</button>
     </template>
   </AccessSheet>
 </template>
