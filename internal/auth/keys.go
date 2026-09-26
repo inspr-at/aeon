@@ -129,12 +129,26 @@ func (m *Module) handleCreateAgentKey(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	var body struct {
+		RotateKeyID *string    `json:"rotate_key_id"`
 		Name        string     `json:"name"`
 		PrincipalID string     `json:"principal_id"`
 		Scopes      []string   `json:"scopes"`
 		ExpiresAt   *time.Time `json:"expires_at"`
 	}
 	if !readJSON(w, r, &body) {
+		return
+	}
+	if body.ExpiresAt != nil && !body.ExpiresAt.After(time.Now()) {
+		writeBadRequest(w, "expires_at must be in the future")
+		return
+	}
+	if body.RotateKeyID != nil {
+		if !uuidRe.MatchString(*body.RotateKeyID) || body.Name != "" || body.PrincipalID != "" || body.Scopes != nil {
+			writeBadRequest(w, "rotation requires rotate_key_id and optional expires_at only")
+			return
+		}
+		rec, err := m.rotateAgentKey(r.Context(), p, *body.RotateKeyID, body.ExpiresAt)
+		m.writeCreatedAgentKey(w, rec, err)
 		return
 	}
 	name := strings.TrimSpace(body.Name)
@@ -152,14 +166,18 @@ func (m *Module) handleCreateAgentKey(w http.ResponseWriter, r *http.Request) {
 		writeBadRequest(w, "invalid scopes")
 		return
 	}
-	if body.ExpiresAt != nil && !body.ExpiresAt.After(time.Now()) {
-		writeBadRequest(w, "expires_at must be in the future")
-		return
-	}
 	rec, err := m.createAgentKey(r.Context(), p, name, principalID, scopes, body.ExpiresAt)
+	m.writeCreatedAgentKey(w, rec, err)
+}
+
+func (m *Module) writeCreatedAgentKey(w http.ResponseWriter, rec keyRecord, err error) {
 	if err != nil {
+		if errors.Is(err, errKeyRevoked) {
+			writeJSON(w, http.StatusConflict, errorJSON{Error: "key already revoked or rotated"})
+			return
+		}
 		if errors.Is(err, errNotFound) {
-			writeJSON(w, http.StatusNotFound, errorJSON{Error: "agent not found"})
+			writeJSON(w, http.StatusNotFound, errorJSON{Error: "agent or key not found"})
 			return
 		}
 		if errors.Is(err, errNotAgent) {

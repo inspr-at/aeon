@@ -163,7 +163,7 @@ export async function mockAccess(page: Page, world: AccessWorld, options: { also
   const person = (p: AccessWorld['people'][number]) => ({ ...p, has_avatar: false, workspace_role: roleRef(p.workspace_role), project_roles: projectRoles(p.principal_id), last_owner: lastOwner(p.principal_id) })
   const nameOf = (id: string) => world.people.find(p => p.principal_id === id)?.name ?? world.agents.find(a => a.principal_id === id)?.name ?? world.imported.find(i => i.principal_id === id)?.name ?? world.people.flatMap(p => p.aliases).find(a => a.principal_id === id)?.name ?? ''
   const principalRef = (id: string) => ({ principal_id: id, name: nameOf(id) })
-  const agent = (a: AccessWorld['agents'][number]) => ({ ...a, has_avatar: false, workspace_role: roleRef(a.workspace_role), key_count: world.keys.filter(k => k.principal_id === a.principal_id && !k.revoked_at).length })
+  const agent = (a: AccessWorld['agents'][number]) => ({ ...a, has_avatar: false, workspace_role: roleRef(a.workspace_role), key_count: world.keys.filter(k => k.principal_id === a.principal_id && !k.revoked_at && (!k.expires_at || Date.parse(k.expires_at) > now)).length })
   const invite = (i: AccessWorld['invites'][number]) => ({ ...i, created_by: principalRef(i.created_by), accepted_by: i.status === 'accepted' ? principalRef(JONAS) : null, accepted_at: i.status === 'accepted' ? ago(24 * 59) : null, workspace_role: roleRef(i.workspace_role), project_roles: i.project_roles.map(pr => ({ project_id: pr.project_id, project_key: world.projects[pr.project_id]?.key ?? '', project_title: world.projects[pr.project_id]?.title ?? '', role: roleRef(pr.role_id)! })) })
   const role = (r: MockRole) => ({ ...r, member_count: world.people.filter(p => p.workspace_role === r.id).length + world.agents.filter(a => a.workspace_role === r.id).length + world.bindings.filter(b => b.role_id === r.id).length })
 
@@ -384,16 +384,25 @@ export async function mockAccess(page: Page, world: AccessWorld, options: { also
     if (path === '/api/agent-keys' && method === 'GET') return route.fulfill({ json: { keys: world.keys } })
     if (path === '/api/agent-keys' && method === 'POST') {
       if (!need('keys.manage')) return fail(route, 403, 'forbidden', 'You need Manage agent keys.')
-      const agentRow = world.agents.find(a => a.principal_id === body.principal_id) ?? world.agents.find(a => a.name === body.name)
+      const old = body.rotate_key_id ? world.keys.find(k => k.id === body.rotate_key_id) : undefined
+      if (body.rotate_key_id && !old) return fail(route, 404, 'not_found', 'No such key.')
+      if (old?.revoked_at) return fail(route, 409, 'conflict', 'Key already revoked or rotated.')
+      if (body.expires_at && (!Number.isFinite(Date.parse(String(body.expires_at))) || Date.parse(String(body.expires_at)) <= now)) return fail(route, 400, 'invalid', 'expires_at must be in the future')
+      const agentRow = world.agents.find(a => a.principal_id === (old?.principal_id ?? body.principal_id)) ?? world.agents.find(a => a.name === body.name)
       if (!agentRow) return route.fulfill({ status: 404, json: { error: 'agent not found' } })
       if (agentRow.service) return route.fulfill({ status: 403, json: { error: 'forbidden' } })
-      const scopes = Array.isArray(body.scopes) ? (body.scopes as string[]).map(k => k.replace(/:/g, '.')) : []
+      const scopes = old ? [...old.scopes] : Array.isArray(body.scopes) ? (body.scopes as string[]).map(k => k.replace(/:/g, '.')) : []
       if (scopes.length > 32 || scopes.some(k => !REGISTRY.find(p => p.key === k)?.agent_grantable)) return route.fulfill({ status: 400, json: { error: 'invalid scopes' } })
       // Never more than the creator holds, nor (on a shared role) than the agent's role.
       const agentRole = world.roles.find(r => r.id === agentRow.workspace_role)
       if (scopes.some(k => !mine(world).has(k) || (agentRole && !agentRole.permissions.includes(k)))) return route.fulfill({ status: 403, json: { error: 'forbidden' } })
       const prefix = `n${String(nextId++).slice(-3)}`
-      const key = { id: `k-${prefix}`, principal_id: agentRow?.principal_id ?? `agent-${prefix}`, name: String(body.name), prefix, scopes, created_at: new Date(now).toISOString(), expires_at: (body.expires_at as string | undefined) ?? null, last_used_at: null, revoked_at: null }
+      const key = { id: `k-${prefix}`, principal_id: agentRow?.principal_id ?? `agent-${prefix}`, name: old?.name ?? String(body.name), prefix, scopes, created_at: new Date(now).toISOString(), expires_at: (body.expires_at as string | undefined) ?? null, last_used_at: null, revoked_at: null }
+      if (old) {
+        const before = { ...old }
+        old.revoked_at = new Date(now).toISOString()
+        event('agent_key.revoked', before, { ...old })
+      }
       world.keys.unshift(key)
       event('agent_key.created', null, { id: key.id, principal_id: key.principal_id, name: key.name, prefix })
       return route.fulfill({ status: 201, json: { id: key.id, token: `aeon_${prefix}_T0k3nS3cr3tValue`, prefix, name: key.name, expires_at: key.expires_at } })

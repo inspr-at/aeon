@@ -446,11 +446,23 @@ type keyRecord struct {
 }
 
 func (m *Module) createAgentKey(ctx context.Context, p tenant.Principal, name, principalID string, scopes []string, expires *time.Time) (keyRecord, error) {
+	var rec keyRecord
+	err := m.inTenant(ctx, m.pool, p.TenantID, func(tx pgx.Tx) error {
+		var err error
+		rec, err = m.createAgentKeyTx(ctx, tx, p, name, principalID, scopes, expires)
+		return err
+	})
+	return rec, err
+}
+
+// createAgentKeyTx is shared by creation and atomic rotation; all grant and
+// creator-ceiling checks remain on this path. The caller owns db.InTenant.
+func (m *Module) createAgentKeyTx(ctx context.Context, tx pgx.Tx, p tenant.Principal, name, principalID string, scopes []string, expires *time.Time) (keyRecord, error) {
 	if scopes == nil {
 		scopes = []string{}
 	}
 	var rec keyRecord
-	err := m.inTenant(ctx, m.pool, p.TenantID, func(tx pgx.Tx) error {
+	err := func() error {
 		actorID := p.ID
 		if actorID == "" {
 			var err error
@@ -575,7 +587,7 @@ func (m *Module) createAgentKey(ctx context.Context, p tenant.Principal, name, p
 				Token:       "aeon_" + prefix + "_" + secret,
 			}
 			_, err = events.Append(ctx, tx, tenant.Principal{ID: actorID, TenantID: p.TenantID}, events.Change{
-				Type: "agent_key.created", After: map[string]any{"key_id": id, "principal_id": principalID, "name": name, "prefix": prefix, "scopes": scopes},
+				Type: "agent_key.created", After: keySnapshot(rec),
 			})
 			if err != nil {
 				return err
@@ -583,7 +595,7 @@ func (m *Module) createAgentKey(ctx context.Context, p tenant.Principal, name, p
 			return nil
 		}
 		return errors.New("agent key prefix collision")
-	})
+	}()
 	return rec, err
 }
 
@@ -738,35 +750,87 @@ func (m *Module) listAgentKeys(ctx context.Context, tenantID string) ([]keyRecor
 
 func (m *Module) revokeAgentKey(ctx context.Context, p tenant.Principal, id string) error {
 	return m.inTenant(ctx, m.pool, p.TenantID, func(tx pgx.Tx) error {
-		actorID := p.ID
-		via := "api"
-		if actorID == "" {
-			via = "operator"
-			var err error
-			actorID, err = operatoractor.Ensure(ctx, tx, p.TenantID)
-			if err != nil {
-				return err
-			}
-		}
-		var principalID, keyName, prefix string
-		var revokedAt *time.Time
-		if err := tx.QueryRow(ctx, `SELECT principal_id::text,name,prefix,revoked_at FROM agent_keys WHERE id=$1::uuid FOR UPDATE`, id).Scan(&principalID, &keyName, &prefix, &revokedAt); err != nil {
-			if errors.Is(err, pgx.ErrNoRows) {
-				return errNotFound
-			}
-			return err
-		}
-		if revokedAt != nil {
-			return nil
-		}
-		if _, err := tx.Exec(ctx, `UPDATE agent_keys SET revoked_at=now() WHERE id=$1::uuid`, id); err != nil {
-			return err
-		}
-		_, err := events.Append(ctx, tx, tenant.Principal{ID: actorID, TenantID: p.TenantID}, events.Change{
-			Type: "agent_key.revoked", After: map[string]any{"key_id": id, "principal_id": principalID, "name": keyName, "prefix": prefix, "via": via},
-		})
-		return err
+		return m.revokeAgentKeyTx(ctx, tx, p, id)
 	})
+}
+
+func (m *Module) revokeAgentKeyTx(ctx context.Context, tx pgx.Tx, p tenant.Principal, id string) error {
+	actorID := p.ID
+	via := "api"
+	if actorID == "" {
+		via = "operator"
+		var err error
+		actorID, err = operatoractor.Ensure(ctx, tx, p.TenantID)
+		if err != nil {
+			return err
+		}
+	}
+	rec, err := lockAgentKey(ctx, tx, id)
+	if err != nil {
+		return err
+	}
+	if rec.RevokedAt != nil {
+		return nil
+	}
+	before := keySnapshot(rec)
+	if err := tx.QueryRow(ctx, `UPDATE agent_keys SET revoked_at=now() WHERE id=$1::uuid RETURNING revoked_at`, id).Scan(&rec.RevokedAt); err != nil {
+		return err
+	}
+	after := keySnapshot(rec)
+	after["via"] = via
+	_, err = events.Append(ctx, tx, tenant.Principal{ID: actorID, TenantID: p.TenantID}, events.Change{
+		Type: "agent_key.revoked", Before: before, After: after,
+	})
+	return err
+}
+
+func lockAgentKey(ctx context.Context, tx pgx.Tx, id string) (keyRecord, error) {
+	var rec keyRecord
+	err := tx.QueryRow(ctx, `SELECT id::text,principal_id::text,name,prefix,scopes,created_at,expires_at,last_used_at,revoked_at
+		FROM agent_keys WHERE id=$1::uuid FOR UPDATE`, id).Scan(&rec.ID, &rec.PrincipalID, &rec.Name, &rec.Prefix, &rec.Scopes, &rec.CreatedAt, &rec.ExpiresAt, &rec.LastUsedAt, &rec.RevokedAt)
+	if errors.Is(err, pgx.ErrNoRows) {
+		err = errNotFound
+	}
+	return rec, err
+}
+
+func keySnapshot(rec keyRecord) map[string]any {
+	return map[string]any{"key_id": rec.ID, "principal_id": rec.PrincipalID, "name": rec.Name, "prefix": rec.Prefix,
+		"scopes": rec.Scopes, "created_at": rec.CreatedAt, "expires_at": rec.ExpiresAt, "last_used_at": rec.LastUsedAt, "revoked_at": rec.RevokedAt}
+}
+
+var errKeyRevoked = errors.New("agent key already revoked")
+
+func (m *Module) rotateAgentKey(ctx context.Context, p tenant.Principal, id string, expires *time.Time) (keyRecord, error) {
+	var replacement keyRecord
+	err := m.inTenant(ctx, m.pool, p.TenantID, func(tx pgx.Tx) error {
+		// Match creation/access-management lock order: tenant, then resource.
+		// Serializing on the tenant also fences concurrent grants and rotation.
+		var tenantID string
+		if err := tx.QueryRow(ctx, `SELECT id::text FROM tenants WHERE id=$1::uuid FOR UPDATE`, p.TenantID).Scan(&tenantID); err != nil {
+			return err
+		}
+		if err := authz.RequireTx(ctx, tx, p, "keys.manage", authz.Scope{}); err != nil {
+			return err
+		}
+		old, err := lockAgentKey(ctx, tx, id)
+		if err != nil {
+			return err
+		}
+		if old.RevokedAt != nil {
+			return errKeyRevoked
+		}
+		scopes, err := cleanScopes(old.Scopes)
+		if err != nil {
+			return authz.ErrForbidden
+		}
+		replacement, err = m.createAgentKeyTx(ctx, tx, p, old.Name, old.PrincipalID, scopes, expires)
+		if err != nil {
+			return err
+		}
+		return m.revokeAgentKeyTx(ctx, tx, p, old.ID)
+	})
+	return replacement, err
 }
 
 type meView struct {
