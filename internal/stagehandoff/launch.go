@@ -30,6 +30,7 @@ func (ClosedLaunchChecks) CheckLaunch(context.Context, string, string, string, A
 // bounded integration before the service issues one launch admission.
 type LaunchReadiness struct {
 	ReviewedArtifactDigestSHA256 string
+	ReviewedPlanDigest           string
 	BackupReady                  bool
 	HostReady                    bool
 	ObservedAt                   time.Time
@@ -57,9 +58,6 @@ type LaunchAdmission struct {
 // readiness. A nil provider fails closed at admission.
 func NewService(pool *pgxpool.Pool, registry *plugins.Registry, checks LaunchChecks) *Module {
 	return &Module{pool: pool, registry: registry, launchChecks: checks}
-}
-func launchBinding(h Handoff, a Artifact) string {
-	return digest(h.ContextDigest, h.PrerequisiteSealSHA256, a.VersionScheme, a.Version, a.ReleaseChannel, a.DigestSHA256, a.CommitDigest, a.ManifestCoordinate, a.ManifestDigestSHA256)
 }
 func (m *Module) AdmitLaunch(ctx context.Context, p tenant.Principal, authorization, handoffID string, a Artifact) (LaunchAdmission, error) {
 	var out LaunchAdmission
@@ -116,14 +114,25 @@ func (m *Module) AdmitLaunch(ctx context.Context, p tenant.Principal, authorizat
 		if m.launchChecks == nil {
 			return fail(409, "Pharos launch checks are unavailable")
 		}
-		readiness, err := m.launchChecks.CheckLaunch(ctx, p.TenantID, h.ProjectNodeID, h.ReleaseNodeID, a)
+		var readiness LaunchReadiness
+		if checker, ok := m.launchChecks.(interface {
+			CheckLaunchTx(context.Context, pgx.Tx, Handoff, Artifact) (LaunchReadiness, error)
+		}); ok {
+			readiness, err = checker.CheckLaunchTx(ctx, tx, h, a)
+		} else {
+			readiness, err = m.launchChecks.CheckLaunch(ctx, p.TenantID, h.ProjectNodeID, h.ReleaseNodeID, a)
+		}
 		if err != nil {
+			var closed *apiError
+			if errors.As(err, &closed) {
+				return closed
+			}
 			return fail(409, "Pharos launch checks refused")
 		}
-		if readiness.ReviewedArtifactDigestSHA256 != a.DigestSHA256 || !readiness.BackupReady || !readiness.HostReady || readiness.ObservedAt.IsZero() || time.Since(readiness.ObservedAt) > 5*time.Minute || readiness.ObservedAt.After(time.Now().Add(time.Minute)) {
+		if readiness.ReviewedArtifactDigestSHA256 != a.DigestSHA256 || !readiness.BackupReady || !readiness.HostReady || !launchFresh(readiness.ObservedAt, time.Now()) {
 			return fail(409, "Pharos launch checks are stale or incomplete")
 		}
-		binding := launchBinding(h, a)
+		binding := launchBinding(h, a.DigestSHA256, readiness.ReviewedPlanDigest)
 		err = tx.QueryRow(ctx, `INSERT INTO stage_launch_admissions(tenant_id,handoff_id,binding_digest_sha256,artifact_digest_sha256,authority_epoch,expires_at) VALUES($1::uuid,$2::uuid,$3,$4,$5,$6) ON CONFLICT (tenant_id, handoff_id, binding_digest_sha256) DO NOTHING RETURNING id::text,expires_at`, p.TenantID, h.ID, binding, a.DigestSHA256, h.AuthorityEpoch, h.ExpiresAt).Scan(&out.ID, &out.ExpiresAt)
 		if errors.Is(err, pgx.ErrNoRows) {
 			return replayAdmission(ctx, tx, h, a, binding, &out)
@@ -219,8 +228,9 @@ func (m *Module) ConsumeLaunch(ctx context.Context, p tenant.Principal, authoriz
 		return fail(404, "admission not found")
 	}
 	return db.InTenant(tenant.WithPrincipal(ctx, p), m.pool, p.TenantID, func(tx pgx.Tx) error {
-		var id string
-		err := tx.QueryRow(ctx, `SELECT handoff_id::text FROM stage_launch_admissions WHERE id=$1::uuid FOR UPDATE`, admissionID).Scan(&id)
+		var id, storedBinding, storedArtifact string
+		var storedEpoch int64
+		err := tx.QueryRow(ctx, `SELECT handoff_id::text, binding_digest_sha256, artifact_digest_sha256, authority_epoch FROM stage_launch_admissions WHERE id=$1::uuid FOR UPDATE`, admissionID).Scan(&id, &storedBinding, &storedArtifact, &storedEpoch)
 		if errors.Is(err, pgx.ErrNoRows) {
 			return fail(404, "admission not found")
 		}
@@ -264,6 +274,20 @@ func (m *Module) ConsumeLaunch(ctx context.Context, p tenant.Principal, authoriz
 		if !current {
 			return fail(409, "handoff is stale")
 		}
+		if storedEpoch != h.AuthorityEpoch {
+			return fail(409, "launch binding drifted")
+		}
+		binding, err := recomputeLaunchBinding(ctx, tx, h, storedArtifact, true)
+		if err != nil {
+			var closed *apiError
+			if errors.As(err, &closed) {
+				return fail(409, "launch binding drifted")
+			}
+			return err
+		}
+		if binding != storedBinding {
+			return fail(409, "launch binding drifted")
+		}
 		tag, err := tx.Exec(ctx, `UPDATE stage_launch_admissions SET consumed_at=now() WHERE id=$1::uuid AND handoff_id=$2::uuid AND authority_epoch=$3 AND consumed_at IS NULL AND expires_at>now()`, admissionID, id, h.AuthorityEpoch)
 		if err != nil {
 			return err
@@ -276,8 +300,12 @@ func (m *Module) ConsumeLaunch(ctx context.Context, p tenant.Principal, authoriz
 	})
 }
 func consumedAdmission(ctx context.Context, tx pgx.Tx, h Handoff, a Artifact) error {
+	binding, err := recomputeLaunchBinding(ctx, tx, h, a.DigestSHA256, false)
+	if err != nil {
+		return err
+	}
 	var ok bool
-	err := tx.QueryRow(ctx, `SELECT EXISTS(SELECT 1 FROM stage_launch_admissions WHERE handoff_id=$1::uuid AND binding_digest_sha256=$2 AND artifact_digest_sha256=$3 AND authority_epoch=$4 AND consumed_at IS NOT NULL AND expires_at>now())`, h.ID, launchBinding(h, a), a.DigestSHA256, h.AuthorityEpoch).Scan(&ok)
+	err = tx.QueryRow(ctx, `SELECT EXISTS(SELECT 1 FROM stage_launch_admissions WHERE handoff_id=$1::uuid AND binding_digest_sha256=$2 AND artifact_digest_sha256=$3 AND authority_epoch=$4 AND consumed_at IS NOT NULL AND expires_at>now())`, h.ID, binding, a.DigestSHA256, h.AuthorityEpoch).Scan(&ok)
 	if err != nil {
 		return err
 	}

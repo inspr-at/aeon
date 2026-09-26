@@ -235,9 +235,9 @@ func serveListener(ctx context.Context, cfg config.Config, ln net.Listener) erro
 			releases.New(pool),
 			intake.New(pool),
 			plugins.NewWithRegistry(pool, pluginRegistry),
-			// ClosedLaunchChecks refuses every admission until an observation
-			// source reports a fresh reviewed artifact, backup and host readiness.
-			stagehandoff.New(pool, pluginRegistry, stagehandoff.ClosedLaunchChecks{}),
+			// EvidenceLaunchChecks admits only from the recorded candidate artifact
+			// and a fresh launch_readiness row. A missing record stays refused.
+			stagehandoff.New(pool, pluginRegistry, stagehandoff.EvidenceLaunchChecks{Pool: pool}),
 			// R4: business plugins
 			costunits.New(pool, pluginRegistry),
 			crm.New(pool, pluginRegistry),

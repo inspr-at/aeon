@@ -1,7 +1,5 @@
 // SPDX-License-Identifier: AGPL-3.0-only
 
-// Package stagehandoff implements one fenced request, ordered evidence and a
-// terminal result for compiled stage plugins. The coordinator mounts New.
 package stagehandoff
 
 import (
@@ -46,8 +44,8 @@ var _ httpapi.Module = (*Module)(nil)
 
 // New exposes the handoff routes. Use plugins.Builtin for the shared registry,
 // then mount this module and plugins.NewWithRegistry from cmd/aeon.
-// Pass ClosedLaunchChecks, or a provider that independently observes a fresh
-// reviewed artifact, backup and host readiness. A nil provider fails closed.
+// Pass EvidenceLaunchChecks in production. ClosedLaunchChecks refuses every
+// admission. A nil provider fails closed.
 // GET /api/stage-handoffs/{handoffId} returns prerequisite_seal_sha256.
 // POST /api/stage-handoffs/{handoffId}/launch/admit and /launch/consume are
 // the remote one-use launch fence.
@@ -107,16 +105,25 @@ type Artifact struct {
 	ManifestDigestSHA256 string `json:"manifest_digest_sha256"`
 }
 type EvidenceWrite struct {
-	Sequence        int64     `json:"sequence"`
-	Kind            string    `json:"kind"`
-	Outcome         string    `json:"outcome"`
-	ObservedAt      time.Time `json:"observed_at"`
-	AuthorityEpoch  int64     `json:"authority_epoch"`
-	Workflow        *string   `json:"workflow,omitempty"`
-	Environment     *string   `json:"environment,omitempty"`
-	Artifact        *Artifact `json:"artifact,omitempty"`
-	Authorized      *bool     `json:"authorized,omitempty"`
-	CredentialReady *bool     `json:"credential_ready,omitempty"`
+	Sequence           int64     `json:"sequence"`
+	Kind               string    `json:"kind"`
+	Outcome            string    `json:"outcome"`
+	ObservedAt         time.Time `json:"observed_at"`
+	AuthorityEpoch     int64     `json:"authority_epoch"`
+	Workflow           *string   `json:"workflow,omitempty"`
+	Environment        *string   `json:"environment,omitempty"`
+	Artifact           *Artifact `json:"artifact,omitempty"`
+	Authorized         *bool     `json:"authorized,omitempty"`
+	CredentialReady    *bool     `json:"credential_ready,omitempty"`
+	ReviewedPlanDigest string    `json:"reviewed_plan_digest,omitempty"`
+	Host               string    `json:"host,omitempty"`
+	AllHostEvalPassed  *bool     `json:"all_host_eval_passed,omitempty"`
+	TargetBuildPassed  *bool     `json:"target_build_passed,omitempty"`
+	BackupReady        *bool     `json:"backup_ready,omitempty"`
+	BackupObservedAt   time.Time `json:"backup_observed_at,omitempty"`
+	RestartRequired    *bool     `json:"restart_required,omitempty"`
+	RunningKernel      string    `json:"running_kernel,omitempty"`
+	ExpectedKernel     string    `json:"expected_kernel,omitempty"`
 }
 type Evidence struct {
 	EvidenceWrite
@@ -189,7 +196,7 @@ func route(stage, operation string) (plugin string, ceiling []string, gate strin
 	case stage == "access" && operation == "apply":
 		return "janus", []string{"authorization", "credential_handoff"}, "access", true
 	case stage == "deploy" && operation == "deploy":
-		return "pharos", []string{"deployment"}, "deploy", true
+		return "pharos", []string{"deployment", "launch_readiness"}, "deploy", true
 	case stage == "deploy" && operation == "verify":
 		return "pharos", []string{"verification"}, "deploy", true
 	}
@@ -363,7 +370,7 @@ func validateEvidence(e EvidenceWrite) error {
 	}
 	switch e.Kind {
 	case "deployment", "verification":
-		if e.Workflow == nil || e.Environment == nil || e.Artifact == nil || e.Authorized != nil || e.CredentialReady != nil {
+		if e.Workflow == nil || e.Environment == nil || e.Artifact == nil || e.Authorized != nil || e.CredentialReady != nil || launchFieldsSet(e) {
 			return fail(400, "invalid Pharos evidence")
 		}
 		a := e.Artifact
@@ -371,15 +378,38 @@ func validateEvidence(e EvidenceWrite) error {
 			return fail(400, "invalid artifact identity")
 		}
 	case "authorization":
-		if e.Authorized == nil || e.CredentialReady != nil || e.Artifact != nil || e.Workflow != nil || e.Environment != nil {
+		if e.Authorized == nil || e.CredentialReady != nil || e.Artifact != nil || e.Workflow != nil || e.Environment != nil || launchFieldsSet(e) {
 			return fail(400, "invalid Janus evidence")
 		}
 	case "credential_handoff":
-		if e.CredentialReady == nil || e.Authorized != nil || e.Artifact != nil || e.Workflow != nil || e.Environment != nil {
+		if e.CredentialReady == nil || e.Authorized != nil || e.Artifact != nil || e.Workflow != nil || e.Environment != nil || launchFieldsSet(e) {
 			return fail(400, "invalid Janus evidence")
+		}
+	case "launch_readiness":
+		if e.Artifact != nil || e.Workflow != nil || e.Environment != nil || e.Authorized != nil || e.CredentialReady != nil {
+			return fail(400, "invalid launch readiness")
+		}
+		if !hexRE.MatchString(e.ReviewedPlanDigest) || !plainToken(e.Host, 256) || !plainToken(e.RunningKernel, 128) || !plainToken(e.ExpectedKernel, 128) || e.AllHostEvalPassed == nil || e.TargetBuildPassed == nil || e.BackupReady == nil || e.RestartRequired == nil || e.BackupObservedAt.IsZero() || e.BackupObservedAt.After(time.Now().Add(5*time.Minute)) {
+			return fail(400, "invalid launch readiness")
 		}
 	default:
 		return fail(400, "invalid evidence kind")
 	}
 	return nil
+}
+
+func launchFieldsSet(e EvidenceWrite) bool {
+	return e.ReviewedPlanDigest != "" || e.Host != "" || e.AllHostEvalPassed != nil || e.TargetBuildPassed != nil || e.BackupReady != nil || !e.BackupObservedAt.IsZero() || e.RestartRequired != nil || e.RunningKernel != "" || e.ExpectedKernel != ""
+}
+
+func plainToken(s string, max int) bool {
+	if s == "" || len(s) > max || strings.TrimSpace(s) != s {
+		return false
+	}
+	for _, r := range s {
+		if r < 0x20 || r == 0x7f {
+			return false
+		}
+	}
+	return true
 }

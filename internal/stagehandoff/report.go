@@ -18,7 +18,10 @@ func loadEvidence(ctx context.Context, tx pgx.Tx, id string, sequence int64) (Ev
 	var a Artifact
 	var scheme, version, channel, artifactDigest, commit, coordinate, manifestDigest *string
 	var releaseSequence *int64
-	err := tx.QueryRow(ctx, `SELECT sequence,kind,outcome,observed_at,authority_epoch,workflow,environment,version_scheme,version,release_channel,release_sequence,artifact_digest_sha256,commit_digest,manifest_coordinate,manifest_digest_sha256,authorized,credential_ready,received_at FROM stage_handoff_evidence WHERE handoff_id=$1::uuid AND sequence=$2`, id, sequence).Scan(&e.Sequence, &e.Kind, &e.Outcome, &e.ObservedAt, &e.AuthorityEpoch, &e.Workflow, &e.Environment, &scheme, &version, &channel, &releaseSequence, &artifactDigest, &commit, &coordinate, &manifestDigest, &e.Authorized, &e.CredentialReady, &e.ReceivedAt)
+	var plan, host, running, expected *string
+	var hostEval, targetPass, backup, restart *bool
+	var backupAt *time.Time
+	err := tx.QueryRow(ctx, `SELECT sequence,kind,outcome,observed_at,authority_epoch,workflow,environment,version_scheme,version,release_channel,release_sequence,artifact_digest_sha256,commit_digest,manifest_coordinate,manifest_digest_sha256,authorized,credential_ready,received_at,reviewed_plan_digest,host,all_host_eval_passed,target_build_passed,backup_ready,backup_observed_at,restart_required,running_kernel,expected_kernel FROM stage_handoff_evidence WHERE handoff_id=$1::uuid AND sequence=$2`, id, sequence).Scan(&e.Sequence, &e.Kind, &e.Outcome, &e.ObservedAt, &e.AuthorityEpoch, &e.Workflow, &e.Environment, &scheme, &version, &channel, &releaseSequence, &artifactDigest, &commit, &coordinate, &manifestDigest, &e.Authorized, &e.CredentialReady, &e.ReceivedAt, &plan, &host, &hostEval, &targetPass, &backup, &backupAt, &restart, &running, &expected)
 	if err != nil {
 		return e, err
 	}
@@ -29,11 +32,28 @@ func loadEvidence(ctx context.Context, tx pgx.Tx, id string, sequence int64) (Ev
 		a = Artifact{*scheme, *version, *channel, *releaseSequence, *artifactDigest, *commit, *coordinate, *manifestDigest}
 		e.Artifact = &a
 	}
+	if e.Kind == "launch_readiness" {
+		if plan == nil || host == nil || hostEval == nil || targetPass == nil || backup == nil || backupAt == nil || restart == nil || running == nil || expected == nil {
+			return e, fail(500, "incomplete launch readiness")
+		}
+		e.ReviewedPlanDigest = *plan
+		e.Host = *host
+		e.AllHostEvalPassed = hostEval
+		e.TargetBuildPassed = targetPass
+		e.BackupReady = backup
+		e.BackupObservedAt = *backupAt
+		e.RestartRequired = restart
+		e.RunningKernel = *running
+		e.ExpectedKernel = *expected
+	}
 	e.HandoffID = id
 	return e, nil
 }
 func normalizeEvidence(e EvidenceWrite) EvidenceWrite {
 	e.ObservedAt = e.ObservedAt.UTC().Truncate(time.Microsecond)
+	if !e.BackupObservedAt.IsZero() {
+		e.BackupObservedAt = e.BackupObservedAt.UTC().Truncate(time.Microsecond)
+	}
 	return e
 }
 func (m *Module) appendEvidence(ctx context.Context, tx pgx.Tx, p tenant.Principal, authorization, id string, in EvidenceWrite) (Evidence, error) {
@@ -51,8 +71,13 @@ func (m *Module) appendEvidence(ctx context.Context, tx pgx.Tx, p tenant.Princip
 	if in.AuthorityEpoch != h.AuthorityEpoch {
 		return Evidence{}, fail(409, "stale authority")
 	}
-	if !contains(h.EvidenceCeiling, in.Kind) {
+	// launch_readiness is Pharos deploy observation. Handoffs requested before
+	// the kind was added to the ceiling still accept it from the routed principal.
+	if !contains(h.EvidenceCeiling, in.Kind) && !(in.Kind == "launch_readiness" && h.PluginID == "pharos" && h.Operation == "deploy") {
 		return Evidence{}, fail(400, "evidence exceeds plugin ceiling")
+	}
+	if in.Kind == "launch_readiness" && (h.PluginID != "pharos" || h.Operation != "deploy") {
+		return Evidence{}, fail(400, "launch readiness requires a Pharos deploy")
 	}
 	var requestedAt time.Time
 	if err := tx.QueryRow(ctx, `SELECT created_at FROM stage_handoffs WHERE id=$1::uuid`, id).Scan(&requestedAt); err != nil {
@@ -123,7 +148,21 @@ func (m *Module) appendEvidence(ctx context.Context, tx pgx.Tx, p tenant.Princip
 	if a == nil {
 		a = &Artifact{}
 	}
-	_, err = tx.Exec(ctx, `INSERT INTO stage_handoff_evidence(tenant_id,handoff_id,sequence,authority_epoch,kind,outcome,observed_at,workflow,environment,version_scheme,version,release_channel,release_sequence,artifact_digest_sha256,commit_digest,manifest_coordinate,manifest_digest_sha256,authorized,credential_ready) VALUES($1::uuid,$2::uuid,$3,$4,$5,$6,$7,$8,$9,nullif($10,''),nullif($11,''),nullif($12,''),nullif($13,0),nullif($14,''),nullif($15,''),nullif($16,''),nullif($17,''),$18,$19)`, p.TenantID, id, in.Sequence, in.AuthorityEpoch, in.Kind, in.Outcome, in.ObservedAt, in.Workflow, in.Environment, a.VersionScheme, a.Version, a.ReleaseChannel, a.ReleaseSequence, a.DigestSHA256, a.CommitDigest, a.ManifestCoordinate, a.ManifestDigestSHA256, in.Authorized, in.CredentialReady)
+	var plan, host, running, expected any
+	var hostEval, targetPass, backup, restart any
+	var backupAt any
+	if in.Kind == "launch_readiness" {
+		plan = in.ReviewedPlanDigest
+		host = in.Host
+		hostEval = *in.AllHostEvalPassed
+		targetPass = *in.TargetBuildPassed
+		backup = *in.BackupReady
+		backupAt = in.BackupObservedAt
+		restart = *in.RestartRequired
+		running = in.RunningKernel
+		expected = in.ExpectedKernel
+	}
+	_, err = tx.Exec(ctx, `INSERT INTO stage_handoff_evidence(tenant_id,handoff_id,sequence,authority_epoch,kind,outcome,observed_at,workflow,environment,version_scheme,version,release_channel,release_sequence,artifact_digest_sha256,commit_digest,manifest_coordinate,manifest_digest_sha256,authorized,credential_ready,reviewed_plan_digest,host,all_host_eval_passed,target_build_passed,backup_ready,backup_observed_at,restart_required,running_kernel,expected_kernel) VALUES($1::uuid,$2::uuid,$3,$4,$5,$6,$7,$8,$9,nullif($10,''),nullif($11,''),nullif($12,''),nullif($13,0),nullif($14,''),nullif($15,''),nullif($16,''),nullif($17,''),$18,$19,$20,$21,$22,$23,$24,$25,$26,$27,$28)`, p.TenantID, id, in.Sequence, in.AuthorityEpoch, in.Kind, in.Outcome, in.ObservedAt, in.Workflow, in.Environment, a.VersionScheme, a.Version, a.ReleaseChannel, a.ReleaseSequence, a.DigestSHA256, a.CommitDigest, a.ManifestCoordinate, a.ManifestDigestSHA256, in.Authorized, in.CredentialReady, plan, host, hostEval, targetPass, backup, backupAt, restart, running, expected)
 	if err != nil {
 		return Evidence{}, err
 	}
