@@ -67,7 +67,15 @@ func InTenant(ctx context.Context, pool *pgxpool.Pool, tenantID string, fn func(
 	if err := enterTenant(ctx, tx, tenantID); err != nil {
 		return fmt.Errorf("set tenant: %w", err)
 	}
+	if limit, ok := ctx.Value(readLimitKey{}).(*readLimit); ok {
+		if err := SetLocalStatementTimeout(ctx, tx, limit.duration); err != nil {
+			return fmt.Errorf("set read statement timeout: %w", err)
+		}
+	}
 	if err := fn(tx); err != nil {
+		if limit, ok := ctx.Value(readLimitKey{}).(*readLimit); ok && IsStatementTimeout(err) {
+			limit.timedOut.Store(true)
+		}
 		return err
 	}
 	return tx.Commit(ctx)

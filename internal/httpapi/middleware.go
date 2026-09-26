@@ -3,13 +3,18 @@
 package httpapi
 
 import (
+	"bytes"
 	"context"
 	"crypto/rand"
 	"encoding/hex"
+	"encoding/json"
 	"log/slog"
 	"net/http"
+	"os"
 	"strings"
 	"time"
+
+	"github.com/inspr-at/aeon/internal/db"
 )
 
 type requestIDKey struct{}
@@ -24,6 +29,71 @@ func RequestID(ctx context.Context) string {
 
 func commonMiddleware(next http.Handler) http.Handler {
 	return requestIDMiddleware(recoverMiddleware(securityMiddleware(next)))
+}
+
+// readStatementTimeoutMiddleware bounds list and search statements before the
+// module starts a tenant transaction. It buffers these small JSON responses so
+// a module's generic database error can be replaced by a clear 503 problem.
+func readStatementTimeoutMiddleware(next http.Handler) http.Handler {
+	duration := 15 * time.Second
+	if raw := os.Getenv("AEON_READ_STATEMENT_TIMEOUT"); raw != "" {
+		if parsed, err := time.ParseDuration(raw); err == nil && parsed > 0 {
+			duration = parsed
+		} else {
+			slog.Warn("invalid AEON_READ_STATEMENT_TIMEOUT; using 15s")
+		}
+	}
+	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if r.Method != http.MethodGet || (r.Pattern != "GET /api/nodes" && r.Pattern != "GET /api/nodes/tree" && r.Pattern != "GET /api/projects" && r.Pattern != "GET /api/search") {
+			next.ServeHTTP(w, r)
+			return
+		}
+		ctx := db.WithReadStatementTimeout(r.Context(), duration)
+		buffer := &readResponse{header: make(http.Header)}
+		next.ServeHTTP(buffer, r.WithContext(ctx))
+		if db.ReadStatementTimedOut(ctx) {
+			w.Header().Set("Content-Type", "application/problem+json")
+			w.Header().Set("Cache-Control", "no-store")
+			w.Header().Set("Retry-After", "1")
+			w.WriteHeader(http.StatusServiceUnavailable)
+			_ = json.NewEncoder(w).Encode(struct {
+				Type   string `json:"type"`
+				Title  string `json:"title"`
+				Status int    `json:"status"`
+				Detail string `json:"detail"`
+			}{"about:blank", "Service Unavailable", http.StatusServiceUnavailable, "Read query exceeded the time limit; retry later."})
+			return
+		}
+		for name, values := range buffer.header {
+			for _, value := range values {
+				w.Header().Add(name, value)
+			}
+		}
+		if buffer.status == 0 {
+			buffer.status = http.StatusOK
+		}
+		w.WriteHeader(buffer.status)
+		_, _ = w.Write(buffer.body.Bytes())
+	})
+}
+
+type readResponse struct {
+	header http.Header
+	body   bytes.Buffer
+	status int
+}
+
+func (w *readResponse) Header() http.Header { return w.header }
+func (w *readResponse) WriteHeader(status int) {
+	if w.status == 0 {
+		w.status = status
+	}
+}
+func (w *readResponse) Write(p []byte) (int, error) {
+	if w.status == 0 {
+		w.status = http.StatusOK
+	}
+	return w.body.Write(p)
 }
 
 func securityMiddleware(next http.Handler) http.Handler {
