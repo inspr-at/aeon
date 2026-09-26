@@ -126,6 +126,13 @@ func (m *Module) bindClassicBatchAlias(w http.ResponseWriter, r *http.Request) {
 		if err := handoffOwner(r.Context(), tx, p, h.ID); err != nil {
 			return err
 		}
+		open, err := authorityOpen(r.Context(), tx, h)
+		if err != nil {
+			return err
+		}
+		if !open {
+			return fail(409, "handoff is stale")
+		}
 		_, err = tx.Exec(r.Context(), `INSERT INTO stage_handoff_classic_batch_aliases
 		 (tenant_id,project_node_id,classic_batch_id,classic_project_id,handoff_id,classic_batch,implementation_execution,implementation_authority_epoch,account_key,runtime_generation)
 		 VALUES($1::uuid,$2::uuid,$3,$4,$5::uuid,$6::jsonb,$7,$8,$9,$10)`, p.TenantID, h.ProjectNodeID, in.ClassicBatchID, in.ClassicProjectID, h.ID, in.ClassicBatch, in.ImplementationExecution, in.ImplementationAuthorityEpoch, in.AccountKey, in.RuntimeGeneration)

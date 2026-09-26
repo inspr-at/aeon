@@ -61,6 +61,11 @@
 // principal, key, body digest and the original response. The routed principal
 // is checked before replay. Exact replay writes no event and is available
 // through 24 hours after a terminal result; a new key follows the normal
-// one-use admission and consumption rules. The coordinator mounts New or
-// NewService as httpapi.Module and supplies the Pharos launch checks.
+// one-use admission and consumption rules. GET reports the handoff's attempt,
+// latest superseding attempt ID, and current authority_open status. Exact
+// launch replays retain their original receipt fields while recomputing
+// authority_open; a superseded or closed handoff reports false. Neither status
+// nor a stored receipt grants permission for a new write. The coordinator
+// mounts New or NewService as httpapi.Module and supplies the Pharos launch
+// checks.
 package stagehandoff

@@ -192,10 +192,10 @@ func TestLaunchExactReplayAndAdmissionRead(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if rec := launchHTTP(t, w, w.p, w.bearer, base+"consume", consumeKey, consumeBody); rec.Code != 200 || rec.Body.String() != consumed.Body.String() {
+	if rec := launchHTTP(t, w, w.p, w.bearer, base+"consume", consumeKey, consumeBody); rec.Code != 200 || !strings.Contains(rec.Body.String(), `"authority_open":false`) || !strings.Contains(rec.Body.String(), admission.ID) {
 		t.Fatalf("terminal consume replay: %d %s", rec.Code, rec.Body.String())
 	}
-	if rec := launchHTTP(t, w, w.p, w.bearer, base+"admit", admitKey, string(firstBody)); rec.Code != 200 || rec.Body.String() != first.Body.String() {
+	if rec := launchHTTP(t, w, w.p, w.bearer, base+"admit", admitKey, string(firstBody)); rec.Code != 200 || !strings.Contains(rec.Body.String(), `"authority_open":false`) || !strings.Contains(rec.Body.String(), admission.ID) {
 		t.Fatalf("terminal admit replay: %d %s", rec.Code, rec.Body.String())
 	}
 	w.m.now = func() time.Time { return result.CompletedAt.Add(24*time.Hour + time.Second) }
@@ -204,5 +204,82 @@ func TestLaunchExactReplayAndAdmissionRead(t *testing.T) {
 	}
 	if rec := launchHTTP(t, w, w.p, w.bearer, base+"admit", admitKey, string(firstBody)); rec.Code != 409 {
 		t.Fatalf("expired admit replay: %d %s", rec.Code, rec.Body.String())
+	}
+}
+
+func TestSupersededHandoffReadAndLaunchReplay(t *testing.T) {
+	w := newLaunchWorld(t)
+	w.p.Scopes = []string{"stage.deploy"}
+	ctx := t.Context()
+	if err := db.InTenant(dbtest.Seed(ctx), w.m.pool, w.p.TenantID, func(tx pgx.Tx) error {
+		var role string
+		if err := tx.QueryRow(ctx, `INSERT INTO roles(tenant_id,key,name) VALUES($1::uuid,'supersession_reader','Supersession reader') RETURNING id::text`, w.p.TenantID).Scan(&role); err != nil {
+			return err
+		}
+		if _, err := tx.Exec(ctx, `INSERT INTO role_permissions(tenant_id,role_id,permission) VALUES($1::uuid,$2::uuid,'stage.deploy'),($1::uuid,$2::uuid,'nodes.read')`, w.p.TenantID, role); err != nil {
+			return err
+		}
+		_, err := tx.Exec(ctx, `UPDATE role_bindings SET role_id=$3::uuid WHERE tenant_id=$1::uuid AND principal_id=$2::uuid AND scope_type='workspace'`, w.p.TenantID, w.p.ID, role)
+		return err
+	}); err != nil {
+		t.Fatal(err)
+	}
+	w.storeArtifact(t, w.art.DigestSHA256)
+	w.postReadiness(t, w.plan, true, true, true, time.Now(), w.h.AuthorityEpoch)
+	admitKey := "44444444-4444-4444-8444-444444444444"
+	consumeKey := "55555555-5555-4555-8555-555555555555"
+	artifactBody, err := json.Marshal(w.art)
+	if err != nil {
+		t.Fatal(err)
+	}
+	admitted := launchHTTP(t, w, w.p, w.bearer, "/launch/admit", admitKey, string(artifactBody))
+	if admitted.Code != 200 {
+		t.Fatalf("admit: %d %s", admitted.Code, admitted.Body.String())
+	}
+	var admission LaunchAdmission
+	if err := json.Unmarshal(admitted.Body.Bytes(), &admission); err != nil || !admission.AuthorityOpen {
+		t.Fatalf("admission: %+v %v", admission, err)
+	}
+	consumeBody := `{"admission_id":"` + admission.ID + `"}`
+	consumed := launchHTTP(t, w, w.p, w.bearer, "/launch/consume", consumeKey, consumeBody)
+	if consumed.Code != 200 {
+		t.Fatalf("consume: %d %s", consumed.Code, consumed.Body.String())
+	}
+	var successor Handoff
+	if err := db.InTenant(dbtest.Seed(ctx), w.m.pool, w.p.TenantID, func(tx pgx.Tx) error {
+		var err error
+		successor, err = w.m.create(ctx, tx, w.p, RequestWrite{ProjectNodeID: w.project, ReleaseNodeID: w.release, Stage: "deploy", Operation: "deploy", ExpectedJourneyRevision: 1, IdempotencyKey: "superseding-attempt"}, "pharos", []string{"deployment", "launch_readiness"}, "deploy")
+		return err
+	}); err != nil {
+		t.Fatal(err)
+	}
+	if successor.Attempt != w.h.Attempt+1 || successor.AuthorityEpoch != w.h.AuthorityEpoch+1 {
+		t.Fatalf("successor: %+v", successor)
+	}
+	read := launchHTTP(t, w, w.p, w.bearer, "", "", "")
+	var stale Handoff
+	if read.Code != 200 || json.Unmarshal(read.Body.Bytes(), &stale) != nil || stale.Attempt != w.h.Attempt || stale.SupersededBy == nil || *stale.SupersededBy != successor.ID || stale.AuthorityOpen {
+		t.Fatalf("stale read: %d %s", read.Code, read.Body.String())
+	}
+	for _, tc := range []struct{ path, key, body string }{
+		{"/launch/admit", admitKey, string(artifactBody)},
+		{"/launch/consume", consumeKey, consumeBody},
+	} {
+		replay := launchHTTP(t, w, w.p, w.bearer, tc.path, tc.key, tc.body)
+		if replay.Code != 200 || !strings.Contains(replay.Body.String(), `"authority_open":false`) || !strings.Contains(replay.Body.String(), admission.ID) {
+			t.Fatalf("stale replay %s: %d %s", tc.path, replay.Code, replay.Body.String())
+		}
+		if rec := launchHTTP(t, w, w.p, w.bearer, tc.path, "66666666-6666-4666-8666-666666666666", tc.body); rec.Code != 409 {
+			t.Fatalf("new stale write %s: %d %s", tc.path, rec.Code, rec.Body.String())
+		}
+	}
+	if err := db.InTenant(dbtest.Seed(ctx), w.m.pool, w.p.TenantID, func(tx pgx.Tx) error {
+		_, err := w.m.appendEvidence(ctx, tx, w.p, w.bearer, w.h.ID, w.readiness(w.seq+1, w.plan, true, true, true, time.Now(), w.h.AuthorityEpoch))
+		return err
+	}); err == nil || !strings.Contains(err.Error(), "handoff is stale") {
+		t.Fatalf("new evidence on stale handoff: %v", err)
+	}
+	if got := launchEventCount(t, w, "stage_handoff.launch_consumed"); got != 1 {
+		t.Fatalf("consume events after replay=%d", got)
 	}
 }

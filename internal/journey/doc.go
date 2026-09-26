@@ -124,6 +124,8 @@
 // identity and policy all match. Stale, missing or failed evidence blocks the
 // stage. Every transition appends a tenant event. The read API exposes safe
 // metadata only, never credentials, callback material or provider payloads.
+// Journey stages expose the selected handoff ID with its attempt and authority
+// epoch so a reporter can compare it with its own pinned handoff before acting.
 //
 // This replaces classic paimos/backend/externalstage and baselinebatch's
 // external HTTP handoff. Preserve their useful invariants: immutable attempt

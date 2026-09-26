@@ -53,11 +53,13 @@ type LaunchReadiness struct {
 
 // JourneyStage is one step on the eight-stage rail.
 type JourneyStage struct {
-	Key            string  `json:"key"`
-	State          string  `json:"state"`
-	GateApprovalID *string `json:"gate_approval_id"`
-	GateLive       bool    `json:"gate_live"`
-	HandoffID      *string `json:"handoff_id"`
+	Key                   string  `json:"key"`
+	State                 string  `json:"state"`
+	GateApprovalID        *string `json:"gate_approval_id"`
+	GateLive              bool    `json:"gate_live"`
+	HandoffID             *string `json:"handoff_id"`
+	HandoffAttempt        *int    `json:"handoff_attempt"`
+	HandoffAuthorityEpoch *int64  `json:"handoff_authority_epoch"`
 }
 
 // JourneyNextAction is the single call to action for the project.

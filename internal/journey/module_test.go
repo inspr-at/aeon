@@ -375,6 +375,11 @@ func TestJourneyActions(t *testing.T) {
 	f.handoff(t, project, release, "deploy", "deploy", 1, "succeeded", "")
 	f.handoff(t, project, release, "deploy", "verify", 2, "succeeded", "")
 	view = f.journey(t, f.person, http.MethodGet, "/api/projects/"+project+"/journey", "")
+	for _, stage := range view.Stages {
+		if stage.Key == "deploy" && (stage.HandoffID == nil || stage.HandoffAttempt == nil || *stage.HandoffAttempt != 2 || stage.HandoffAuthorityEpoch == nil || *stage.HandoffAuthorityEpoch != 1) {
+			t.Fatalf("deploy stage handoff identity: %+v", stage)
+		}
+	}
 	if view.Stage != "live" || view.NextAction.Key != "plan_next_release" || !view.NextAction.Available || stateOf(view, "access") != "skipped" {
 		t.Fatalf("live %+v access %s", view.NextAction, stateOf(view, "access"))
 	}

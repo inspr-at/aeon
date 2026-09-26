@@ -133,8 +133,8 @@ type facts struct {
 	DeployGateID               string
 	AccessGateID               string
 	GateLiveByID               map[string]bool
-	DeployHandoffID            string
-	AccessHandoffID            string
+	DeployHandoff              handoffIdentity
+	AccessHandoff              handoffIdentity
 	DeployOutcome              string
 	VerifyOutcome              string
 	AccessOutcome              string
@@ -528,11 +528,16 @@ func stageRail(f facts, current string, blocked bool) []JourneyStage {
 	out := make([]JourneyStage, 0, len(stageOrder))
 	for i, key := range stageOrder {
 		gateID := gateIDFor(f, key)
+		handoff := handoffFor(f, key)
 		st := JourneyStage{
 			Key:            key,
 			GateApprovalID: strPtr(gateID),
 			GateLive:       f.GateLiveByID[gateID],
-			HandoffID:      strPtr(handoffIDFor(f, key)),
+			HandoffID:      strPtr(handoff.ID),
+		}
+		if handoff.ID != "" {
+			st.HandoffAttempt = &handoff.Attempt
+			st.HandoffAuthorityEpoch = &handoff.Epoch
 		}
 		switch {
 		case key == stageShape && shapeSkip:
@@ -577,14 +582,14 @@ func gateIDFor(f facts, stage string) string {
 	}
 }
 
-func handoffIDFor(f facts, stage string) string {
+func handoffFor(f facts, stage string) handoffIdentity {
 	switch stage {
 	case stageDeploy:
-		return f.DeployHandoffID
+		return f.DeployHandoff
 	case stageAccess:
-		return f.AccessHandoffID
+		return f.AccessHandoff
 	default:
-		return ""
+		return handoffIdentity{}
 	}
 }
 
