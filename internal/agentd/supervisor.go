@@ -294,7 +294,16 @@ func (s *Supervisor) StartRun(ctx context.Context, run Run) error {
 	if len(s.estimates) == 0 {
 		return errors.New("allowance estimates required")
 	}
-	route, err := s.api.Route(ctx, run.ID, s.estimates)
+	accountIDs := make([]string, 0, len(s.accounts))
+	for _, account := range s.accounts {
+		if account.Harness == profile.Harness {
+			accountIDs = append(accountIDs, account.ID)
+		}
+	}
+	if len(accountIDs) == 0 {
+		return errors.New("no local account enrollment for harness")
+	}
+	route, err := s.api.Route(ctx, run.ID, s.daemonID, accountIDs, s.estimates)
 	if err != nil {
 		return err
 	}

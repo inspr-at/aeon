@@ -4,6 +4,7 @@ package agentd
 
 import (
 	"context"
+	"encoding/json"
 	"net/http"
 	"net/http/httptest"
 	"sync"
@@ -31,6 +32,13 @@ func TestRemoteUsesAeonRunAndInboxContract(t *testing.T) {
 		case "/api/runs/queued":
 			_, _ = w.Write([]byte(`[{"id":"run","agent_principal_id":"agent"}]`))
 		case "/api/agent-accounts/route":
+			var body struct {
+				DaemonID   string   `json:"daemon_id"`
+				AccountIDs []string `json:"account_ids"`
+			}
+			if err := json.NewDecoder(r.Body).Decode(&body); err != nil || body.DaemonID != "daemon" || len(body.AccountIDs) != 1 || body.AccountIDs[0] != "account" {
+				t.Errorf("route request omitted daemon enrollment: %+v, %v", body, err)
+			}
 			_, _ = w.Write([]byte(`{"account_id":"account","account_key":"local","daemon_id":"daemon","reservations":[{"reservation_id":"reservation"}]}`))
 		case "/api/inbox/messages":
 			_, _ = w.Write([]byte(`{"items":[],"next_after":0}`))
@@ -47,7 +55,7 @@ func TestRemoteUsesAeonRunAndInboxContract(t *testing.T) {
 	if runs, err := r.Queued(ctx); err != nil || len(runs) != 1 {
 		t.Fatalf("queued: %#v %v", runs, err)
 	}
-	if _, err := r.Route(ctx, "run", map[string]int64{"requests": 1}); err != nil {
+	if _, err := r.Route(ctx, "run", "daemon", []string{"account"}, map[string]int64{"requests": 1}); err != nil {
 		t.Fatal(err)
 	}
 	if err := r.Claim(ctx, "run", "daemon", "generation", []string{"reservation"}); err != nil {

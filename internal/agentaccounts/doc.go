@@ -7,7 +7,10 @@
 // not edit cmd/aeon. Registration stores an opaque account key for the
 // calling agent principal and rejects credential-shaped values. Probes are
 // accepted only from that principal and only for the account's daemon id.
-// A reservation requires a successful probe newer than ProbeFreshness.
+// A route request names the claiming daemon and its locally enrolled account
+// IDs. Selection is restricted to those IDs, that daemon, and accounts
+// registered by the calling agent. A reservation requires a successful probe
+// newer than ProbeFreshness. The coordinator mounts New as an httpapi.Module.
 //
 // Pace for elapsed window fraction f in [0,1] is f (steady),
 // 1-(1-f)^2 (frontload) or 1 (unrestricted). The cumulative allowed fraction
