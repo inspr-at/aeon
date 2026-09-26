@@ -20,7 +20,7 @@ const value = (project: Project, kind: StatKind) => kind === 'open' ? project.op
 
 <template>
   <li class="project-item" :class="{ selected, dragging, menu: menuOpen, archived: project.archived }" :data-project-id="project.id" draggable="true">
-    <RouterLink class="project-row item-link" :to="to" :aria-label="label" draggable="false">
+    <RouterLink class="project-row item-link" :to="to" :aria-label="label" aria-describedby="arrange-hint" aria-keyshortcuts="Alt+ArrowUp Alt+ArrowDown" draggable="false">
       <span class="key-badge"><template v-for="(part, i) in highlight(project.routeKey, term)" :key="i"><mark v-if="part.match">{{ part.text }}</mark><template v-else>{{ part.text }}</template></template></span>
       <span class="project-text">
         <span class="project-name">

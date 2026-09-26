@@ -5,13 +5,14 @@ import { useRoute, useRouter } from 'vue-router'
 import { useProjects, type Project } from '../stores/projects'
 import { useProjectGroups } from '../stores/projectGroups'
 import { useSession } from '../stores/session'
-import { usePreference } from '../lib/preferences'
+import { onPreferenceFailure, usePreference } from '../lib/preferences'
 import { plural } from '../lib/work'
 import { toast, type ToastAction } from '../lib/toast'
 import { opensRowMenu, type RowAction, type RowMenuAnchor } from '../lib/rowActions'
 import { ARCHIVED, NO_GROUP, bucket, isShared, isUserGroup, nameProblem, showsHeaders } from '../lib/projectGroups'
 import { PROJECT_COLUMNS, chosenProjectColumns, customisedProjectColumns, fittingProjectColumns, projectColumnOrder, type ProjectColumnId, type ProjectColumnPrefs } from '../lib/projectColumns'
-import AppIcon from '../components/AppIcon.vue'
+import { byRank, keepOrder, nearestCell, place, prunedOrder, sameOrder } from '../lib/projectOrder'
+import AppIcon, { type IconName } from '../components/AppIcon.vue'
 import WelcomeBlock from '../components/WelcomeBlock.vue'
 import FloatingPanel from '../components/work/FloatingPanel.vue'
 import ColumnPicker from '../components/work/ColumnPicker.vue'
@@ -23,12 +24,14 @@ import ProjectBulkBar from '../components/projects/ProjectBulkBar.vue'
 import ProjectCards from '../components/projects/ProjectCards.vue'
 import ProjectList, { type ProjectSection } from '../components/projects/ProjectList.vue'
 
-type SortKey = 'activity' | 'name' | 'open' | 'progress'
-const SORTS: { value: SortKey; label: string }[] = [
-  { value: 'activity', label: 'Last activity' },
-  { value: 'name', label: 'Name' },
-  { value: 'open', label: 'Open tickets' },
-  { value: 'progress', label: 'Progress' },
+// Each sort has its icon; the Display button shows the current one (AEON-174).
+type SortKey = 'activity' | 'name' | 'open' | 'progress' | 'custom'
+const SORTS: { value: SortKey; label: string; phrase: string; icon: IconName }[] = [
+  { value: 'activity', label: 'Last activity', phrase: 'last activity', icon: 'clock' },
+  { value: 'name', label: 'Name', phrase: 'name', icon: 'sort-name' },
+  { value: 'open', label: 'Open tickets', phrase: 'open tickets', icon: 'ticket' },
+  { value: 'progress', label: 'Progress', phrase: 'progress', icon: 'progress' },
+  { value: 'custom', label: 'Custom', phrase: 'custom order', icon: 'grip' },
 ]
 const COLUMN_LABELS: Record<string, string> = { key: 'Key', project: 'Project', ...Object.fromEntries(PROJECT_COLUMNS.map(c => [c.id, c.label])) }
 
@@ -37,13 +40,18 @@ const groups = useProjectGroups()
 const session = useSession()
 const route = useRoute()
 const router = useRouter()
-// The person's view of this page: List or Cards, and the list's columns.
-const pagePref = usePreference<{ view?: 'list' | 'cards'; columns?: ProjectColumnPrefs }>('projects')
+// The person's view of this page: List or Cards and the list's columns. Their own
+// order of projects (the Custom sort) has a key of its own, so saving one never
+// overwrites the other.
+type PagePrefs = { view?: 'list' | 'cards'; columns?: ProjectColumnPrefs }
+const pagePref = usePreference<PagePrefs>('projects')
+const ORDER_KEY = 'projects:order'
+const orderPref = usePreference<{ ids?: string[] }>(ORDER_KEY)
 const pageReady = ref(false)
-void pagePref.ready.then(() => { pageReady.value = true })
+void Promise.all([pagePref.ready, orderPref.ready]).then(() => { pageReady.value = true })
 const view = computed<'list' | 'cards'>(() => pagePref.value.value?.view === 'cards' ? 'cards' : 'list')
 const columnPrefs = computed(() => pagePref.value.value?.columns ?? null)
-function savePage(patch: { view?: 'list' | 'cards'; columns?: ProjectColumnPrefs }) {
+function savePage(patch: PagePrefs) {
   const next = { ...(pagePref.value.value ?? {}), ...patch }
   if ('columns' in patch && !patch.columns) delete next.columns
   pagePref.save(next, 0)
@@ -57,16 +65,26 @@ const now = ref(Date.now())
 let clock: ReturnType<typeof setInterval> | undefined
 
 // ---------- Sorting ----------
-const sort = computed<SortKey>(() => SORTS.some(s => s.value === route.query.sort) ? route.query.sort as SortKey : 'activity')
-const sortLabel = computed(() => SORTS.find(s => s.value === sort.value)!.label)
+const routeSort = computed<SortKey>(() => SORTS.some(s => s.value === route.query.sort) ? route.query.sort as SortKey : 'activity')
+// While a card is dragged, and until the address catches up after a drop, the
+// sort is Custom already: the Display button says so the moment a drag starts.
+const sortOverride = ref<SortKey | null>(null)
+const sort = computed<SortKey>(() => sortOverride.value ?? routeSort.value)
+const sortMeta = computed(() => SORTS.find(s => s.value === sort.value)!)
+// The saved custom order, or the live one while a card is being dragged.
+const savedOrder = computed(() => orderPref.value.value?.ids ?? [])
+const dragOrder = ref<string[] | null>(null)
+const byCustom = computed(() => byRank(new Map((dragOrder.value ?? savedOrder.value).map((id, i) => [id, i]))))
 const compare: Record<SortKey, (a: Project, b: Project) => number> = {
   activity: (a, b) => Date.parse(b.last_activity) - Date.parse(a.last_activity),
   name: (a, b) => a.title.localeCompare(b.title, 'en', { sensitivity: 'base' }),
   open: (a, b) => (b.open + b.in_progress) - (a.open + a.in_progress),
   progress: (a, b) => b.percent - a.percent || b.total - a.total,
+  custom: (a, b) => byCustom.value(a, b),
 }
 const order = (a: Project, b: Project) => compare[sort.value](a, b) || compare.activity(a, b)
-function chooseSort(value: SortKey) { void router.replace({ query: { ...route.query, sort: value === 'activity' ? undefined : value } }) }
+// Other sorts leave the custom order alone, so Custom brings it back later.
+function chooseSort(value: SortKey) { sortOverride.value = null; void router.replace({ query: { ...route.query, sort: value === 'activity' ? undefined : value } }) }
 
 // ---------- Groups ----------
 const ready = computed(() => store.loaded && groups.ready && pageReady.value)
@@ -308,12 +326,19 @@ const rowActions = computed<RowAction[]>(() => {
   const project = rowMenu.value?.project
   if (!project) return []
   const picked = selected.value.has(project.id)
+  // Moving earlier or later arranges the custom order (Alt and the arrow keys).
+  const members = sectionOf(project.id)?.items ?? [], at = members.findIndex(p => p.id === project.id), cards = view.value === 'cards'
+  const arranging: RowAction[] = members.length > 1 ? [
+    { id: 'earlier', label: 'Move earlier', icon: cards ? 'arrow-left' : 'arrow-up', group: 3, reason: at === 0 ? 'It is already first.' : undefined },
+    { id: 'later', label: 'Move later', icon: cards ? 'arrow' : 'arrow-down', group: 3, reason: at === members.length - 1 ? 'It is already last.' : undefined },
+  ] : []
   return [
     { id: 'open', label: 'Open', icon: 'arrow', group: 1, keys: 'Enter' },
     { id: 'move', label: 'Move to group…', icon: 'folder', group: 2, keys: 'm' },
     { id: 'select', label: picked ? 'Deselect' : 'Select', icon: 'check', group: 2, keys: 'x' },
-    { id: 'copy', label: 'Copy link', icon: 'link', group: 3 },
-    project.archived ? { id: 'restore', label: 'Restore from the archive', icon: 'rollback', group: 4 } : { id: 'archive', label: 'Archive', icon: 'archive', group: 4 },
+    ...arranging,
+    { id: 'copy', label: 'Copy link', icon: 'link', group: 4 },
+    project.archived ? { id: 'restore', label: 'Restore from the archive', icon: 'rollback', group: 5 } : { id: 'archive', label: 'Archive', icon: 'archive', group: 5 },
   ]
 })
 function openRowMenu(project: Project, anchor: RowMenuAnchor) { rowMenu.value = rowMenu.value?.project.id === project.id && anchor instanceof HTMLElement ? null : { project, anchor } }
@@ -327,6 +352,7 @@ async function rowAction(action: string) {
     case 'open': void router.push(to(project)); break
     case 'move': openMove(selected.value.has(project.id) ? [...selected.value] : [project.id], menu.anchor instanceof HTMLElement ? menu.anchor : null); break
     case 'select': toggleSelect(project.id); focusItem(project.id); break
+    case 'earlier': case 'later': arrange(project.id, action === 'earlier' ? -1 : 1); break
     case 'copy':
       try { await navigator.clipboard.writeText(new URL(to(project), location.origin).href); toast(`Copied the link to ${project.title}`) }
       catch { toast('The link could not be copied.', { tone: 'error' }) }
@@ -390,6 +416,15 @@ function keydown(event: KeyboardEvent) {
   if ((event.metaKey || event.ctrlKey) && !event.altKey && !event.shiftKey && event.key.toLowerCase() === 'a' && !typing(event.target) && onScreen.value.length) {
     event.preventDefault(); selectAll(); return
   }
+  // Alt and an arrow key move the focused project in the custom order.
+  if (event.altKey && !event.metaKey && !event.ctrlKey && !event.shiftKey && event.key.startsWith('Arrow') && !typing(event.target)) {
+    const id = focusedId()
+    if (!id) return
+    event.preventDefault()
+    const back = event.key === 'ArrowLeft' || event.key === 'ArrowUp', vertical = event.key === 'ArrowUp' || event.key === 'ArrowDown'
+    arrange(id, (back ? -1 : 1) * (vertical ? perRow(id) : 1))
+    return
+  }
   if (event.metaKey || event.ctrlKey || event.altKey) return
   if (typing(event.target)) {
     if (event.key === 'ArrowDown' && event.target === search.value) { event.preventDefault(); step(1) }
@@ -425,6 +460,8 @@ function keydown(event: KeyboardEvent) {
 }
 // Shift and Command (or Ctrl) clicks select instead of opening.
 function clickCapture(event: MouseEvent) {
+  // The click that ends a card drag opens nothing.
+  if (clickBlocked) { event.preventDefault(); event.stopPropagation(); return }
   const link = (event.target as HTMLElement).closest<HTMLElement>('[data-project-id] .item-link')
   if (!link || !(event.shiftKey || event.metaKey || event.ctrlKey) || event.button !== 0) return
   const id = link.closest<HTMLElement>('[data-project-id]')!.dataset.projectId!
@@ -493,6 +530,266 @@ async function drop(event: DragEvent) {
   }
 }
 
+// ---------- Arranging: the Custom sort ----------
+// Cards are arranged by dragging them (mouse or pen) or with Alt and the arrow
+// keys; the list follows the same order and moves with Alt and the arrows too.
+// Each group keeps its own order: a card is arranged among its group's cards.
+const announcement = ref('')
+function announce(text: string) { announcement.value = ''; void nextTick(() => { announcement.value = text }) }
+function sectionOf(id: string) { return sections.value.find(s => s.items.some(p => p.id === id)) }
+// Every project in the order the screen shows them now, the base a new custom order starts from.
+function screenOrder() { return [...store.projects].sort(order).map(p => p.id) }
+function cardEl(id: string) { return page.value?.querySelector<HTMLElement>(`[data-project-id="${CSS.escape(id)}"]`) ?? null }
+// A card's box without the transform it may be gliding under.
+function layoutBox(el: HTMLElement) {
+  const box = el.getBoundingClientRect(), transform = getComputedStyle(el).transform
+  const shift = transform && transform !== 'none' ? new DOMMatrixReadOnly(transform) : null
+  const dx = shift?.m41 ?? 0, dy = shift?.m42 ?? 0
+  return { left: box.left - dx, top: box.top - dy, right: box.right - dx, bottom: box.bottom - dy }
+}
+function where(position: number, count: number, group: string) {
+  return `position ${position} of ${count}${headers.value ? ` in ${groupName(group)}` : ''}`
+}
+// What is saved is pruned to the projects shown to this person and bounded in size.
+// Moves in quick succession send one write when they settle.
+function saveOrder(ids: string[]) {
+  const known = new Set(store.projects.map(p => p.id)), archived = new Set(store.projects.filter(p => p.archived).map(p => p.id))
+  orderPref.save({ ids: keepOrder(ids, known, archived) }, 300)
+}
+const stopFailures = onPreferenceFailure(key => {
+  if (key !== ORDER_KEY) return
+  toast('Your project order could not be saved. It stays here until you reload.', { tone: 'error', key: 'order-failed', action: { label: 'Try again', run: () => saveOrder(savedOrder.value) } })
+})
+// Whenever the projects shown change (one deleted, access changed, one archived),
+// the saved order is pruned to them once things settle, and written only if that
+// changes it.
+let pruneTimer: ReturnType<typeof setTimeout> | undefined
+const visibleProjects = computed(() => ready.value && store.loaded && !store.error && store.projects.length ? store.projects.map(p => `${p.id}${p.archived ? ':a' : ''}`).join(',') : '')
+const stopPruning = watch(visibleProjects, list => {
+  clearTimeout(pruneTimer)
+  if (!list) return
+  pruneTimer = setTimeout(() => {
+    if (!visibleProjects.value || !savedOrder.value.length) return
+    const next = prunedOrder(savedOrder.value, new Set(store.projects.map(p => p.id)), new Set(store.projects.filter(p => p.archived).map(p => p.id)))
+    if (next) orderPref.save({ ids: next }, 0)
+  }, 600)
+}, { immediate: true })
+// Saves an arrangement; the first one made under another sort switches to Custom, undoably.
+async function commitOrder(next: string[]) {
+  const was = routeSort.value, before = savedOrder.value
+  saveOrder(next)
+  dragOrder.value = null
+  if (was === 'custom') { sortOverride.value = null; return }
+  sortOverride.value = 'custom'
+  toast('Now sorted by custom order', { key: 'custom-order', timeout: 8000, action: { label: 'Undo', run: () => { saveOrder(before); chooseSort(was) } } })
+  await router.replace({ query: { ...route.query, sort: 'custom' } })
+  if (sortOverride.value === 'custom') sortOverride.value = null
+}
+function arrange(id: string, delta: number) {
+  const section = sectionOf(id), project = store.byId(id)
+  if (!section || !project || section.collapsed || drag) return
+  const members = section.items.map(p => p.id), at = members.indexOf(id)
+  const to = Math.max(0, Math.min(members.length - 1, at + delta))
+  if (to === at) { announce(`${project.title} is already ${at === 0 ? 'first' : 'last'}`); return }
+  const next = place(screenOrder(), members, [id], to)
+  void commitOrder(next)
+  announce(`${project.title} moved to ${where(to + 1, members.length, section.group.id)}`)
+  void nextTick(() => focusItem(id))
+}
+// Alt with up or down moves a card by a row of the grid; in the list by one.
+function perRow(id: string) {
+  if (view.value !== 'cards') return 1
+  const tops = (sectionOf(id)?.items ?? []).map(p => cardEl(p.id)).filter((el): el is HTMLElement => !!el).map(el => layoutBox(el).top)
+  return Math.max(1, tops.filter(top => Math.abs(top - tops[0]!) < 4).length)
+}
+
+interface CardDrag {
+  pointer: number; id: string; x: number; y: number; lastX: number; lastY: number; card: HTMLElement; started: boolean
+  ids: string[]; moving: string[]; group: string; members: string[]; base: string[]; ghost?: HTMLElement; origin?: DOMRect
+}
+let drag: CardDrag | null = null
+let settling = false
+let clickBlocked = false
+let scrollFrame = 0
+const arranging = ref(false)
+const reducedMotion = window.matchMedia('(prefers-reduced-motion: reduce)')
+function pointerDown(event: PointerEvent) {
+  if (view.value !== 'cards' || !ready.value || event.pointerType === 'touch' || event.button !== 0 || event.shiftKey || event.metaKey || event.ctrlKey || event.altKey || drag || settling) return
+  const target = event.target as HTMLElement
+  const card = target.closest<HTMLElement>('.cards-view .card[data-project-id]')
+  if (!card || target.closest('button, input')) return
+  drag = { pointer: event.pointerId, id: card.dataset.projectId!, x: event.clientX, y: event.clientY, lastX: event.clientX, lastY: event.clientY, card, started: false, ids: [], moving: [], group: '', members: [], base: [] }
+  window.addEventListener('pointermove', pointerMove)
+  window.addEventListener('pointerup', pointerUp)
+  window.addEventListener('pointercancel', abandonDrag)
+  window.addEventListener('blur', abandonDrag)
+}
+function pointerMove(event: PointerEvent) {
+  if (!drag || event.pointerId !== drag.pointer) return
+  drag.lastX = event.clientX; drag.lastY = event.clientY
+  if (!drag.started && (Math.hypot(event.clientX - drag.x, event.clientY - drag.y) < 6 || !beginDrag())) return
+  event.preventDefault()
+  follow()
+}
+function beginDrag() {
+  const d = drag!, section = sectionOf(d.id)
+  if (!section) { release(); drag = null; return false }
+  const grabbedSelected = selected.value.has(d.id)
+  d.started = true
+  d.group = section.group.id
+  d.members = section.items.map(p => p.id)
+  d.ids = grabbedSelected ? d.members.filter(id => selected.value.has(id)) : [d.id]
+  d.moving = grabbedSelected ? [...selected.value] : [d.id]
+  d.base = screenOrder()
+  // The card lifts off the page: a copy follows the pointer, its place stays open.
+  const origin = d.card.getBoundingClientRect()
+  const ghost = d.card.cloneNode(true) as HTMLElement
+  ghost.removeAttribute('data-project-id')
+  ghost.classList.remove('selected', 'menu')
+  ghost.classList.add('card-ghost')
+  ghost.setAttribute('aria-hidden', 'true')
+  ghost.inert = true
+  Object.assign(ghost.style, { left: `${origin.left}px`, top: `${origin.top}px`, width: `${origin.width}px`, height: `${origin.height}px` })
+  if (d.ids.length > 1) { const count = document.createElement('span'); count.className = 'card-ghost-count'; count.textContent = String(d.ids.length); ghost.append(count) }
+  document.body.append(ghost)
+  requestAnimationFrame(() => ghost.classList.add('lifted'))
+  d.ghost = ghost; d.origin = origin
+  window.getSelection()?.removeAllRanges()
+  document.documentElement.classList.add('arranging-cards')
+  window.addEventListener('keydown', dragKey, true)
+  rowMenu.value = null
+  arranging.value = true
+  dragIds.value = new Set(d.ids)
+  dragOrder.value = d.base
+  sortOverride.value = 'custom'
+  autoScroll()
+  return true
+}
+// The card under the pointer gives way: the dragged one takes the nearest place
+// in its group. Over another group (its cards, header or chip) it moves there.
+function follow() {
+  const d = drag!
+  d.ghost!.style.translate = `${d.lastX - d.x}px ${d.lastY - d.y}px`
+  const zone = document.elementFromPoint(d.lastX, d.lastY)?.closest<HTMLElement>('[data-group-drop]')?.dataset.groupDrop
+  if (zone && zone !== d.group) {
+    dropOn.value = zone
+    if (!sameOrder(dragOrder.value ?? [], d.base)) dragOrder.value = d.base
+    return
+  }
+  dropOn.value = null
+  const members = new Set(d.members)
+  const cells = [...(page.value?.querySelectorAll<HTMLElement>('.cards-view [data-project-id]') ?? [])].filter(el => members.has(el.dataset.projectId!)).map(layoutBox)
+  const cell = nearestCell(cells, d.lastX, d.lastY)
+  if (cell < 0) return
+  const next = place(d.base, d.members, d.ids, cell)
+  if (!sameOrder(next, dragOrder.value ?? [])) dragOrder.value = next
+}
+// Near the top or bottom edge the page scrolls, faster the closer the pointer.
+function autoScroll() {
+  cancelAnimationFrame(scrollFrame)
+  const tick = () => {
+    if (!drag?.started) return
+    const main = document.getElementById('main')
+    if (main) {
+      const box = main.getBoundingClientRect(), edge = 64, y = drag.lastY
+      const push = y < box.top + edge ? y - box.top - edge : y > box.bottom - edge ? y - box.bottom + edge : 0
+      if (push) { const before = main.scrollTop; main.scrollTop += Math.max(-22, Math.min(22, push / 3)); if (main.scrollTop !== before) follow() }
+    }
+    scrollFrame = requestAnimationFrame(tick)
+  }
+  scrollFrame = requestAnimationFrame(tick)
+}
+function release() {
+  window.removeEventListener('pointermove', pointerMove)
+  window.removeEventListener('pointerup', pointerUp)
+  window.removeEventListener('pointercancel', abandonDrag)
+  window.removeEventListener('keydown', dragKey, true)
+  window.removeEventListener('blur', abandonDrag)
+  cancelAnimationFrame(scrollFrame)
+  document.documentElement.classList.remove('arranging-cards')
+}
+function dragKey(event: KeyboardEvent) {
+  if (event.key !== 'Escape') return
+  event.preventDefault(); event.stopPropagation()
+  cancelDrag(true)
+}
+function pointerUp(event: PointerEvent) {
+  if (!drag || event.pointerId !== drag.pointer) return
+  if (!drag.started) { release(); drag = null; return }
+  clickBlocked = true
+  setTimeout(() => { clickBlocked = false })
+  void finishDrag(true)
+}
+// The pointer was taken away (pointercancel) or the window lost focus: no release
+// will follow for this press, so nothing waits for one.
+function abandonDrag() { cancelDrag(false) }
+// Escape: the button is still down, so its release opens nothing either. Only that
+// pointer's next release is swallowed, and a new press forgets it.
+function cancelDrag(held: boolean) {
+  if (!drag) return
+  const d = drag
+  if (!d.started) { release(); drag = null; return }
+  if (held) swallowRelease(d.pointer)
+  void finishDrag(false)
+}
+let swallow: ((event: PointerEvent) => void) | null = null
+function swallowRelease(pointer: number) {
+  dropSwallow()
+  swallow = event => {
+    if (event.pointerId !== pointer) return
+    dropSwallow()
+    clickBlocked = true
+    setTimeout(() => { clickBlocked = false })
+  }
+  window.addEventListener('pointerup', swallow, true)
+  window.addEventListener('pointerdown', dropSwallow, true)
+}
+function dropSwallow() {
+  if (swallow) window.removeEventListener('pointerup', swallow, true)
+  window.removeEventListener('pointerdown', dropSwallow, true)
+  swallow = null
+}
+async function finishDrag(dropping: boolean) {
+  const d = drag!
+  drag = null
+  release()
+  const target = dropping ? dropOn.value : null, next = dragOrder.value
+  dropOn.value = null
+  if (target) {
+    // Dropped on another group: the projects move there, the sort stays as it was.
+    dragOrder.value = null; sortOverride.value = null
+    settleGhost(d, false)
+    const list = d.moving.map(id => store.byId(id)).filter((p): p is Project => !!p)
+    if (routeSort.value === 'custom') {
+      // Under Custom they land at the end of that group as it is shown.
+      const shown = screenOrder(), there = shown.filter(id => { const p = store.byId(id); return !!p && groups.where(p) === target })
+      saveOrder(place(shown, [...there, ...d.moving], d.moving, there.length))
+    }
+    await moveTo(list, target)
+    return
+  }
+  if (dropping && next && !sameOrder(next, d.base)) {
+    void commitOrder(next)
+    const project = store.byId(d.id), members = sectionOf(d.id)?.items.map(p => p.id) ?? []
+    if (project) announce(`${project.title} moved to ${where(members.indexOf(d.id) + 1, members.length, d.group)}`)
+  } else { dragOrder.value = null; sortOverride.value = null }
+  await nextTick()
+  settleGhost(d, true)
+}
+// The copy glides into the open place (or fades away over another group), then the card shows again.
+function settleGhost(d: CardDrag, home: boolean) {
+  const ghost = d.ghost!, slot = home ? cardEl(d.id) : null
+  let done = false
+  settling = true
+  const finish = () => { if (done) return; done = true; ghost.remove(); dragIds.value = new Set(); arranging.value = false; settling = false }
+  if (reducedMotion.matches || (home && !slot)) { finish(); return }
+  ghost.classList.remove('lifted')
+  ghost.classList.add(home ? 'settling' : 'dropped')
+  if (slot) { const to = layoutBox(slot); ghost.style.translate = `${to.left - d.origin!.left}px ${to.top - d.origin!.top}px` }
+  ghost.addEventListener('transitionend', event => { if (event.propertyName === 'translate' || event.propertyName === 'opacity') finish() })
+  setTimeout(finish, 280)
+}
+
 // ---------- Life cycle ----------
 async function clearSearch() { term.value = ''; await nextTick(); search.value?.focus() }
 onMounted(() => {
@@ -511,17 +808,25 @@ watch(listCard, element => {
   sizer = new ResizeObserver(([entry]) => { listWidth.value = entry!.contentRect.width })
   sizer.observe(element)
 }, { flush: 'post' })
-onBeforeUnmount(() => { window.removeEventListener('keydown', keydown); page.value?.removeEventListener('click', clickCapture, true); clearInterval(clock); sizer?.disconnect(); phoneQuery.removeEventListener('change', phoneChange) })
+onBeforeUnmount(() => { if (drag) { drag.ghost?.remove(); release(); drag = null } dropSwallow(); stopFailures(); stopPruning(); clearTimeout(pruneTimer); window.removeEventListener('keydown', keydown); page.value?.removeEventListener('click', clickCapture, true); clearInterval(clock); sizer?.disconnect(); phoneQuery.removeEventListener('change', phoneChange) })
 const who = computed(() => session.identity?.tenant.name ?? 'Workspace')
-const displayLabel = computed(() => sort.value === 'activity' ? 'Display' : `Sorted by ${sortLabel.value.toLowerCase()}`)
+// One line under the sorts says how to arrange your own order. Touch screens
+// scroll when a card is dragged, so there the card's menu arranges it.
+const touchOnly = window.matchMedia('(hover: none) and (pointer: coarse)').matches
+const sortHint = computed(() => touchOnly
+  ? (view.value === 'cards' || sort.value === 'custom' ? 'Move earlier and Move later in a project’s actions menu arrange your own order.' : '')
+  : view.value === 'cards' ? 'Drag a card, or press Alt and an arrow key, to arrange your own order.'
+    : sort.value === 'custom' ? 'Your own order: drag cards in Cards view, or press Alt and an arrow key.' : '')
 const archivedSelection = computed(() => selectedProjects.value.length > 0 && selectedProjects.value.every(p => p.archived))
 </script>
 
 <template>
   <section
     ref="page" class="projects-page" :class="[`view-${view}`, { selecting: selected.size }]" aria-labelledby="projects-title"
-    @dragstart="dragStart" @dragover="dragOver" @dragleave="dragLeave" @drop="drop" @dragend="resetDrag" @contextmenu="contextMenu"
+    @dragstart="dragStart" @dragover="dragOver" @dragleave="dragLeave" @drop="drop" @dragend="resetDrag" @contextmenu="contextMenu" @pointerdown="pointerDown"
   >
+    <p class="sr-only" aria-live="polite" aria-atomic="true">{{ announcement }}</p>
+    <span id="arrange-hint" class="sr-only">Alt and the arrow keys move the project in your own order.</span>
     <WelcomeBlock />
     <header class="page-head">
       <p class="eyebrow">{{ who }}</p>
@@ -545,26 +850,26 @@ const archivedSelection = computed(() => selectedProjects.value.length > 0 && se
             <button type="button" role="radio" :aria-checked="view === 'cards'" aria-label="Cards view" data-tip="Cards · progress at a glance" @click="setView('cards')"><AppIcon name="cards" :size="14" /><span class="view-label">Cards</span></button>
           </span>
           <button
-            type="button" class="btn sm display-btn" :class="{ on: sort !== 'activity' }" aria-haspopup="dialog" :aria-expanded="!!displayAnchor" :aria-label="`Display: ${displayLabel}`"
-            :data-tip="view === 'list' ? 'Sort and columns' : 'Sort'" @click="displayAnchor = displayAnchor ? null : ($event.currentTarget as HTMLElement)"
-          ><AppIcon name="layers" :size="13" /><span class="display-label">{{ displayLabel }}</span><AppIcon name="chevron" :size="12" class="chev" /></button>
+            type="button" class="btn sm display-btn" :class="{ on: sort !== 'activity' }" aria-haspopup="dialog" :aria-expanded="!!displayAnchor" :aria-label="`Display, sorted by ${sortMeta.phrase}`"
+            :data-tip="`Sorted by ${sortMeta.phrase} · ${view === 'list' ? 'sort and columns' : 'sort'}`" :data-sort="sort" @click="displayAnchor = displayAnchor ? null : ($event.currentTarget as HTMLElement)"
+          ><AppIcon :name="sortMeta.icon" :size="14" class="sort-icon" /><span class="display-label">Display</span><AppIcon name="chevron" :size="12" class="chev" /></button>
         </span>
         <FloatingPanel v-if="displayAnchor" :anchor="displayAnchor" :width="290" :tallest="640" align="end" label="Display options" @close="closeDisplay">
           <div class="display-panel">
             <p class="eyebrow">Sort by</p>
             <div class="sort-grid" role="radiogroup" aria-label="Sort projects by">
               <button
-                v-for="option in SORTS" :key="option.value" type="button" role="radio" class="sort-option" :aria-checked="sort === option.value"
-                :data-autofocus="sort === option.value ? '' : undefined" @click="chooseSort(option.value)"
-              >{{ option.label }}</button>
+                v-for="option in SORTS" :key="option.value" type="button" role="radio" class="sort-option" :class="{ wide: option.value === 'custom' }" :aria-checked="sort === option.value"
+                :data-sort="option.value" :data-autofocus="sort === option.value ? '' : undefined" @click="chooseSort(option.value)"
+              ><AppIcon :name="option.icon" :size="14" /><span>{{ option.label }}</span></button>
             </div>
+            <p v-if="sortHint" class="fine sort-hint">{{ sortHint }}</p>
             <p v-if="view === 'list' && phone" class="section fine">On a phone each project is a small card; columns apply to wider screens.</p>
             <ColumnPicker
               v-else-if="view === 'list'" class="section" :order="pickerColumns.order" :visible="pickerColumns.visible" :customised="pickerColumns.customised"
               :labels="COLUMN_LABELS" :pinned="PINNED_COLUMNS" reset-label="Default" reset-tip="Open, Doing, Done, Progress and Last activity" :note="'Key and Project always lead. Columns that do not fit step aside.'"
               @change="saveColumns" @reset="resetColumns"
             />
-            <p v-else class="section fine">Cards show progress, the three counts, who was active lately and when.</p>
           </div>
         </FloatingPanel>
       </div>
@@ -592,7 +897,7 @@ const archivedSelection = computed(() => selectedProjects.value.length > 0 && se
 
     <template v-if="view === 'cards' && !(store.error && !store.loaded) && !(ready && !sections.length)">
       <ProjectCards
-        class="cards-area" :sections="sections" :headers="headers" :term="term" :now="now" :loading="!ready"
+        class="cards-area" :sections="sections" :headers="headers" :term="term" :now="now" :loading="!ready" :arranging="arranging"
         :selected="selected" :dragging="dragIds" :drop-on="dropOn" :caret-before="caretBefore" :row-menu="rowMenu?.project.id ?? null" :group-menu="groupMenu?.id ?? null"
         :renaming="renaming" :validate-name="validateName" :to="to" :label="label"
         @toggle="toggleFold" @step="stepGroup" @group-menu="openGroupMenu" @rename="renameGroup" @row-menu="openRowMenu"
@@ -643,13 +948,19 @@ const archivedSelection = computed(() => selectedProjects.value.length > 0 && se
 @media (max-width: 1199px) { .projects-toolbar { grid-template-columns: minmax(0, 280px) 1fr auto; grid-template-areas: "search . tools" "chips chips chips"; } }
 .view-seg button { height: 26px; padding: 0 11px; }
 .display-btn { gap: 6px; color: var(--ink-2); }
-.display-btn.on { color: var(--teal-ink); }
+.display-btn .sort-icon { flex-shrink: 0; }
+.display-btn.on .sort-icon { color: var(--teal-ink); }
 .chev { color: var(--ink-3); }
 .display-panel { display: grid; gap: 8px; padding: 6px 8px 8px; }
 .sort-grid { display: grid; grid-template-columns: 1fr 1fr; gap: 4px; padding: 3px; border-radius: 12px; background: var(--seg-bg); }
-.sort-option { height: 30px; padding: 0 6px; border: 0; border-radius: 9px; background: transparent; color: var(--ink-2); font-size: 12.5px; font-weight: 500; white-space: nowrap; }
+.sort-option { display: inline-flex; align-items: center; gap: 7px; height: 30px; padding: 0 10px; border: 0; border-radius: 9px; background: transparent; color: var(--ink-2); font-size: 12.5px; font-weight: 500; white-space: nowrap; }
+.sort-option svg { flex-shrink: 0; color: var(--ink-3); }
+.sort-option.wide { grid-column: 1 / -1; }
 .sort-option:hover { color: var(--ink); }
+.sort-option:hover svg { color: var(--ink-2); }
 .sort-option[aria-checked="true"] { background: var(--seg-on); color: var(--ink); font-weight: 600; box-shadow: var(--shadow-btn); }
+.sort-option[aria-checked="true"] svg { color: var(--teal-ink); }
+.sort-hint { padding: 0 2px; line-height: 1.45; }
 .sort-option:focus-visible { box-shadow: var(--focus-ring); }
 .section { margin-top: 6px; padding-top: 10px; border-top: 1px solid var(--line); }
 .fine { font-size: 12px; color: var(--ink-3); }

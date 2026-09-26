@@ -9,6 +9,9 @@ type Json = Record<string, unknown>
 const cache = new Map<string, Ref<Json | null>>()
 const loads = new Map<string, Promise<void>>()
 const timers = new Map<string, ReturnType<typeof setTimeout>>()
+// Whoever needs to know that a write failed listens here (a page can say so).
+const failures = new Set<(key: string) => void>()
+export function onPreferenceFailure(listener: (key: string) => void) { failures.add(listener); return () => { failures.delete(listener) } }
 
 export async function readPreference(key: string): Promise<Json | null> {
   try {
@@ -21,8 +24,9 @@ export async function readPreference(key: string): Promise<Json | null> {
 export async function writePreference(key: string, value: Json): Promise<boolean> {
   try {
     const response = await api(`/preferences/${key}`, { method: 'PUT', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ value }) })
+    if (!response.ok) failures.forEach(listener => listener(key))
     return response.ok
-  } catch { return false }
+  } catch { failures.forEach(listener => listener(key)); return false }
 }
 
 // A reactive preference: loads once per key, then `save` updates it locally at once

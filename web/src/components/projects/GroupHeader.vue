@@ -86,7 +86,8 @@ button.fold:focus-visible { box-shadow: var(--focus-ring); }
 .chev { color: var(--ink-3); }
 @media (prefers-reduced-motion: no-preference) { .chev { transition: transform .15s ease; } }
 .collapsed .chev { transform: rotate(-90deg); }
-.name { min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+/* The fold button sets line-height 1; a truncating label needs room for descenders (g, j, p, q, y). */
+.name { min-width: 0; padding-block: 1px; line-height: 1.3; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 .count { display: inline-grid; place-items: center; min-width: 20px; height: 18px; padding: 0 6px; border-radius: 999px; background: var(--surface-2); color: var(--ink-2); font-size: 11px; font-weight: 600; }
 .shared { display: inline-flex; color: var(--ink-3); }
 .rename { width: min(280px, 60vw); height: 30px; font-size: 13px; font-weight: 600; }

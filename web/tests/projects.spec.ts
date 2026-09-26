@@ -75,7 +75,8 @@ test('the sort control orders by name, open tickets and progress', async ({ page
   await page.getByRole('dialog', { name: 'Display options' }).getByRole('radio', { name: 'Open tickets' }).click()
   await expect(names).toHaveText(['Pharos', 'Aeon', 'Studio infrastructure'])
   await page.keyboard.press('Escape')
-  await expect(page.getByRole('button', { name: /^Display/ })).toContainText('Sorted by open tickets')
+  // The Display button keeps its word and shows the sort as its icon (AEON-174).
+  await expect(page.getByRole('button', { name: 'Display, sorted by open tickets' })).toHaveAttribute('data-sort', 'open')
 })
 
 test('key badges share one column as wide as the widest badge', async ({ page }) => {
