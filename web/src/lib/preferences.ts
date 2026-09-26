@@ -31,17 +31,32 @@ export async function writePreference(key: string, value: Json): Promise<boolean
 // stalled when the page clock is faked or the machine is loaded, so the screen can
 // show the change while the write has not started.
 const soon = new Set<string>()
+// One write at a time per key. A later save waits, then sends whatever the value
+// is now, so a slow move cannot land after its undo and stick on the server.
+const tails = new Map<string, Promise<void>>()
+function persist(key: string, current: () => Json | null) {
+  const previous = tails.get(key) ?? Promise.resolve()
+  const job = previous.catch(() => undefined).then(async () => {
+    const value = current()
+    if (value) await writePreference(key, value)
+  }).finally(() => { if (tails.get(key) === job) tails.delete(key) })
+  tails.set(key, job)
+}
 function writeSoon(key: string, current: () => Json | null) {
   if (soon.has(key)) return
   soon.add(key)
   const channel = new MessageChannel()
   channel.port1.onmessage = () => {
+    channel.port1.close()
+    channel.port2.close()
     soon.delete(key)
     // A delayed save took over; it will write the latest value.
     if (timers.has(key)) return
-    const value = current()
-    if (value) void writePreference(key, value)
+    persist(key, current)
   }
+  // A port left open keeps a Node test process alive after the writes have settled.
+  ;(channel.port1 as MessagePort & { unref?: () => void }).unref?.()
+  ;(channel.port2 as MessagePort & { unref?: () => void }).unref?.()
   channel.port2.postMessage(undefined)
 }
 export function usePreference<T extends object>(key: string) {
@@ -56,7 +71,7 @@ export function usePreference<T extends object>(key: string) {
     if (pending) clearTimeout(pending)
     timers.delete(key)
     if (delay <= 0) { writeSoon(key, () => target.value as Json | null); return }
-    timers.set(key, setTimeout(() => { timers.delete(key); void writePreference(key, target.value as Json) }, delay))
+    timers.set(key, setTimeout(() => { timers.delete(key); persist(key, () => target.value as Json | null) }, delay))
   }
   return { value: target, ready, save }
 }

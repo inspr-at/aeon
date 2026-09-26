@@ -2,7 +2,7 @@
 <script setup lang="ts">
 import { setPageTitle } from '../lib/brand'
 import { computed, defineAsyncComponent, nextTick, onBeforeUnmount, onMounted, ref, watch } from 'vue'
-import { onBeforeRouteLeave, onBeforeRouteUpdate, useRoute, useRouter } from 'vue-router'
+import { isNavigationFailure, NavigationFailureType, onBeforeRouteLeave, onBeforeRouteUpdate, useRoute, useRouter } from 'vue-router'
 import { APIError, createNode, listNodes, type ListItem, type SavedView } from '../lib/api'
 import { can } from '../lib/authz'
 import { confirmAction } from '../lib/confirm'
@@ -118,8 +118,9 @@ const shownEntry = computed<{ type: KnowledgeType; slug: string; mode: 'page' | 
 })
 // A docked link on a narrow screen (shared, or the window got narrower) opens the entry's page.
 // The graph keeps its selection there instead, shown in its own card.
-watch([dockEntry, knowledgeWide], ([entry, wide]) => {
-  if (entry && !wide && route.query.mode !== 'graph') void router.replace({ path: entryPath(routeKey.value, entry.type, entry.slug), query: knowledgeListQuery.value, hash: route.hash })
+watch([dockEntry, knowledgeWide], ([entry]) => {
+  // The same width the route guard reads. The cached flag can lag a resize.
+  if (entry && !window.matchMedia(DOCK_MEDIA).matches && route.query.mode !== 'graph') void router.replace({ path: entryPath(routeKey.value, entry.type, entry.slug), query: knowledgeListQuery.value, hash: route.hash })
 }, { immediate: true })
 const fullViewQuery = computed(() => !!ticketKey.value && route.query.view === 'full')
 const lastListMode = ref<ViewMode>(modeOf(route.query.view))
@@ -596,10 +597,18 @@ watch(panelItem, item => {
 watch(project, current => { if (current) remember({ type: 'project', key: current.routeKey, title: current.title }) }, { immediate: true })
 
 // ---------- Knowledge: the list's place in the URL, and closing an entry ----------
+// One write at a time. A later filter reads the address after the earlier one has
+// landed, and a replace that lost to another navigation is sent once more.
+let knowledgeWrite: Promise<unknown> = Promise.resolve()
 function updateKnowledge(patch: Partial<KnowledgeFilters>) {
-  // A docked entry, and the graph, stay while the list is searched and filtered.
-  const entry = typeof route.query.entry === 'string' ? { entry: route.query.entry } : {}
-  void router.replace({ path: route.path, query: { ...knowledgeDisplay.value, ...knowledgeQuery({ ...knowledgeFilters.value, ...patch }), ...entry } })
+  knowledgeWrite = knowledgeWrite.catch(() => undefined).then(async () => {
+    const go = () => {
+      const entry = typeof route.query.entry === 'string' ? { entry: route.query.entry } : {}
+      return router.replace({ path: route.path, query: { ...knowledgeDisplay.value, ...knowledgeQuery({ ...knowledgeFilters.value, ...patch }), ...entry } })
+    }
+    const failure = await go()
+    if (isNavigationFailure(failure, NavigationFailureType.aborted)) await go()
+  })
 }
 // The next navigation's outcome: true once it has landed, false when a guard kept the page.
 function landed() {

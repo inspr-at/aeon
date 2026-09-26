@@ -90,8 +90,7 @@ test('the pane closes back to the graph, which keeps the display and filters', a
   await expect(page.getByRole('group', { name: 'Knowledge display', exact: true })).toBeVisible()
   await expect(toggle(page, 'Graph')).toHaveAttribute('aria-pressed', 'true')
   await pane(page).getByRole('button', { name: 'Close the preview' }).click()
-  // Closing waits on the router's session check. Under load that outlasts the default 5s; the address is the settled signal.
-  await expect(page).toHaveURL(/\/knowledge\?(?=.*mode=graph)(?=.*type=runbook)(?!.*entry=)/, { timeout: 15_000 })
+  await expect(page).toHaveURL(/\/knowledge\?(?=.*mode=graph)(?=.*type=runbook)(?!.*entry=)/)
   await expect(canvas(page)).toBeFocused()
   // Expanding keeps the way back to the graph.
   // The pane's controls are used once its entry has loaded.

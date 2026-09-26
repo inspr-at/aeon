@@ -88,11 +88,22 @@ export const router = createRouter({
   ],
 })
 
-router.beforeEach(async (to) => {
+// Overlapping checks would race each other and the later failure could clear a
+// session the earlier one had just confirmed.
+let refreshing: Promise<void> | null = null
+function refreshSession() {
+  if (!refreshing) refreshing = useSession().refresh().finally(() => { refreshing = null })
+  return refreshing
+}
+router.beforeEach(async (to, from) => {
   if (to.meta.public) return true
   const session = useSession()
   const wasSignedIn = !!session.identity
-  await session.refresh()
+  // The page is already showing, so the session was checked to get here. Another
+  // round trip blocks the address until it returns; under load that return loses
+  // to a later navigation, or times out and replaces the page.
+  if (wasSignedIn && from.matched.length > 0) return
+  await refreshSession()
   if (session.error) return true // The shell shows a retry screen, never protected content.
   // Losing a session without signing out means it expired; say so on the sign-in page.
   if (!session.identity && to.path !== '/signin') return wasSignedIn ? { path: '/signin', query: { error: 'expired' } } : '/signin'

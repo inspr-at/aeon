@@ -81,15 +81,18 @@ function setDimension(value: GraphDimension) {
   interact(); dimension.value = value; hovered.value = null; void startRenderer()
 }
 function select(node: GraphNode) {
+  if (!mounted) return
   interact(); ticketSelection.value = node.kind === 'ticket' ? node.id : ''
   void router.replace({ query: { ...route.query, entry: graphEntry(node) || undefined } })
   renderer?.focus(node.id); host.value?.focus({ preventScroll: true })
 }
 function clear() {
+  if (!mounted) return
   interact(); ticketSelection.value = ''; hovered.value = null
   if (route.query.entry) void router.replace({ query: { ...route.query, entry: undefined } })
 }
 async function open(node: GraphNode) {
+  if (!mounted) return
   if (node.kind === 'knowledge') {
     await router.push({ path: entryPath(props.project.routeKey, node.type as KnowledgeType, node.slug), query: { ...route.query, entry: undefined } })
     return
