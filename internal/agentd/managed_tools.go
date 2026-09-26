@@ -19,7 +19,7 @@ import (
 	"strings"
 	"time"
 
-	"github.com/inspr-at/aeon/internal/ownedprocess"
+	"github.com/inspr-at/paimos/internal/ownedprocess"
 	"github.com/modelcontextprotocol/go-sdk/mcp"
 )
 
