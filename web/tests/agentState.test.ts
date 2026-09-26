@@ -3,7 +3,7 @@ import { test } from 'node:test'
 import assert from 'node:assert/strict'
 import {
   agentName, bindingWindow, controlBlocked, cost, decidedApprovals, duration, expiresIn, groupSessions, heldRequests, needsYou,
-  pendingApprovals, riskFor, riskOf, runDuration, scopeLabel, sessionStatus, sessionForest, STOPPED_WORKER_GRACE_MS, tokens, windowSummary,
+  pendingApprovals, riskFor, riskOf, runDuration, scopeLabel, sessionStatus, sessionForest, tokens, windowSummary,
 } from '../src/lib/agentState.ts'
 import type { AllowanceWindow, Approval, HarnessSession, ProjectMessage } from '../src/lib/agents.ts'
 
@@ -48,13 +48,36 @@ test('session families cross status groups without losing any worker or orphan',
   assert.equal(views[1]!.status.label, 'Stopped')
 })
 
-test('finished workers remain recent for thirty seconds, with no fabricated stop from a stale heartbeat', () => {
-  const stopped = session({ phase: 'stopped', stopped_at: new Date(now).toISOString() })
-  const view = { session: stopped, status: sessionStatus(stopped, now) }
-  assert.equal(sessionForest([view], now + STOPPED_WORKER_GRACE_MS - 1)[0]!.recent, true)
-  assert.equal(sessionForest([view], now + STOPPED_WORKER_GRACE_MS)[0]!.recent, false)
-  const stale = session({ heartbeat_at: ago(30) })
-  assert.equal(sessionForest([{ session: stale, status: sessionStatus(stale, now) }], now)[0]!.liveCount, 1)
+test('worker families sort working and starting by heartbeat, then idle, then stopped', () => {
+  const sessions = [
+    session({ id: 'lead', role: 'coordinator' }),
+    session({ id: 'stopped', parent_harness_session_id: 'lead', phase: 'stopped', stopped_at: ago(0), heartbeat_at: ago(0) }),
+    session({ id: 'idle', parent_harness_session_id: 'lead', activity: 'idle', heartbeat_at: ago(0) }),
+    session({ id: 'busy-older', parent_harness_session_id: 'lead', heartbeat_at: ago(1) }),
+    session({ id: 'starting', parent_harness_session_id: 'lead', phase: 'starting', heartbeat_at: ago(0.1) }),
+    session({ id: 'busy-newer', parent_harness_session_id: 'lead', heartbeat_at: ago(0.2) }),
+    session({ id: 'idle-needs', parent_harness_session_id: 'lead', activity: 'idle', heartbeat_at: ago(0.1) }),
+    session({ id: 'stale', parent_harness_session_id: 'lead', heartbeat_at: ago(30) }),
+  ]
+  const tree = sessionForest(sessions.map(s => ({ session: s, status: sessionStatus(s, now, s.id === 'idle-needs') })), now)
+  assert.deepEqual(tree[0]!.children.map(n => n.view.session.id), ['starting', 'busy-newer', 'busy-older', 'idle', 'idle-needs', 'stale', 'stopped'])
+  assert.equal(tree[0]!.workingCount, 4) // includes the working lead
+  assert.equal(tree[0]!.liveCount, 7) // includes idle, never a fabricated stop
+  assert.equal(tree[0]!.count, 8)
+})
+
+test('live descendants keep stopped parents ahead of history; heartbeat ties use session ID', () => {
+  const sessions = [
+    session({ id: 'lead' }),
+    session({ id: 'stopped', parent_harness_session_id: 'lead', phase: 'stopped', stopped_at: ago(0) }),
+    session({ id: 'parent', parent_harness_session_id: 'lead', phase: 'stopped', stopped_at: ago(5) }),
+    session({ id: 'b', parent_harness_session_id: 'parent' }),
+    session({ id: 'a', parent_harness_session_id: 'parent' }),
+  ]
+  const tree = sessionForest(sessions.map(s => ({ session: s, status: sessionStatus(s, now) })), now)
+  assert.deepEqual(tree[0]!.children.map(n => n.view.session.id), ['parent', 'stopped'])
+  assert.deepEqual(tree[0]!.children[0]!.children.map(n => n.view.session.id), ['a', 'b'])
+  assert.equal(tree[0]!.children[0]!.workingCount, 2)
 })
 
 test('invalid cyclic session bindings remain visible instead of recursing or disappearing', () => {

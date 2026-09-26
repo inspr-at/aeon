@@ -50,16 +50,15 @@ export function agentName(session: Pick<HarnessSession, 'agent_principal_id' | '
   return session.display_label?.trim() || name || session.agent?.name || session.host
 }
 
-export const STOPPED_WORKER_GRACE_MS = 30_000
 export interface SessionBranch<T> {
-  view: T; children: SessionBranch<T>[]; group: SessionGroup; liveCount: number; count: number; recent: boolean
+  view: T; children: SessionBranch<T>[]; group: SessionGroup; liveCount: number; workingCount: number; count: number
 }
 
 // Parent UUIDs, never shared principals or names, establish the tree. A missing
 // or invalid parent leaves a visible root; even malformed cycles lose no rows.
 // Group by the most urgent member so a stopped lead cannot hide working children.
 export function sessionForest<T extends { session: HarnessSession; status: SessionStatus }>(views: T[], now: number): SessionBranch<T>[] {
-  const branches = new Map(views.map(view => [view.session.id, { view, children: [], group: view.status.group, liveCount: 0, count: 0, recent: false } as SessionBranch<T>]))
+  const branches = new Map(views.map(view => [view.session.id, { view, children: [], group: view.status.group, liveCount: 0, workingCount: 0, count: 0 } as SessionBranch<T>]))
   const roots: SessionBranch<T>[] = []
   for (const branch of branches.values()) {
     const s = branch.view.session
@@ -76,20 +75,24 @@ export function sessionForest<T extends { session: HarnessSession; status: Sessi
     else roots.push(branch)
   }
   const rank = (group: SessionGroup) => GROUPS.findIndex(g => g.id === group)
+  const activityRank = (branch: SessionBranch<T>) => branch.workingCount ? 0 : branch.liveCount ? 1 : 2
+  const beat = (s: HarnessSession) => Date.parse(s.heartbeat_at ?? s.created_at)
   const summarize = (branch: SessionBranch<T>) => {
     const s = branch.view.session
     branch.liveCount = branch.view.status.group === 'stopped' ? 0 : 1
+    branch.workingCount = branch.liveCount && activityStatus(s, now).group === 'working' ? 1 : 0
     branch.count = 1
-    branch.recent = branch.liveCount > 0 || now - Date.parse(s.stopped_at ?? s.created_at) < STOPPED_WORKER_GRACE_MS
     for (const child of branch.children) {
       summarize(child)
       branch.count += child.count
       branch.liveCount += child.liveCount
-      branch.recent ||= child.recent
+      branch.workingCount += child.workingCount
       if (rank(child.group) < rank(branch.group)) branch.group = child.group
     }
-    // Stable start order prevents heartbeat updates moving focused workers.
-    branch.children.sort((a, b) => a.view.session.created_at.localeCompare(b.view.session.created_at) || a.view.session.id.localeCompare(b.view.session.id))
+    // Active branches lead, including stopped parents of live descendants.
+    // UUIDs break heartbeat ties; keyed rows retain their identity on refresh.
+    branch.children.sort((a, b) => activityRank(a) - activityRank(b)
+      || beat(b.view.session) - beat(a.view.session) || a.view.session.id.localeCompare(b.view.session.id))
   }
   roots.forEach(summarize)
   return roots

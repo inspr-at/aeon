@@ -10,8 +10,8 @@ import FloatingPanel from '../work/FloatingPanel.vue'
 import ConnectHint from './ConnectHint.vue'
 import LiveDot from './LiveDot.vue'
 
-// Session families stay together across status groups. Stopped workers fold after
-// thirty seconds, with explicit history controls and stable keyboard focus.
+// Session families stay together across status groups. Each lead's history is
+// opt-in for this mounted list only; refreshes never open it or persist it.
 const props = defineProps<{
   groups: Record<SessionGroup, SessionView[]>; now: number; cursor: string; selected: string; state: Availability; error: string
   loaded: boolean; controls: Record<string, SessionControl>; canControl: boolean
@@ -26,16 +26,12 @@ const roots = (group: SessionGroup) => forest.value.filter(branch => branch.grou
 const expanded = ref<Record<string, boolean>>({})
 const history = ref<Record<string, boolean>>({})
 const containsSelected = (branch: Branch): boolean => branch.view.session.id === props.selected || branch.children.some(containsSelected)
-const retained = (branch: Branch): boolean => containsSelected(branch) || branch.view.session.id === props.cursor.slice(2) || branch.children.some(retained)
-const candidates = (branch: Branch, includeHistory = false) => branch.children.filter(child => includeHistory || history.value[branch.view.session.id] || child.recent || retained(child))
-const isExpanded = (branch: Branch, includeHistory = false): boolean => {
-  return candidates(branch, includeHistory).length > 0 && (expanded.value[branch.view.session.id] ?? true)
-}
+// A direct link may reveal its selected row, but never its stopped siblings.
+const candidates = (branch: Branch) => branch.children.filter(child => history.value[branch.view.session.id] || child.liveCount > 0 || containsSelected(child))
+const isExpanded = (branch: Branch): boolean => candidates(branch).length > 0 && (expanded.value[branch.view.session.id] ?? true)
 function toggle(branch: Branch) {
   const id = branch.view.session.id
-  const wasOpen = isExpanded(branch)
-  if (!wasOpen && !candidates(branch).length) history.value[id] = true
-  expanded.value[id] = !wasOpen
+  expanded.value[id] = !isExpanded(branch)
 }
 function toggleHistory(branch: Branch) {
   const id = branch.view.session.id
@@ -43,17 +39,24 @@ function toggleHistory(branch: Branch) {
   expanded.value[id] = true
 }
 const stoppedChildren = (branch: Branch) => branch.children.reduce((sum, child) => sum + child.count - child.liveCount, 0)
+const workingChildren = (branch: Branch) => branch.children.reduce((sum, child) => sum + child.workingCount, 0)
+const idleChildren = (branch: Branch) => branch.children.reduce((sum, child) => sum + child.liveCount - child.workingCount, 0)
 const workerLabel = (branch: Branch) => `${branch.count - 1} ${branch.count === 2 ? 'worker' : 'workers'}`
 const visible = (group: SessionGroup) => {
-  const out: { view: SessionView; branch: Branch; depth: number; parent: string; open: boolean }[] = []
-  function walk(branch: Branch, depth: number, parent = '', includeHistory = false) {
-    const open = isExpanded(branch, includeHistory)
-    out.push({ view: branch.view, branch, depth, parent, open })
-    if (open) for (const child of candidates(branch, includeHistory)) walk(child, depth + 1, branch.view.name, includeHistory || history.value[branch.view.session.id])
+  const out: { view: SessionView; branch: Branch; depth: number; parent: string; open: boolean; guides: boolean[]; family: boolean; familyEnd: boolean }[] = []
+  function walk(branch: Branch, guides: boolean[], parent = '') {
+    const open = isExpanded(branch)
+    out.push({ view: branch.view, branch, depth: guides.length, parent, open, guides, family: guides.length > 0 || open, familyEnd: false })
+    if (open) {
+      const children = candidates(branch)
+      children.forEach((child, index) => walk(child, [...guides, index < children.length - 1], branch.view.name))
+    }
   }
   for (const branch of roots(group)) {
-    // A lead stopping with its last worker still gets the same grace period.
-    if (group !== 'stopped' || showStopped.value || (branch.children.length && branch.recent) || retained(branch)) walk(branch, 0)
+    if (group !== 'stopped' || showStopped.value || containsSelected(branch)) {
+      walk(branch, [])
+      out[out.length - 1]!.familyEnd = true
+    }
   }
   return out
 }
@@ -139,9 +142,13 @@ function rowClick(event: MouseEvent, id: string) {
           </span>
         </div>
         <div
-          v-for="{ view, branch, depth, parent, open } in visible(group.id)" :key="view.session.id" class="row" role="row" :data-row="`s:${view.session.id}`" :data-parent="view.session.parent_harness_session_id || undefined" :data-depth="depth" :style="{ '--depth': Math.min(depth, 4) }" tabindex="-1" @focusin="emit('focusRow', `s:${view.session.id}`)"
-          :class="[view.status.group, { worker: depth > 0, active: cursor === `s:${view.session.id}`, selected: selected === view.session.id }]" @click="rowClick($event, view.session.id)"
+          v-for="{ view, branch, depth, parent, open, guides, family, familyEnd } in visible(group.id)" :key="view.session.id" class="row" role="row" :data-row="`s:${view.session.id}`" :data-parent="view.session.parent_harness_session_id || undefined" :data-depth="depth" :style="{ '--depth': depth }" tabindex="-1" @focusin="emit('focusRow', `s:${view.session.id}`)"
+          :class="[view.status.group, { worker: depth > 0, family, 'family-start': family && !depth, 'family-end': family && familyEnd, active: cursor === `s:${view.session.id}`, selected: selected === view.session.id }]" @click="rowClick($event, view.session.id)"
         >
+          <span v-if="depth || open" class="tree-lines" aria-hidden="true">
+            <span v-for="(continues, level) in guides" :key="level" class="tree-guide" :class="{ continues, elbow: level === depth - 1, last: level === depth - 1 && !continues }" :style="{ '--level': level }" />
+            <span v-if="open" class="tree-stem" :style="{ '--level': depth }" />
+          </span>
           <span role="cell" class="c-state"><LiveDot :tone="view.status.tone" /><span class="state-label">{{ pendingLabel(view) || view.status.label }}</span></span>
           <span role="cell" class="c-agent">
             <span v-if="depth" class="sr-only">Worker of {{ parent }}. </span>
@@ -151,10 +158,12 @@ function rowClick(event: MouseEvent, id: string) {
             </RouterLink>
             <span v-if="view.session.role === 'coordinator'" class="role" data-tip="Coordinates other sessions">Lead</span>
             <span v-if="branch.children.length" class="worker-tools">
-              <button type="button" class="worker-toggle" :aria-expanded="open" :aria-label="`${open ? 'Collapse' : 'Expand'} ${workerLabel(branch)} of ${view.name}`" @click="toggle(branch)">
-                <AppIcon name="chevron-right" :size="12" class="chev" :class="{ turned: open }" />{{ workerLabel(branch) }}
+              <button type="button" class="worker-toggle" :disabled="!candidates(branch).length" :aria-expanded="open" :aria-label="`${open ? 'Collapse' : 'Expand'} ${workerLabel(branch)} of ${view.name}: ${workingChildren(branch)} working`" @click="toggle(branch)">
+                <AppIcon name="chevron-right" :size="12" class="chev" :class="{ turned: open }" />{{ workingChildren(branch) }} working
               </button>
-              <button v-if="stoppedChildren(branch)" type="button" class="worker-toggle history-toggle" :aria-pressed="!!history[view.session.id]" :aria-label="`${history[view.session.id] ? 'Hide' : 'Show'} stopped workers of ${view.name}`" @click="toggleHistory(branch)">{{ stoppedChildren(branch) }} stopped</button>
+              <template v-if="idleChildren(branch)"><span aria-hidden="true"> · </span><span class="idle-count">{{ idleChildren(branch) }} idle</span></template>
+              <span aria-hidden="true"> · </span>
+              <button type="button" class="worker-toggle history-toggle" :disabled="!stoppedChildren(branch)" :aria-expanded="!!history[view.session.id]" :aria-label="`${history[view.session.id] ? 'Hide' : 'Show'} stopped workers of ${view.name}: ${stoppedChildren(branch)} stopped`" @click="toggleHistory(branch)">{{ stoppedChildren(branch) }} stopped</button>
             </span>
           </span>
           <span role="cell" class="c-ticket">
@@ -207,7 +216,7 @@ function rowClick(event: MouseEvent, id: string) {
 .card-head { display: flex; align-items: baseline; gap: 10px; padding: 14px 18px 10px; }
 .card-head h2 { font-size: 15px; font-weight: 650; }
 .sub { font-size: 12.5px; color: var(--ink-3); }
-.table { display: grid; grid-template-columns: 132px minmax(210px, 1.5fr) minmax(96px, .8fr) minmax(90px, .8fr) minmax(110px, .9fr) 84px 72px 76px; padding: 0 0 8px; }
+.table { --state-width: 132px; --tree-step: 18px; display: grid; grid-template-columns: var(--state-width) minmax(210px, 1.5fr) minmax(96px, .8fr) minmax(90px, .8fr) minmax(110px, .9fr) 84px 72px 76px; padding: 0 0 8px; }
 .thead, .row, .group-row { display: grid; grid-template-columns: subgrid; grid-column: 1 / -1; align-items: center; column-gap: 0; }
 .thead { height: 32px; padding: 0 12px; border-top: 1px solid var(--line); border-bottom: 1px solid var(--line); font: 500 10.5px/1 var(--mono); letter-spacing: .14em; text-transform: uppercase; color: var(--ink-3); font-variant-ligatures: none; white-space: nowrap; }
 .thead > span, .row > span { padding: 0 8px; min-width: 0; }
@@ -220,19 +229,33 @@ function rowClick(event: MouseEvent, id: string) {
 .group-toggle:hover { background: var(--row-hover); color: var(--ink); }
 .group-toggle:focus-visible { box-shadow: var(--focus-ring); }
 .chev.turned { transform: rotate(90deg); }
-.row { position: relative; min-height: 48px; margin: 0 6px; padding: 0 4px; border-radius: 10px; outline: none; cursor: pointer; font-size: 13px; }
+.row { --tree-joint: 24px; position: relative; min-height: 48px; margin: 0 6px; padding: 0 4px; border-radius: 10px; outline: none; cursor: pointer; font-size: 13px; }
+.row.family { background: var(--chip-bg); border-radius: 0; }
+.row.family-start { border-radius: 10px 10px 0 0; }
+.row.family-end { border-radius: 0 0 10px 10px; }
 @media (hover: hover) { .row:hover { background: var(--row-hover); } }
 .row.active { background: var(--row-selected); box-shadow: inset 0 0 0 1px var(--chip-teal-line); }
 .row.selected { background: var(--row-selected); }
 .row { transition: background-color .3s ease, color .3s ease; }
 .row.stopped { color: var(--ink-2); background: var(--chip-bg); }
 .row.stopped .agent-name { font-weight: 450; color: var(--ink-2); }
-.row.worker .c-agent { padding-left: calc(8px + var(--depth) * 16px); }
-.worker-tools { display: flex; flex-wrap: wrap; gap: 2px 6px; flex-basis: 100%; padding: 2px 0 4px; }
-.worker-toggle { display: inline-flex; align-items: center; justify-content: center; gap: 4px; min-height: 28px; padding: 2px 6px; border: 0; border-radius: 6px; background: var(--chip-bg); color: var(--ink); font-size: 11.5px; font-weight: 550; white-space: nowrap; }
-.worker-toggle:hover { background: var(--row-hover); }
+.row.worker .c-agent { padding-left: calc(8px + var(--depth) * var(--tree-step)); }
+/* Neutral one-pixel tree strokes, never state accents or text glyphs. The
+   ancestor tracks continue only while that ancestor has another visible sibling. */
+.row > .tree-lines { position: absolute; inset: 0 0 0 calc(var(--state-width) + 4px); padding: 0; pointer-events: none; color: var(--ink-3); }
+.tree-guide, .tree-stem { position: absolute; left: calc(var(--level) * var(--tree-step)); top: 0; bottom: 0; width: var(--tree-step); }
+.tree-guide.continues::before, .tree-guide.elbow::before { content: ''; position: absolute; top: 0; bottom: 0; width: 1px; background: currentColor; }
+.tree-guide.last::before { bottom: auto; height: var(--tree-joint); }
+.tree-guide.elbow::after { content: ''; position: absolute; top: var(--tree-joint); width: calc(var(--tree-step) - 4px); height: 1px; background: currentColor; }
+.tree-stem { top: auto; height: 6px; width: 1px; background: currentColor; }
+.worker-tools { display: flex; align-items: center; flex-wrap: wrap; gap: 2px; flex-basis: 100%; padding: 2px 0 6px; color: var(--ink-2); font-size: 11.5px; }
+.worker-toggle { display: inline-flex; align-items: center; justify-content: center; gap: 4px; min-height: 28px; padding: 2px 6px; border: 0; border-radius: 6px; background: transparent; color: var(--ink); font: inherit; font-weight: 550; white-space: nowrap; }
+.worker-toggle:hover:not(:disabled) { background: var(--row-hover); }
+.worker-toggle:disabled { cursor: default; }
 .worker-toggle:focus-visible { box-shadow: var(--focus-ring); }
 .history-toggle { color: var(--ink-2); font-weight: 450; }
+.history-toggle[aria-expanded="true"] { background: var(--row-hover); color: var(--ink); }
+.idle-count { padding-inline: 4px; white-space: nowrap; }
 .chev { transition: transform .2s ease; }
 @media (prefers-reduced-motion: reduce) { .row, .chev { transition: none; } }
 .c-state { display: inline-flex; align-items: center; gap: 9px; }
@@ -282,22 +305,23 @@ function rowClick(event: MouseEvent, id: string) {
 .sk-row .dot { width: 10px; height: 10px; border-radius: 50%; }
 .sk-row .key { width: 70px; height: 20px; border-radius: 6px; }
 @container sessions (max-width: 920px) {
-  .table { grid-template-columns: 118px minmax(150px, 1.3fr) minmax(96px, .8fr) minmax(100px, .9fr) 80px 64px 76px; }
+  .table { --state-width: 118px; grid-template-columns: var(--state-width) minmax(150px, 1.3fr) minmax(96px, .8fr) minmax(100px, .9fr) 80px 64px 76px; }
   .c-account { display: none; }
 }
 @container sessions (max-width: 760px) {
-  .table { grid-template-columns: 112px minmax(140px, 1fr) minmax(90px, auto) 78px 76px; }
+  .table { --state-width: 112px; grid-template-columns: var(--state-width) minmax(140px, 1fr) minmax(90px, auto) 78px 76px; }
   .c-model, .c-elapsed { display: none; }
 }
 /* Phones: two lines per session, actions live in the session panel. */
 @container sessions (max-width: 560px) {
-  .table { display: block; }
+  .table { --tree-step: 12px; display: block; }
   .thead { display: none; }
   .group-row { display: block; margin: 12px 8px 2px; padding: 0 8px; }
-  .row { display: grid; grid-template-columns: auto minmax(0, 1fr) auto 44px; grid-template-areas: "agent agent beat actions" "state ticket ticket actions"; row-gap: 6px; column-gap: 0; min-height: 64px; margin: 0 6px; padding: 10px 4px 10px 10px; }
+  .row { --tree-joint: 30px; display: grid; grid-template-columns: auto minmax(0, 1fr) auto 44px; grid-template-areas: "agent agent beat actions" "state ticket ticket actions"; row-gap: 6px; column-gap: 0; min-height: 64px; margin: 0 6px; padding: 10px 4px 10px calc(10px + var(--depth) * var(--tree-step)); }
   .row > span { padding: 0; }
   .c-agent { grid-area: agent; }
-  .row.worker .c-agent { padding-left: calc(var(--depth) * 10px); }
+  .row.worker .c-agent { padding-left: 0; }
+  .row > .tree-lines { left: 10px; }
   .worker-toggle { min-height: 44px; padding-inline: 8px; }
   .c-state { grid-area: state; margin-right: 10px; }
   .c-ticket { grid-area: ticket; justify-self: start; }
