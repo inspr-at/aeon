@@ -15,7 +15,7 @@ const display = (page: Page) => page.getByRole('button', { name: /^Display/ })
 const panel = (page: Page) => page.getByRole('dialog', { name: 'Display options' })
 const names = (page: Page) => projects(page).locator('.card-name')
 const card = (page: Page, id: string) => page.locator(`.card[data-project-id="${id}"]`)
-const lastOrder = (calls: Call[]) => (calls.findLast(call => call.method === 'PUT' && call.path === '/api/preferences/projects')?.body as { value: { order?: string[] } } | undefined)?.value.order
+const lastOrder = (calls: Call[]) => (calls.findLast(call => call.method === 'PUT' && call.path === '/api/preferences/projects:order')?.body as { value: { ids?: string[] } } | undefined)?.value.ids
 const iso = (hours: number) => new Date(Date.parse('2026-09-23T12:00:00Z') - hours * 3_600_000).toISOString()
 
 async function open(page: Page, options: { view?: 'list' | 'cards'; groups?: Record<string, unknown>; order?: string[]; more?: boolean; path?: string } = {}) {
@@ -25,7 +25,8 @@ async function open(page: Page, options: { view?: 'list' | 'cards'; groups?: Rec
     { id: 'p-jig', key: 'PRJ-42', title: 'Pygmy jig catalogue', state: 'active', classic: 'JIGGY', description: 'Typography, glyphs and spacing.', last: iso(50) },
   )
   if (options.groups) data.preferences['project-groups'] = options.groups
-  data.preferences['projects'] = { view: options.view ?? 'cards', ...(options.order ? { order: options.order } : {}) }
+  data.preferences['projects'] = { view: options.view ?? 'cards' }
+  if (options.order) data.preferences['projects:order'] = { ids: options.order }
   const calls = await mockWork(page, data)
   await mockProjectGroups(page, data, groupsWorld())
   await page.goto(options.path ?? '/')
@@ -85,7 +86,9 @@ test('dragging a card switches to Custom at once and keeps that order across a r
   await expect(page).toHaveURL('/?sort=custom')
   await expect(page.getByText('Now sorted by custom order')).toBeVisible()
   await expect(page.getByText('Studio infrastructure moved to position 1 of 3')).toBeAttached()
-  await expect.poll(() => lastOrder(calls)?.slice(0, 3)).toEqual(['p-frozen', 'p-pharos', 'p-aeon'])
+  await expect.poll(() => lastOrder(calls)).toEqual(['p-frozen', 'p-pharos', 'p-aeon', 'p-glint'])
+  // The order has its own key: the page's other settings were not rewritten.
+  expect(calls.filter(call => call.method === 'PUT' && call.path === '/api/preferences/projects')).toEqual([])
   // The drop opened nothing.
   await expect(page.getByRole('heading', { name: 'Projects', level: 1 })).toBeVisible()
   await page.reload()
@@ -174,9 +177,75 @@ test('with groups, a card is arranged within its own group', async ({ page }) =>
   await expect.poll(() => { const order = lastOrder(calls) ?? []; return order.includes('p-jig') && order.indexOf('p-jig') < order.indexOf('p-quay') }).toBe(true)
 })
 
+test('the saved order drops projects that are gone; a failed save says so', async ({ page }) => {
+  await page.setViewportSize({ width: 1280, height: 900 })
+  const { calls } = await open(page, { order: ['p-gone', 'p-aeon', 'p-aeon', 'p-frozen'], path: '/?sort=custom' })
+  await expect(names(page)).toHaveText(['Aeon', 'Studio infrastructure', 'Pharos'])
+  await expect.poll(() => lastOrder(calls)).toEqual(['p-aeon', 'p-frozen'])
+  await page.route('**/api/preferences/projects:order', route => route.request().method() === 'PUT' ? route.fulfill({ status: 500, json: { error: 'down' } }) : route.fallback())
+  await drag(page, card(page, 'p-pharos'), card(page, 'p-aeon'))
+  await expect(names(page)).toHaveText(['Pharos', 'Aeon', 'Studio infrastructure'])
+  await expect(page.getByText('Your project order could not be saved. It stays here until you reload.')).toBeVisible()
+  await expect(page.getByRole('button', { name: 'Try again' })).toBeVisible()
+})
+
+test('under Custom, a card dropped on another group lands at the end of that group as shown', async ({ page }) => {
+  await page.setViewportSize({ width: 1280, height: 900 })
+  // Shown Jiggy then Quay, although the server lists Quay first.
+  const { calls } = await open(page, { more: true, order: ['p-jig', 'p-quay'], path: '/?sort=custom', groups: { groups: [{ id: 'g:pq', name: 'Paying jiggy queue' }], place: { 'p-quay': 'g:pq', 'p-jig': 'g:pq' }, hidden: [] } })
+  const inGroup = page.getByRole('list', { name: 'Paying jiggy queue', exact: true }).locator('.card-name')
+  await expect(inGroup).toHaveText(['Pygmy jig catalogue', 'Quay yard logging'])
+  await drag(page, card(page, 'p-pharos'), page.locator('.card-section[data-group-drop="g:pq"] .group-head'))
+  await expect(page.getByText('Moved Pharos to Paying jiggy queue')).toBeVisible()
+  await expect(inGroup).toHaveText(['Pygmy jig catalogue', 'Quay yard logging', 'Pharos'])
+  await expect(display(page)).toHaveAttribute('data-sort', 'custom')
+  await expect.poll(() => lastOrder(calls)?.slice(0, 3)).toEqual(['p-jig', 'p-quay', 'p-pharos'])
+})
+
+// A synthetic press on a card, then what the browser may send instead of a release.
+async function press(page: Page, id: string, then: 'cancel' | 'blur') {
+  await card(page, id).locator('.card-link').evaluate((link, then) => {
+    const box = link.getBoundingClientRect(), x = box.left + box.width / 2, y = box.top + box.height / 2
+    const base = { bubbles: true, cancelable: true, pointerId: 7, pointerType: 'mouse', button: 0, buttons: 1 }
+    link.dispatchEvent(new PointerEvent('pointerdown', { ...base, clientX: x, clientY: y }))
+    if (then === 'cancel') {
+      window.dispatchEvent(new PointerEvent('pointermove', { ...base, clientX: x + 40, clientY: y + 10 }))
+      window.dispatchEvent(new PointerEvent('pointercancel', { ...base, clientX: x + 40, clientY: y + 10 }))
+    } else window.dispatchEvent(new Event('blur'))
+  }, then)
+}
+
+test('a cancelled pointer ends the drag and the next card click still opens its project', async ({ page }) => {
+  await page.setViewportSize({ width: 1280, height: 900 })
+  await open(page)
+  await press(page, 'p-pharos', 'cancel')
+  await expect(page.locator('.card-ghost, .card.dragging')).toHaveCount(0)
+  await expect(display(page)).toHaveAttribute('data-sort', 'activity')
+  await expect(names(page)).toHaveText(['Pharos', 'Aeon', 'Studio infrastructure'])
+  await card(page, 'p-aeon').locator('.card-link').click()
+  await expect(page).toHaveURL('/p/AEON')
+})
+
+test('a blur before the drag starts forgets the press, so the next drag works', async ({ page }) => {
+  await page.setViewportSize({ width: 1280, height: 900 })
+  await open(page)
+  await press(page, 'p-pharos', 'blur')
+  await drag(page, card(page, 'p-frozen'), card(page, 'p-pharos'))
+  await expect(names(page)).toHaveText(['Studio infrastructure', 'Pharos', 'Aeon'])
+  await expect(display(page)).toHaveAttribute('data-sort', 'custom')
+})
+
 // Truncating labels must leave room for descenders (g, j, p, q, y): the text's box
 // stays inside the label and every clipping box around it.
+// A label that clips its overflow also needs a line-height of at least 1.2 times its
+// font size (a line-height of 1 cuts the ink of g and y while the text box fits)
+// and no overflow of its own.
 const clippedText = (page: Page, selector: string) => page.locator(selector).evaluateAll(els => els.flatMap(el => {
+  const own = getComputedStyle(el)
+  if (own.overflowY !== 'visible' || own.overflowX !== 'visible') {
+    const line = own.lineHeight === 'normal' ? Infinity : parseFloat(own.lineHeight)
+    if (line < parseFloat(own.fontSize) * 1.2 || el.scrollHeight > el.clientHeight) return [`${el.className}: ${el.textContent?.trim()} (line-height ${own.lineHeight} for ${own.fontSize})`]
+  }
   const range = document.createRange(); range.selectNodeContents(el)
   const text = range.getBoundingClientRect()
   if (!text.height) return []

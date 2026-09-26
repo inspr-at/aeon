@@ -15,8 +15,9 @@ export function byRank(rank: ReadonlyMap<string, number>) {
  * every project; `members` are the group's projects as shown.
  */
 export function place(order: readonly string[], members: readonly string[], ids: readonly string[], index: number): string[] {
-  const moving = new Set(ids)
-  const others = members.filter(id => !moving.has(id))
+  const moving = new Set(ids), group = new Set(members)
+  // The group's other projects as `order` has them, whatever order `members` came in.
+  const others = order.filter(id => group.has(id) && !moving.has(id))
   const block = order.filter(id => moving.has(id))
   const rest = order.filter(id => !moving.has(id))
   if (!others.length || !block.length) return [...order]
@@ -24,6 +25,23 @@ export function place(order: readonly string[], members: readonly string[], ids:
   const anchor = at < others.length ? rest.indexOf(others[at]!) : rest.indexOf(others[others.length - 1]!) + 1
   if (anchor < 0) return [...order]
   return [...rest.slice(0, anchor), ...block, ...rest.slice(anchor)]
+}
+
+/**
+ * What is saved: only projects the person can see now, each once, and at most
+ * `limit` of them so the preference stays well under the server's 16 KiB. Over
+ * the limit, archived projects go first, then the end of the list; those follow
+ * the arranged ones by last activity.
+ */
+export const ORDER_LIMIT = 240
+export function keepOrder(order: readonly string[], known: ReadonlySet<string>, archived: ReadonlySet<string> = new Set(), limit = ORDER_LIMIT): string[] {
+  const seen = new Set<string>()
+  const kept = order.filter(id => known.has(id) && !seen.has(id) && !!seen.add(id))
+  if (kept.length <= limit) return kept
+  const live = kept.filter(id => !archived.has(id))
+  if (live.length >= limit) return live.slice(0, limit)
+  const room = new Set([...live, ...kept.filter(id => archived.has(id)).slice(0, limit - live.length)])
+  return kept.filter(id => room.has(id))
 }
 
 /** The same order, or not: cheap equality for id lists. */

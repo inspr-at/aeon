@@ -5,13 +5,13 @@ import { useRoute, useRouter } from 'vue-router'
 import { useProjects, type Project } from '../stores/projects'
 import { useProjectGroups } from '../stores/projectGroups'
 import { useSession } from '../stores/session'
-import { usePreference } from '../lib/preferences'
+import { onPreferenceFailure, usePreference } from '../lib/preferences'
 import { plural } from '../lib/work'
 import { toast, type ToastAction } from '../lib/toast'
 import { opensRowMenu, type RowAction, type RowMenuAnchor } from '../lib/rowActions'
 import { ARCHIVED, NO_GROUP, bucket, isShared, isUserGroup, nameProblem, showsHeaders } from '../lib/projectGroups'
 import { PROJECT_COLUMNS, chosenProjectColumns, customisedProjectColumns, fittingProjectColumns, projectColumnOrder, type ProjectColumnId, type ProjectColumnPrefs } from '../lib/projectColumns'
-import { byRank, nearestCell, place, sameOrder } from '../lib/projectOrder'
+import { byRank, keepOrder, nearestCell, place, sameOrder } from '../lib/projectOrder'
 import AppIcon, { type IconName } from '../components/AppIcon.vue'
 import WelcomeBlock from '../components/WelcomeBlock.vue'
 import FloatingPanel from '../components/work/FloatingPanel.vue'
@@ -40,12 +40,15 @@ const groups = useProjectGroups()
 const session = useSession()
 const route = useRoute()
 const router = useRouter()
-// The person's view of this page: List or Cards, the list's columns and their own
-// order of projects (the Custom sort).
-type PagePrefs = { view?: 'list' | 'cards'; columns?: ProjectColumnPrefs; order?: string[] }
+// The person's view of this page: List or Cards and the list's columns. Their own
+// order of projects (the Custom sort) has a key of its own, so saving one never
+// overwrites the other.
+type PagePrefs = { view?: 'list' | 'cards'; columns?: ProjectColumnPrefs }
 const pagePref = usePreference<PagePrefs>('projects')
+const ORDER_KEY = 'projects:order'
+const orderPref = usePreference<{ ids?: string[] }>(ORDER_KEY)
 const pageReady = ref(false)
-void pagePref.ready.then(() => { pageReady.value = true })
+void Promise.all([pagePref.ready, orderPref.ready]).then(() => { pageReady.value = true })
 const view = computed<'list' | 'cards'>(() => pagePref.value.value?.view === 'cards' ? 'cards' : 'list')
 const columnPrefs = computed(() => pagePref.value.value?.columns ?? null)
 function savePage(patch: PagePrefs) {
@@ -69,7 +72,7 @@ const sortOverride = ref<SortKey | null>(null)
 const sort = computed<SortKey>(() => sortOverride.value ?? routeSort.value)
 const sortMeta = computed(() => SORTS.find(s => s.value === sort.value)!)
 // The saved custom order, or the live one while a card is being dragged.
-const savedOrder = computed(() => pagePref.value.value?.order ?? [])
+const savedOrder = computed(() => orderPref.value.value?.ids ?? [])
 const dragOrder = ref<string[] | null>(null)
 const byCustom = computed(() => byRank(new Map((dragOrder.value ?? savedOrder.value).map((id, i) => [id, i]))))
 const compare: Record<SortKey, (a: Project, b: Project) => number> = {
@@ -547,14 +550,31 @@ function layoutBox(el: HTMLElement) {
 function where(position: number, count: number, group: string) {
   return `position ${position} of ${count}${headers.value ? ` in ${groupName(group)}` : ''}`
 }
+// What is saved is pruned to the projects shown to this person and bounded in size.
+// Moves in quick succession send one write when they settle.
+function saveOrder(ids: string[]) {
+  const known = new Set(store.projects.map(p => p.id)), archived = new Set(store.projects.filter(p => p.archived).map(p => p.id))
+  orderPref.save({ ids: keepOrder(ids, known, archived) }, 300)
+}
+const stopFailures = onPreferenceFailure(key => {
+  if (key !== ORDER_KEY) return
+  toast('Your project order could not be saved. It stays here until you reload.', { tone: 'error', key: 'order-failed', action: { label: 'Try again', run: () => saveOrder(savedOrder.value) } })
+})
+// Projects deleted or no longer shown leave the saved order once the list is in.
+const stopPruning = watch(() => ready.value && store.loaded && !store.error && store.projects.length > 0, loaded => {
+  if (!loaded) return
+  queueMicrotask(() => stopPruning())
+  const known = new Set(store.projects.map(p => p.id))
+  if (savedOrder.value.some(id => !known.has(id)) || new Set(savedOrder.value).size !== savedOrder.value.length) saveOrder(savedOrder.value)
+}, { immediate: true })
 // Saves an arrangement; the first one made under another sort switches to Custom, undoably.
 async function commitOrder(next: string[]) {
   const was = routeSort.value, before = savedOrder.value
-  savePage({ order: next })
+  saveOrder(next)
   dragOrder.value = null
   if (was === 'custom') { sortOverride.value = null; return }
   sortOverride.value = 'custom'
-  toast('Now sorted by custom order', { key: 'custom-order', timeout: 8000, action: { label: 'Undo', run: () => { savePage({ order: before }); chooseSort(was) } } })
+  toast('Now sorted by custom order', { key: 'custom-order', timeout: 8000, action: { label: 'Undo', run: () => { saveOrder(before); chooseSort(was) } } })
   await router.replace({ query: { ...route.query, sort: 'custom' } })
   if (sortOverride.value === 'custom') sortOverride.value = null
 }
@@ -594,7 +614,8 @@ function pointerDown(event: PointerEvent) {
   drag = { pointer: event.pointerId, id: card.dataset.projectId!, x: event.clientX, y: event.clientY, lastX: event.clientX, lastY: event.clientY, card, started: false, ids: [], moving: [], group: '', members: [], base: [] }
   window.addEventListener('pointermove', pointerMove)
   window.addEventListener('pointerup', pointerUp)
-  window.addEventListener('pointercancel', cancelDrag)
+  window.addEventListener('pointercancel', abandonDrag)
+  window.addEventListener('blur', abandonDrag)
 }
 function pointerMove(event: PointerEvent) {
   if (!drag || event.pointerId !== drag.pointer) return
@@ -629,7 +650,6 @@ function beginDrag() {
   window.getSelection()?.removeAllRanges()
   document.documentElement.classList.add('arranging-cards')
   window.addEventListener('keydown', dragKey, true)
-  window.addEventListener('blur', cancelDrag)
   rowMenu.value = null
   arranging.value = true
   dragIds.value = new Set(d.ids)
@@ -675,16 +695,16 @@ function autoScroll() {
 function release() {
   window.removeEventListener('pointermove', pointerMove)
   window.removeEventListener('pointerup', pointerUp)
-  window.removeEventListener('pointercancel', cancelDrag)
+  window.removeEventListener('pointercancel', abandonDrag)
   window.removeEventListener('keydown', dragKey, true)
-  window.removeEventListener('blur', cancelDrag)
+  window.removeEventListener('blur', abandonDrag)
   cancelAnimationFrame(scrollFrame)
   document.documentElement.classList.remove('arranging-cards')
 }
 function dragKey(event: KeyboardEvent) {
   if (event.key !== 'Escape') return
   event.preventDefault(); event.stopPropagation()
-  cancelDrag()
+  cancelDrag(true)
 }
 function pointerUp(event: PointerEvent) {
   if (!drag || event.pointerId !== drag.pointer) return
@@ -693,12 +713,34 @@ function pointerUp(event: PointerEvent) {
   setTimeout(() => { clickBlocked = false })
   void finishDrag(true)
 }
-function cancelDrag() {
+// The pointer was taken away (pointercancel) or the window lost focus: no release
+// will follow for this press, so nothing waits for one.
+function abandonDrag() { cancelDrag(false) }
+// Escape: the button is still down, so its release opens nothing either. Only that
+// pointer's next release is swallowed, and a new press forgets it.
+function cancelDrag(held: boolean) {
   if (!drag) return
-  if (!drag.started) { release(); drag = null; return }
-  // The button is still down: its release after Escape opens nothing either.
-  window.addEventListener('pointerup', () => { clickBlocked = true; setTimeout(() => { clickBlocked = false }) }, { once: true, capture: true })
+  const d = drag
+  if (!d.started) { release(); drag = null; return }
+  if (held) swallowRelease(d.pointer)
   void finishDrag(false)
+}
+let swallow: ((event: PointerEvent) => void) | null = null
+function swallowRelease(pointer: number) {
+  dropSwallow()
+  swallow = event => {
+    if (event.pointerId !== pointer) return
+    dropSwallow()
+    clickBlocked = true
+    setTimeout(() => { clickBlocked = false })
+  }
+  window.addEventListener('pointerup', swallow, true)
+  window.addEventListener('pointerdown', dropSwallow, true)
+}
+function dropSwallow() {
+  if (swallow) window.removeEventListener('pointerup', swallow, true)
+  window.removeEventListener('pointerdown', dropSwallow, true)
+  swallow = null
 }
 async function finishDrag(dropping: boolean) {
   const d = drag!
@@ -712,8 +754,9 @@ async function finishDrag(dropping: boolean) {
     settleGhost(d, false)
     const list = d.moving.map(id => store.byId(id)).filter((p): p is Project => !!p)
     if (routeSort.value === 'custom') {
-      const there = everything.value.find(s => s.group.id === target)?.items.map(p => p.id) ?? []
-      savePage({ order: place(screenOrder(), [...there, ...d.moving], d.moving, there.length) })
+      // Under Custom they land at the end of that group as it is shown.
+      const shown = screenOrder(), there = shown.filter(id => { const p = store.byId(id); return !!p && groups.where(p) === target })
+      saveOrder(place(shown, [...there, ...d.moving], d.moving, there.length))
     }
     await moveTo(list, target)
     return
@@ -758,7 +801,7 @@ watch(listCard, element => {
   sizer = new ResizeObserver(([entry]) => { listWidth.value = entry!.contentRect.width })
   sizer.observe(element)
 }, { flush: 'post' })
-onBeforeUnmount(() => { if (drag) { drag.ghost?.remove(); release(); drag = null } window.removeEventListener('keydown', keydown); page.value?.removeEventListener('click', clickCapture, true); clearInterval(clock); sizer?.disconnect(); phoneQuery.removeEventListener('change', phoneChange) })
+onBeforeUnmount(() => { if (drag) { drag.ghost?.remove(); release(); drag = null } dropSwallow(); stopFailures(); stopPruning(); window.removeEventListener('keydown', keydown); page.value?.removeEventListener('click', clickCapture, true); clearInterval(clock); sizer?.disconnect(); phoneQuery.removeEventListener('change', phoneChange) })
 const who = computed(() => session.identity?.tenant.name ?? 'Workspace')
 // One line under the sorts says how to arrange your own order. Touch screens
 // scroll when a card is dragged, so there the card's menu arranges it.
