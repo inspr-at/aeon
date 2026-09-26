@@ -4,22 +4,130 @@ package journey_test
 
 import (
 	"encoding/json"
+	"fmt"
 	"net/http"
 	"net/http/httptest"
 	"strconv"
 	"strings"
 	"testing"
+	"time"
 
 	"github.com/jackc/pgx/v5"
 	"github.com/jackc/pgx/v5/pgxpool"
 
+	"github.com/inspr-at/aeon/internal/approvals"
+	"github.com/inspr-at/aeon/internal/auth"
 	"github.com/inspr-at/aeon/internal/db"
 	"github.com/inspr-at/aeon/internal/dbtest"
 	"github.com/inspr-at/aeon/internal/journey"
+	"github.com/inspr-at/aeon/internal/plugins"
+	"github.com/inspr-at/aeon/internal/stagehandoff"
 	"github.com/inspr-at/aeon/internal/tenant"
 )
 
 const digest = "0123456789abcdef0123456789abcdef0123456789abcdef0123456789abcdef"
+
+func TestJourneyGateKeyPharosHandoffRoundtrip(t *testing.T) {
+	f := newFixture(t)
+	project := f.node(t, "project", "PRJ-36", "Disposable Pharos fixture")
+	release := f.node(t, "release", "REL-1", "Release")
+	ctx := t.Context()
+	if err := db.InTenant(dbtest.Seed(ctx), f.db.App, f.tenant, func(tx pgx.Tx) error {
+		if _, err := tx.Exec(ctx, `INSERT INTO journey_projects(tenant_id,project_node_id,brief_confirmed_at,requirements_revision,agreed_requirements_revision,agreed_requirements_digest_sha256,current_release_node_id)
+			VALUES($1::uuid,$2::uuid,now(),1,1,$4,$3::uuid)`, f.tenant, project, release, digest); err != nil {
+			return err
+		}
+		if _, err := tx.Exec(ctx, `INSERT INTO journey_releases(tenant_id,release_node_id,project_node_id,number,state)
+			VALUES($1::uuid,$2::uuid,$3::uuid,1,'candidate')`, f.tenant, release, project); err != nil {
+			return err
+		}
+		return nil
+	}); err != nil {
+		t.Fatal(err)
+	}
+	dbtest.BindRoleWith(t, f.db.Admin, f.tenant, f.agent.ID, "owner")
+	dbtest.BindRoleWith(t, f.db.Admin, f.tenant, f.person.ID, "owner")
+	keyID, agentID, token, err := auth.OperatorCreateAgentKey(ctx, f.db.App, f.tenant, "gate proposer", f.agent.ID, []string{"approvals.request", "journey.read", "stage_handoffs.write"}, nil)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if agentID != f.agent.ID {
+		t.Fatal("key belongs to a different agent")
+	}
+	if _, err := auth.OperatorAddJourneyGateScopes(ctx, f.db.App, f.tenant, keyID, []string{"candidate", "deploy"}); err != nil {
+		t.Fatal(err)
+	}
+	registry, err := plugins.Builtin()
+	if err != nil {
+		t.Fatal(err)
+	}
+	pharos, _ := registry.Lookup("pharos")
+	if err := db.InTenant(dbtest.Seed(ctx), f.db.App, f.tenant, func(tx pgx.Tx) error {
+		_, err := tx.Exec(ctx, `INSERT INTO plugin_installations(tenant_id,plugin_id,version,manifest_digest_sha256,owner,enabled,permissions,updated_by_principal_id)
+			VALUES($1::uuid,$2,$3,$4,$5,true,$6,$7::uuid)`, f.tenant, pharos.Manifest.ID, pharos.Manifest.Version, pharos.Manifest.DigestSHA256, pharos.Manifest.Owner, pharos.Manifest.Permissions, f.person.ID)
+		return err
+	}); err != nil {
+		t.Fatal(err)
+	}
+	approvals.New(f.db.App).Mount(f.mux)
+	stagehandoff.New(f.db.App, registry).Mount(f.mux)
+	callAgent := func(method, path, body string) *httptest.ResponseRecorder {
+		req := httptest.NewRequest(method, path, strings.NewReader(body))
+		req.Header.Set("Authorization", "Bearer "+token)
+		req.Header.Set("Content-Type", "application/json")
+		req = req.WithContext(tenant.WithPrincipal(req.Context(), f.agent))
+		w := httptest.NewRecorder()
+		f.mux.ServeHTTP(w, req)
+		return w
+	}
+	view := f.journey(t, f.person, http.MethodGet, "/api/projects/"+project+"/journey", "")
+	if view.NextAction.Key != "approve_candidate" {
+		t.Fatalf("initial journey action: %+v", view.NextAction)
+	}
+	for _, gate := range []struct{ scope, action string }{{"journey.candidate", "approve_candidate"}, {"journey.deploy", "approve_deploy"}} {
+		body := fmt.Sprintf(`{"scope":%q,"resource_kind":"node","resource_id":%q,"rationale":"Disposable Pharos roundtrip gate","expires_at":%q}`, gate.scope, release, time.Now().Add(time.Hour).UTC().Format(time.RFC3339))
+		proposed := callAgent(http.MethodPost, "/api/approvals", body)
+		if proposed.Code != http.StatusCreated {
+			t.Fatalf("propose %s: %d %s", gate.scope, proposed.Code, proposed.Body.String())
+		}
+		var approval struct {
+			ID string `json:"id"`
+		}
+		if err := json.Unmarshal(proposed.Body.Bytes(), &approval); err != nil || approval.ID == "" {
+			t.Fatalf("proposal: %v %s", err, proposed.Body.String())
+		}
+		decided := f.do(f.person, http.MethodPost, "/api/approvals/"+approval.ID+"/decision", `{"decision":"approved"}`)
+		if decided.Code != http.StatusOK {
+			t.Fatalf("decide %s: %d %s", gate.scope, decided.Code, decided.Body.String())
+		}
+		view = f.journey(t, f.person, http.MethodPost, "/api/projects/"+project+"/journey/actions", actionJSON(gate.action, view.Revision, gate.action, approval.ID, release, ""))
+		if err := db.InTenant(dbtest.Seed(ctx), f.db.App, f.tenant, func(tx pgx.Tx) error {
+			var proposer, bound string
+			if err := tx.QueryRow(ctx, `SELECT a.proposed_by_principal_id::text,g.approval_request_id::text FROM journey_gates g
+				JOIN approval_requests a ON a.id=g.approval_request_id WHERE g.release_node_id=$1::uuid AND a.scope=$2`, release, gate.scope).Scan(&proposer, &bound); err != nil {
+				return err
+			}
+			if proposer != f.agent.ID || bound != approval.ID {
+				t.Fatalf("gate %s: proposer=%s approval=%s", gate.scope, proposer, bound)
+			}
+			return nil
+		}); err != nil {
+			t.Fatal(err)
+		}
+	}
+	request := fmt.Sprintf(`{"project_node_id":%q,"release_node_id":%q,"stage":"deploy","operation":"deploy","expected_journey_revision":%d,"idempotency_key":"pharos-roundtrip"}`, project, release, view.Revision)
+	handoff := callAgent(http.MethodPost, "/api/stage-handoffs", request)
+	if handoff.Code != http.StatusCreated {
+		t.Fatalf("Pharos deploy handoff: %d %s", handoff.Code, handoff.Body.String())
+	}
+	var created stagehandoff.Handoff
+	if err := json.Unmarshal(handoff.Body.Bytes(), &created); err != nil {
+		t.Fatal(err)
+	}
+	if created.ID == "" || created.PluginID != "pharos" || created.Stage != "deploy" || created.Operation != "deploy" {
+		t.Fatalf("wrong handoff: %+v", created)
+	}
+}
 
 func TestJourneyStageGateLiveTracksRevocationAndExpiry(t *testing.T) {
 	f := newFixture(t)
