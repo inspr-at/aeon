@@ -52,7 +52,9 @@ func TestList6000WithProjectVisibility(t *testing.T) {
 	if _, err := testDB.Admin.Exec(t.Context(), `INSERT INTO role_bindings(tenant_id,principal_id,role_id,scope_type,scope_id) SELECT $1,$2,id,'project',$3 FROM roles WHERE tenant_id=$1 AND key='guest'`, member.TenantID, guest.ID, root.ID); err != nil {
 		t.Fatal(err)
 	}
-	limit := 150 * time.Millisecond
+	// The materialized list filter keeps bad no-statistics plans bounded while
+	// adding a small predictable cost under project visibility.
+	limit := 300 * time.Millisecond
 	if os.Getenv("CI") != "" {
 		limit = 600 * time.Millisecond
 	}

@@ -19,6 +19,7 @@ import (
 	"github.com/inspr-at/aeon/internal/authz"
 	"github.com/inspr-at/aeon/internal/db"
 	"github.com/inspr-at/aeon/internal/events"
+	"github.com/inspr-at/aeon/internal/operatoractor"
 	"github.com/inspr-at/aeon/internal/tenant"
 	"github.com/inspr-at/aeon/internal/tenantbootstrap"
 )
@@ -450,9 +451,18 @@ func (m *Module) createAgentKey(ctx context.Context, p tenant.Principal, name, p
 	}
 	var rec keyRecord
 	err := m.inTenant(ctx, m.pool, p.TenantID, func(tx pgx.Tx) error {
-		var tenantLock string
-		if err := tx.QueryRow(ctx, `SELECT id::text FROM tenants WHERE id=$1::uuid FOR UPDATE`, p.TenantID).Scan(&tenantLock); err != nil {
-			return err
+		actorID := p.ID
+		if actorID == "" {
+			var err error
+			actorID, err = operatoractor.Ensure(ctx, tx, p.TenantID)
+			if err != nil {
+				return err
+			}
+		} else {
+			var tenantLock string
+			if err := tx.QueryRow(ctx, `SELECT id::text FROM tenants WHERE id=$1::uuid FOR UPDATE`, p.TenantID).Scan(&tenantLock); err != nil {
+				return err
+			}
 		}
 		var err error
 		if principalID != "" {
@@ -514,7 +524,7 @@ func (m *Module) createAgentKey(ctx context.Context, p tenant.Principal, name, p
 				return err
 			}
 		}
-		if err := ensureAgentBinding(ctx, tx, p, principalID, name, scopes); err != nil {
+		if err := ensureAgentBinding(ctx, tx, p, actorID, principalID, name, scopes); err != nil {
 			return err
 		}
 		for attempt := 0; attempt < 5; attempt++ {
@@ -531,6 +541,8 @@ func (m *Module) createAgentKey(ctx context.Context, p tenant.Principal, name, p
 			}
 			var id string
 			var created time.Time
+			// This column caps HTTP-created keys by the creator's live
+			// permissions. Operator keys have no human creator ceiling.
 			var creator any
 			if p.ID != "" {
 				creator = p.ID
@@ -562,10 +574,6 @@ func (m *Module) createAgentKey(ctx context.Context, p tenant.Principal, name, p
 				ExpiresAt:   expires,
 				Token:       "aeon_" + prefix + "_" + secret,
 			}
-			actorID := p.ID
-			if actorID == "" {
-				actorID = principalID
-			}
 			_, err = events.Append(ctx, tx, tenant.Principal{ID: actorID, TenantID: p.TenantID}, events.Change{
 				Type: "agent_key.created", After: map[string]any{"key_id": id, "principal_id": principalID, "name": name, "prefix": prefix, "scopes": scopes},
 			})
@@ -581,6 +589,10 @@ func (m *Module) createAgentKey(ctx context.Context, p tenant.Principal, name, p
 
 func (m *Module) grantJourneyScopes(ctx context.Context, tenantID, keyID, principalID string) error {
 	return m.inTenant(ctx, m.pool, tenantID, func(tx pgx.Tx) error {
+		actorID, err := operatoractor.Ensure(ctx, tx, tenantID)
+		if err != nil {
+			return err
+		}
 		var before []string
 		if err := tx.QueryRow(ctx, `SELECT scopes FROM agent_keys WHERE id=$1::uuid AND principal_id=$2::uuid AND revoked_at IS NULL FOR UPDATE`, keyID, principalID).Scan(&before); err != nil {
 			if errors.Is(err, pgx.ErrNoRows) {
@@ -600,7 +612,7 @@ func (m *Module) grantJourneyScopes(ctx context.Context, tenantID, keyID, princi
 		if _, err := tx.Exec(ctx, `UPDATE agent_keys SET scopes=$3::text[] WHERE id=$1::uuid AND principal_id=$2::uuid`, keyID, principalID, after); err != nil {
 			return err
 		}
-		_, err := events.Append(ctx, tx, tenant.Principal{ID: principalID, TenantID: tenantID}, events.Change{
+		_, err = events.Append(ctx, tx, tenant.Principal{ID: actorID, TenantID: tenantID}, events.Change{
 			Type:   "agent_key.scopes_extended",
 			Before: map[string]any{"key_id": keyID, "principal_id": principalID, "scopes": before},
 			After:  map[string]any{"key_id": keyID, "principal_id": principalID, "scopes": after},
@@ -609,7 +621,7 @@ func (m *Module) grantJourneyScopes(ctx context.Context, tenantID, keyID, princi
 	})
 }
 
-func ensureAgentBinding(ctx context.Context, tx pgx.Tx, creator tenant.Principal, agentID, name string, scopes []string) error {
+func ensureAgentBinding(ctx context.Context, tx pgx.Tx, creator tenant.Principal, actorID, agentID, name string, scopes []string) error {
 	requested := map[string]bool{}
 	for _, scope := range scopes {
 		key := strings.ReplaceAll(scope, ":", ".")
@@ -636,10 +648,6 @@ func ensureAgentBinding(ctx context.Context, tx pgx.Tx, creator tenant.Principal
 		WHERE b.tenant_id=$1::uuid AND b.principal_id=$2::uuid AND b.scope_type='workspace' FOR UPDATE OF b`, creator.TenantID, agentID).Scan(&roleID, &roleKey, &builtin)
 	if err != nil && !errors.Is(err, pgx.ErrNoRows) {
 		return err
-	}
-	actorID := creator.ID
-	if actorID == "" {
-		actorID = agentID
 	}
 	actor := tenant.Principal{ID: actorID, TenantID: creator.TenantID}
 	if errors.Is(err, pgx.ErrNoRows) {
@@ -725,6 +733,16 @@ func (m *Module) listAgentKeys(ctx context.Context, tenantID string) ([]keyRecor
 
 func (m *Module) revokeAgentKey(ctx context.Context, p tenant.Principal, id string) error {
 	return m.inTenant(ctx, m.pool, p.TenantID, func(tx pgx.Tx) error {
+		actorID := p.ID
+		via := "api"
+		if actorID == "" {
+			via = "operator"
+			var err error
+			actorID, err = operatoractor.Ensure(ctx, tx, p.TenantID)
+			if err != nil {
+				return err
+			}
+		}
 		var principalID, keyName, prefix string
 		var revokedAt *time.Time
 		if err := tx.QueryRow(ctx, `SELECT principal_id::text,name,prefix,revoked_at FROM agent_keys WHERE id=$1::uuid FOR UPDATE`, id).Scan(&principalID, &keyName, &prefix, &revokedAt); err != nil {
@@ -738,12 +756,6 @@ func (m *Module) revokeAgentKey(ctx context.Context, p tenant.Principal, id stri
 		}
 		if _, err := tx.Exec(ctx, `UPDATE agent_keys SET revoked_at=now() WHERE id=$1::uuid`, id); err != nil {
 			return err
-		}
-		actorID := p.ID
-		via := "api"
-		if actorID == "" {
-			actorID = principalID
-			via = "operator"
 		}
 		_, err := events.Append(ctx, tx, tenant.Principal{ID: actorID, TenantID: p.TenantID}, events.Change{
 			Type: "agent_key.revoked", After: map[string]any{"key_id": id, "principal_id": principalID, "name": keyName, "prefix": prefix, "via": via},

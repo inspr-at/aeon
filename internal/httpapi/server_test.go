@@ -12,10 +12,13 @@ import (
 	"strings"
 	"testing"
 	"testing/fstest"
+	"time"
 
 	"github.com/inspr-at/aeon/internal/brand"
+	"github.com/inspr-at/aeon/internal/db"
 	"github.com/inspr-at/aeon/internal/dbtest"
 	"github.com/inspr-at/aeon/internal/version"
+	"github.com/jackc/pgx/v5"
 )
 
 type moduleFunc func(*http.ServeMux)
@@ -217,6 +220,43 @@ func get(t *testing.T, h http.Handler, path, requestID string) *httptest.Respons
 	rec := httptest.NewRecorder()
 	h.ServeHTTP(rec, req)
 	return rec
+}
+
+func TestReadStatementTimeoutReturns503(t *testing.T) {
+	t.Setenv("AEON_READ_STATEMENT_TIMEOUT", "5ms")
+	d := dbtest.Open(t)
+	var tenantID string
+	if err := d.App.QueryRow(t.Context(), `INSERT INTO tenants(slug,name) VALUES('read-timeout','Read timeout') RETURNING id::text`).Scan(&tenantID); err != nil {
+		t.Fatal(err)
+	}
+	s := &Server{Modules: []Module{moduleFunc(func(mux *http.ServeMux) {
+		for _, path := range []string{"GET /api/nodes", "GET /api/search"} {
+			mux.HandleFunc(path, func(w http.ResponseWriter, r *http.Request) {
+				err := db.InTenant(db.NoProjects(r.Context(), "timeout test"), d.App, tenantID, func(tx pgx.Tx) error {
+					return tx.QueryRow(r.Context(), `SELECT pg_sleep($1::double precision)`, 0.05).Scan(new(any))
+				})
+				if err != nil {
+					WriteError(w, http.StatusInternalServerError, "internal")
+					return
+				}
+				WriteJSON(w, http.StatusOK, map[string]bool{"ok": true})
+			})
+		}
+	})}}
+	for _, path := range []string{"/api/nodes", "/api/search"} {
+		rec := get(t, s.Handler(), path, "")
+		if rec.Code != http.StatusServiceUnavailable || rec.Header().Get("Content-Type") != "application/problem+json" || !strings.Contains(rec.Body.String(), `"status":503`) {
+			t.Fatalf("%s: status %d, type %q, body %s", path, rec.Code, rec.Header().Get("Content-Type"), rec.Body.String())
+		}
+	}
+	// The SET LOCAL limit must not leak into another request on a pooled connection.
+	ctx, cancel := context.WithTimeout(t.Context(), time.Second)
+	defer cancel()
+	if err := db.InTenant(db.NoProjects(ctx, "timeout test"), d.App, tenantID, func(tx pgx.Tx) error {
+		return tx.QueryRow(ctx, `SELECT pg_sleep($1::double precision)`, 0.02).Scan(new(any))
+	}); err != nil {
+		t.Fatalf("timeout leaked into another transaction: %v", err)
+	}
 }
 
 func TestCapabilityAndPanicDetailsNeverEnterRequestLogs(t *testing.T) {
