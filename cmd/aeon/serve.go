@@ -27,6 +27,7 @@ import (
 	"github.com/inspr-at/aeon/internal/brand"
 	"github.com/inspr-at/aeon/internal/embedding"
 	"github.com/inspr-at/aeon/internal/events"
+	"github.com/inspr-at/aeon/internal/fromclassic"
 	"github.com/inspr-at/aeon/internal/greetings"
 	"github.com/inspr-at/aeon/internal/harness"
 	"github.com/inspr-at/aeon/internal/imports"
@@ -209,6 +210,7 @@ func serveListener(ctx context.Context, cfg config.Config, ln net.Listener) erro
 			// access audit. P1 shipped with it unmounted, so /api/me/permissions answered 403.
 			authz.New(pool),
 			nodes.New(pool, nodes.SQLWriter{}),
+			fromclassic.New(pool),
 			relations.New(pool),
 			events.New(pool, events.WithUndoHandlers(nodes.UndoHandlers()), relations.UndoOption(), events.WithUndoHandlers(views.UndoHandlers()), events.WithUndoHandlers(knowledge.UndoHandlers()), events.WithUndoHandlers(projectgroups.UndoHandlers()), events.WithUndoHandlers(attachments.UndoHandlers()), events.WithUndoHandlers(hours.UndoHandlers(pluginRegistry)), events.WithUndoHandlers(profile.UndoHandlers()), events.WithUndoHandlers(crm.UndoHandlers(pluginRegistry)), events.WithUndoHandlers(publicquotes.UndoHandlers()), events.WithUndoHandlers(quotes.UndoHandlers(pluginRegistry))),
 			search.New(pool, embedProvider),
