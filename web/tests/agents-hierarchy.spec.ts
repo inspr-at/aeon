@@ -49,7 +49,7 @@ async function setup(page: Page) {
 test('workers nest by session ID, display their label, harness and ticket, and expand with the keyboard', async ({ page }) => {
   await setup(page)
   await page.goto('/agents')
-  await expect(row(page, lead)).toContainText('1 worker')
+  await expect(row(page, lead)).toContainText('1 working')
   await expect(row(page, child)).toHaveAttribute('data-depth', '1')
   await expect(row(page, child)).toHaveAttribute('data-parent', lead)
   await expect(row(page, child)).toContainText('AC4 hierarchy')
@@ -64,7 +64,7 @@ test('workers nest by session ID, display their label, harness and ticket, and e
   await expect(page.locator('.last-updated time')).toHaveAttribute('datetime', /T/)
 })
 
-test('new and stopped workers update within seconds through the live channel, then fold into recoverable history', async ({ page }) => {
+test('new workers update through the live channel and stopped workers fold immediately into recoverable history', async ({ page }) => {
   const { data } = await setup(page)
   const worker = data.sessions.pop()!
   await page.clock.install()
@@ -77,8 +77,6 @@ test('new and stopped workers update within seconds through the live channel, th
   Object.assign(worker, { phase: 'stopped', stopped_at: new Date().toISOString(), stop_reason: 'process_exited' })
   await signal(page, 'harness.stopped')
   await page.clock.runFor(500)
-  await expect(row(page, child).locator('.state-label')).toHaveText('Stopped', { timeout: 3000 })
-  await page.clock.runFor(31_000)
   await expect(row(page, child)).toHaveCount(0)
   await row(page, lead).getByRole('button', { name: 'Show stopped workers of Release lead' }).click()
   await expect(row(page, child)).toBeVisible()
