@@ -10,6 +10,7 @@ import (
 	"io"
 	"net"
 	"net/http"
+	"net/url"
 	"os"
 	"os/exec"
 	"path/filepath"
@@ -224,18 +225,31 @@ func runTerminal(ctx context.Context, workspace, branch string, in terminalArgs)
 	if !allowedTerminal(in.Command, in.Args) {
 		return "", errors.New("terminal command denied")
 	}
+	physicalWorkspace, err := filepath.EvalSymlinks(workspace)
+	if err != nil || !filepath.IsAbs(workspace) {
+		return "", errors.New("terminal workspace unavailable")
+	}
+	workspace = physicalWorkspace
+	toolPath, err := exec.LookPath(in.Command)
+	if err != nil {
+		return "", errors.New("terminal toolchain unavailable")
+	}
+	toolPath, err = filepath.EvalSymlinks(toolPath)
+	if err != nil || pathWithin(workspace, toolPath) {
+		return "", errors.New("terminal toolchain is not independent of workspace")
+	}
 	if in.Command == "git" && (in.Args[0] == "add" || in.Args[0] == "commit") {
-		current, err := exec.CommandContext(ctx, "git", "-C", workspace, "branch", "--show-current").Output()
+		current, err := exec.CommandContext(ctx, toolPath, "-C", workspace, "branch", "--show-current").Output()
 		if err != nil || strings.TrimSpace(string(current)) != branch || branch == "" || branch == "main" || branch == "master" {
 			return "", errors.New("run branch is not checked out")
 		}
 		if in.Args[0] == "add" {
 			for _, path := range in.Args[2:] {
-				if !safeStagePath(workspace, path) {
+				if !safeStagePath(toolPath, workspace, path) {
 					return "", errors.New("git add path denied")
 				}
 			}
-		} else if !safeStagedSet(ctx, workspace) {
+		} else if !safeStagedSet(ctx, toolPath, workspace) {
 			return "", errors.New("git staged file set denied")
 		}
 	}
@@ -247,16 +261,116 @@ func runTerminal(ctx context.Context, workspace, branch string, in terminalArgs)
 	if runtime.GOOS != "darwin" {
 		return "", errors.New("bounded terminal requires the macOS sandbox")
 	}
-	profile := `(version 1) (allow default) (deny network*) (allow network-outbound (remote ip "localhost:*")) (allow network-bind (local ip "localhost:*")) (allow network-inbound (local ip "localhost:*"))`
 	home, err := os.UserHomeDir()
 	if err != nil || !filepath.IsAbs(home) {
 		return "", errors.New("terminal home unavailable")
 	}
+	physicalHome, err := filepath.EvalSymlinks(home)
+	if err != nil {
+		return "", errors.New("terminal home is not physical")
+	}
+	if pathWithin(workspace, physicalHome) {
+		return "", errors.New("terminal workspace contains home")
+	}
+	tmp, err := os.MkdirTemp("", "aeon-terminal-")
+	if err != nil {
+		return "", err
+	}
+	defer os.RemoveAll(tmp) // This invocation owns the private cache and temp tree.
+	for _, name := range []string{"go-build", "go-mod", "npm-cache"} {
+		if err := os.Mkdir(filepath.Join(tmp, name), 0700); err != nil {
+			return "", err
+		}
+	}
+	for _, name := range []string{"gitconfig", "npmrc"} {
+		if err := os.WriteFile(filepath.Join(tmp, name), nil, 0600); err != nil {
+			return "", err
+		}
+	}
+	physicalTmp, err := filepath.EvalSymlinks(tmp)
+	if err != nil {
+		return "", err
+	}
+	// A private module cache is filled only from the host's existing download
+	// cache. The host cache is read-only to sandboxed code; no registry access or
+	// GOFLAGS=-modcacherw is needed. Go's build cache and npm cache are private.
+	moduleProxy := "off"
+	moduleCache := ""
+	goRoot := ""
+	if in.Command == "go" {
+		out, err := exec.CommandContext(deadline, toolPath, "env", "GOROOT", "GOMODCACHE").Output()
+		if err != nil {
+			return "", errors.New("Go toolchain unavailable")
+		}
+		paths := strings.Split(strings.TrimSpace(string(out)), "\n")
+		if len(paths) != 2 {
+			return "", errors.New("Go toolchain paths unavailable")
+		}
+		goRoot, err = filepath.EvalSymlinks(paths[0])
+		if err != nil || !filepath.IsAbs(goRoot) || pathWithin(goRoot, physicalHome) {
+			return "", errors.New("Go root is not physical")
+		}
+		moduleCache = paths[1]
+		if !filepath.IsAbs(moduleCache) {
+			return "", errors.New("Go module cache is not absolute")
+		}
+		moduleCache, err = filepath.EvalSymlinks(moduleCache)
+		if err != nil && !os.IsNotExist(err) {
+			return "", errors.New("Go module cache is not physical")
+		}
+		if err == nil && pathWithin(moduleCache, physicalHome) {
+			return "", errors.New("Go module cache contains home")
+		}
+		if err == nil {
+			moduleProxy = (&url.URL{Scheme: "file", Path: filepath.ToSlash(filepath.Join(moduleCache, "cache", "download"))}).String()
+		} else {
+			moduleCache = ""
+		}
+	}
+	profile := `(version 1) (allow default) (deny network*) (allow network-outbound (remote ip "localhost:*")) (allow network-bind (local ip "localhost:*")) (allow network-inbound (local ip "localhost:*")) (deny file-write*)`
+	profile += fmt.Sprintf(" (allow file-write* (subpath %q)) (allow file-write* (subpath %q))", physicalWorkspace, physicalTmp)
+	// Git opens the null device read/write while staging. It has no persistent
+	// backing data and grants no filesystem write outside the two run roots.
+	profile += ` (allow file-write* (literal "/dev/null"))`
+	// Deny the rest of home even to test binaries and package scripts. Read
+	// exceptions are limited to this workspace and offline dependency cache.
+	for _, path := range []string{home, physicalHome} {
+		profile += fmt.Sprintf(" (deny file-read* (subpath %q))", path)
+	}
+	for _, path := range []string{physicalWorkspace, physicalTmp, moduleCache, goRoot} {
+		if path != "" {
+			profile += fmt.Sprintf(" (allow file-read* (subpath %q))", path)
+		}
+	}
+	// A toolchain installed under home may be needed to execute the command.
+	// Resolve links so a Nix profile grants only its immutable store target.
+	toolNames := []string{in.Command}
+	if in.Command == "npm" {
+		toolNames = append(toolNames, "node")
+	}
+	for _, name := range toolNames {
+		path, lookupErr := exec.LookPath(name)
+		if lookupErr != nil {
+			return "", fmt.Errorf("terminal toolchain unavailable: %s", name)
+		}
+		path, err = filepath.EvalSymlinks(path)
+		if err != nil {
+			return "", err
+		}
+		profile += fmt.Sprintf(" (allow file-read* (literal %q))", path)
+		if pathWithin(physicalHome, path) {
+			root := filepath.Dir(filepath.Dir(path))
+			if root == physicalHome {
+				return "", errors.New("terminal toolchain root is home")
+			}
+			profile += fmt.Sprintf(" (allow file-read* (subpath %q))", root)
+		}
+	}
 	for _, path := range []string{"Secrets", ".ssh", ".inspr/secrets", ".aws", ".gnupg", ".config/gh", "Library/Keychains"} {
-		full := filepath.Join(home, path)
+		full := filepath.Join(physicalHome, path)
 		profile += fmt.Sprintf(" (deny file-read* (subpath %q)) (deny file-write* (subpath %q))", full, full)
 	}
-	argv := append([]string{"-p", profile, in.Command}, in.Args...)
+	argv := append([]string{"-p", profile, toolPath}, in.Args...)
 	cmd := exec.Command("/usr/bin/sandbox-exec", argv...)
 	cmd.Dir = workspace
 	if in.Directory == "web" {
@@ -267,7 +381,7 @@ func runTerminal(ctx context.Context, workspace, branch string, in terminalArgs)
 		}
 		cmd.Dir = web
 	}
-	cmd.Env = terminalEnvironment()
+	cmd.Env = terminalEnvironment(physicalTmp, moduleProxy, goRoot)
 	configured := ownedprocess.Configure(cmd)
 	// CombinedOutput is capped by a pipe reader so a noisy child cannot grow
 	// memory indefinitely. Closing the pipe kills the owned process on overflow.
@@ -374,7 +488,12 @@ func localGoPackage(arg string) bool {
 	return true
 }
 
-func safeStagePath(workspace, path string) bool {
+func pathWithin(root, path string) bool {
+	rel, err := filepath.Rel(root, path)
+	return err == nil && rel != ".." && !strings.HasPrefix(rel, ".."+string(filepath.Separator))
+}
+
+func safeStagePath(gitPath, workspace, path string) bool {
 	if path == "." || filepath.IsAbs(path) || strings.HasPrefix(path, "-") {
 		return false
 	}
@@ -398,27 +517,30 @@ func safeStagePath(workspace, path string) bool {
 	}
 	// A deleted tracked file is safe to stage by its exact path. A missing
 	// directory or pathspec that expands to several files is not.
-	out, err := exec.Command("git", "-C", workspace, "ls-files", "-z", "--", clean).Output()
+	out, err := exec.Command(gitPath, "-C", workspace, "ls-files", "-z", "--", clean).Output()
 	return err == nil && string(out) == clean+"\x00"
 }
 
-func safeStagedSet(ctx context.Context, workspace string) bool {
-	cmd := exec.CommandContext(ctx, "git", "-C", workspace, "diff", "--cached", "--name-only", "-z")
+func safeStagedSet(ctx context.Context, gitPath, workspace string) bool {
+	cmd := exec.CommandContext(ctx, gitPath, "-C", workspace, "diff", "--cached", "--name-only", "-z")
 	out, err := cmd.Output()
 	if err != nil || len(out) == 0 || len(out) > 64<<10 {
 		return false
 	}
 	for _, part := range strings.Split(strings.TrimSuffix(string(out), "\x00"), "\x00") {
-		if !safeStagePath(workspace, part) {
+		if !safeStagePath(gitPath, workspace, part) {
 			return false
 		}
 	}
 	return true
 }
 
-func terminalEnvironment() []string {
-	allowed := map[string]bool{"PATH": true, "HOME": true, "TMPDIR": true, "GOCACHE": true, "GOMODCACHE": true, "GOPATH": true, "GOROOT": true, "LANG": true, "LC_ALL": true, "AEON_TEST_DATABASE_URL": true}
-	out := []string{"GIT_TERMINAL_PROMPT=0", "GIT_CONFIG_NOSYSTEM=1", "GIT_ALLOW_PROTOCOL=file", "GOPROXY=off", "GOSUMDB=off", "NPM_CONFIG_OFFLINE=true", "NPM_CONFIG_AUDIT=false", "CI=1"}
+func terminalEnvironment(tmp, moduleProxy, goRoot string) []string {
+	allowed := map[string]bool{"PATH": true, "HOME": true, "LANG": true, "LC_ALL": true, "AEON_TEST_DATABASE_URL": true}
+	out := []string{"GIT_TERMINAL_PROMPT=0", "GIT_CONFIG_NOSYSTEM=1", "GIT_CONFIG_GLOBAL=" + filepath.Join(tmp, "gitconfig"), "GIT_ALLOW_PROTOCOL=file", "GOPROXY=" + moduleProxy, "GOSUMDB=off", "GOENV=off", "GOTOOLCHAIN=local", "GOCACHE=" + filepath.Join(tmp, "go-build"), "GOMODCACHE=" + filepath.Join(tmp, "go-mod"), "NPM_CONFIG_CACHE=" + filepath.Join(tmp, "npm-cache"), "NPM_CONFIG_USERCONFIG=" + filepath.Join(tmp, "npmrc"), "NPM_CONFIG_OFFLINE=true", "NPM_CONFIG_AUDIT=false", "TMPDIR=" + tmp, "CI=1"}
+	if goRoot != "" {
+		out = append(out, "GOROOT="+goRoot)
+	}
 	for _, entry := range os.Environ() {
 		name, _, ok := strings.Cut(entry, "=")
 		if ok && allowed[name] {

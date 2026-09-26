@@ -3,6 +3,8 @@
 // Lifecycle events are content-free. The explicit native_message frame carries
 // bounded send arguments transiently to the owner; it is never journaled.
 import { randomUUID } from "node:crypto";
+import { lstatSync, realpathSync } from "node:fs";
+import { dirname, isAbsolute, relative, resolve, sep } from "node:path";
 import { createInterface } from "node:readline";
 import { pathToFileURL } from "node:url";
 
@@ -16,6 +18,45 @@ const CONTROL_INPUT_TIMEOUT_MS = 30 * 1000;
 const DEFAULT_TOOLS = ["Read", "Glob", "Grep", "Edit", "Write"];
 const AEON_TOOLS = ["aeon_comment", "aeon_status", "aeon_check_criterion", "aeon_evidence",
   "aeon_request_approval", "aeon_reply", "aeon_terminal"];
+
+function editPathWithinWorkspace(filePath, root) {
+  if (typeof filePath !== "string" || filePath.length === 0 || filePath.includes("\0")) return false;
+  const target = resolve(root, filePath);
+  try {
+    // Resolve the target or its nearest existing parent. This rejects links
+    // from the workspace to another repo or a protected home directory.
+    let existing = target;
+    const suffix = [];
+    while (true) {
+      try {
+        existing = resolve(realpathSync(existing), ...suffix.reverse());
+        break;
+      } catch (error) {
+        if (error.code !== "ENOENT") return false;
+        try { if (lstatSync(existing).isSymbolicLink()) return false; } catch (statError) {
+          if (statError.code !== "ENOENT") return false;
+        }
+        const parent = dirname(existing);
+        if (parent === existing) return false;
+        suffix.push(existing.slice(parent.length + (parent === sep ? 0 : 1)));
+        existing = parent;
+      }
+    }
+    const rel = relative(root, existing);
+    return rel === "" || (rel !== ".." && !rel.startsWith(`..${sep}`) && !isAbsolute(rel));
+  } catch {
+    return false;
+  }
+}
+
+function workspaceEditHook(root) {
+  return async (input) => {
+    if (input?.tool_name !== "Edit" && input?.tool_name !== "Write") return {};
+    if (editPathWithinWorkspace(input.tool_input?.file_path, root)) return {};
+    return { hookSpecificOutput: { hookEventName: "PreToolUse", permissionDecision: "deny",
+      permissionDecisionReason: "Edit and Write paths must stay inside the run workspace" } };
+  };
+}
 
 function emit(frame) {
   process.stdout.write(JSON.stringify(frame) + "\n");
@@ -259,6 +300,8 @@ function observeUsage(message) {
 
 try {
   if (start.native_messages !== undefined) throw new Error("direct message targets are unavailable in AEON");
+  const physicalWorkspace = realpathSync(workspace);
+  if (!isAbsolute(workspace) || physicalWorkspace !== workspace) throw new Error("workspace is not physical");
   const { query } = await import(pathToFileURL(sdkPath));
   const toolBinding = start.tools;
   if (toolBinding !== undefined &&
@@ -282,6 +325,8 @@ try {
     plugins: [],
     includePartialMessages: true,
     permissionMode: "dontAsk",
+    additionalDirectories: [],
+    hooks: { PreToolUse: [{ matcher: "Edit|Write", hooks: [workspaceEditHook(physicalWorkspace)] }] },
     allowedTools,
     tools: DEFAULT_TOOLS,
     systemPrompt: { type: "preset", preset: "claude_code" },

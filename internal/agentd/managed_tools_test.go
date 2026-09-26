@@ -5,6 +5,7 @@ package agentd
 import (
 	"context"
 	"errors"
+	"fmt"
 	"net/http"
 	"os"
 	"os/exec"
@@ -257,8 +258,8 @@ func TestTerminalPolicyAndBranchFence(t *testing.T) {
 	if _, err := runTerminal(t.Context(), workspace, "aeon/run-a", terminalArgs{Command: "git", Args: []string{"add", "--", ".env"}}); err == nil {
 		t.Fatal("secret stage accepted")
 	}
-	if _, err := runTerminal(t.Context(), workspace, "aeon/run-a", terminalArgs{Command: "git", Args: []string{"add", "--", "safe.go"}}); err != nil {
-		t.Fatal(err)
+	if out, err := runTerminal(t.Context(), workspace, "aeon/run-a", terminalArgs{Command: "git", Args: []string{"add", "--", "safe.go"}}); err != nil {
+		t.Fatalf("git add: %v\n%s", err, out)
 	}
 	if _, err := runTerminal(t.Context(), workspace, "aeon/run-a", terminalArgs{Command: "git", Args: []string{"commit", "-m", "AEON test"}}); err != nil {
 		t.Fatal(err)
@@ -292,5 +293,99 @@ func TestNetworkFence(t *testing.T) {
 	}
 	if out, err := runTerminal(t.Context(), workspace, "", terminalArgs{Command: "go", Args: []string{"test", "./..."}}); err != nil {
 		t.Fatalf("sandboxed test: %v\n%s", err, out)
+	}
+}
+
+func TestTerminalSandboxesTestProcessFiles(t *testing.T) {
+	if runtime.GOOS != "darwin" {
+		t.Skip("macOS sandbox")
+	}
+	root := t.TempDir()
+	home := filepath.Join(root, "home")
+	workspace := filepath.Join(home, "work")
+	for _, path := range []string{workspace, filepath.Join(home, ".ssh")} {
+		if err := os.MkdirAll(path, 0700); err != nil {
+			t.Fatal(err)
+		}
+	}
+	t.Setenv("HOME", home)
+	if err := os.WriteFile(filepath.Join(home, ".ssh", "fixture"), []byte("private fixture"), 0600); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(filepath.Join(home, "ordinary-file"), []byte("private fixture"), 0600); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.Symlink(home, filepath.Join(workspace, "escape")); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(filepath.Join(workspace, "go.mod"), []byte("module example.invalid/filetest\n\ngo 1.25\n"), 0600); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(filepath.Join(workspace, "sample.go"), []byte("package filetest\n"), 0600); err != nil {
+		t.Fatal(err)
+	}
+	outside := filepath.Join(home, ".zshrc-like")
+	malicious := fmt.Sprintf(`package filetest
+import ("os"; "testing")
+func TestOutsideWrite(t *testing.T) {
+  if err := os.WriteFile(%q, []byte("persist"), 0600); err != nil { t.Fatal(err) }
+}`, outside)
+	testFile := filepath.Join(workspace, "file_test.go")
+	if err := os.WriteFile(testFile, []byte(malicious), 0600); err != nil {
+		t.Fatal(err)
+	}
+	if out, err := runTerminal(t.Context(), workspace, "", terminalArgs{Command: "go", Args: []string{"test", "./..."}}); err == nil || !strings.Contains(out, "TestOutsideWrite") {
+		t.Fatalf("outside write was not rejected by the test process: %v\n%s", err, out)
+	}
+	if _, err := os.Stat(outside); !os.IsNotExist(err) {
+		t.Fatalf("outside path exists after denied write: %v", err)
+	}
+	allowed := fmt.Sprintf(`package filetest
+import ("net"; "os"; "testing"; "time")
+func TestSandbox(t *testing.T) {
+  if err := os.WriteFile("inside", []byte("ok"), 0600); err != nil { t.Fatalf("workspace write: %%v", err) }
+  if err := os.WriteFile("temp-path", []byte(os.Getenv("TMPDIR")), 0600); err != nil { t.Fatal(err) }
+  if _,err := os.ReadFile(%q); err == nil { t.Fatal("read escaped sandbox") }
+  if _,err := os.ReadFile(%q); err == nil { t.Fatal("home read escaped sandbox") }
+  if err := os.WriteFile(%q, []byte("persist"), 0600); err == nil { t.Fatal("write escaped sandbox") }
+  if err := os.WriteFile("escape/symlink-write", []byte("persist"), 0600); err == nil { t.Fatal("symlink write escaped sandbox") }
+  c,err := net.DialTimeout("tcp", "1.1.1.1:443", time.Second)
+  if c != nil { c.Close(); t.Fatal("network escaped sandbox") }
+  if err == nil { t.Fatal("network escaped sandbox") }
+}`, filepath.Join(home, ".ssh", "fixture"), filepath.Join(home, "ordinary-file"), outside)
+	if err := os.WriteFile(testFile, []byte(allowed), 0600); err != nil {
+		t.Fatal(err)
+	}
+	if out, err := runTerminal(t.Context(), workspace, "", terminalArgs{Command: "go", Args: []string{"test", "./..."}}); err != nil {
+		t.Fatalf("allowed sandboxed test: %v\n%s", err, out)
+	}
+	for _, verb := range []string{"build", "vet"} {
+		if out, err := runTerminal(t.Context(), workspace, "", terminalArgs{Command: "go", Args: []string{verb, "./..."}}); err != nil {
+			t.Fatalf("sandboxed go %s: %v\n%s", verb, err, out)
+		}
+	}
+	if content, err := os.ReadFile(filepath.Join(workspace, "inside")); err != nil || string(content) != "ok" {
+		t.Fatalf("workspace output: %q %v", content, err)
+	}
+	if tempPath, err := os.ReadFile(filepath.Join(workspace, "temp-path")); err != nil {
+		t.Fatal(err)
+	} else if _, err := os.Stat(string(tempPath)); !os.IsNotExist(err) {
+		t.Fatalf("per-run temp directory was not removed: %v", err)
+	}
+	web := filepath.Join(workspace, "web")
+	if err := os.Mkdir(web, 0700); err != nil {
+		t.Fatal(err)
+	}
+	const packageJSON = `{"scripts":{"test":"node -e 'require(\"fs\").writeFileSync(\"npm-inside\",\"ok\")'","build":"node -e 'process.exit(0)'"}}`
+	if err := os.WriteFile(filepath.Join(web, "package.json"), []byte(packageJSON), 0600); err != nil {
+		t.Fatal(err)
+	}
+	for _, script := range []string{"test", "build"} {
+		if out, err := runTerminal(t.Context(), workspace, "", terminalArgs{Command: "npm", Args: []string{"run", script}, Directory: "web"}); err != nil {
+			t.Fatalf("npm run %s: %v\n%s", script, err, out)
+		}
+	}
+	if content, err := os.ReadFile(filepath.Join(web, "npm-inside")); err != nil || string(content) != "ok" {
+		t.Fatalf("npm workspace output: %q %v", content, err)
 	}
 }
