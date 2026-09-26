@@ -57,8 +57,14 @@ func normalizeEvidence(e EvidenceWrite) EvidenceWrite {
 	return e
 }
 func (m *Module) appendEvidence(ctx context.Context, tx pgx.Tx, p tenant.Principal, authorization, id string, in EvidenceWrite) (Evidence, error) {
+	if err := requireActiveAgent(ctx, tx, p); err != nil {
+		return Evidence{}, err
+	}
 	h, err := loadHandoff(ctx, tx, id, true)
 	if err != nil {
+		return Evidence{}, err
+	}
+	if err := requireRoutedPrincipal(ctx, tx, p, h); err != nil {
 		return Evidence{}, err
 	}
 	allowed, err := agentAllowed(ctx, tx, p, authorization, h)
@@ -185,8 +191,14 @@ func contains(set []string, value string) bool {
 	return false
 }
 func (m *Module) close(ctx context.Context, tx pgx.Tx, p tenant.Principal, authorization, id string, in ResultWrite) (Result, error) {
+	if err := requireActiveAgent(ctx, tx, p); err != nil {
+		return Result{}, err
+	}
 	h, err := loadHandoff(ctx, tx, id, true)
 	if err != nil {
+		return Result{}, err
+	}
+	if err := requireRoutedPrincipal(ctx, tx, p, h); err != nil {
 		return Result{}, err
 	}
 	allowed, err := agentAllowed(ctx, tx, p, authorization, h)

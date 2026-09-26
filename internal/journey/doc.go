@@ -17,6 +17,9 @@
 // decision, the agreed requirements revision, the current release node state,
 // R2 gate decisions, and terminal stage handoff results. Never infer progress
 // from a worker heartbeat, timer, forecast, or a client-supplied stage string.
+// Each stages[] entry includes gate_approval_id as historical identity and
+// gate_live as the server's current approval/grant validity check across that
+// stage's gates. It is false when none are live, without erasing history.
 // Preserve history when a later release starts; Live becomes the prior release
 // state while Plan is current. Park/drop retains the Shape stage with Reopen.
 // Personal skips Shape after a brief; Access is skipped only when the release

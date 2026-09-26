@@ -284,6 +284,7 @@ func newLaunchWorld(t *testing.T) *launchWorld {
 	if err != nil {
 		t.Fatal(err)
 	}
+	routeFixtureAgent(t, m, &w.p, "pharos")
 	return w
 }
 

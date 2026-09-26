@@ -455,23 +455,38 @@ func loadPeople(ctx context.Context, tx pgx.Tx, f *facts) error {
 }
 
 func loadGates(ctx context.Context, tx pgx.Tx, f *facts) error {
+	// Keep this liveness predicate aligned with stagehandoff.gateLive: approved
+	// decision, unexpired request, and an unrevoked, unexpired grant.
 	rows, err := tx.Query(ctx, `
-		SELECT gate, coalesce(release_node_id::text, ''), approval_request_id::text
-		FROM journey_gates
-		WHERE project_node_id = $1::uuid
-		ORDER BY created_at DESC`, f.ProjectID)
+		SELECT g.gate, coalesce(g.release_node_id::text, ''), g.approval_request_id::text,
+		       EXISTS (
+		         SELECT 1 FROM journey_gates live_gate
+		         JOIN approval_requests a ON a.tenant_id=live_gate.tenant_id AND a.id=live_gate.approval_request_id
+		         JOIN approval_decisions d ON d.tenant_id=a.tenant_id AND d.request_id=a.id
+		         JOIN agent_permission_grants grant_row ON grant_row.tenant_id=a.tenant_id AND grant_row.approval_request_id=a.id
+		         WHERE live_gate.tenant_id=g.tenant_id AND live_gate.project_node_id=g.project_node_id
+		           AND live_gate.gate=g.gate AND live_gate.release_node_id IS NOT DISTINCT FROM g.release_node_id
+		           AND a.resource_kind='node' AND a.resource_id=coalesce(live_gate.release_node_id,live_gate.project_node_id)
+		           AND d.decision='approved' AND a.expires_at>now()
+		           AND grant_row.revoked_at IS NULL AND grant_row.valid_until>now()
+		       )
+		FROM journey_gates g
+		WHERE g.project_node_id = $1::uuid
+		ORDER BY g.created_at DESC`, f.ProjectID)
 	if err != nil {
 		return err
 	}
 	defer rows.Close()
 	seen := map[string]bool{}
+	f.GateLiveByID = make(map[string]bool)
 	current := ""
 	if f.Release != nil {
 		current = f.Release.ID
 	}
 	for rows.Next() {
 		var gate, release, approval string
-		if err := rows.Scan(&gate, &release, &approval); err != nil {
+		var live bool
+		if err := rows.Scan(&gate, &release, &approval, &live); err != nil {
 			return err
 		}
 		if seen[gate+"\x00"+release] {
@@ -482,6 +497,7 @@ func loadGates(ctx context.Context, tx pgx.Tx, f *facts) error {
 		if !matches {
 			continue
 		}
+		f.GateLiveByID[approval] = live
 		switch gate {
 		case GateShape:
 			if f.ShapeGateID == "" {

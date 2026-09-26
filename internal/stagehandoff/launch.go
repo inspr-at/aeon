@@ -65,8 +65,14 @@ func (m *Module) AdmitLaunch(ctx context.Context, p tenant.Principal, authorizat
 		return out, fail(400, "invalid launch artifact")
 	}
 	err := db.InTenant(tenant.WithPrincipal(ctx, p), m.pool, p.TenantID, func(tx pgx.Tx) error {
+		if err := requireActiveAgent(ctx, tx, p); err != nil {
+			return err
+		}
 		h, err := loadHandoff(ctx, tx, handoffID, true)
 		if err != nil {
+			return err
+		}
+		if err := requireRoutedPrincipal(ctx, tx, p, h); err != nil {
 			return err
 		}
 		if h.Operation != "deploy" || h.PluginID != "pharos" || h.Result != nil || closedHandoff(h.State) {
@@ -228,6 +234,9 @@ func (m *Module) ConsumeLaunch(ctx context.Context, p tenant.Principal, authoriz
 		return fail(404, "admission not found")
 	}
 	return db.InTenant(tenant.WithPrincipal(ctx, p), m.pool, p.TenantID, func(tx pgx.Tx) error {
+		if err := requireActiveAgent(ctx, tx, p); err != nil {
+			return err
+		}
 		var id, storedBinding, storedArtifact string
 		var storedEpoch int64
 		err := tx.QueryRow(ctx, `SELECT handoff_id::text, binding_digest_sha256, artifact_digest_sha256, authority_epoch FROM stage_launch_admissions WHERE id=$1::uuid FOR UPDATE`, admissionID).Scan(&id, &storedBinding, &storedArtifact, &storedEpoch)
@@ -242,6 +251,9 @@ func (m *Module) ConsumeLaunch(ctx context.Context, p tenant.Principal, authoriz
 		}
 		h, err := loadHandoff(ctx, tx, id, true)
 		if err != nil {
+			return err
+		}
+		if err := requireRoutedPrincipal(ctx, tx, p, h); err != nil {
 			return err
 		}
 		enabled, err := plugins.Enabled(ctx, tx, m.registry, p.TenantID, "pharos", "deploy")
