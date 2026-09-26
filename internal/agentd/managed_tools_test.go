@@ -235,6 +235,10 @@ func TestTerminalPolicyAndBranchFence(t *testing.T) {
 			t.Fatalf("git: %v %s", err, out)
 		}
 	}
+	// The allowlist above is platform-independent; running it needs the macOS sandbox.
+	if runtime.GOOS != "darwin" {
+		t.Skip("macOS sandbox")
+	}
 	if _, err := runTerminal(t.Context(), workspace, "aeon/run-a", terminalArgs{Command: "git", Args: []string{"commit", "-m", "message"}}); err == nil || !strings.Contains(err.Error(), "branch") {
 		t.Fatalf("branch fence: %v", err)
 	}
