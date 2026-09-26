@@ -74,6 +74,19 @@ func TestDisposableOperatorSeedUsesJourneyActions(t *testing.T) {
 	if view.NextAction.Key != "approve_candidate" || view.NextAction.Available {
 		t.Fatalf("candidate approval was bypassed: %+v", view)
 	}
+	buildStage := func() journey.JourneyStage {
+		t.Helper()
+		for _, stage := range view.Stages {
+			if stage.Key == "build" {
+				return stage
+			}
+		}
+		t.Fatal("build stage missing")
+		return journey.JourneyStage{}
+	}
+	if gate := buildStage(); gate.GateScope != journey.ScopeCandidate || gate.GateLive || gate.GateApprovalID != nil {
+		t.Fatalf("candidate gate absent in journey document: %+v", gate)
+	}
 	var state, actor string
 	var events int
 	if err := db.InTenant(dbtest.Seed(ctx), f.db.App, f.tenant, func(tx pgx.Tx) error {
@@ -94,6 +107,9 @@ func TestDisposableOperatorSeedUsesJourneyActions(t *testing.T) {
 	}
 	candidate := f.grant(t, f.agent.ID, f.person.ID, journey.ScopeCandidate, release)
 	view = f.journey(t, f.person, "POST", "/api/projects/"+project+"/journey/actions", actionJSON("approve_candidate", view.Revision, "ds1-candidate", candidate, release, ""))
+	if gate := buildStage(); gate.GateScope != journey.ScopeCandidate || !gate.GateLive || gate.GateApprovalID == nil || *gate.GateApprovalID != candidate {
+		t.Fatalf("candidate gate not reported in journey document: %+v", gate)
+	}
 	pending, err = journey.SeedDisposable(ctx, f.db.App, "journey-a", "PRJ-361", "deploy")
 	if err != nil || pending.TargetReached || pending.PendingAction != "approve_deploy" {
 		t.Fatalf("deploy crossed deployment gate: %+v %v", pending, err)

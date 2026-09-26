@@ -56,6 +56,7 @@ type LaunchReadiness struct {
 type JourneyStage struct {
 	Key            string  `json:"key"`
 	State          string  `json:"state"`
+	GateScope      string  `json:"gate_scope"`
 	GateApprovalID *string `json:"gate_approval_id"`
 	GateLive       bool    `json:"gate_live"`
 	HandoffID      *string `json:"handoff_id"`

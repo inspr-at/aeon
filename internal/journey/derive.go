@@ -532,6 +532,7 @@ func stageRail(f facts, current string, blocked bool) []JourneyStage {
 		gateID := gateIDFor(f, key)
 		st := JourneyStage{
 			Key:            key,
+			GateScope:      gateScopeFor(f, key),
 			GateApprovalID: strPtr(gateID),
 			GateLive:       f.GateLiveByID[gateID],
 			HandoffID:      strPtr(handoffIDFor(f, key)),
@@ -557,6 +558,25 @@ func stageRail(f facts, current string, blocked bool) []JourneyStage {
 	return out
 }
 
+func gateScopeFor(f facts, stage string) string {
+	switch stage {
+	case stageShape:
+		return ScopeShape
+	case stageRequirements:
+		return requirementsScope(f.Revision, f.RequirementsDigest)
+	case stagePlan:
+		return ScopeBuild
+	case stageBuild:
+		return ScopeCandidate
+	case stageDeploy:
+		return ScopeDeploy
+	case stageAccess:
+		return ScopeAccess
+	default:
+		return ""
+	}
+}
+
 func gateIDFor(f facts, stage string) string {
 	switch stage {
 	case stageShape:
@@ -566,10 +586,7 @@ func gateIDFor(f facts, stage string) string {
 	case stagePlan:
 		return f.BuildGateID
 	case stageBuild:
-		if f.CandidateGateID != "" {
-			return f.CandidateGateID
-		}
-		return f.BuildGateID
+		return f.CandidateGateID
 	case stageDeploy:
 		return f.DeployGateID
 	case stageAccess:
