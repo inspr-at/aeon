@@ -15,13 +15,14 @@ import (
 )
 
 type runRow struct {
-	ID         string
-	AgentID    string
-	ProfileID  *string
-	AccountID  *string
-	Status     string
-	DaemonID   *string
-	Generation *string
+	ID                 string
+	AgentID            string
+	ProfileID          *string
+	AccountID          *string
+	RequestedAccountID *string
+	Status             string
+	DaemonID           *string
+	Generation         *string
 }
 
 func lockRun(ctx context.Context, tx pgx.Tx, id string) (runRow, error) {
@@ -31,9 +32,9 @@ func lockRun(ctx context.Context, tx pgx.Tx, id string) (runRow, error) {
 	var run runRow
 	err := tx.QueryRow(ctx, `
 		SELECT id::text, agent_principal_id::text, model_profile_id::text, account_id::text,
-		       status, daemon_id, daemon_generation
+		       status, daemon_id, daemon_generation, requested_account_id::text
 		FROM agent_runs WHERE id = $1::uuid FOR UPDATE`, id).
-		Scan(&run.ID, &run.AgentID, &run.ProfileID, &run.AccountID, &run.Status, &run.DaemonID, &run.Generation)
+		Scan(&run.ID, &run.AgentID, &run.ProfileID, &run.AccountID, &run.Status, &run.DaemonID, &run.Generation, &run.RequestedAccountID)
 	if isNoRows(err) {
 		return runRow{}, fail(http.StatusNotFound, "run not found")
 	}
@@ -63,6 +64,15 @@ func reserve(ctx context.Context, tx pgx.Tx, r *http.Request, p tenant.Principal
 	}
 	if err := authorizeRoute(ctx, tx, r, p, run.AgentID, run.ID); err != nil {
 		return RouteResult{}, err
+	}
+	// A person's account choice narrows the daemon's enrolled set; it never
+	// bypasses ownership, probe, capacity or allowance checks. No fallback.
+	if run.RequestedAccountID != nil {
+		if !enrolled[*run.RequestedAccountID] {
+			return RouteResult{}, fail(http.StatusConflict, "requested account is not enrolled by this daemon")
+		}
+		accountIDs = []string{*run.RequestedAccountID}
+		enrolled = map[string]bool{*run.RequestedAccountID: true}
 	}
 	if existing, ok, err := activeRoute(ctx, tx, run.ID, p.ID, daemonID, enrolled); err != nil || ok {
 		return existing, err

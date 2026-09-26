@@ -36,6 +36,7 @@ export interface AgentAccount {
 export interface AgentRun {
   id: string; work_order_id: string; agent_principal_id: string; model_profile_id?: string | null
   account_id?: string | null; status: 'queued' | 'starting' | 'running' | 'waiting' | 'completed' | 'failed' | 'cancelled' | 'ownership_lost'
+  requested_account_id?: string | null
   requested_model?: string | null; effective_model?: string | null; model_evidence: 'unverified' | 'vendor_reported'
   input_tokens: number; output_tokens: number; cost_micros: number
   outcome?: 'completed' | 'failed' | 'cancelled' | 'ownership_lost' | null; duration_ms?: number | null

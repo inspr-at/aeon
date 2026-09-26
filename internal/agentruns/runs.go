@@ -15,25 +15,26 @@ import (
 )
 
 type Run struct {
-	ID             string     `json:"id"`
-	OrderID        string     `json:"work_order_id"`
-	AgentID        string     `json:"agent_principal_id"`
-	ProfileID      *string    `json:"model_profile_id"`
-	AccountID      *string    `json:"account_id"`
-	Outcome        *string    `json:"outcome"`
-	DurationMS     *int64     `json:"duration_ms"`
-	Status         string     `json:"status"`
-	RequestedModel *string    `json:"requested_model"`
-	EffectiveModel *string    `json:"effective_model"`
-	ModelEvidence  string     `json:"model_evidence"`
-	InputTokens    int64      `json:"input_tokens"`
-	OutputTokens   int64      `json:"output_tokens"`
-	Cost           int64      `json:"cost_micros"`
-	StartedAt      *time.Time `json:"started_at"`
-	EndedAt        *time.Time `json:"ended_at"`
-	CreatedAt      time.Time  `json:"created_at"`
-	DaemonID       *string    `json:"-"`
-	Generation     *string    `json:"-"`
+	ID                 string     `json:"id"`
+	OrderID            string     `json:"work_order_id"`
+	AgentID            string     `json:"agent_principal_id"`
+	ProfileID          *string    `json:"model_profile_id"`
+	AccountID          *string    `json:"account_id"`
+	RequestedAccountID *string    `json:"requested_account_id"`
+	Outcome            *string    `json:"outcome"`
+	DurationMS         *int64     `json:"duration_ms"`
+	Status             string     `json:"status"`
+	RequestedModel     *string    `json:"requested_model"`
+	EffectiveModel     *string    `json:"effective_model"`
+	ModelEvidence      string     `json:"model_evidence"`
+	InputTokens        int64      `json:"input_tokens"`
+	OutputTokens       int64      `json:"output_tokens"`
+	Cost               int64      `json:"cost_micros"`
+	StartedAt          *time.Time `json:"started_at"`
+	EndedAt            *time.Time `json:"ended_at"`
+	CreatedAt          time.Time  `json:"created_at"`
+	DaemonID           *string    `json:"-"`
+	Generation         *string    `json:"-"`
 }
 
 // UsageRecorder lets the account module settle its own allowance projections
@@ -77,11 +78,11 @@ func (m *module) Mount(mux *http.ServeMux) {
 }
 
 const columns = `id::text,work_order_id::text,agent_principal_id::text,model_profile_id::text,account_id::text,status,
- requested_model,effective_model,model_evidence,input_tokens,output_tokens,cost_micros,started_at,ended_at,created_at,daemon_id,daemon_generation`
+ requested_model,effective_model,model_evidence,input_tokens,output_tokens,cost_micros,started_at,ended_at,created_at,daemon_id,daemon_generation,requested_account_id::text`
 
 func scan(row pgx.Row) (Run, error) {
 	var v Run
-	err := row.Scan(&v.ID, &v.OrderID, &v.AgentID, &v.ProfileID, &v.AccountID, &v.Status, &v.RequestedModel, &v.EffectiveModel, &v.ModelEvidence, &v.InputTokens, &v.OutputTokens, &v.Cost, &v.StartedAt, &v.EndedAt, &v.CreatedAt, &v.DaemonID, &v.Generation)
+	err := row.Scan(&v.ID, &v.OrderID, &v.AgentID, &v.ProfileID, &v.AccountID, &v.Status, &v.RequestedModel, &v.EffectiveModel, &v.ModelEvidence, &v.InputTokens, &v.OutputTokens, &v.Cost, &v.StartedAt, &v.EndedAt, &v.CreatedAt, &v.DaemonID, &v.Generation, &v.RequestedAccountID)
 	if terminal(v.Status) {
 		outcome := v.Status
 		v.Outcome = &outcome
@@ -149,13 +150,14 @@ func (m *module) queued(r *http.Request, tx pgx.Tx, p tenant.Principal) (any, er
 }
 func (m *module) create(r *http.Request, tx pgx.Tx, p tenant.Principal) (any, error) {
 	var in struct {
-		Agent   string `json:"agent_principal_id"`
-		Profile string `json:"model_profile_id"`
+		Agent   string  `json:"agent_principal_id"`
+		Profile string  `json:"model_profile_id"`
+		Account *string `json:"requested_account_id"`
 	}
 	if err := workorders.Decode(r, &in); err != nil {
 		return nil, err
 	}
-	if !workorders.UUID(in.Agent) || !workorders.UUID(in.Profile) {
+	if !workorders.UUID(in.Agent) || !workorders.UUID(in.Profile) || (in.Account != nil && !workorders.UUID(*in.Account)) {
 		return nil, workorders.Fail(400, "agent and model profile required")
 	}
 	ctx := r.Context()
@@ -175,11 +177,20 @@ func (m *module) create(r *http.Request, tx pgx.Tx, p tenant.Principal) (any, er
 	if err = dispatchable(ctx, tx, o); err != nil {
 		return nil, err
 	}
-	var model string
-	if err = tx.QueryRow(ctx, `SELECT model FROM model_profiles WHERE id=$1 AND enabled`, in.Profile).Scan(&model); err != nil {
+	var model, harness string
+	if err = tx.QueryRow(ctx, `SELECT model,harness FROM model_profiles WHERE id=$1 AND enabled`, in.Profile).Scan(&model, &harness); err != nil {
 		return nil, err
 	}
-	v, err := scan(tx.QueryRow(ctx, `INSERT INTO agent_runs(tenant_id,work_order_id,agent_principal_id,model_profile_id,requested_model) VALUES($1,$2,$3,$4,$5) RETURNING `+columns, p.TenantID, o.NodeID, in.Agent, in.Profile, model))
+	if in.Account != nil {
+		var matches bool
+		if err = tx.QueryRow(ctx, `SELECT EXISTS(SELECT 1 FROM agent_accounts WHERE id=$1 AND registered_by_principal_id=$2 AND harness=$3)`, *in.Account, in.Agent, harness).Scan(&matches); err != nil {
+			return nil, err
+		}
+		if !matches {
+			return nil, workorders.Fail(409, "requested account must belong to the run agent and match the model harness")
+		}
+	}
+	v, err := scan(tx.QueryRow(ctx, `INSERT INTO agent_runs(tenant_id,work_order_id,agent_principal_id,model_profile_id,requested_model,requested_account_id) VALUES($1,$2,$3,$4,$5,$6) RETURNING `+columns, p.TenantID, o.NodeID, in.Agent, in.Profile, model, in.Account))
 	if err != nil {
 		return nil, err
 	}

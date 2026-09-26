@@ -28,6 +28,8 @@ import RelationList from './RelationList.vue'
 import RelationPicker from './RelationPicker.vue'
 import TicketHeaderBar from './TicketHeaderBar.vue'
 import TicketProperties from './TicketProperties.vue'
+import { can } from '../../lib/authz'
+import StartAgentDialog from '../agents/StartAgentDialog.vue'
 
 // The ticket workspace: the same parts in the docked side panel and in the
 // full page. Every write goes through useTicket (precondition, conflicts).
@@ -63,6 +65,8 @@ const commentDeletable = computed(() => props.canDeleteComment && !ticket.readOn
 const attachable = computed(() => props.canAttach && !ticket.readOnly.value && !ticket.gone.value)
 const attachments = useAttachments(computed(() => props.item?.id ?? null))
 const lightbox = ref<InstanceType<typeof AttachmentLightbox>>()
+const startDialog = ref<InstanceType<typeof StartAgentDialog>>()
+const canStartAgent = computed(() => props.item?.kind_slug === 'ticket' && !ticket.gone.value && can('work_orders.write') && can('run.create'))
 
 // ---------- Following links: a modified click opens a new tab ----------
 let modifiedClick = false
@@ -321,11 +325,14 @@ defineExpose({
     <TicketHeaderBar
       :ticket-key="item?.key ?? ticketKey" :kind="item?.kind_slug ?? null" :position="position" :mode="mode" :can-write="editable"
       :can-delete="deletable" :can-move="movable && item?.kind_slug === 'ticket'" :trail="trail" :editing="editing" :saving="saving" :dirty="editDirty"
+      :can-start-agent="canStartAgent"
       @copy-key="copy(item?.key ?? ticketKey, item?.key ?? ticketKey)" @copy-link="copy(link(), 'link')" @prev="emit('prev')" @next="emit('next')"
       @expand="emit('expand')" @collapse="emit('collapse')" @new-tab="emit('newTab')" @close="emit('close')"
       @move="anchor => openMenu('epic', anchor)" @delete="remove" @back="steps => emit('trailBack', steps)"
       @edit="startEdit()" @save="saveEdit" @cancel="cancelEdit"
+      @start-agent="item && startDialog?.open(item)"
     />
+    <StartAgentDialog ref="startDialog" />
 
     <div ref="scroller" class="ws-scroll">
       <div v-if="ticket.gone.value" class="ws-state" role="alert">
