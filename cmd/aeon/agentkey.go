@@ -83,7 +83,10 @@ func agentKeyCommand(args []string, stdout io.Writer) error {
 			os.Remove(*outFile)
 			return err
 		}
-		if _, err := f.WriteString(token + "\n"); err != nil {
+		// No trailing newline: consumers read the file verbatim into an
+		// Authorization header, and a newline there made an HTTP client echo
+		// the header (with the token) in its error (2026-09-26).
+		if _, err := f.WriteString(token); err != nil {
 			f.Close()
 			return err
 		}

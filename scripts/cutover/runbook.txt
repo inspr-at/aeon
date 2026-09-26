@@ -24,6 +24,21 @@ Required evidence before the window (AEON operator, consumer owners):
    the last classic write timestamp and the classic backup identifier. These
    actions use the classic operator's existing controlled procedure; CR1 does
    not supply or execute a classic mutation command.
+   Classic PPM is NOT Postgres: it is SQLite (ppm.db in volume csb1_ppm_data)
+   plus the MinIO bucket ppm-attachments, so pg_dump does not apply. The
+   classic backup (OPS-233, run by the OPS session on Markus's per-step go) is
+   a consistent SQLite online backup (or a stopped-volume copy) plus a bucket
+   mirror, a SHA256 manifest, a restore test into a throwaway container on the
+   workstation (never on a fleet host), and an off-host tagged restic snapshot.
+   Classic has no read-only switch; read-only is enforced at Traefik by
+   allowing only GET/HEAD: on pm.barta.cm during the freeze, and on the
+   fallback route pml.barta.cm afterwards (Cloudflare record plus a
+   Zitadel redirect URI for SSO; break-glass reads via the CLI API key).
+   Rehearsed 2026-09-26 (OPS-233): csb1:/var/lib/csb1-docker/ppm-classic-backup/
+   20260926T064926Z, integrity ok, 192 tables 0 row drift, 404/404 attachments,
+   406-entry manifest verified, restic snapshot 83868845 off-host by checksum.
+   The freeze-time run uses the same script plus the last-write timestamp;
+   allow about 5 minutes inside the freeze window.
 
 2. AEON operator — capture a pre-switch backup, then reconcile the frozen
    classic PPM through its read-only API. Supply these values in the approved

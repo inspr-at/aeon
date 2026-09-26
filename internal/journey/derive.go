@@ -89,6 +89,9 @@ type releaseFacts struct {
 // Heartbeats, timers, forecasts and client stage strings are not inputs.
 type facts struct {
 	ProjectID                  string
+	NodeKey                    string
+	ProjectKey                 string
+	TenantSlug                 string
 	Profile                    string
 	Revision                   int64
 	BriefConfirmed             bool
@@ -151,6 +154,9 @@ func derive(f facts) Journey {
 	}
 	return Journey{
 		ProjectNodeID:        f.ProjectID,
+		NodeKey:              f.NodeKey,
+		ProjectKey:           f.ProjectKey,
+		TenantSlug:           f.TenantSlug,
 		Profile:              f.Profile,
 		Revision:             f.Revision,
 		Stage:                stage,

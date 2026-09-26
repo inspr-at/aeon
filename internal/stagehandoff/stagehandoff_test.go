@@ -6,6 +6,7 @@ import (
 	"crypto/sha256"
 	"encoding/hex"
 	"errors"
+	"sync"
 	"testing"
 	"time"
 
@@ -389,15 +390,55 @@ func TestPharosAdmissionAndTenantFence(t *testing.T) {
 		t.Fatalf("missing readiness provider: %v", err)
 	}
 	m.launchChecks = testLaunchChecks{}
+	if err := m.ConsumeLaunch(ctx, p, bearer, h.ID, "00000000-0000-4000-8000-000000000099"); !errors.As(err, &apiErr) || apiErr.code != 404 {
+		t.Fatalf("consume without admit: %v", err)
+	}
 	admission, err := m.AdmitLaunch(ctx, p, bearer, h.ID, a)
 	if err != nil {
 		t.Fatal(err)
 	}
-	if err := m.ConsumeLaunch(ctx, p, bearer, admission.ID); err != nil {
+	replayedAdmission, err := m.AdmitLaunch(ctx, p, bearer, h.ID, a)
+	if err != nil || replayedAdmission.ID != admission.ID {
+		t.Fatalf("admit replay: %v %+v", err, replayedAdmission)
+	}
+	err = db.InTenant(dbtest.Seed(ctx), m.pool, p.TenantID, func(tx pgx.Tx) error {
+		var n int
+		if err := tx.QueryRow(ctx, `SELECT count(*) FROM events WHERE type='stage_handoff.launch_admitted'`).Scan(&n); err != nil {
+			return err
+		}
+		if n != 1 {
+			t.Fatalf("admit replay events=%d", n)
+		}
+		return nil
+	})
+	if err != nil {
 		t.Fatal(err)
 	}
-	if err := m.ConsumeLaunch(ctx, p, bearer, admission.ID); !errors.As(err, &apiErr) || apiErr.code != 409 {
-		t.Fatalf("double consume: %v", err)
+	consumeErrs := make([]error, 2)
+	var consumeWG sync.WaitGroup
+	consumeStart := make(chan struct{})
+	for i := 0; i < 2; i++ {
+		consumeWG.Add(1)
+		go func(i int) {
+			defer consumeWG.Done()
+			<-consumeStart
+			consumeErrs[i] = m.ConsumeLaunch(ctx, p, bearer, h.ID, admission.ID)
+		}(i)
+	}
+	close(consumeStart)
+	consumeWG.Wait()
+	wins := 0
+	for _, consumeErr := range consumeErrs {
+		if consumeErr == nil {
+			wins++
+			continue
+		}
+		if !errors.As(consumeErr, &apiErr) || apiErr.code != 409 {
+			t.Fatalf("concurrent consume: %v", consumeErr)
+		}
+	}
+	if wins != 1 {
+		t.Fatalf("concurrent consume wins=%d", wins)
 	}
 	err = db.InTenant(dbtest.Seed(ctx), m.pool, p.TenantID, func(tx pgx.Tx) error { _, err := m.appendEvidence(ctx, tx, p, bearer, h.ID, e); return err })
 	if err != nil {
@@ -409,6 +450,9 @@ func TestPharosAdmissionAndTenantFence(t *testing.T) {
 	})
 	if err != nil {
 		t.Fatal(err)
+	}
+	if _, err := m.AdmitLaunch(ctx, p, bearer, h.ID, a); !errors.As(err, &apiErr) || apiErr.code != 409 {
+		t.Fatalf("admit after close: %v", err)
 	}
 	verifyRequest := RequestWrite{ProjectNodeID: project, ReleaseNodeID: release, Stage: "deploy", Operation: "verify", ExpectedJourneyRevision: 2, IdempotencyKey: "verify-1"}
 	var verification Handoff
