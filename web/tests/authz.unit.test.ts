@@ -104,4 +104,22 @@ describe('can()', () => {
     await accessChanged()
     expect(can('members.read')).toBe(true)
   })
+  it('review r2: a 401 latches until a later 200, and never refetches by itself', async () => {
+    let status = 401
+    const fetch = vi.fn(async () => status === 200
+      ? { ok: true, status, json: async () => ({ workspace: { role: null, permissions: ['members.read'] }, project: null }) }
+      : { ok: false, status, json: async () => ({}) })
+    vi.stubGlobal('fetch', fetch)
+    await refreshPermissions()
+    const asked = fetch.mock.calls.length
+    expect(can('members.read')).toBe(false)
+    expect(permissionsKnown()).toBe(true)
+    await refreshPermissions('p')
+    expect(fetch.mock.calls.length).toBe(asked) // latched: no self-refetch
+    await accessChanged() // a focus re-check that 401s latches again
+    expect(can('members.read')).toBe(false)
+    status = 200
+    await accessChanged()
+    expect(can('members.read')).toBe(true)
+  })
 })

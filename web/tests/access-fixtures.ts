@@ -80,6 +80,8 @@ export interface AccessWorld {
   projects: Record<string, { key: string; title: string }>
   calls: { method: string; path: string; body: unknown }[]
   available: boolean
+  // The session ended: every call answers 401, as the server does.
+  sessionEnded?: boolean
 }
 export function accessWorld(options: { role?: 'owner' | 'admin' | 'member' | 'viewer' | 'guest'; secondOwner?: boolean; available?: boolean } = {}): AccessWorld {
   const role = (key: string) => `role-${key}`
@@ -168,6 +170,7 @@ export async function mockAccess(page: Page, world: AccessWorld, options: { also
     let body: Record<string, unknown> = {}
     try { body = (request.postDataJSON() as Record<string, unknown>) ?? {} } catch { body = {} }
     world.calls.push({ method, path: `${path}${url.search}`, body })
+    if (world.sessionEnded) return route.fulfill({ status: 401, json: { error: 'unauthorized' } })
     if (path === '/api/me/permissions' && !world.available) return route.fulfill({ status: 404, json: { error: 'not found' } })
     if (!world.available) return route.fulfill({ status: 404, json: { error: 'not found' } })
     const need = (permission: string) => has(world, world.me, permission)

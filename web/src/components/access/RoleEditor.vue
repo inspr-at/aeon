@@ -4,7 +4,7 @@ import { brand } from '../../lib/brand'
 import { computed, nextTick, onMounted, ref } from 'vue'
 import { onBeforeRouteLeave, onBeforeRouteUpdate, useRouter, type RouteLocationNormalized } from 'vue-router'
 import { beyond, diff, groupPermissions, permissionLabel, type Permission, type Role } from '../../lib/access'
-import { can, myPermissions } from '../../lib/authz'
+import { can, myPermissions, permissionsRevoked } from '../../lib/authz'
 import { confirmAction } from '../../lib/confirm'
 import { toast } from '../../lib/toast'
 import { useAccess } from '../../stores/access'
@@ -22,7 +22,9 @@ const props = defineProps<{ role: Role | null; from: Role | null }>()
 const access = useAccess()
 const router = useRouter()
 const manage = computed(() => can('roles.manage'))
-const readOnly = computed(() => !!props.role?.builtin || !manage.value)
+// After a 401 the editor keeps what was typed, inert: fields disabled, no saving (the leave guard still protects it).
+const readOnly = computed(() => !!props.role?.builtin || (!manage.value && !permissionsRevoked()))
+const frozen = computed(() => readOnly.value || permissionsRevoked())
 const base = computed<Role | null>(() => props.role ? (props.role.based_on ? access.roleById.get(props.role.based_on) ?? null : null) : props.from)
 const initial = computed(() => props.role?.permissions ?? props.from?.permissions ?? [])
 const name = ref(props.role?.name ?? (props.from ? `${props.from.name} copy` : ''))
@@ -55,14 +57,14 @@ const counts = computed(() => ({ all: access.registry.length, selected: picked.v
 const blocked = (p: Permission) => !picked.value.has(p.key) && !mine.value.has(p.key)
 const highOn = computed(() => access.registry.filter(p => p.risk === 'high' && picked.value.has(p.key)).length)
 function toggle(p: Permission) {
-  if (readOnly.value || blocked(p)) return
+  if (frozen.value || blocked(p)) return
   const next = new Set(picked.value)
   if (next.has(p.key)) next.delete(p.key); else next.add(p.key)
   picked.value = next
   errors.value.permissions = ''
 }
 function toggleGroup(items: Permission[]) {
-  if (readOnly.value) return
+  if (frozen.value) return
   const allowed = items.filter(p => !blocked(p))
   const on = allowed.every(p => picked.value.has(p.key))
   const next = new Set(picked.value)
@@ -121,12 +123,12 @@ onMounted(() => { if (!props.role) void nextTick(() => document.getElementById('
         <template v-else>
           <div class="field-row">
             <label class="label" for="role-name">Name</label>
-            <input id="role-name" v-model="name" class="field name-input" type="text" maxlength="60" autocomplete="off" :aria-invalid="!!errors.name" :aria-describedby="errors.name ? 'role-name-error' : undefined" @input="errors.name = ''" />
+            <input id="role-name" v-model="name" :disabled="frozen" class="field name-input" type="text" maxlength="60" autocomplete="off" :aria-invalid="!!errors.name" :aria-describedby="errors.name ? 'role-name-error' : undefined" @input="errors.name = ''" />
             <span v-if="errors.name" id="role-name-error" class="error"><AppIcon name="alert" :size="12" />{{ errors.name }}</span>
           </div>
           <div class="field-row">
             <label class="label" for="role-description">What it is for</label>
-            <input id="role-description" v-model="description" class="field" type="text" maxlength="200" placeholder="For example: a member who also issues quotes" />
+            <input id="role-description" v-model="description" :disabled="frozen" class="field" type="text" maxlength="200" placeholder="For example: a member who also issues quotes" />
           </div>
         </template>
         <p class="badges">
@@ -172,13 +174,13 @@ onMounted(() => { if (!props.role) void nextTick(() => document.getElementById('
         <div class="g-head">
           <h4 :id="`g-${g.group}`">{{ g.group }}</h4>
           <span class="g-count mono">{{ g.on }} of {{ g.items.length }}</span>
-          <button v-if="!readOnly && !term && view === 'all'" type="button" class="btn sm ghost" @click="toggleGroup(g.items)">{{ g.items.filter(p => !blocked(p)).every(p => picked.has(p.key)) ? 'None' : 'All' }}</button>
+          <button v-if="!frozen && !term && view === 'all'" type="button" class="btn sm ghost" @click="toggleGroup(g.items)">{{ g.items.filter(p => !blocked(p)).every(p => picked.has(p.key)) ? 'None' : 'All' }}</button>
         </div>
         <ul class="perms">
           <li v-for="p in g.shown" :key="p.key" class="perm" :class="{ on: picked.has(p.key), blocked: blocked(p), added: vsBase.added.includes(p.key), removed: vsBase.removed.includes(p.key) }">
             <label class="perm-label">
               <input
-                type="checkbox" class="check-box" :checked="picked.has(p.key)" :disabled="readOnly || blocked(p)"
+                type="checkbox" class="check-box" :checked="picked.has(p.key)" :disabled="frozen || blocked(p)"
                 :aria-describedby="`p-${p.key}-desc${blocked(p) ? ` p-${p.key}-why` : ''}`" @change="toggle(p)"
               />
               <span class="p-text">
@@ -198,7 +200,7 @@ onMounted(() => { if (!props.role) void nextTick(() => document.getElementById('
       <p v-if="!groups.length" class="empty">{{ term ? `No permission matches “${term}”.` : view === 'changes' ? `The same as ${base?.name}.` : 'Nothing to show.' }}</p>
     </div>
 
-    <div v-if="!readOnly" class="savebar">
+    <div v-if="!frozen" class="savebar">
       <span class="state" aria-live="polite">
         <template v-if="errors.form"><AppIcon name="alert" :size="13" class="err" />{{ errors.form }}</template>
         <template v-else-if="!role">Not created yet</template>

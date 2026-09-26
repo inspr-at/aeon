@@ -4,6 +4,7 @@
 // helpers below are free of Vue so they can be unit-tested.
 import { api } from './api.ts'
 import { learnPictures } from './avatar.ts'
+import { sessionGone } from './authz.ts'
 
 export type Risk = 'low' | 'medium' | 'high'
 export type Scope = 'workspace' | 'project'
@@ -50,6 +51,7 @@ export class AccessError extends Error {
 }
 async function call<T>(path: string, method = 'GET', body?: unknown): Promise<T> {
   const response = await api(path, { method, ...(body === undefined ? {} : { headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(body) }) })
+  if (response.status === 401) sessionGone()
   if (!response.ok) throw new AccessError(response.status, await response.json().catch(() => ({})))
   return response.status === 204 ? undefined as T : response.json() as Promise<T>
 }

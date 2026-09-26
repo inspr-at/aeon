@@ -1,9 +1,9 @@
 <!-- SPDX-License-Identifier: AGPL-3.0-only -->
 <script setup lang="ts">
 import { brand } from '../../lib/brand'
-import { computed, nextTick, onMounted, ref, type Component } from 'vue'
+import { computed, nextTick, onMounted, ref, watch, type Component } from 'vue'
 import { useRoute, useRouter } from 'vue-router'
-import { can } from '../../lib/authz'
+import { can, permissionsRevoked } from '../../lib/authz'
 import { useAccess } from '../../stores/access'
 import AppIcon from '../AppIcon.vue'
 import BizIcon, { type BizIconName } from '../business/BizIcon.vue'
@@ -31,7 +31,12 @@ const TABS: { id: Tab; label: string; icon: BizIconName; permission: string; com
   { id: 'agents', label: 'Agents', icon: 'agent', permission: 'members.read', component: AgentsTab },
   { id: 'audit', label: 'Access log', icon: 'history', permission: 'audit.read', component: AuditTab },
 ]
-const tabs = computed(() => TABS.filter(tab => can(tab.permission)))
+const liveTabs = computed(() => TABS.filter(tab => can(tab.permission)))
+// After a 401 the tabs stay as they were (inert); the note below says why.
+const tabs = ref(liveTabs.value)
+watch(liveTabs, now => { if (!permissionsRevoked()) tabs.value = now })
+const ended = computed(() => permissionsRevoked())
+function signIn() { window.open('/signin?error=expired', '_blank', 'noopener') }
 const tab = computed<Tab>(() => { const wanted = route.params.tab as Tab | undefined; return tabs.value.some(t => t.id === wanted) ? wanted! : 'people' })
 const current = computed(() => TABS.find(t => t.id === tab.value)!)
 const detail = computed(() => typeof route.params.id === 'string' ? route.params.id : '')
@@ -64,6 +69,7 @@ onMounted(() => { void access.load() })
           <p class="lead">Who works here, with which role and on which projects. {{ brand.short_name }} decides access; an INSPR ID only proves who someone is.</p>
         </div>
       </header>
+      <p v-if="ended" class="set-note error ended" role="alert"><AppIcon name="alert" :size="14" /><span>Your session has ended, so nothing here can change. Sign in again in a new tab; what you typed and any link on screen stay here.</span><button type="button" class="btn sm" @click="signIn">Sign in</button></p>
       <div ref="tabBar" class="tabs" :class="{ drilled: !!detail && (tab === 'roles' || tab === 'projects') }" role="tablist" aria-label="Access" @keydown="tabKeys">
         <RouterLink
           v-for="t in tabs" :id="`access-tab-${t.id}`" :key="t.id" :to="`/settings/access/${t.id}`" class="tab" role="tab" :aria-selected="tab === t.id" :tabindex="tab === t.id ? 0 : -1"
@@ -100,6 +106,7 @@ h2 { font: 600 15px/1.35 var(--font); color: var(--ink); }
 .tab[aria-selected="true"] svg { color: var(--teal-ink); }
 .tab:focus-visible { box-shadow: var(--focus-ring); }
 .n { font-size: 11px; font-weight: 600; color: var(--ink-3); }
+.ended { margin-top: 14px; }
 .panel { display: grid; grid-template-columns: minmax(0, 1fr); margin-top: 16px; min-width: 0; }
 @media (max-width: 600px) {
   .access-card { padding: 16px 12px 12px; }

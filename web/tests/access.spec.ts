@@ -374,6 +374,43 @@ test('review #7: scopes I no longer hold leave the new key and are never sent', 
   expect((calls(world, 'POST', /\/agent-keys$/)[0]!.body as { scopes: string[] }).scopes).toEqual(['nodes.read'])
 })
 
+test('review r2 #1: a 401 on an Access call revokes every grant at once, without a refetch loop', async ({ page }) => {
+  const world = await open(page, '/settings/access/roles/new?from=role-member')
+  await page.getByLabel('Name', { exact: true }).fill('Night shift')
+  world.sessionEnded = true
+  await page.getByRole('button', { name: 'Create role' }).click()
+  const card = page.locator('.access-card')
+  await expect(card.getByRole('alert').first()).toContainText('Your session has ended, so nothing here can change.')
+  await expect(page.locator('.toast', { hasText: 'Your session has ended' })).toBeVisible()
+  // Inert, and nothing typed is lost: the editor is read-only with the name kept.
+  await expect(page.getByLabel('Name', { exact: true })).toHaveValue('Night shift')
+  await expect(page.getByRole('button', { name: 'Create role' })).toHaveCount(0)
+  const asked = () => calls(world, 'GET', /\/api\/me\/permissions/).length
+  const before = asked()
+  await page.evaluate(() => window.dispatchEvent(new Event('focus')))
+  await page.waitForTimeout(600)
+  expect(asked()).toBeLessThanOrEqual(before + 1) // one focus re-check, then latched again
+  await expect(page.getByLabel('Name', { exact: true })).toHaveValue('Night shift')
+})
+
+test('review r2 #2: a join link on screen stays when the session ends', async ({ page }) => {
+  const world = await open(page, '/settings/access/invites')
+  await page.getByRole('button', { name: 'Invite people' }).click()
+  const sheet = page.getByRole('dialog', { name: 'Invite people' })
+  await sheet.getByLabel('Email').fill('late@studio.at')
+  await sheet.getByRole('button', { name: 'Create invite link' }).click()
+  const ready = page.getByRole('dialog', { name: 'Invite ready' })
+  const link = await ready.getByRole('textbox').inputValue()
+  expect(link).toMatch(/join/)
+  world.sessionEnded = true
+  await page.evaluate(() => window.dispatchEvent(new Event('focus')))
+  await expect(page.locator('.access-card').getByRole('alert').first()).toContainText('Your session has ended')
+  await expect(ready.getByRole('textbox')).toHaveValue(link)
+  await expect(page.getByRole('tablist', { name: 'Access' })).toBeVisible()
+  await ready.getByRole('button', { name: 'Done' }).click()
+  await expect(page.locator('.access-card')).toBeVisible()
+})
+
 test('tabs are a tablist: arrows move between them', async ({ page }) => {
   await open(page)
   await page.getByRole('tab', { name: /People/ }).focus()

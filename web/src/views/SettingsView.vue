@@ -1,9 +1,9 @@
 <!-- SPDX-License-Identifier: AGPL-3.0-only -->
 <script setup lang="ts">
-import { computed, nextTick, watch, type Component } from 'vue'
+import { computed, nextTick, ref, watch, type Component } from 'vue'
 import { useRoute } from 'vue-router'
 import '../styles/settings.css'
-import { can, permissionsKnown, refreshPermissions } from '../lib/authz'
+import { can, permissionsKnown, permissionsRevoked, refreshPermissions } from '../lib/authz'
 import AppIcon from '../components/AppIcon.vue'
 import BizIcon, { type BizIconName } from '../components/business/BizIcon.vue'
 import BusinessSection from '../components/settings/BusinessSection.vue'
@@ -20,10 +20,17 @@ import { useSession } from '../stores/session'
 const route = useRoute()
 const session = useSession()
 const admin = computed(() => can('settings.manage'))
-const sections = computed(() => visibleSections(admin.value, permission => can(permission)))
+// A session that ends (401) revokes every grant; what is on screen stays as it
+// was, inert, so typed input and a join link shown once are not lost.
+const liveSections = computed(() => visibleSections(admin.value, permission => can(permission)))
+const sections = ref(liveSections.value)
+watch(liveSections, now => { if (!permissionsRevoked()) sections.value = now })
+const shown = new Set<SectionId>()
 const current = computed(() => sectionOf(route.params.section))
 const meta = computed(() => SETTINGS_SECTIONS.find(section => section.id === current.value)!)
-const allowed = computed(() => meta.value.permission ? can(meta.value.permission) : !meta.value.admin || admin.value)
+const granted = computed(() => meta.value.permission ? can(meta.value.permission) : !meta.value.admin || admin.value)
+watch(granted, ok => { if (ok) shown.add(current.value) }, { immediate: true })
+const allowed = computed(() => granted.value || (permissionsRevoked() && shown.has(current.value)))
 // A permission-gated section waits for my permissions before it says no.
 const deciding = computed(() => !!meta.value.permission && !permissionsKnown())
 // Which sections show depends on my permissions: the layout waits for them, so

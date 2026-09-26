@@ -2,6 +2,7 @@
 // Settings: the sections, who sees them, and the server calls they read. Personal
 // settings are everyone's; the rest are for workspace admins.
 import { api } from './api.ts'
+import { sessionGone } from './authz.ts'
 
 export type SectionId = 'personal' | 'workspace' | 'access' | 'business' | 'projects'
 // permission: the section shows to whoever holds it (can()), instead of by role.
@@ -24,6 +25,7 @@ export const settingsLink = (section: SectionId, anchor?: string) => `/settings/
 
 async function read<T>(path: string): Promise<T> {
   const response = await api(path)
+  if (response.status === 401) sessionGone()
   if (!response.ok) {
     const body = await response.json().catch(() => ({}))
     throw Object.assign(new Error(typeof body?.error === 'string' ? body.error : `Request failed (${response.status})`), { status: response.status })
