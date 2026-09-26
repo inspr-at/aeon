@@ -135,7 +135,8 @@ var RoutePermissions = map[string]string{
 	"GET /api/runs/queued":                                                            "run.read",
 	"GET /api/runs/{runId}":                                                           "run.read",
 	"GET /api/search":                                                                 "search.read",
-	"GET /api/stage-handoffs/{handoffId}":                                             "stage_handoffs.read",
+	// Readers, or the routed plugin agent holding that handoff's operation scope.
+	"GET /api/stage-handoffs/{handoffId}":                                             "stage_handoffs.read|stage.prepare|stage.deploy|stage.verify|stage.apply",
 	"GET /api/time-entries":                                                           "hours.read",
 	"GET /api/time-periods":                                                           "hours.read",
 	"GET /api/time-periods/{periodId}":                                                "hours.read",
@@ -254,6 +255,8 @@ var RoutePermissions = map[string]string{
 	"POST /api/stage-handoffs":                                         "stage_handoffs.write",
 	"POST /api/stage-handoffs/{handoffId}/classic-batch-alias":         "stage_handoffs.decide",
 	"POST /api/stage-handoffs/{handoffId}/evidence":                    "stage_handoffs.write",
+	"POST /api/stage-handoffs/{handoffId}/launch/admit":                "stage.deploy",
+	"POST /api/stage-handoffs/{handoffId}/launch/consume":              "stage.deploy",
 	"POST /api/stage-handoffs/{handoffId}/result":                      "stage_handoffs.decide",
 	"POST /api/time-entries":                                           "hours.write",
 	"POST /api/time-periods":                                           "hours.write",

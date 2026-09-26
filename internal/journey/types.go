@@ -26,7 +26,12 @@ const (
 // before Plan were never recorded here, so the face shows what came with it
 // (description, epics, tickets) instead of intake and gates.
 type Journey struct {
-	ProjectNodeID        string            `json:"project_node_id"`
+	ProjectNodeID string `json:"project_node_id"`
+	// ProjectKey is the route key used in /p/{project_key} links (e.g. PHAROS);
+	// NodeKey is the project node's immutable key (e.g. PRJ-17).
+	NodeKey              string            `json:"node_key"`
+	ProjectKey           string            `json:"project_key"`
+	TenantSlug           string            `json:"tenant_slug"`
 	Profile              string            `json:"profile"`
 	Revision             int64             `json:"revision"`
 	Stage                string            `json:"stage"`
