@@ -342,11 +342,16 @@ export async function mockWork(page: Page, data: Fixtures, options: MockOptions 
     }
     if (path === '/api/relations') return route.fulfill({ json: { items: data.relations.filter(r => r.source_node_id === query.get('node_id') || r.target_node_id === query.get('node_id')), next_cursor: null } })
     if (path === '/api/nodes/lookup') {
-      const ids = (query.get('ids') ?? '').split(',')
-      return route.fulfill({ json: { items: ids.flatMap(id => {
+      const ids = (query.get('ids') ?? '').split(',').filter(Boolean)
+      // Keys (ticket keys in release notes) also name the key asked for and the project.
+      const keys = (query.get('keys') ?? '').split(',').filter(Boolean).map(key => key.toUpperCase())
+      return route.fulfill({ json: { items: [...ids.flatMap(id => {
         const node = data.nodes.find(n => n.id === id)
         return node ? [{ id: node.id, key: node.key, title: node.title, state: node.state }] : []
-      }) } })
+      }), ...keys.flatMap(key => {
+        const node = data.nodes.find(n => n.key === key)
+        return node ? [{ id: node.id, key: node.key, title: node.title, state: node.state, requested_key: key, project_id: node.project }] : []
+      })] } })
     }
     const activityPath = /^\/api\/nodes\/([^/]+)\/(activity|comments)(?:\/(\d+))?$/.exec(path)
     if (activityPath) {

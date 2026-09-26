@@ -215,18 +215,17 @@ test('evidence: runs, commit and digest with copy, the rollback target, and what
   await expect(sheet(page).locator('.run.failure')).toHaveText('failed')
 })
 
-test('ticket keys open tickets that live here; others stay plain', async ({ page }) => {
+test('ticket keys link to the tickets this workspace has; others stay plain', async ({ page }) => {
   const { history } = await setup(page)
   await page.goto(`/releases/${history.releases[3].version}`)
   await expect(sheet(page).locator('.detail .tickets')).toContainText('PAI-1057')
   await expect(sheet(page).locator('.detail .tickets').getByRole('link')).toHaveCount(0)
   await page.keyboard.press('k'); await page.keyboard.press('k')
   const tickets = sheet(page).locator('.detail .tickets')
-  await expect(tickets.getByRole('link', { name: 'Open ticket AEON-74' })).toHaveAttribute('href', '/p/AEON/AEON-74')
-  await tickets.getByRole('link', { name: 'Open ticket PHAROS-11' }).click()
-  await expect(sheet(page)).toHaveCount(0)
-  await expect(page).toHaveURL('/p/PHAROS/PHAROS-11')
-  await expect(page.locator('.ticket-ws.panel')).toBeVisible()
+  // AEON is a project here, but AEON-74 is not one of its tickets: no dead link.
+  await expect(tickets.getByRole('link', { name: /^PHAROS-11: / })).toHaveAttribute('href', '/p/PHAROS/PHAROS-11')
+  await expect(tickets.getByRole('link')).toHaveCount(1)
+  await expect(tickets.getByText('AEON-74')).toHaveAttribute('data-tip', 'AEON-74 is not a ticket in this AEON workspace')
 })
 
 test('a reserved version reads as reserved and never published', async ({ page }) => {
