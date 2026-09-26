@@ -73,6 +73,28 @@ test('no escalation: an admin cannot give Owner, and is told why', async ({ page
   await expect(page.getByRole('button', { name: 'Give Mira Holm Owner' })).toBeDisabled()
 })
 
+test('an invite offers only project roles the inviter holds in the workspace, as the server checks', async ({ page }) => {
+  // Invites check a project role against the inviter's workspace permissions,
+  // not the project's: a people manager who leads Pharos still cannot invite
+  // someone as Delivery lead there.
+  await mockWork(page, fixtures())
+  const world = accessWorld()
+  const member = world.roles.find(r => r.id === 'role-member')!
+  world.roles.push({ ...member, id: 'role-people', key: 'people-manager', name: 'People manager', description: 'Invites people.', builtin: false, permissions: [...member.permissions, 'members.manage'], based_on: member.id })
+  world.people.find(p => p.principal_id === ME)!.workspace_role = 'role-people'
+  world.bindings.push({ principal_id: ME, project_id: 'p-pharos', role_id: 'role-lead' })
+  await mockAccess(page, world)
+  await page.goto('/settings/access/invites')
+  await page.getByRole('button', { name: 'Invite people' }).click()
+  const sheet = page.getByRole('dialog', { name: 'Invite people' })
+  await sheet.getByRole('button', { name: 'Add a project' }).click()
+  await sheet.getByLabel('Project 1', { exact: true }).selectOption({ label: 'Pharos' })
+  const lead = sheet.getByLabel('Role on project 1', { exact: true }).locator('option', { hasText: 'Delivery lead' })
+  await expect(lead).toBeDisabled()
+  await expect(lead).toContainText('which you do not hold')
+  await expect(sheet.getByLabel('Role on project 1', { exact: true }).locator('option', { hasText: 'Guest' })).toBeEnabled()
+})
+
 test('the last owner keeps Owner, and the reason is said instead of a silent block', async ({ page }) => {
   await open(page)
   const role = row(page, 'Markus Barta').getByRole('button', { name: /Workspace role of Markus Barta/ })

@@ -5,7 +5,7 @@ export interface InvitePrefill { email: string; workspaceRoleId: string | null; 
 <script setup lang="ts">
 import { brand } from '../../lib/brand'
 import { computed, nextTick, onMounted, ref } from 'vue'
-import { beyond, defaultProjectRole, defaultWorkspaceRole, effectLine, EXPIRY_DAYS, type Invite, lostPermission, neededToGive, permissionLabel, projectRolesOf, validEmail, workspaceRolesOf } from '../../lib/access'
+import { beyond, defaultProjectRole, defaultWorkspaceRole, effectLine, EXPIRY_DAYS, type Invite, lostPermission, permissionLabel, projectRolesOf, validEmail, workspaceRolesOf } from '../../lib/access'
 import { can, myPermissions } from '../../lib/authz'
 import { absoluteTime } from '../../lib/work'
 import { useAccess } from '../../stores/access'
@@ -29,12 +29,14 @@ const projectRoles = computed(() => projectRolesOf(access.roles, access.registry
 // Guest is a project role; it is offered on projects only.
 const workspaceRoles = computed(() => workspaceRolesOf(access.roles))
 const okWorkspace = (id: string) => workspaceRoles.value.some(r => r.id === id) && grantable(id)
-const grantableOn = (roleId: string, projectId: string) => { const role = access.roleById.get(roleId); return !!role && !beyond(neededToGive(role, 'project', access.registry), myPermissions(projectId)).length }
-const okProject = (id: string, projectId?: string) => projectRoles.value.some(r => r.id === id) && (projectId ? grantableOn(id, projectId) : grantable(id))
+// The invite API checks every permission of a project role against the
+// inviter's workspace permissions, unlike a project binding, so the form does
+// the same and never offers a role the server would refuse.
+const okProject = (id: string) => projectRoles.value.some(r => r.id === id) && grantable(id)
 // A default or an "Invite again" prefill keeps only roles I may give there.
 const start = props.prefill ? props.prefill.workspaceRoleId ?? '' : defaultWorkspaceRole(access.roles)
 const workspaceRole = ref<string>(start && okWorkspace(start) ? start : '')
-const projectRows = ref<{ project_id: string; role_id: string }[]>(props.prefill?.projectRoles.filter(r => okProject(r.role_id, r.project_id)).map(r => ({ ...r })) ?? [])
+const projectRows = ref<{ project_id: string; role_id: string }[]>(props.prefill?.projectRoles.filter(r => okProject(r.role_id)).map(r => ({ ...r })) ?? [])
 const days = ref<number>(14)
 const errors = ref<Record<string, string>>({})
 const saving = ref(false)
@@ -57,7 +59,7 @@ function validate(): boolean {
   if (!validEmail(email.value)) out.email = email.value.trim() ? 'Enter an email address like name@example.com.' : 'Enter the email address they sign in with.'
   if (!workspaceRole.value && !projectRows.value.length) out.access = 'Give a workspace role or at least one project, or they could not see anything.'
   else if (workspaceRole.value && !okWorkspace(workspaceRole.value)) out.access = 'Choose a workspace role you can give.'
-  else if (projectRows.value.some(r => !okProject(r.role_id, r.project_id))) out.access = 'Choose a project role you can give for every project.'
+  else if (projectRows.value.some(r => !okProject(r.role_id))) out.access = 'Choose a project role you can give for every project.'
   errors.value = out
   return !Object.keys(out).length
 }
@@ -109,7 +111,7 @@ onMounted(() => { void projects.load() })
             <option v-for="p in freeProjects(row)" :key="p.id" :value="p.id">{{ p.title }}</option>
           </select>
           <select v-model="row.role_id" class="field" :aria-label="`Role on project ${index + 1}`">
-            <option v-for="role in projectRoles" :key="role.id" :value="role.id" :disabled="!grantableOn(role.id, row.project_id)">{{ role.name }}{{ grantableOn(role.id, row.project_id) ? '' : ' (you cannot give this)' }}</option>
+            <option v-for="role in projectRoles" :key="role.id" :value="role.id" :disabled="!grantable(role.id)">{{ role.name }}{{ grantable(role.id) ? '' : ` (${whyNot(role.id)})` }}</option>
           </select>
           <button type="button" class="icon-btn sm flat" :aria-label="`Remove project ${index + 1}`" @click="projectRows.splice(index, 1)"><AppIcon name="close" :size="13" /></button>
         </div>
