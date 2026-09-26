@@ -35,3 +35,11 @@ func OperatorRevokeAgentKey(ctx context.Context, pool *pgxpool.Pool, tenantID, i
 	m := &Module{pool: pool, inTenant: db.InTenant}
 	return m.revokeAgentKey(db.NoProjects(ctx, "operator agent key"), tenant.Principal{TenantID: tenantID}, id)
 }
+
+// OperatorGrantJourneyScopes adds the two legacy journey gate prefixes to one
+// newly created demo key. They are outside the agent permission registry, so
+// the ordinary key creation path cannot accept them.
+func OperatorGrantJourneyScopes(ctx context.Context, pool *pgxpool.Pool, tenantID, keyID, principalID string) error {
+	m := &Module{pool: pool, inTenant: db.InTenant}
+	return m.grantJourneyScopes(db.NoProjects(ctx, "operator agent key"), tenantID, keyID, principalID)
+}

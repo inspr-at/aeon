@@ -11,7 +11,8 @@ const emit = defineEmits<{ close: [restoreFocus: boolean] }>()
 const panel = ref<HTMLElement>()
 const x = ref(-9999)
 const y = ref(-9999)
-const maxHeight = ref(360)
+// Until placed (off-screen), the content may take its full height so place() measures it.
+const maxHeight = ref(props.tallest)
 const above = ref(false)
 
 // keepSide: when the content grows or shrinks (results arriving), stay on the
@@ -86,7 +87,7 @@ defineExpose({ place })
 
 <template>
   <Teleport to="body">
-    <div ref="panel" class="floating pop" :class="{ above }" role="dialog" :aria-label="label" :style="{ transform: `translate(${x}px, ${y}px)`, width: `${Math.min(width, 9999)}px`, maxHeight: `${maxHeight}px` }" @keydown="keydown">
+    <div ref="panel" class="floating pop" :class="{ above }" role="dialog" :aria-label="label" :style="{ transform: `translate(${x}px, ${y}px)`, width: `${Math.min(width, 9999)}px`, maxHeight: `${maxHeight}px`, '--floating-max': `${maxHeight}px` }" @keydown="keydown">
       <slot />
     </div>
   </Teleport>
