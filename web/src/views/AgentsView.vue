@@ -15,6 +15,8 @@ import AccountsCard from '../components/agents/AccountsCard.vue'
 import ApprovalQueue from '../components/agents/ApprovalQueue.vue'
 import SessionList from '../components/agents/SessionList.vue'
 import SessionPanel from '../components/agents/SessionPanel.vue'
+import StartAgentDialog from '../components/agents/StartAgentDialog.vue'
+import RunQueue from '../components/agents/RunQueue.vue'
 
 // Markus's desk for agents: what waits on him first, then every live session grouped
 // by state, with accounts and pacing beside them. A session opens in the docked panel.
@@ -26,6 +28,8 @@ const router = useRouter()
 const cursor = ref('')
 const live = ref(false)
 const queue = ref<InstanceType<typeof ApprovalQueue>>()
+const startDialog = ref<InstanceType<typeof StartAgentDialog>>()
+const canStart = computed(() => session.identity?.principal.kind === 'person' && can('work_orders.write') && can('run.create'))
 
 const sessionId = computed(() => typeof route.params.sessionId === 'string' ? route.params.sessionId : '')
 const selected = computed(() => agents.views.find(v => v.session.id === sessionId.value))
@@ -212,6 +216,7 @@ watch(sessionId, id => { if (id) cursor.value = `s:${id}` }, { immediate: true }
         <p class="summary"><span v-if="summary">{{ summary }}</span><span v-else class="skeleton summary-skeleton" /></p>
       </div>
       <div class="head-side">
+        <button v-if="canStart" type="button" class="btn primary start-agent" @click="startDialog?.open()"><AppIcon name="plus" :size="15" />Start agent</button>
         <RouterLink v-if="can('keys.manage')" class="context-link" to="/settings/access/agents">Agent keys<AppIcon name="arrow" :size="13" /></RouterLink>
         <p class="live" :class="{ on: live }" :data-tip="live ? 'Updates arrive as they happen' : 'Refreshing every 20 seconds'">
           <span class="live-mark" aria-hidden="true" />{{ live ? 'Live' : 'Polling' }}
@@ -229,6 +234,7 @@ watch(sessionId, id => { if (id) cursor.value = `s:${id}` }, { immediate: true }
           @focus-row="id => cursor = id" @open-agent="openAgent"
         />
         <p v-if="agents.approvalsState === 'error'" class="inline-error" role="alert"><AppIcon name="alert" :size="14" />Permission requests could not be loaded: {{ agents.approvalsError }} <button type="button" class="btn sm" @click="agents.refreshApprovals()">Try again</button></p>
+        <RunQueue v-if="agents.loaded" />
         <SessionList
           v-if="agents.loaded"
           :groups="agents.grouped" :now="agents.now" :cursor="cursor" :selected="sessionId" :state="agents.sessionsState" :error="agents.sessionsError"
@@ -248,6 +254,7 @@ watch(sessionId, id => { if (id) cursor.value = `s:${id}` }, { immediate: true }
       v-if="sessionId && agents.loaded" :view="selected" :loading="false" :now="agents.now" :can-write="writable" :control-block="controlBlock"
       @close="closePanel" @control="control" @review="review"
     />
+    <StartAgentDialog ref="startDialog" />
   </section>
 </template>
 
@@ -255,7 +262,8 @@ watch(sessionId, id => { if (id) cursor.value = `s:${id}` }, { immediate: true }
 .agents-page { width: 100%; margin: 0; padding: 22px var(--gutter) 24px; }
 .page-head { display: flex; align-items: flex-end; justify-content: space-between; gap: 24px; margin-bottom: 20px; }
 .page-head h1 { margin-top: 6px; }
-.head-side { display: flex; align-items: center; gap: 12px; }
+.head-side { display: flex; align-items: center; gap: 12px; flex-wrap: wrap; }
+.start-agent { min-height: 44px; }
 /* In-context link to the matching settings. */
 .context-link { display: inline-flex; align-items: center; gap: 6px; height: 32px; padding: 0 10px; border-radius: 999px; color: var(--teal-ink); font-size: 13px; font-weight: 600; white-space: nowrap; }
 @media (max-width: 600px) {

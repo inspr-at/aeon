@@ -4629,6 +4629,10 @@ components:
       properties:
         agent_principal_id: {type: string, format: uuid}
         model_profile_id: {type: string, format: uuid}
+        requested_account_id:
+          type: [string, 'null']
+          format: uuid
+          description: Optional strict account choice. Must belong to the selected agent and match the model harness. The daemon still reserves allowance and claims; an unavailable chosen account leaves the run queued without fallback. Omit or null for automatic routing.
     RunClaim:
       type: object
       required: [daemon_id, daemon_generation, reservation_ids]
@@ -4742,6 +4746,7 @@ components:
         agent_principal_id: {type: string, format: uuid}
         model_profile_id: {type: [string, 'null'], format: uuid}
         account_id: {type: [string, 'null'], format: uuid}
+        requested_account_id: {type: [string, 'null'], format: uuid, description: The optional account choice pinned at creation; account_id remains null until a reservation succeeds.}
         status: {type: string, enum: [queued, starting, running, waiting, completed, failed, cancelled, ownership_lost]}
         requested_model: {type: [string, 'null']}
         effective_model: {type: [string, 'null']}

@@ -267,5 +267,6 @@ export const useAgents = defineStore('agents', () => {
     loading, loaded, pending, held, needsCount, views, grouped,
     loadAll, loadNeeds, ensureTicket, refreshApprovals, refreshSessions, refreshThread, refreshAgentRuns, tick,
     viewOf, byAgent, forTicket, recentRuns, askerName, thread, addressOf, decide, revoke, resolve, control, send, setAccount,
+    recordRun: (run: AgentRun) => mergeRuns([run]),
   }
 })

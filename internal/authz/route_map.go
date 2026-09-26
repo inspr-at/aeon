@@ -268,7 +268,7 @@ var RoutePermissions = map[string]string{
 	"POST /api/work-orders":                                            "work_orders.write",
 	"POST /api/work-orders/{workOrderId}/criteria/{criterionId}/check": "work_orders.write",
 	"POST /api/work-orders/{workOrderId}/evidence":                     "work_orders.write",
-	"POST /api/work-orders/{workOrderId}/runs":                         "run.create",
+	"POST /api/work-orders/{workOrderId}/runs":                         "run.create", // Account choice only constrains routing; reservation/claim retain their scopes.
 	"PUT /api/crm/documents/{attachmentId}/metadata":                   "crm.write",
 	"PUT /api/crm/projects/{projectId}/cooperation":                    "crm.write",
 	"PUT /api/crm/projects/{projectId}/customer":                       "crm.write",

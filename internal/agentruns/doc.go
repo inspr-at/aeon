@@ -15,6 +15,14 @@
 // integer token/cost_micros counters. Missing terminal data stays null.
 // This extends New; no new plugin installation or server wiring is required.
 //
+// AC3 / AEON-181: RunCreate accepts optional requested_account_id (0851).
+// Creation validates its tenant, enrolling agent and profile harness and writes
+// the choice in run.created. account_id stays null until allowance reservation.
+// agentaccounts.New enforces the choice within the claiming daemon's enrollment;
+// no eligible chosen account means queued, never an implicit fallback. Omitted
+// or null keeps automatic routing. Existing New constructors and run.create /
+// account.route permissions apply; the coordinator needs no additional wiring.
+//
 // Agent keys require exact run.read, run.create, run.claim or run.telemetry
 // scopes. People may create/read runs; queue, claim and telemetry are agent-only.
 // Agents create their own runs, read their own runs, and see only their queue.
