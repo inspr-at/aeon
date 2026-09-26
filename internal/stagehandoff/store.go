@@ -37,6 +37,13 @@ func loadHandoff(ctx context.Context, tx pgx.Tx, id string, lock bool) (Handoff,
 	} else if !errors.Is(err, pgx.ErrNoRows) {
 		return h, err
 	}
+	var admission HandoffAdmissionState
+	err = tx.QueryRow(ctx, `SELECT id::text,authority_epoch,expires_at,consumed_at,consumed_by_principal_id::text FROM stage_launch_admissions WHERE handoff_id=$1::uuid ORDER BY expires_at DESC,id DESC LIMIT 1`, id).Scan(&admission.AdmissionID, &admission.Epoch, &admission.ExpiresAt, &admission.ConsumedAt, &admission.ConsumedByPrincipalID)
+	if err == nil {
+		h.Admission = &admission
+	} else if !errors.Is(err, pgx.ErrNoRows) {
+		return h, err
+	}
 	return h, nil
 }
 func planDigest(ctx context.Context, tx pgx.Tx, releaseID string) (string, error) {

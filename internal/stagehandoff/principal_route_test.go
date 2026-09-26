@@ -27,6 +27,11 @@ func routedTestRequest(t *testing.T, handler http.Handler, p tenant.Principal, b
 	}
 	r := httptest.NewRequest(http.MethodPost, path, bytes.NewReader(raw)).WithContext(tenant.WithPrincipal(t.Context(), p))
 	r.Header.Set("Content-Type", "application/json")
+	if strings.HasSuffix(path, "/launch/consume") {
+		r.Header.Set("Idempotency-Key", "66666666-6666-4666-8666-666666666666")
+	} else {
+		r.Header.Set("Idempotency-Key", "44444444-4444-4444-8444-444444444444")
+	}
 	if bearer != "" {
 		r.Header.Set("Authorization", bearer)
 	}
