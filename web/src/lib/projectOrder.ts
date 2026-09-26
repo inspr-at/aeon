@@ -28,20 +28,34 @@ export function place(order: readonly string[], members: readonly string[], ids:
 }
 
 /**
- * What is saved: only projects the person can see now, each once, and at most
- * `limit` of them so the preference stays well under the server's 16 KiB. Over
- * the limit, archived projects go first, then the end of the list; those follow
- * the arranged ones by last activity.
+ * What is saved: only projects the person can see now, each once, within a byte
+ * budget just under the server's 16 KiB preference limit (about 410 UUIDs). Only
+ * when the list is over it, archived projects give up their places first (last
+ * ranked first), and only then the end of the list; those follow the arranged
+ * ones by last activity. An active project's place is never dropped while the
+ * list fits.
  */
-export const ORDER_LIMIT = 240
-export function keepOrder(order: readonly string[], known: ReadonlySet<string>, archived: ReadonlySet<string> = new Set(), limit = ORDER_LIMIT): string[] {
+export const ORDER_BYTES = 16_000
+const encoder = new TextEncoder()
+const bytesOf = (text: string) => encoder.encode(text).length
+export function orderBytes(ids: readonly string[]) { return bytesOf(JSON.stringify({ ids })) }
+export function keepOrder(order: readonly string[], known: ReadonlySet<string>, archived: ReadonlySet<string> = new Set(), budget = ORDER_BYTES): string[] {
   const seen = new Set<string>()
   const kept = order.filter(id => known.has(id) && !seen.has(id) && !!seen.add(id))
-  if (kept.length <= limit) return kept
-  const live = kept.filter(id => !archived.has(id))
-  if (live.length >= limit) return live.slice(0, limit)
-  const room = new Set([...live, ...kept.filter(id => archived.has(id)).slice(0, limit - live.length)])
-  return kept.filter(id => room.has(id))
+  // {"ids":[]} plus each id quoted, with a comma between.
+  const cost = (id: string) => bytesOf(JSON.stringify(id)) + 1
+  let size = bytesOf('{"ids":[]}') - 1 + kept.reduce((sum, id) => sum + cost(id), 0)
+  if (size <= budget) return kept
+  const dropped = new Set<string>()
+  for (let i = kept.length - 1; i >= 0 && size > budget; i--) if (archived.has(kept[i]!)) { dropped.add(kept[i]!); size -= cost(kept[i]!) }
+  for (let i = kept.length - 1; i >= 0 && size > budget; i--) if (!dropped.has(kept[i]!)) { dropped.add(kept[i]!); size -= cost(kept[i]!) }
+  return kept.filter(id => !dropped.has(id))
+}
+
+/** The saved order once projects that are gone or over budget leave it, or null when nothing changes. */
+export function prunedOrder(saved: readonly string[], known: ReadonlySet<string>, archived: ReadonlySet<string> = new Set(), budget = ORDER_BYTES): string[] | null {
+  const kept = keepOrder(saved, known, archived, budget)
+  return sameOrder(kept, saved) ? null : kept
 }
 
 /** The same order, or not: cheap equality for id lists. */

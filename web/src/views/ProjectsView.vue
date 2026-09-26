@@ -11,7 +11,7 @@ import { toast, type ToastAction } from '../lib/toast'
 import { opensRowMenu, type RowAction, type RowMenuAnchor } from '../lib/rowActions'
 import { ARCHIVED, NO_GROUP, bucket, isShared, isUserGroup, nameProblem, showsHeaders } from '../lib/projectGroups'
 import { PROJECT_COLUMNS, chosenProjectColumns, customisedProjectColumns, fittingProjectColumns, projectColumnOrder, type ProjectColumnId, type ProjectColumnPrefs } from '../lib/projectColumns'
-import { byRank, keepOrder, nearestCell, place, sameOrder } from '../lib/projectOrder'
+import { byRank, keepOrder, nearestCell, place, prunedOrder, sameOrder } from '../lib/projectOrder'
 import AppIcon, { type IconName } from '../components/AppIcon.vue'
 import WelcomeBlock from '../components/WelcomeBlock.vue'
 import FloatingPanel from '../components/work/FloatingPanel.vue'
@@ -560,12 +560,19 @@ const stopFailures = onPreferenceFailure(key => {
   if (key !== ORDER_KEY) return
   toast('Your project order could not be saved. It stays here until you reload.', { tone: 'error', key: 'order-failed', action: { label: 'Try again', run: () => saveOrder(savedOrder.value) } })
 })
-// Projects deleted or no longer shown leave the saved order once the list is in.
-const stopPruning = watch(() => ready.value && store.loaded && !store.error && store.projects.length > 0, loaded => {
-  if (!loaded) return
-  queueMicrotask(() => stopPruning())
-  const known = new Set(store.projects.map(p => p.id))
-  if (savedOrder.value.some(id => !known.has(id)) || new Set(savedOrder.value).size !== savedOrder.value.length) saveOrder(savedOrder.value)
+// Whenever the projects shown change (one deleted, access changed, one archived),
+// the saved order is pruned to them once things settle, and written only if that
+// changes it.
+let pruneTimer: ReturnType<typeof setTimeout> | undefined
+const visibleProjects = computed(() => ready.value && store.loaded && !store.error && store.projects.length ? store.projects.map(p => `${p.id}${p.archived ? ':a' : ''}`).join(',') : '')
+const stopPruning = watch(visibleProjects, list => {
+  clearTimeout(pruneTimer)
+  if (!list) return
+  pruneTimer = setTimeout(() => {
+    if (!visibleProjects.value || !savedOrder.value.length) return
+    const next = prunedOrder(savedOrder.value, new Set(store.projects.map(p => p.id)), new Set(store.projects.filter(p => p.archived).map(p => p.id)))
+    if (next) orderPref.save({ ids: next }, 0)
+  }, 600)
 }, { immediate: true })
 // Saves an arrangement; the first one made under another sort switches to Custom, undoably.
 async function commitOrder(next: string[]) {
@@ -801,7 +808,7 @@ watch(listCard, element => {
   sizer = new ResizeObserver(([entry]) => { listWidth.value = entry!.contentRect.width })
   sizer.observe(element)
 }, { flush: 'post' })
-onBeforeUnmount(() => { if (drag) { drag.ghost?.remove(); release(); drag = null } dropSwallow(); stopFailures(); stopPruning(); window.removeEventListener('keydown', keydown); page.value?.removeEventListener('click', clickCapture, true); clearInterval(clock); sizer?.disconnect(); phoneQuery.removeEventListener('change', phoneChange) })
+onBeforeUnmount(() => { if (drag) { drag.ghost?.remove(); release(); drag = null } dropSwallow(); stopFailures(); stopPruning(); clearTimeout(pruneTimer); window.removeEventListener('keydown', keydown); page.value?.removeEventListener('click', clickCapture, true); clearInterval(clock); sizer?.disconnect(); phoneQuery.removeEventListener('change', phoneChange) })
 const who = computed(() => session.identity?.tenant.name ?? 'Workspace')
 // One line under the sorts says how to arrange your own order. Touch screens
 // scroll when a card is dragged, so there the card's menu arranges it.

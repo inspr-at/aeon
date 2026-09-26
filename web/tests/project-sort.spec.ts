@@ -177,14 +177,27 @@ test('with groups, a card is arranged within its own group', async ({ page }) =>
   await expect.poll(() => { const order = lastOrder(calls) ?? []; return order.includes('p-jig') && order.indexOf('p-jig') < order.indexOf('p-quay') }).toBe(true)
 })
 
-test('the saved order drops projects that are gone; a failed save says so', async ({ page }) => {
+test('the saved order drops projects that are gone, also later; a failed save says so', async ({ page }) => {
   await page.setViewportSize({ width: 1280, height: 900 })
-  const { calls } = await open(page, { order: ['p-gone', 'p-aeon', 'p-aeon', 'p-frozen'], path: '/?sort=custom' })
+  const { calls, data } = await open(page, { order: ['p-gone', 'p-aeon', 'p-aeon', 'p-frozen', 'p-pharos'], path: '/?sort=custom' })
   await expect(names(page)).toHaveText(['Aeon', 'Studio infrastructure', 'Pharos'])
-  await expect.poll(() => lastOrder(calls)).toEqual(['p-aeon', 'p-frozen'])
+  await expect.poll(() => lastOrder(calls)).toEqual(['p-aeon', 'p-frozen', 'p-pharos'])
+  // Later a project is deleted elsewhere; the next time the list loads (here after an
+  // archive), its place goes. The archived one keeps its place.
+  data.projects.splice(data.projects.findIndex(p => p.id === 'p-frozen'), 1)
+  const aeon = card(page, 'p-aeon')
+  await aeon.hover()
+  await aeon.getByRole('button', { name: /^Actions for/ }).click()
+  await page.getByRole('menuitem', { name: 'Archive' }).click()
+  await expect(names(page)).toHaveText(['Pharos'])
+  await expect.poll(() => lastOrder(calls)).toEqual(['p-aeon', 'p-pharos'])
+  const writes = calls.filter(call => call.method === 'PUT' && call.path === '/api/preferences/projects:order').length
   await page.route('**/api/preferences/projects:order', route => route.request().method() === 'PUT' ? route.fulfill({ status: 500, json: { error: 'down' } }) : route.fallback())
-  await drag(page, card(page, 'p-pharos'), card(page, 'p-aeon'))
-  await expect(names(page)).toHaveText(['Pharos', 'Aeon', 'Studio infrastructure'])
+  expect(calls.filter(call => call.method === 'PUT' && call.path === '/api/preferences/projects:order').length).toBe(writes)
+  await page.getByRole('group', { name: 'Groups' }).getByRole('button', { name: /^Archived/ }).click()
+  await expect(names(page)).toHaveText(['Pharos', 'Aeon', 'Glint'])
+  await drag(page, card(page, 'p-glint'), card(page, 'p-aeon'))
+  await expect(names(page)).toHaveText(['Pharos', 'Glint', 'Aeon'])
   await expect(page.getByText('Your project order could not be saved. It stays here until you reload.')).toBeVisible()
   await expect(page.getByRole('button', { name: 'Try again' })).toBeVisible()
 })

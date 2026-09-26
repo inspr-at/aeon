@@ -1,7 +1,7 @@
 // SPDX-License-Identifier: AGPL-3.0-only
 import { test } from 'node:test'
 import assert from 'node:assert/strict'
-import { ORDER_LIMIT, byRank, keepOrder, nearestCell, place, sameOrder } from '../src/lib/projectOrder.ts'
+import { ORDER_BYTES, byRank, keepOrder, nearestCell, orderBytes, place, prunedOrder, sameOrder } from '../src/lib/projectOrder.ts'
 
 test('custom order: ranked projects first, new ones after them and equal among themselves', () => {
   const compare = byRank(new Map([['b', 0], ['a', 1]]))
@@ -38,15 +38,39 @@ test('sameOrder and nearestCell', () => {
   assert.equal(nearestCell([], 0, 0), -1)
 })
 
-test('keepOrder saves visible projects once, and stays well under the 16 KiB preference limit', () => {
+const uuid = (i: number) => `00000000-0000-4000-8000-${String(i).padStart(12, '0')}`
+
+test('keepOrder saves visible projects once and keeps every active place while the list fits', () => {
   assert.deepEqual(keepOrder(['a', 'gone', 'b', 'a'], new Set(['a', 'b'])), ['a', 'b'])
-  const ids = Array.from({ length: 600 }, (_, i) => `00000000-0000-4000-8000-${String(i).padStart(12, '0')}`)
-  const archived = new Set(ids.slice(0, 500))
+  // 400 active projects fit whole, well past the old 240, under the 16 KiB limit.
+  const active = Array.from({ length: 400 }, (_, i) => uuid(i))
+  assert.deepEqual(keepOrder(active, new Set(active)), active)
+  assert.ok(orderBytes(active) <= ORDER_BYTES && orderBytes(active) < 16 * 1024)
+})
+
+test('over the byte budget, archived places go first (last ranked first), then the end of the list', () => {
+  const ids = Array.from({ length: 430 }, (_, i) => uuid(i))
+  const archived = new Set(ids.filter((_, i) => i % 10 === 0))
   const kept = keepOrder(ids, new Set(ids), archived)
-  assert.equal(kept.length, ORDER_LIMIT)
-  // Live projects stay; archived ones fill the rest in order.
-  assert.deepEqual(kept.slice(0, 140), ids.slice(0, 140))
-  assert.ok(ids.slice(500).every(id => kept.includes(id)))
-  assert.ok(new TextEncoder().encode(JSON.stringify({ ids: kept })).length < 10 * 1024)
-  assert.deepEqual(keepOrder(ids.slice(0, 3), new Set(ids), new Set(), 2), ids.slice(0, 2))
+  assert.ok(orderBytes(kept) <= ORDER_BYTES)
+  // Every active project keeps its place; only archived ones left, the last ranked first.
+  assert.ok(ids.filter(id => !archived.has(id)).every(id => kept.includes(id)))
+  const gone = ids.filter(id => !kept.includes(id))
+  assert.ok(gone.every(id => archived.has(id)))
+  assert.deepEqual(gone, [...archived].slice(-gone.length))
+  // With only active projects over budget, the end of the list gives way.
+  const many = Array.from({ length: 500 }, (_, i) => uuid(i))
+  const trimmed = keepOrder(many, new Set(many))
+  assert.deepEqual(trimmed, many.slice(0, trimmed.length))
+  assert.ok(orderBytes(trimmed) <= ORDER_BYTES && orderBytes([...trimmed, many[trimmed.length]!]) > ORDER_BYTES)
+})
+
+test('prunedOrder writes only when the visible projects change the saved order', () => {
+  const saved = ['a', 'b', 'c']
+  assert.equal(prunedOrder(saved, new Set(['a', 'b', 'c', 'new'])), null)
+  // Archiving keeps the place while the list fits.
+  assert.equal(prunedOrder(saved, new Set(['a', 'b', 'c']), new Set(['b'])), null)
+  // Deleted or no longer shown (access changed): its place goes.
+  assert.deepEqual(prunedOrder(saved, new Set(['a', 'c'])), ['a', 'c'])
+  assert.deepEqual(prunedOrder(['a', 'a', 'b'], new Set(['a', 'b'])), ['a', 'b'])
 })
