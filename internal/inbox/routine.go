@@ -213,6 +213,11 @@ func (d *RoutineDispatcher) failRoutine(ctx context.Context, actor tenant.Princi
 		if _, err := tx.Exec(ctx, `UPDATE inbox_message_deliveries SET state=$3,reason=$4,lease_token=NULL,lease_until=clock_timestamp()+$5::interval WHERE id=$1::uuid AND lease_token=$2::uuid`, work.ID, work.LeaseToken, state, reason, delay.String()); err != nil {
 			return err
 		}
+		if state == "dead" && work.Message != nil {
+			if err := advanceReceipt(ctx, tx, actor, work.Message.ID, "failed", "", reason, receiptTarget{}); err != nil {
+				return err
+			}
+		}
 		_, err := events.Append(ctx, tx, actor, events.Change{Type: "inbox.delivery_attempt_failed", After: map[string]any{"delivery_id": work.ID, "reason": reason, "state": state}})
 		return err
 	})

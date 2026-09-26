@@ -72,6 +72,8 @@ function closeReleases() {
   const { releases: _releases, ...rest } = route.query
   void router.replace({ path: route.path, query: rest, hash: route.hash })
 }
+// The release history's mark goes home: a real navigation to /, which also closes the overlay.
+function goHome() { openedHere = false; void router.push('/') }
 watch(releasesOpen, open => { if (!open) openedHere = false })
 watch(command, value => { if (value?.command.name === 'releases') { consume(); openReleases() } })
 
@@ -155,7 +157,7 @@ watch(() => [route.path, route.params.projectKey, route.params.ticketKey] as con
     </main>
     <!-- A row of the shell: the page, docked panels and toasts all end above it. -->
     <AppFooter v-if="!bare" :hidden="footerHidden" @releases="openReleases()" />
-    <ReleasesSheet v-if="releasesOpen" :target="releasesTarget" @select="selectRelease" @close="closeReleases" />
+    <ReleasesSheet v-if="releasesOpen" :target="releasesTarget" @select="selectRelease" @close="closeReleases" @home="goHome" />
     <ToastHost />
     <ConfirmHost />
     <ShortcutSheet ref="shortcuts" />

@@ -6,9 +6,7 @@ import (
 	"context"
 	"encoding/json"
 	"errors"
-	"reflect"
 
-	"github.com/inspr-at/aeon/internal/authz"
 	"github.com/inspr-at/aeon/internal/events"
 	"github.com/inspr-at/aeon/internal/tenant"
 	"github.com/jackc/pgx/v5"
@@ -22,19 +20,44 @@ func UndoHandlers() map[string]events.UndoFunc {
 }
 
 func undoMove(ctx context.Context, tx pgx.Tx, p tenant.Principal, e events.Event) (events.Change, error) {
-	var before, after nodeJSON
+	var before, after movedNodeSnapshot
 	if e.NodeID == nil || json.Unmarshal(e.Before, &before) != nil || json.Unmarshal(e.After, &after) != nil ||
 		before.ID != *e.NodeID || after.ID != *e.NodeID || before.ID != after.ID {
+		return events.Change{}, events.ErrConflict
+	}
+	if len(before.JourneyTickets) != len(after.JourneyTickets) {
 		return events.Change{}, events.ErrConflict
 	}
 	if err := lockTree(ctx, tx); err != nil {
 		return events.Change{}, err
 	}
-	restored, err := restoreMovedNode(ctx, tx, p, before, after)
+	restored, err := restoreMovedNode(ctx, tx, p, before.nodeJSON, after.nodeJSON)
 	if err != nil {
 		return events.Change{}, err
 	}
-	return events.Change{NodeID: e.NodeID, Type: evNodeMoved, Before: after, After: restored}, nil
+	for i, ticket := range before.JourneyTickets {
+		if ticket.TicketID != after.JourneyTickets[i].TicketID {
+			return events.Change{}, events.ErrConflict
+		}
+		// A descendant may have been moved out of the subtree since this
+		// event. Restoring its old projection would then describe the wrong
+		// project even though the ancestor itself is still undoable.
+		var projectID *string
+		if err := tx.QueryRow(ctx, `SELECT project_id::text FROM nodes WHERE id=$1::uuid AND deleted_at IS NULL`, ticket.TicketID).Scan(&projectID); err != nil {
+			return events.Change{}, events.ErrConflict
+		}
+		if ticket.Membership == nil || deref(projectID) != ticket.Membership.ProjectID {
+			return events.Change{}, events.ErrConflict
+		}
+		if err := restoreJourneyMembership(ctx, tx, p, ticket.TicketID, ticket.Membership, after.JourneyTickets[i].Membership); err != nil {
+			return events.Change{}, err
+		}
+	}
+	if len(before.JourneyTickets) == 0 {
+		return events.Change{NodeID: e.NodeID, Type: evNodeMoved, Before: after.nodeJSON, After: restored}, nil
+	}
+	return events.Change{NodeID: e.NodeID, Type: evNodeMoved, Before: after,
+		After: movedNodeSnapshot{nodeJSON: restored, JourneyTickets: before.JourneyTickets}}, nil
 }
 
 func undoProjectMove(ctx context.Context, tx pgx.Tx, p tenant.Principal, e events.Event) (events.Change, error) {
@@ -46,53 +69,12 @@ func undoProjectMove(ctx context.Context, tx pgx.Tx, p tenant.Principal, e event
 	if err := lockTree(ctx, tx); err != nil {
 		return events.Change{}, err
 	}
-	currentJourney, err := loadJourneyMembership(ctx, tx, after.Node.ID)
-	if err != nil {
-		return events.Change{}, err
-	}
-	if !reflect.DeepEqual(currentJourney, after.Journey) {
-		return events.Change{}, events.ErrConflict
-	}
-	// The undo rewrites journey rows of both projects (ADR-003 P2).
-	var journeyProjects []string
-	for _, j := range []*journeyMembership{before.Journey, after.Journey} {
-		if j != nil {
-			journeyProjects = append(journeyProjects, j.ProjectID)
-		}
-	}
-	if err := authz.RequireInProjects(ctx, tx, p, "nodes.move", journeyProjects...); err != nil {
-		return events.Change{}, events.ErrForbidden
-	}
 	restored, err := restoreMovedNode(ctx, tx, p, before.Node, after.Node)
 	if err != nil {
 		return events.Change{}, err
 	}
-	if before.Journey == nil {
-		if after.Journey != nil {
-			return events.Change{}, events.ErrConflict
-		}
-	} else if after.Journey == nil {
-		_, err = tx.Exec(ctx, `INSERT INTO journey_tickets(tenant_id,ticket_node_id,project_node_id,feature_node_id,release_node_id,
-		 walker_position,source,scope_revision_required,access_change,estimated_hours)
-		 VALUES($1::uuid,$2::uuid,$3::uuid,$4::uuid,$5::uuid,$6,$7,$8,$9,$10::numeric)`,
-			p.TenantID, after.Node.ID, before.Journey.ProjectID, before.Journey.FeatureID, before.Journey.ReleaseID,
-			before.Journey.WalkerPosition, before.Journey.Source, before.Journey.ScopeRevisionRequired,
-			before.Journey.AccessChange, before.Journey.EstimatedHours)
-	} else {
-		_, err = tx.Exec(ctx, `UPDATE journey_tickets SET project_node_id=$2::uuid,feature_node_id=$3::uuid,release_node_id=$4::uuid,
-		 walker_position=$5,source=$6,scope_revision_required=$7,access_change=$8,estimated_hours=$9::numeric
-		 WHERE ticket_node_id=$1::uuid`, after.Node.ID, before.Journey.ProjectID, before.Journey.FeatureID,
-			before.Journey.ReleaseID, before.Journey.WalkerPosition, before.Journey.Source,
-			before.Journey.ScopeRevisionRequired, before.Journey.AccessChange, before.Journey.EstimatedHours)
-	}
-	if err != nil {
-		return events.Change{}, events.ErrConflict
-	}
-	if before.Journey != nil {
-		if _, err := tx.Exec(ctx, `UPDATE journey_projects SET revision=revision+1,updated_at=now()
-		 WHERE project_node_id=$1::uuid OR project_node_id=$2::uuid`, before.Journey.ProjectID, after.Node.ParentID); err != nil {
-			return events.Change{}, err
-		}
+	if err := restoreJourneyMembership(ctx, tx, p, after.Node.ID, before.Journey, after.Journey); err != nil {
+		return events.Change{}, err
 	}
 	return events.Change{NodeID: e.NodeID, Type: evNodeProjectMoved,
 		Before: projectMoveSnapshot{Node: after.Node, Journey: after.Journey},

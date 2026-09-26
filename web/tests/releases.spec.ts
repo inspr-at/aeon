@@ -51,6 +51,17 @@ test('on phones the footer folds away reading down and returns on the way up', a
   await expect(footer).not.toHaveClass(/hidden/)
 })
 
+test('the mark in the release history goes home and leaves the history', async ({ page }) => {
+  await setup(page)
+  await page.goto('/p/PHAROS')
+  await expect(page.locator('tr.ticket-row:not(.ghost)').first()).toBeVisible()
+  await pill(page).click()
+  await expect(sheet(page)).toBeVisible()
+  await sheet(page).getByRole('link', { name: 'PAIMOS AEON home' }).click()
+  await expect(page).toHaveURL(/\/$/)
+  await expect(sheet(page)).toHaveCount(0)
+})
+
 test('the version pill opens the history over the page, and Esc brings the page back', async ({ page }) => {
   const errors = watchErrors(page)
   const { history } = await setup(page)

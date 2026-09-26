@@ -18,7 +18,7 @@ import ReleaseStats from './ReleaseStats.vue'
 // detail replaces the list. j/k move, / searches, c compares, Enter opens,
 // e shows the evidence, ? lists the keys, Esc steps back and finally closes.
 const props = defineProps<{ target: string | null }>()
-const emit = defineEmits<{ select: [version: string]; close: [] }>()
+const emit = defineEmits<{ select: [version: string]; close: []; home: [] }>()
 const store = useReleases()
 const version = useVersion()
 
@@ -221,7 +221,8 @@ const KINDS = [
     <div class="shell" :class="{ 'show-detail': showDetail, compare: mode === 'compare' }">
       <header class="head">
         <div class="title-row">
-          <span class="mark-backing" aria-hidden="true"><img :src="mark" width="24" height="24" alt="" /></span>
+          <!-- The mark leaves the release history for the home page, like the app header's mark. -->
+          <a class="mark-backing" href="/" :aria-label="`${brand.wordmark} home`" data-tip="Home" @click.prevent="emit('home')"><img :src="mark" width="24" height="24" alt="" /></a>
           <div class="titles">
             <p class="eyebrow">{{ generationLabel }} · Release history</p>
             <h1 id="releases-title">{{ brand.wordmark }} releases</h1>
@@ -383,7 +384,9 @@ const KINDS = [
 /* ---------- Head ---------- */
 .head { display: grid; gap: 14px; padding: 18px 0 16px; }
 .title-row { display: flex; align-items: center; gap: 12px; min-width: 0; }
-.mark-backing { display: grid; place-items: center; flex-shrink: 0; width: 40px; height: 40px; border-radius: 12px; background: #f7f6f2; box-shadow: 0 0 0 1px var(--glass-rim), 0 6px 16px -10px rgba(32, 60, 61, .5); }
+.mark-backing { display: grid; place-items: center; text-decoration: none; transition: transform .12s ease, box-shadow .12s ease; flex-shrink: 0; width: 40px; height: 40px; border-radius: 12px; background: #f7f6f2; box-shadow: 0 0 0 1px var(--glass-rim), 0 6px 16px -10px rgba(32, 60, 61, .5); }
+.mark-backing:hover { box-shadow: 0 0 0 1px var(--glass-rim), 0 8px 20px -10px rgba(32, 60, 61, .6); transform: translateY(-1px); }
+.mark-backing:focus-visible { outline: 2px solid var(--focus, #0e6f6c); outline-offset: 2px; }
 .titles { min-width: 0; }
 .titles .eyebrow { margin: 0; }
 .titles h1 { font: 300 clamp(22px, 2.2vw, 30px)/1.15 var(--serif); letter-spacing: -.02em; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }

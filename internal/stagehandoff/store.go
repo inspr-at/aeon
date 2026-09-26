@@ -292,6 +292,39 @@ func agentAllowed(ctx context.Context, tx pgx.Tx, p tenant.Principal, authorizat
 	scope := "stage." + h.Operation
 	return approvals.LiveGrant(ctx, tx, p.ID, scope, "node", &h.ReleaseNodeID, scopes)
 }
+
+// requireRoutedPrincipal is checked after the handoff row is locked and before
+// any replay or mutation. A grant for stage.<operation> does not name a plugin.
+func requireRoutedPrincipal(ctx context.Context, tx pgx.Tx, p tenant.Principal, h Handoff) error {
+	routed, err := principalRoutedTo(ctx, tx, p, h.PluginID)
+	if err != nil {
+		return err
+	}
+	if !routed {
+		return fail(403, "handoff requires the routed plugin agent")
+	}
+	return nil
+}
+
+// An inactive principal may lose project visibility before the handoff row can
+// be locked. Reject it explicitly so write routes still return a clear 403.
+func requireActiveAgent(ctx context.Context, tx pgx.Tx, p tenant.Principal) error {
+	if p.Kind != tenant.Agent {
+		return fail(403, "handoff requires an active plugin agent")
+	}
+	var kind, status string
+	err := tx.QueryRow(ctx, `SELECT kind,status FROM principals WHERE id=$1::uuid AND tenant_id=$2::uuid`, p.ID, p.TenantID).Scan(&kind, &status)
+	if errors.Is(err, pgx.ErrNoRows) {
+		return fail(403, "handoff requires an active plugin agent")
+	}
+	if err != nil {
+		return err
+	}
+	if kind != string(tenant.Agent) || status != "active" {
+		return fail(403, "handoff requires an active plugin agent")
+	}
+	return nil
+}
 func parseBearer(header string) (string, string, bool) {
 	scheme, token, ok := strings.Cut(strings.TrimSpace(header), " ")
 	if !ok || !strings.EqualFold(scheme, "Bearer") {

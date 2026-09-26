@@ -3,9 +3,9 @@
 // Package dbtest gives each test a private Postgres database.
 //
 // AEON_TEST_DATABASE_URL is a maintenance database on a server where that user
-// can CREATE DATABASE (the CI service user is a superuser). Open applies the
-// embedded migrations, returns a superuser pool and a NOSUPERUSER NOBYPASSRLS
-// pool, and drops the database and role on cleanup. Packages can therefore
+// can CREATE DATABASE (the CI service user is a superuser). Open bootstraps
+// pgvector as that user, applies migrations as a NOSUPERUSER NOBYPASSRLS app
+// role, and returns both pools. It drops the database and role on cleanup. Tests
 // run in parallel against one Postgres without sharing tables.
 package dbtest
 
@@ -33,7 +33,7 @@ const EnvDatabaseURL = "AEON_TEST_DATABASE_URL"
 
 // DB is one migrated database. Admin is the maintenance user (it bypasses
 // row-level security). App is a LOGIN role with NOSUPERUSER and NOBYPASSRLS
-// that owns the application tables, so FORCE ROW LEVEL SECURITY applies to it.
+// that owns the migrated schema, so FORCE ROW LEVEL SECURITY applies to it.
 type DB struct {
 	URL string
 	// AppURL connects as the NOSUPERUSER NOBYPASSRLS app role, as production
@@ -124,6 +124,16 @@ func BindLegacyTx(ctx context.Context, tx interface {
 // New creates a migrated database. On failure the database and role are dropped.
 // The caller must Close a successful handle.
 func New(ctx context.Context) (opened *DB, err error) {
+	return newDatabase(ctx, true)
+}
+
+// NewUnmigrated creates the same database, role and extension without applying
+// migrations. Migration tests use it to seed data between historical files.
+func NewUnmigrated(ctx context.Context) (opened *DB, err error) {
+	return newDatabase(ctx, false)
+}
+
+func newDatabase(ctx context.Context, migrate bool) (opened *DB, err error) {
 	base, maint, err := maintenanceURL()
 	if err != nil {
 		return nil, err
@@ -152,9 +162,15 @@ func New(ctx context.Context) (opened *DB, err error) {
 	}
 
 	d.URL = adminURL(base, d.Name)
-	d.Admin, err = db.Open(ctx, d.URL)
+	d.Admin, err = pgxpool.New(ctx, d.URL)
 	if err != nil {
 		return nil, err
+	}
+	if err = d.Admin.Ping(ctx); err != nil {
+		return nil, fmt.Errorf("ping maintenance role: %w", err)
+	}
+	if _, err = d.Admin.Exec(ctx, `CREATE EXTENSION IF NOT EXISTS vector`); err != nil {
+		return nil, fmt.Errorf("bootstrap vector extension: %w", err)
 	}
 
 	password := randomIdent("")
@@ -168,16 +184,15 @@ func New(ctx context.Context) (opened *DB, err error) {
 	app.Path = "/" + d.Name
 	app.User = url.UserPassword(d.Role, password)
 	d.AppURL = app.String()
-	d.App, err = openApp(ctx, base, d.Name, d.Role, password)
+	if migrate {
+		d.App, err = db.Open(ctx, d.AppURL)
+	} else {
+		d.App, err = openApp(ctx, base, d.Name, d.Role, password)
+	}
 	if err != nil {
 		return nil, err
 	}
 	if err = assertNoSuperuser(ctx, d.App, d.Role); err != nil {
-		return nil, err
-	}
-	// The app role owns every application table. Table owners bypass row-level
-	// security unless it is forced, which is what the RLS tests need to observe.
-	if err = ownAppTables(ctx, d.Admin, d.Role); err != nil {
 		return nil, err
 	}
 	return d, nil
@@ -304,9 +319,7 @@ func grantApp(ctx context.Context, admin *pgxpool.Pool, dbName, role string) err
 	roleIdent := quoteIdent(role)
 	stmts := []string{
 		fmt.Sprintf(`GRANT CONNECT ON DATABASE %s TO %s`, dbIdent, roleIdent),
-		fmt.Sprintf(`GRANT USAGE ON SCHEMA public TO %s`, roleIdent),
-		fmt.Sprintf(`GRANT SELECT, INSERT, UPDATE, DELETE ON ALL TABLES IN SCHEMA public TO %s`, roleIdent),
-		fmt.Sprintf(`GRANT REFERENCES ON ALL TABLES IN SCHEMA public TO %s`, roleIdent),
+		fmt.Sprintf(`GRANT USAGE, CREATE ON SCHEMA public TO %s`, roleIdent),
 	}
 	for _, stmt := range stmts {
 		if _, err := admin.Exec(ctx, stmt); err != nil {
@@ -326,35 +339,6 @@ func assertNoSuperuser(ctx context.Context, app *pgxpool.Pool, role string) erro
 	}
 	if user != role || super || bypass {
 		return fmt.Errorf("app connection is %s (super=%v bypass=%v), want nosuperuser %s", user, super, bypass, role)
-	}
-	return nil
-}
-
-func ownAppTables(ctx context.Context, admin *pgxpool.Pool, role string) error {
-	rows, err := admin.Query(ctx, `
-		SELECT tablename FROM pg_tables
-		WHERE schemaname = 'public' AND tablename <> 'schema_migrations'
-		ORDER BY tablename`)
-	if err != nil {
-		return fmt.Errorf("list tables: %w", err)
-	}
-	defer rows.Close()
-	var tables []string
-	for rows.Next() {
-		var name string
-		if err := rows.Scan(&name); err != nil {
-			return err
-		}
-		tables = append(tables, name)
-	}
-	if err := rows.Err(); err != nil {
-		return err
-	}
-	roleIdent := quoteIdent(role)
-	for _, name := range tables {
-		if _, err := admin.Exec(ctx, fmt.Sprintf(`ALTER TABLE public.%s OWNER TO %s`, quoteIdent(name), roleIdent)); err != nil {
-			return fmt.Errorf("own %s: %w", name, err)
-		}
 	}
 	return nil
 }

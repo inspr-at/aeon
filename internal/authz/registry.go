@@ -32,7 +32,7 @@ func makeRegistry() []Permission {
 		{"stage_handoffs", "read write decide"}, {"harness", "read write worker control manage"},
 		{"work_orders", "read write assign"}, {"runs", "read write control claim"},
 		{"run", "create read claim telemetry"}, {"account", "read manage route probe"},
-		{"approvals", "read request propose decide decide_high revoke"}, {"inbox", "read send manage"},
+		{"approvals", "read request propose decide decide_high revoke"}, {"inbox", "read send manage receipt"},
 		{"stage", "prepare deploy verify apply"},
 		{"models", "read manage resolve"}, {"plugins", "read manage invoke"},
 		{"imports", "read manage"}, {"views", "read write share"},

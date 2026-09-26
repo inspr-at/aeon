@@ -65,6 +65,7 @@ var RoutePermissions = map[string]string{
 	"GET /api/imports":                                               "imports.read",
 	"GET /api/imports/{importId}":                                    "imports.read",
 	"GET /api/inbox/messages":                                        "inbox.read",
+	"GET /api/inbox/messages/{messageId}/receipt":                    "inbox.receipt",
 	"GET /api/inbox/stream":                                          "inbox.read",
 	"GET /api/inbox/targets":                                         "inbox.read",
 	"GET /api/kinds":                                                 "nodes.read",

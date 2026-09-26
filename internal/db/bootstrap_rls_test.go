@@ -16,13 +16,6 @@ import (
 func TestEnsureTenantSeedsBuiltinRolesUnderForcedRLS(t *testing.T) {
 	d := dbtest.Open(t)
 	ctx := t.Context()
-	// dbtest applies migrations as a superuser, so SECURITY DEFINER functions
-	// would bypass RLS; production owns them with the app role. Mirror that.
-	for _, fn := range []string{"aeon_seed_builtin_roles(uuid)", "aeon_seed_builtin_roles_trigger()"} {
-		if _, err := d.Admin.Exec(ctx, `ALTER FUNCTION `+fn+` OWNER TO `+pgx.Identifier{d.Role}.Sanitize()); err != nil {
-			t.Fatal(err)
-		}
-	}
 	if err := db.EnsureTenant(ctx, d.App, "seed-rls", "Seed under RLS"); err != nil {
 		t.Fatal(err)
 	}
