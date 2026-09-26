@@ -9,6 +9,7 @@ import (
 	"strings"
 
 	"github.com/inspr-at/aeon/internal/db"
+	"github.com/inspr-at/aeon/internal/operatoractor"
 	"github.com/inspr-at/aeon/internal/tenant"
 	"github.com/jackc/pgx/v5"
 	"github.com/jackc/pgx/v5/pgxpool"
@@ -61,8 +62,12 @@ func OperatorBindProjects(ctx context.Context, pool *pgxpool.Pool, tenantID, pri
 		if err != nil {
 			return err
 		}
+		actorID, err := operatoractor.Ensure(ctx, tx, tenantID)
+		if err != nil {
+			return err
+		}
 		m := &Module{pool: pool}
-		actor := tenant.Principal{TenantID: tenantID}
+		actor := tenant.Principal{ID: actorID, TenantID: tenantID}
 		for _, pair := range pairs {
 			projectID, err := operatorProjectTx(ctx, tx, pair.Project)
 			if err != nil {
@@ -96,7 +101,11 @@ func OperatorUnbindProject(ctx context.Context, pool *pgxpool.Pool, tenantID, pr
 		if err != nil {
 			return err
 		}
-		err = (&Module{pool: pool}).removeProjectBindingTx(ctx, tx, tenant.Principal{TenantID: tenantID}, projectID, principalID, true)
+		actorID, err := operatoractor.Ensure(ctx, tx, tenantID)
+		if err != nil {
+			return err
+		}
+		err = (&Module{pool: pool}).removeProjectBindingTx(ctx, tx, tenant.Principal{ID: actorID, TenantID: tenantID}, projectID, principalID, true)
 		if errors.Is(err, errNoSuchBinding) || errors.Is(err, errViaWorkspace) {
 			return nil
 		}

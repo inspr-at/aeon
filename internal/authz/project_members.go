@@ -237,8 +237,8 @@ func (m *Module) putProjectMember(w http.ResponseWriter, r *http.Request) {
 	reply(w, 200, out)
 }
 
-// setProjectBindingTx is the common HTTP/operator store path. The operator
-// actor is the bound principal, matching operator agent-key events.
+// setProjectBindingTx is the common HTTP/operator store path. Callers supply
+// the actor principal for both HTTP and operator events.
 func (m *Module) setProjectBindingTx(ctx context.Context, tx pgx.Tx, p tenant.Principal, projectID, principalID, roleID string, operator bool) (ProjectBinding, error) {
 	var out ProjectBinding
 	projectKey, _, err := projectNodeTx(ctx, tx, projectID)
@@ -293,9 +293,6 @@ func (m *Module) setProjectBindingTx(ctx context.Context, tx pgx.Tx, p tenant.Pr
 		return out, nil
 	}
 	after := bindingSnapshot{PrincipalID: principalID, ScopeType: "project", ProjectID: projectID, ProjectKey: projectKey, Role: &out.Role}
-	if operator {
-		p.ID = principalID
-	}
 	return out, appendProjectEvent(ctx, tx, p, projectID, "binding.set", before, after)
 }
 
@@ -349,8 +346,5 @@ func (m *Module) removeProjectBindingTx(ctx context.Context, tx pgx.Tx, p tenant
 		return err
 	}
 	before := bindingSnapshot{PrincipalID: principalID, ScopeType: "project", ProjectID: projectID, ProjectKey: projectKey, Role: &RoleRef{ID: roleID, Key: roleKey, Name: roleName}}
-	if operator {
-		p.ID = principalID
-	}
 	return appendProjectEvent(ctx, tx, p, projectID, "binding.removed", before, nil)
 }

@@ -91,8 +91,9 @@ func TestOperatorCLIKeyCreateAndAccess(t *testing.T) {
 	}
 	var setEvents, removeEvents int
 	if err := db.InTenant(dbtest.Seed(ctx), d.App, tid, func(tx pgx.Tx) error {
-		return tx.QueryRow(ctx, `SELECT count(*) FILTER (WHERE type='binding.set'), count(*) FILTER (WHERE type='binding.removed')
-			FROM events WHERE actor_principal_id=$1::uuid`, created.PrincipalID).Scan(&setEvents, &removeEvents)
+		return tx.QueryRow(ctx, `SELECT count(*) FILTER (WHERE e.type='binding.set'), count(*) FILTER (WHERE e.type='binding.removed')
+			FROM events e JOIN principals p ON p.tenant_id=e.tenant_id AND p.id=e.actor_principal_id
+			WHERE e.tenant_id=$1::uuid AND p.name='Access operator' AND p.kind='agent' AND p.roles=ARRAY['operator']::text[]`, tid).Scan(&setEvents, &removeEvents)
 	}); err != nil || setEvents != 1 || removeEvents != 1 {
 		t.Fatalf("binding events set=%d removed=%d err=%v", setEvents, removeEvents, err)
 	}
