@@ -111,15 +111,19 @@ defineExpose({ begin, cancel, isOpen: () => !!open.value })
           </p>
           <p class="line2">
             <button type="button" class="who" @click.stop="emit('openAgent', approval.agent_principal_id)">
-              <span v-if="named(approval).harness" class="harness">{{ named(approval).harness }}</span>{{ named(approval).name }}
+              <span v-if="named(approval).harness" class="harness">{{ named(approval).harness }}</span>
+              <span v-else class="who-icon" aria-hidden="true"><AppIcon name="agent" :size="12" /></span>
+              <span class="who-name">{{ named(approval).name }}</span>
             </button>
             <!-- Two phrases that wrap as wholes: "asks for scope" and "on KEY Title". -->
             <span class="phrase"><span class="asks">asks for</span><code class="scope">{{ approval.scope }}</code></span>
             <span class="phrase">
               <span class="asks">on</span>
               <RouterLink v-if="resource(approval).href" class="res-key" :to="resource(approval).href!" @click.stop>{{ resource(approval).key }}</RouterLink>
+              <span v-else-if="resource(approval).key" class="res-key plain">{{ resource(approval).key }}</span>
               <span v-else class="res-label">{{ resource(approval).label }}</span>
-              <span v-if="resource(approval).title" class="res-title">{{ resource(approval).title }}</span>
+              <!-- The title follows a key; without a key the label already is the title. -->
+              <span v-if="resource(approval).title && resource(approval).key" class="res-title">{{ resource(approval).title }}</span>
             </span>
           </p>
           <p v-if="approval.rationale" class="why">“{{ approval.rationale }}”</p>
@@ -238,6 +242,8 @@ defineExpose({ begin, cancel, isOpen: () => !!open.value })
 .line2 { display: flex; align-items: center; flex-wrap: wrap; gap: 6px; font-size: 12.5px; color: var(--ink-2); }
 .phrase { display: inline-flex; align-items: center; flex-wrap: wrap; gap: 6px; min-width: 0; }
 .who { display: inline-flex; align-items: center; gap: 6px; height: 24px; padding: 0 8px 0 3px; border: 0; border-radius: 999px; background: var(--chip-bg); box-shadow: inset 0 0 0 1px var(--chip-line); color: var(--ink); font-size: 12.5px; font-weight: 600; }
+.who-icon { display: inline-grid; place-items: center; width: 18px; height: 18px; border-radius: 999px; background: var(--chip-teal-bg); color: var(--teal-ink); flex: none; }
+.who-name { line-height: 1.3; }
 .who:hover { box-shadow: inset 0 0 0 1px var(--chip-teal-line); color: var(--teal-ink); }
 .who:focus-visible { box-shadow: var(--focus-ring); }
 /* Phones: who asks, what for and on what stack as three short lines; the asker and
@@ -252,6 +258,8 @@ defineExpose({ begin, cancel, isOpen: () => !!open.value })
 .res-key { display: inline-flex; align-items: center; font: 600 11.5px/1 var(--mono); color: var(--teal-ink); text-decoration: none; padding: 3px 7px; border-radius: 6px; background: var(--chip-teal-bg); box-shadow: inset 0 0 0 1px var(--chip-teal-line); font-variant-ligatures: none; }
 @media (max-width: 600px) { .res-key { z-index: 1; min-height: 28px; padding: 0 8px; } }
 .res-key:hover { text-decoration: underline; }
+.res-key.plain { color: var(--ink-2); background: var(--chip-bg); }
+.res-key.plain:hover { text-decoration: none; }
 .res-title { min-width: 0; max-width: 42ch; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; color: var(--ink-2); }
 .res-label { color: var(--ink); }
 .why { font-size: 13px; color: var(--ink-2); line-height: 1.45; overflow: hidden; display: -webkit-box; -webkit-box-orient: vertical; -webkit-line-clamp: 2; line-clamp: 2; }

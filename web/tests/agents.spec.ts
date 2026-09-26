@@ -91,6 +91,14 @@ test('an approval from an agent with no session and no address shows its name', 
   await expect(card).toBeVisible()
   await expect(card).toContainText('Harbor Clerk')
   await expect(card).not.toContainText(`Agent ${principal.slice(0, 8)}`)
+  // The asker pill carries an agent icon, centered on the name.
+  const pill = card.locator('.who')
+  const icon = pill.locator('.who-icon svg')
+  await expect(icon).toBeVisible()
+  const [p, i] = [await pill.boundingBox(), await icon.boundingBox()]
+  expect(Math.abs((p!.y + p!.height / 2) - (i!.y + i!.height / 2))).toBeLessThanOrEqual(1)
+  // A resource shows its label once, not label and title twice.
+  await expect(card.getByText('the whole workspace')).toHaveCount(1)
 })
 
 test('an approval without agent_name falls back to the short agent id', async ({ page }) => {
