@@ -370,6 +370,9 @@ func ReconcileWithOptions(ctx context.Context, source *HTTPSource, pool *pgxpool
 	progress.Skipped = len(findings)
 	logProgress(true)
 	report = finishReconcile(snap.SourceID, tenant, sourceSet, targetSet, projectKeys)
+	// Concurrent reads report the last project to finish; a complete report
+	// keeps only the totals so equal sources give equal reports.
+	progress.Project = ""
 	report.Skipped, report.SkippedCount, report.Progress = findings, len(findings), progress
 	report.Summary += fmt.Sprintf("; %d skipped classic items", len(findings))
 	return report, nil

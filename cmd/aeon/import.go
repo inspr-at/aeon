@@ -168,11 +168,18 @@ func importReconcile(args []string, stdout io.Writer) error {
 	keyFile := flags.String("api-key-file", "", "bearer key file")
 	tenant := flags.String("tenant", "", "Aeon tenant slug")
 	project := flags.String("project", "", "classic project key (all projects when empty)")
+	// Reconcile reads the whole source like an import does; one request at a
+	// time takes hours against a production-sized classic (cutover AEON-43).
+	concurrency := flags.Int("concurrency", 4, "maximum concurrent source requests")
+	delay := flags.Duration("delay", 0, "minimum delay between source request starts")
 	if err := flags.Parse(args); err != nil || flags.NArg() != 0 || *sourceURL == "" || *keyFile == "" || *tenant == "" {
-		return errors.New("usage: aeon import reconcile --source-url URL --api-key-file FILE --tenant SLUG [--project KEY]")
+		return errors.New("usage: aeon import reconcile --source-url URL --api-key-file FILE --tenant SLUG [--project KEY] [--concurrency N] [--delay DURATION]")
 	}
 	source, err := importer.NewHTTPSource(*sourceURL, *keyFile, nil)
 	if err != nil {
+		return err
+	}
+	if err := source.Configure(*concurrency, *delay); err != nil {
 		return err
 	}
 	ctx, stop := signal.NotifyContext(context.Background(), syscall.SIGTERM, syscall.SIGINT)
