@@ -52,7 +52,13 @@ func Open(ctx context.Context, url string) (*pgxpool.Pool, error) {
 // visibility from AllProjects or OnlyProjects, else the visibility of the
 // principal in ctx, else none (fail closed).
 func InTenant(ctx context.Context, pool *pgxpool.Pool, tenantID string, fn func(pgx.Tx) error) error {
-	tx, err := pool.Begin(ctx)
+	var tx pgx.Tx
+	var err error
+	if parent, ok := ctx.Value(transactionContextKey{}).(pgx.Tx); ok {
+		tx, err = parent.Begin(ctx)
+	} else {
+		tx, err = pool.Begin(ctx)
+	}
 	if err != nil {
 		return err
 	}
@@ -62,6 +68,23 @@ func InTenant(ctx context.Context, pool *pgxpool.Pool, tenantID string, fn func(
 		return fmt.Errorf("set tenant: %w", err)
 	}
 	if err := fn(tx); err != nil {
+		return err
+	}
+	return tx.Commit(ctx)
+}
+
+type transactionContextKey struct{}
+
+// InTransaction groups sequential InTenant calls into one atomic unit. Each
+// tenant operation still enters its own savepoint and sets its RLS context.
+// Callers must pass the supplied context to every operation in the unit.
+func InTransaction(ctx context.Context, pool *pgxpool.Pool, fn func(context.Context) error) error {
+	tx, err := pool.Begin(ctx)
+	if err != nil {
+		return err
+	}
+	defer func() { _ = tx.Rollback(ctx) }()
+	if err := fn(context.WithValue(ctx, transactionContextKey{}, tx)); err != nil {
 		return err
 	}
 	return tx.Commit(ctx)

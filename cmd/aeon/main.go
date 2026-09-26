@@ -17,6 +17,7 @@ import (
 	"github.com/jackc/pgx/v5/pgxpool"
 
 	"github.com/inspr-at/aeon/internal/cli"
+	"github.com/inspr-at/aeon/internal/demo"
 	offersimport "github.com/inspr-at/aeon/internal/importer/offers"
 	"github.com/inspr-at/aeon/internal/principallink"
 	"github.com/inspr-at/aeon/internal/profile"
@@ -26,6 +27,19 @@ func main() {
 	if len(os.Args) > 1 && os.Args[1] == "serve" {
 		if err := serve(); err != nil {
 			fmt.Fprintln(os.Stderr, "serve:", err)
+			os.Exit(1)
+		}
+		return
+	}
+	if len(os.Args) > 1 && os.Args[1] == "demo" {
+		if _, err := demo.Validate(os.Args[2:]); err != nil {
+			fmt.Fprintln(os.Stderr, "demo:", err)
+			os.Exit(1)
+		}
+		if err := withPool(func(ctx context.Context, pool *pgxpool.Pool) error {
+			return demo.Run(ctx, pool, os.Args[2:], os.Stdout)
+		}); err != nil {
+			fmt.Fprintln(os.Stderr, "demo:", err)
 			os.Exit(1)
 		}
 		return

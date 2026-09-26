@@ -1,7 +1,8 @@
 // SPDX-License-Identifier: AGPL-3.0-only
 import { reactive } from 'vue'
 
-export interface ConfirmRequest { title: string; body?: string; confirmLabel: string; cancelLabel?: string; danger?: boolean }
+// points: what happens, one line each, shown as a list under the body.
+export interface ConfirmRequest { title: string; body?: string; points?: string[]; confirmLabel: string; cancelLabel?: string; danger?: boolean }
 export const confirmState = reactive<{ request: ConfirmRequest | null; resolve: ((ok: boolean) => void) | null }>({ request: null, resolve: null })
 
 // One styled confirmation dialog for the app (delete, discard changes).
