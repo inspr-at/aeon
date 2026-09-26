@@ -225,8 +225,10 @@ func (m *Module) create(ctx context.Context, tx pgx.Tx, p tenant.Principal, in R
 		return h, err
 	}
 	h.State = "requested"
-	h.ExpiresAt = time.Now().Add(30 * time.Minute)
-	err = tx.QueryRow(ctx, `INSERT INTO stage_handoffs(tenant_id,project_node_id,release_node_id,stage,operation,plugin_id,requested_by_principal_id,idempotency_key,attempt,authority_epoch,journey_revision,plan_digest,predecessor_digest,context_digest,prerequisite_seal_sha256,evidence_ceiling,expires_at) VALUES($1::uuid,$2::uuid,$3::uuid,$4,$5,$6,$7::uuid,$8,$9,$10,$11,$12,$13,$14,$15,$16,$17) RETURNING id::text,created_at`, p.TenantID, in.ProjectNodeID, in.ReleaseNodeID, in.Stage, in.Operation, plugin, p.ID, in.IdempotencyKey, h.Attempt, h.AuthorityEpoch, revision, h.PlanDigest, h.PredecessorDigest, h.ContextDigest, seal, ceiling, h.ExpiresAt).Scan(&h.ID, new(time.Time))
+	// PostgreSQL stores timestamptz at microsecond precision. Return the stored
+	// instant so the create response can be used as an exact handoff binding.
+	h.ExpiresAt = m.clock().UTC().Add(30 * time.Minute).Truncate(time.Microsecond)
+	err = tx.QueryRow(ctx, `INSERT INTO stage_handoffs(tenant_id,project_node_id,release_node_id,stage,operation,plugin_id,requested_by_principal_id,idempotency_key,attempt,authority_epoch,journey_revision,plan_digest,predecessor_digest,context_digest,prerequisite_seal_sha256,evidence_ceiling,expires_at) VALUES($1::uuid,$2::uuid,$3::uuid,$4,$5,$6,$7::uuid,$8,$9,$10,$11,$12,$13,$14,$15,$16,$17) RETURNING id::text,expires_at`, p.TenantID, in.ProjectNodeID, in.ReleaseNodeID, in.Stage, in.Operation, plugin, p.ID, in.IdempotencyKey, h.Attempt, h.AuthorityEpoch, revision, h.PlanDigest, h.PredecessorDigest, h.ContextDigest, seal, ceiling, h.ExpiresAt).Scan(&h.ID, &h.ExpiresAt)
 	if err != nil {
 		return h, err
 	}

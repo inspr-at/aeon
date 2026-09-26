@@ -113,6 +113,9 @@ func TestLaunchExactReplayAndAdmissionRead(t *testing.T) {
 	if handoff.Admission == nil || handoff.Admission.AdmissionID != admission.ID || handoff.Admission.Epoch != admission.AuthorityEpoch || handoff.Admission.ConsumedAt != nil {
 		t.Fatalf("admission state: %+v", handoff.Admission)
 	}
+	if !handoff.Admission.ExpiresAt.Equal(admission.ExpiresAt) || handoff.Admission.ExpiresAt.Format(time.RFC3339Nano) != admission.ExpiresAt.Format(time.RFC3339Nano) {
+		t.Fatalf("admission expiry differs from GET: admitted=%s read=%s", admission.ExpiresAt.Format(time.RFC3339Nano), handoff.Admission.ExpiresAt.Format(time.RFC3339Nano))
+	}
 	if strings.Contains(read.Body.String(), "binding_digest_sha256") || strings.Contains(read.Body.String(), "artifact_digest_sha256") {
 		t.Fatal("GET leaked launch artifact binding")
 	}
@@ -163,6 +166,9 @@ func TestLaunchExactReplayAndAdmissionRead(t *testing.T) {
 	read = launchHTTP(t, w, w.p, w.bearer, "", "", "")
 	if read.Code != 200 || json.Unmarshal(read.Body.Bytes(), &handoff) != nil || handoff.Admission == nil || handoff.Admission.ConsumedAt == nil || handoff.Admission.ConsumedByPrincipalID == nil || *handoff.Admission.ConsumedByPrincipalID != w.p.ID {
 		t.Fatalf("consumed admission state: %d %s", read.Code, read.Body.String())
+	}
+	if !handoff.Admission.ConsumedAt.Equal(receipt.ConsumedAt) || handoff.Admission.ConsumedAt.Format(time.RFC3339Nano) != receipt.ConsumedAt.Format(time.RFC3339Nano) {
+		t.Fatalf("admission consumption differs from GET: consumed=%s read=%s", receipt.ConsumedAt.Format(time.RFC3339Nano), handoff.Admission.ConsumedAt.Format(time.RFC3339Nano))
 	}
 	// AEON-169 still fences exact replays after this principal loses routing.
 	routeFixtureAgent(t, w.m, &w.p, "other")
