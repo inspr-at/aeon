@@ -41,7 +41,7 @@ func setup(t *testing.T) *fixture {
 	tid := "10000000-0000-4000-8000-000000000001"
 	other := "10000000-0000-4000-8000-000000000002"
 	for i, id := range []string{tid, other} {
-		err := db.InTenant(t.Context(), d.Admin, id, func(tx pgx.Tx) error {
+		err := db.InTenant(dbtest.Seed(t.Context()), d.Admin, id, func(tx pgx.Tx) error {
 			_, err := tx.Exec(t.Context(), `INSERT INTO tenants(id,slug,name) VALUES($1,$2,'Hours test')`, id, fmt.Sprintf("hours-%d", i))
 			return err
 		})
@@ -51,7 +51,7 @@ func setup(t *testing.T) *fixture {
 	}
 	seedPrincipal := func(id, kind, role string) tenant.Principal {
 		p := tenant.Principal{TenantID: id, Kind: tenant.PrincipalKind(kind), Roles: []string{role}}
-		err := db.InTenant(t.Context(), d.App, id, func(tx pgx.Tx) error {
+		err := db.InTenant(dbtest.Seed(t.Context()), d.App, id, func(tx pgx.Tx) error {
 			return tx.QueryRow(t.Context(), `INSERT INTO principals(tenant_id,kind,name,roles) VALUES($1,$2,'Hours worker',$3) RETURNING id::text`, id, kind, p.Roles).Scan(&p.ID)
 		})
 		if err != nil {
@@ -81,7 +81,7 @@ func setup(t *testing.T) *fixture {
 	}
 	reg.Seal()
 	for _, id := range []string{tid, other} {
-		err := db.InTenant(t.Context(), d.App, id, func(tx pgx.Tx) error {
+		err := db.InTenant(dbtest.Seed(t.Context()), d.App, id, func(tx pgx.Tx) error {
 			for _, plug := range []plugins.Plugin{costs, hours} {
 				_, err := tx.Exec(t.Context(), `INSERT INTO plugin_installations(tenant_id,plugin_id,version,manifest_digest_sha256,owner,enabled,permissions,updated_by_principal_id) VALUES($1,$2,$3,$4,$5,true,$6,(SELECT id FROM principals WHERE tenant_id=$1 AND kind='person' AND 'admin'=ANY(roles) LIMIT 1))`, id, plug.Manifest.ID, plug.Manifest.Version, plug.Manifest.DigestSHA256, plug.Manifest.Owner, plug.Manifest.Permissions)
 				if err != nil {
@@ -128,7 +128,7 @@ func setup(t *testing.T) *fixture {
 }
 func (f *fixture) sql(fn func(pgx.Tx) error) {
 	f.t.Helper()
-	if err := db.InTenant(f.t.Context(), f.database.App, f.admin.TenantID, fn); err != nil {
+	if err := db.InTenant(dbtest.Seed(f.t.Context()), f.database.App, f.admin.TenantID, fn); err != nil {
 		f.t.Fatal(err)
 	}
 }
@@ -432,7 +432,9 @@ func TestScopedAgentTerminalTimeAndLeastPrivilege(t *testing.T) {
 		if err := tx.QueryRow(t.Context(), `INSERT INTO roles(tenant_id,key,name) VALUES($1,'fixture_agent_hours','Fixture agent hours') RETURNING id::text`, f.agent.TenantID).Scan(&roleID); err != nil {
 			return err
 		}
-		if _, err := tx.Exec(t.Context(), `INSERT INTO role_permissions(tenant_id,role_id,permission) VALUES($1,$2,'hours.read'),($1,$2,'hours.write')`, f.agent.TenantID, roleID); err != nil {
+		// The binding must show the cost unit's project (ADR-003 P2); the key
+		// itself stays limited to hours.
+		if _, err := tx.Exec(t.Context(), `INSERT INTO role_permissions(tenant_id,role_id,permission) VALUES($1,$2,'hours.read'),($1,$2,'hours.write'),($1,$2,'nodes.read')`, f.agent.TenantID, roleID); err != nil {
 			return err
 		}
 		if _, err := tx.Exec(t.Context(), `INSERT INTO role_bindings(tenant_id,principal_id,role_id,scope_type) VALUES($1,$2,$3,'workspace')`, f.agent.TenantID, f.agent.ID, roleID); err != nil {

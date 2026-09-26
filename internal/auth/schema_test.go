@@ -62,7 +62,7 @@ func setupDB() error {
 }
 
 func testInTenant(ctx context.Context, pool *pgxpool.Pool, tenantID string, fn func(pgx.Tx) error) error {
-	return db.InTenant(ctx, pool, tenantID, fn)
+	return db.InTenant(dbtest.Seed(ctx), pool, tenantID, fn)
 }
 
 func reset(t *testing.T) {

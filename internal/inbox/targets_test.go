@@ -7,6 +7,7 @@ import (
 	"context"
 	"encoding/json"
 	"errors"
+	"github.com/inspr-at/aeon/internal/dbtest"
 	"net/http"
 	"net/http/httptest"
 	"strings"
@@ -24,7 +25,7 @@ func messagingWorld(t *testing.T) (*world, *messaging, string, *httptest.Server)
 	w := newWorld(t)
 	w.agent = insertPrincipal(t, w.db, w.sender.TenantID, tenant.Agent, "worker", nil)
 	var project string
-	err := db.InTenant(t.Context(), w.db.App, w.sender.TenantID, func(tx pgx.Tx) error {
+	err := db.InTenant(dbtest.Seed(t.Context()), w.db.App, w.sender.TenantID, func(tx pgx.Tx) error {
 		return tx.QueryRow(t.Context(), `INSERT INTO nodes(tenant_id,kind_id,key,title) SELECT $1::uuid,id,'MSG-1','Messaging' FROM node_kinds WHERE slug='project' RETURNING id::text`, w.sender.TenantID).Scan(&project)
 	})
 	if err != nil {
@@ -129,7 +130,7 @@ func TestMessagingTargetsEncryptionVersionsAndAuthorization(t *testing.T) {
 		t.Fatal("routine redaction failed")
 	}
 	var err error
-	err = db.InTenant(t.Context(), w.db.App, w.admin.TenantID, func(tx pgx.Tx) error {
+	err = db.InTenant(dbtest.Seed(t.Context()), w.db.App, w.admin.TenantID, func(tx pgx.Tx) error {
 		var sealed []byte
 		if err := tx.QueryRow(t.Context(), `SELECT sealed_target FROM inbox_message_targets WHERE id=$1::uuid`, privateTarget.ID).Scan(&sealed); err != nil {
 			return err
@@ -164,7 +165,7 @@ func TestMessagingTargetsEncryptionVersionsAndAuthorization(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	err = db.InTenant(t.Context(), w.db.App, w.outsider.TenantID, func(tx pgx.Tx) error {
+	err = db.InTenant(dbtest.Seed(t.Context()), w.db.App, w.outsider.TenantID, func(tx pgx.Tx) error {
 		var n int
 		err := tx.QueryRow(t.Context(), `SELECT count(*) FROM inbox_message_targets`).Scan(&n)
 		if err == nil && n != 0 {
@@ -315,7 +316,7 @@ func TestMessagingReplyObligationsHeldIsolationAndReplay(t *testing.T) {
 	if heldCount != 1 {
 		t.Fatal("held ledger missing")
 	}
-	err = db.InTenant(t.Context(), w.db.App, w.outsider.TenantID, func(tx pgx.Tx) error {
+	err = db.InTenant(dbtest.Seed(t.Context()), w.db.App, w.outsider.TenantID, func(tx pgx.Tx) error {
 		for _, table := range []string{"inbox_compat_messages", "inbox_reply_obligations", "inbox_message_deliveries"} {
 			var n int
 			if err := tx.QueryRow(t.Context(), "SELECT count(*) FROM "+table).Scan(&n); err != nil {
@@ -384,7 +385,7 @@ func TestMessagingAddressAuthSnapshotAndConcurrentSend(t *testing.T) {
 	if status != 403 {
 		t.Fatalf("unscoped agent send %d", status)
 	}
-	err = db.InTenant(t.Context(), w.db.App, w.sender.TenantID, func(tx pgx.Tx) error {
+	err = db.InTenant(dbtest.Seed(t.Context()), w.db.App, w.sender.TenantID, func(tx pgx.Tx) error {
 		var targetID string
 		var n int
 		if err := tx.QueryRow(t.Context(), `SELECT target_id::text FROM inbox_message_deliveries WHERE message_id=$1::uuid`, id).Scan(&targetID); err != nil {

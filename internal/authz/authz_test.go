@@ -102,13 +102,13 @@ func TestLegacyMappingAndOwnerProtection(t *testing.T) {
 	d := dbtest.Open(t)
 	ctx := t.Context()
 	var tid string
-	err := db.InTenant(ctx, d.App, "00000000-0000-0000-0000-000000000000", func(tx pgx.Tx) error {
+	err := db.InTenant(dbtest.Seed(ctx), d.App, "00000000-0000-0000-0000-000000000000", func(tx pgx.Tx) error {
 		return tx.QueryRow(ctx, `INSERT INTO tenants(slug,name) VALUES('az1-fixture','AZ1 fixture') RETURNING id::text`).Scan(&tid)
 	})
 	if err != nil {
 		t.Fatal(err)
 	}
-	err = db.InTenant(ctx, d.App, tid, func(tx pgx.Tx) error {
+	err = db.InTenant(dbtest.Seed(ctx), d.App, tid, func(tx pgx.Tx) error {
 		_, err := tx.Exec(ctx, `UPDATE roles SET name='Changed' WHERE tenant_id=$1::uuid AND key='owner'`, tid)
 		return err
 	})
@@ -117,7 +117,7 @@ func TestLegacyMappingAndOwnerProtection(t *testing.T) {
 	}
 	ids := map[string]string{}
 	for _, role := range []string{"super_admin", "admin", "member", "reviewer", "external", "customer", "system", "importer", "operator", "embedding", "quote_public_service"} {
-		err = db.InTenant(ctx, d.App, tid, func(tx pgx.Tx) error {
+		err = db.InTenant(dbtest.Seed(ctx), d.App, tid, func(tx pgx.Tx) error {
 			kind := "person"
 			if role == "system" || role == "importer" || role == "operator" || role == "embedding" || role == "quote_public_service" {
 				kind = "agent"
@@ -134,8 +134,9 @@ func TestLegacyMappingAndOwnerProtection(t *testing.T) {
 			t.Fatal(err)
 		}
 	}
-	expected := map[string]string{"super_admin": "owner", "admin": "admin", "member": "member", "reviewer": "member", "external": "guest", "customer": "customer"}
-	err = db.InTenant(ctx, d.App, tid, func(tx pgx.Tx) error {
+	// Guest is a project role (ADR-003 P2): "external" gets no workspace binding.
+	expected := map[string]string{"super_admin": "owner", "admin": "admin", "member": "member", "reviewer": "member", "customer": "customer"}
+	err = db.InTenant(dbtest.Seed(ctx), d.App, tid, func(tx pgx.Tx) error {
 		for old, want := range expected {
 			var got string
 			if err := tx.QueryRow(ctx, `SELECT r.key FROM role_bindings b JOIN roles r ON r.tenant_id=b.tenant_id AND r.id=b.role_id WHERE b.principal_id=$1::uuid`, ids[old]).Scan(&got); err != nil {
@@ -145,7 +146,7 @@ func TestLegacyMappingAndOwnerProtection(t *testing.T) {
 				t.Errorf("%s mapped to %s, want %s", old, got, want)
 			}
 		}
-		for _, service := range []string{"system", "importer", "operator", "embedding", "quote_public_service"} {
+		for _, service := range []string{"external", "system", "importer", "operator", "embedding", "quote_public_service"} {
 			var count int
 			if err := tx.QueryRow(ctx, `SELECT count(*) FROM role_bindings WHERE principal_id=$1::uuid`, ids[service]).Scan(&count); err != nil {
 				return err
@@ -186,7 +187,7 @@ func TestLegacyMappingAndOwnerProtection(t *testing.T) {
 	p.Kind = tenant.Agent
 	check("nodes.read", nil, false)
 	check("nodes.read", []string{"nodes.read"}, false)
-	err = db.InTenant(ctx, d.App, tid, func(tx pgx.Tx) error {
+	err = db.InTenant(dbtest.Seed(ctx), d.App, tid, func(tx pgx.Tx) error {
 		_, err := tx.Exec(ctx, `UPDATE principals SET status='deactivated' WHERE id=$1::uuid`, ids["super_admin"])
 		return err
 	})
@@ -196,7 +197,7 @@ func TestLegacyMappingAndOwnerProtection(t *testing.T) {
 	if !errors.Is(err, ErrForbidden) { // PostgreSQL constraint error is expected.
 		t.Logf("last owner guard: %v", err)
 	}
-	err = db.InTenant(ctx, d.App, tid, func(tx pgx.Tx) error {
+	err = db.InTenant(dbtest.Seed(ctx), d.App, tid, func(tx pgx.Tx) error {
 		_, err := tx.Exec(ctx, `UPDATE role_bindings SET role_id=(SELECT id FROM roles WHERE tenant_id=$1::uuid AND key='owner')
 		  WHERE tenant_id=$1::uuid AND principal_id=$2::uuid`, tid, ids["admin"])
 		if err != nil {
@@ -216,14 +217,14 @@ func TestLinkedAliasAndLegacyAgentMigration(t *testing.T) {
 	d := dbtest.Open(t)
 	ctx := t.Context()
 	var tid, personID, aliasID, agentID string
-	err := db.InTenant(ctx, d.App, "00000000-0000-0000-0000-000000000000", func(tx pgx.Tx) error {
+	err := db.InTenant(dbtest.Seed(ctx), d.App, "00000000-0000-0000-0000-000000000000", func(tx pgx.Tx) error {
 		return tx.QueryRow(ctx, `INSERT INTO tenants(slug,name) VALUES('az1-migration','AZ1 migration') RETURNING id::text`).Scan(&tid)
 	})
 	if err != nil {
 		t.Fatal(err)
 	}
 	scopes := []string{"harness.read", "harness.write", "harness.worker", "inbox.send", "inbox.read", "work_orders.read", "nodes.read"}
-	err = db.InTenant(ctx, d.App, tid, func(tx pgx.Tx) error {
+	err = db.InTenant(dbtest.Seed(ctx), d.App, tid, func(tx pgx.Tx) error {
 		if err := tx.QueryRow(ctx, `INSERT INTO principals(tenant_id,kind,name,roles) VALUES($1::uuid,'person','Signed-in admin',ARRAY['admin']) RETURNING id::text`, tid).Scan(&personID); err != nil {
 			return err
 		}
@@ -247,7 +248,7 @@ func TestLinkedAliasAndLegacyAgentMigration(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	err = db.InTenant(ctx, d.App, tid, func(tx pgx.Tx) error {
+	err = db.InTenant(dbtest.Seed(ctx), d.App, tid, func(tx pgx.Tx) error {
 		var role string
 		if err := tx.QueryRow(ctx, `SELECT r.key FROM role_bindings b JOIN roles r ON r.tenant_id=b.tenant_id AND r.id=b.role_id WHERE b.principal_id=$1::uuid`, personID).Scan(&role); err != nil {
 			return err
@@ -298,7 +299,7 @@ func TestLinkedAliasAndLegacyAgentMigration(t *testing.T) {
 			t.Errorf("migrated agent denied %s: %v", route, err)
 		}
 	}
-	err = db.InTenant(ctx, d.App, tid, func(tx pgx.Tx) error {
+	err = db.InTenant(dbtest.Seed(ctx), d.App, tid, func(tx pgx.Tx) error {
 		var replacement string
 		if err := tx.QueryRow(ctx, `INSERT INTO principals(tenant_id,kind,name,roles) VALUES($1::uuid,'person','Replacement owner',ARRAY['super_admin']) RETURNING id::text`, tid).Scan(&replacement); err != nil {
 			return err

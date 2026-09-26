@@ -20,7 +20,7 @@ func TestImportAttachmentsFixtureIdempotent(t *testing.T) {
 	if err := d.Admin.QueryRow(t.Context(), `INSERT INTO tenants(slug,name) VALUES('importatt','Import') RETURNING id::text`).Scan(&tenantID); err != nil {
 		t.Fatal(err)
 	}
-	err := db.InTenant(t.Context(), d.App, tenantID, func(tx pgx.Tx) error {
+	err := db.InTenant(dbtest.Seed(t.Context()), d.App, tenantID, func(tx pgx.Tx) error {
 		if err := tx.QueryRow(t.Context(), `INSERT INTO principals(tenant_id,kind,name) VALUES($1,'person','Importer') RETURNING id::text`, tenantID).Scan(&actorID); err != nil {
 			return err
 		}
@@ -56,7 +56,7 @@ func TestImportAttachmentsFixtureIdempotent(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if err := db.InTenant(t.Context(), d.App, tenantID, func(tx pgx.Tx) error {
+	if err := db.InTenant(dbtest.Seed(t.Context()), d.App, tenantID, func(tx pgx.Tx) error {
 		_, err := tx.Exec(t.Context(), `UPDATE nodes SET fields=jsonb_set(fields,'{classic,source_id}',to_jsonb($2::text)) WHERE tenant_id=$1 AND id=$3`, tenantID, source.InstanceID(), nodeID)
 		return err
 	}); err != nil {
@@ -76,7 +76,7 @@ func TestImportAttachmentsFixtureIdempotent(t *testing.T) {
 	if gets != 1 {
 		t.Fatalf("download count %d", gets)
 	}
-	if err := db.InTenant(t.Context(), d.App, tenantID, func(tx pgx.Tx) error {
+	if err := db.InTenant(dbtest.Seed(t.Context()), d.App, tenantID, func(tx pgx.Tx) error {
 		var rows, eventsCount int
 		if err := tx.QueryRow(t.Context(), `SELECT count(*) FROM attachments WHERE tenant_id=$1 AND node_id=$2`, tenantID, nodeID).Scan(&rows); err != nil {
 			return err

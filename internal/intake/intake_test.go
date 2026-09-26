@@ -337,7 +337,7 @@ func (fx fixture) mustDraft(t *testing.T, mux *http.ServeMux, body string) draft
 func (fx fixture) nodeWithEvent(t *testing.T, database *dbtest.DB, slug, key, title, body, actor string) (string, int64) {
 	t.Helper()
 	if slug == "requirement" {
-		if err := db.InTenant(t.Context(), database.App, fx.tenantA, func(tx pgx.Tx) error {
+		if err := db.InTenant(dbtest.Seed(t.Context()), database.App, fx.tenantA, func(tx pgx.Tx) error {
 			_, err := tx.Exec(t.Context(), `SELECT aeon_seed_requirement_kind($1::uuid)`, fx.tenantA)
 			return err
 		}); err != nil {
@@ -398,6 +398,8 @@ func insertPrincipal(t *testing.T, pool *pgxpool.Pool, tenantID string, kind ten
 		tenantID, string(kind), name).Scan(&p.ID); err != nil {
 		t.Fatal(err)
 	}
+	// Handlers see project data only through a binding (ADR-003 P2).
+	dbtest.BindRoleWith(t, pool, tenantID, p.ID, "member")
 	return p
 }
 
@@ -434,7 +436,7 @@ func insertKey(t *testing.T, pool *pgxpool.Pool, p tenant.Principal, scopes []st
 
 func grantIntake(t *testing.T, pool *pgxpool.Pool, tenantID string, agent, person tenant.Principal, projectID string) {
 	t.Helper()
-	err := db.InTenant(t.Context(), pool, tenantID, func(tx pgx.Tx) error {
+	err := db.InTenant(dbtest.Seed(t.Context()), pool, tenantID, func(tx pgx.Tx) error {
 		var id string
 		if err := tx.QueryRow(t.Context(), `
 			INSERT INTO approval_requests (

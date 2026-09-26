@@ -75,7 +75,7 @@ func (m *Module) principal(w http.ResponseWriter, r *http.Request, permission st
 		httpapi.WriteError(w, 401, "unauthorized")
 		return p, false
 	}
-	if authz.Require(authz.BindPool(r.Context(), m.Pool), permission, authz.Scope{}) != nil {
+	if authz.Require(authz.BindPool(r.Context(), m.Pool), permission, authz.RouteScope(r.Context())) != nil {
 		httpapi.WriteError(w, 403, "permission denied")
 		return p, false
 	}

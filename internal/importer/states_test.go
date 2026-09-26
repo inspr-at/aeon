@@ -35,7 +35,7 @@ func TestStateNormalizationAndStoredUserBackfill(t *testing.T) {
 	}
 	txdo := func(fn func(pgx.Tx) error) {
 		t.Helper()
-		if err := db.InTenant(ctx, d.App, tid, fn); err != nil {
+		if err := db.InTenant(dbtest.Seed(ctx), d.App, tid, fn); err != nil {
 			t.Fatal(err)
 		}
 	}
@@ -140,7 +140,7 @@ func TestNormalizeStatesMigrationEventsAndRollback(t *testing.T) {
 	}
 	tenants := []string{"10000000-0000-4000-8000-000000000001", "10000000-0000-4000-8000-000000000002"}
 	for i, tid := range tenants {
-		if err := db.InTenant(ctx, d.App, tid, func(tx pgx.Tx) error {
+		if err := db.InTenant(dbtest.Seed(ctx), d.App, tid, func(tx pgx.Tx) error {
 			if _, err := tx.Exec(ctx, `INSERT INTO tenants(id,slug,name) VALUES($1,$2,'Migration')`, tid, fmt.Sprintf("migration-%d", i)); err != nil {
 				return err
 			}
@@ -156,7 +156,7 @@ func TestNormalizeStatesMigrationEventsAndRollback(t *testing.T) {
 	}
 	// Execute exactly the migration SQL, first in a transaction that must roll back.
 	sentinel := fmt.Errorf("rollback probe")
-	if err := db.InTenant(ctx, d.Admin, tenants[0], func(tx pgx.Tx) error {
+	if err := db.InTenant(dbtest.Seed(ctx), d.Admin, tenants[0], func(tx pgx.Tx) error {
 		if _, err := tx.Exec(ctx, string(migration)); err != nil {
 			return err
 		}
@@ -164,7 +164,7 @@ func TestNormalizeStatesMigrationEventsAndRollback(t *testing.T) {
 	}); err != sentinel {
 		t.Fatal(err)
 	}
-	if err := db.InTenant(ctx, d.App, tenants[0], func(tx pgx.Tx) error {
+	if err := db.InTenant(dbtest.Seed(ctx), d.App, tenants[0], func(tx pgx.Tx) error {
 		var count int
 		if err := tx.QueryRow(ctx, `SELECT count(*) FROM events WHERE tenant_id=$1`, tenants[0]).Scan(&count); err != nil {
 			return err
@@ -184,12 +184,12 @@ func TestNormalizeStatesMigrationEventsAndRollback(t *testing.T) {
 		t.Fatal(err)
 	}
 	for range 2 {
-		if err := db.InTenant(ctx, d.Admin, tenants[0], func(tx pgx.Tx) error { _, err := tx.Exec(ctx, string(migration)); return err }); err != nil {
+		if err := db.InTenant(dbtest.Seed(ctx), d.Admin, tenants[0], func(tx pgx.Tx) error { _, err := tx.Exec(ctx, string(migration)); return err }); err != nil {
 			t.Fatal(err)
 		}
 	}
 	for _, tid := range tenants {
-		if err := db.InTenant(ctx, d.App, tid, func(tx pgx.Tx) error {
+		if err := db.InTenant(dbtest.Seed(ctx), d.App, tid, func(tx pgx.Tx) error {
 			rows, err := tx.Query(ctx, `SELECT e.before,e.after,p.name,p.roles FROM events e JOIN principals p ON p.tenant_id=e.tenant_id AND p.id=e.actor_principal_id WHERE e.tenant_id=$1 AND e.type='node.state_normalized' ORDER BY e.id`, tid)
 			if err != nil {
 				return err

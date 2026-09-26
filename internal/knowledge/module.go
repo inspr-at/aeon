@@ -102,7 +102,7 @@ func principal(w http.ResponseWriter, r *http.Request) (tenant.Principal, bool) 
 }
 
 func canWrite(ctx context.Context, tx pgx.Tx, p tenant.Principal, permission string) bool {
-	return authz.RequireTx(ctx, tx, p, permission, authz.Scope{}) == nil
+	return authz.RequireTx(ctx, tx, p, permission, authz.RouteScope(ctx)) == nil
 }
 
 func readObject(w http.ResponseWriter, r *http.Request) (map[string]json.RawMessage, error) {

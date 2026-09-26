@@ -3,6 +3,7 @@ package crm
 
 import (
 	"encoding/json"
+	"github.com/inspr-at/aeon/internal/dbtest"
 	"net/http"
 	"strconv"
 	"strings"
@@ -100,7 +101,7 @@ func TestCRMDeletionAndProjectUndo(t *testing.T) {
 	var contact ContactRecord
 	_ = json.Unmarshal(w.Body.Bytes(), &contact)
 	var project string
-	err := db.InTenant(t.Context(), f.db.App, f.admin.TenantID, func(tx pgx.Tx) error {
+	err := db.InTenant(dbtest.Seed(t.Context()), f.db.App, f.admin.TenantID, func(tx pgx.Tx) error {
 		return tx.QueryRow(t.Context(), `INSERT INTO nodes(tenant_id,kind_id,key,title) SELECT $1,id,'PRJ-1','Project' FROM node_kinds WHERE slug='project' RETURNING id::text`, f.admin.TenantID).Scan(&project)
 	})
 	if err != nil {

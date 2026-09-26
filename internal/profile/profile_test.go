@@ -32,7 +32,7 @@ func person(t *testing.T, d *dbtest.DB, slug, email string) tenant.Principal {
 	if err := d.Admin.QueryRow(t.Context(), `INSERT INTO tenants(slug,name) VALUES($1,$1) RETURNING id::text`, slug).Scan(&p.TenantID); err != nil {
 		t.Fatal(err)
 	}
-	err := db.InTenant(t.Context(), d.App, p.TenantID, func(tx pgx.Tx) error {
+	err := db.InTenant(dbtest.Seed(t.Context()), d.App, p.TenantID, func(tx pgx.Tx) error {
 		var identity string
 		if err := tx.QueryRow(t.Context(), `INSERT INTO identities(issuer,subject,email,display_name) VALUES('test',$1,$2,'Person') RETURNING id::text`, slug, email).Scan(&identity); err != nil {
 			return err
@@ -164,7 +164,7 @@ func TestProfileTenantUniquenessAvatarAndUndo(t *testing.T) {
 	a := person(t, d, "profile_a", "a@example.test")
 	b := person(t, d, "profile_b", "b@example.test")
 	var other tenant.Principal
-	err := db.InTenant(t.Context(), d.App, a.TenantID, func(tx pgx.Tx) error {
+	err := db.InTenant(dbtest.Seed(t.Context()), d.App, a.TenantID, func(tx pgx.Tx) error {
 		return tx.QueryRow(t.Context(), `INSERT INTO principals(tenant_id,kind,name) VALUES($1,'person','Other') RETURNING id::text`, a.TenantID).Scan(&other.ID)
 	})
 	if err != nil {
@@ -217,7 +217,7 @@ func TestProfileTenantUniquenessAvatarAndUndo(t *testing.T) {
 		t.Fatalf("delete %+v", deleted)
 	}
 	var eventID int64
-	err = db.InTenant(t.Context(), d.App, a.TenantID, func(tx pgx.Tx) error {
+	err = db.InTenant(dbtest.Seed(t.Context()), d.App, a.TenantID, func(tx pgx.Tx) error {
 		return tx.QueryRow(t.Context(), `SELECT id FROM events WHERE tenant_id=$1 AND type='profile.updated' AND after->>'avatar_original_hash'='' ORDER BY id DESC LIMIT 1`, a.TenantID).Scan(&eventID)
 	})
 	if err != nil {
@@ -235,7 +235,7 @@ func TestProfileTenantUniquenessAvatarAndUndo(t *testing.T) {
 func TestClassicProfileImportIdempotent(t *testing.T) {
 	d := dbtest.Open(t)
 	p := person(t, d, "profile_import", "import@example.test")
-	err := db.InTenant(t.Context(), d.App, p.TenantID, func(tx pgx.Tx) error {
+	err := db.InTenant(dbtest.Seed(t.Context()), d.App, p.TenantID, func(tx pgx.Tx) error {
 		_, err := tx.Exec(t.Context(), `INSERT INTO principals(tenant_id,kind,name) VALUES($1,'agent','Classic Paimos importer')`, p.TenantID)
 		return err
 	})
@@ -292,7 +292,7 @@ func TestClassicProfileImportIdempotent(t *testing.T) {
 		t.Fatalf("imported %+v", got)
 	}
 	var count int
-	err = db.InTenant(t.Context(), d.App, p.TenantID, func(tx pgx.Tx) error {
+	err = db.InTenant(dbtest.Seed(t.Context()), d.App, p.TenantID, func(tx pgx.Tx) error {
 		return tx.QueryRow(t.Context(), `SELECT count(*) FROM events WHERE tenant_id=$1 AND type='profile.updated'`, p.TenantID).Scan(&count)
 	})
 	if err != nil || count != 1 {

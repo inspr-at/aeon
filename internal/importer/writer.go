@@ -36,7 +36,7 @@ func (w PostgresWriter) Write(ctx context.Context, s Snapshot, tenantSlug string
 	if err != nil {
 		return r, fmt.Errorf("resolve tenant: %w", err)
 	}
-	err = db.InTenant(ctx, w.Pool, tenantID, func(tx pgx.Tx) error {
+	err = db.InTenant(db.AllProjects(ctx, "classic importer"), w.Pool, tenantID, func(tx pgx.Tx) error {
 		if _, err := tx.Exec(ctx, `SELECT pg_advisory_xact_lock(hashtextextended($1,42))`, tenantID+":"+s.SourceID); err != nil {
 			return err
 		}
@@ -227,7 +227,7 @@ func (w PostgresWriter) Write(ctx context.Context, s Snapshot, tenantSlug string
 	// Refresh planner statistics only after the import commits. Large imports
 	// otherwise leave list and project queries planning against pre-import row
 	// counts until autovacuum happens to analyze them.
-	if err := db.InTenant(ctx, w.Pool, tenantID, func(tx pgx.Tx) error {
+	if err := db.InTenant(db.AllProjects(ctx, "classic importer"), w.Pool, tenantID, func(tx pgx.Tx) error {
 		_, err := tx.Exec(ctx, `ANALYZE nodes, node_kinds, node_relations, node_key_counters,
             principals, identities, events, event_counters,
             journey_projects, journey_releases, journey_tickets`)

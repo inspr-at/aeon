@@ -4,6 +4,7 @@ package activity
 import (
 	"encoding/json"
 	"fmt"
+	"github.com/inspr-at/aeon/internal/dbtest"
 	"testing"
 	"time"
 
@@ -27,7 +28,7 @@ func TestLinkedActivityAuthorsAndCommentWrites(t *testing.T) {
 	caller := f.p
 	caller.ID = alias
 	m := &module{pool: f.d.App}
-	old, err := m.writeComment(t.Context(), caller, f.node, 0, "old native", false)
+	old, err := m.writeComment(dbtest.Seed(t.Context()), caller, f.node, 0, "old native", false)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -35,7 +36,7 @@ func TestLinkedActivityAuthorsAndCommentWrites(t *testing.T) {
 	if _, err := service.Link(t.Context(), "activity", alias, f.p.ID); err != nil {
 		t.Fatal(err)
 	}
-	page, err := m.read(t.Context(), f.p, f.node, 50, nil)
+	page, err := m.read(dbtest.Seed(t.Context()), f.p, f.node, 50, nil)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -47,7 +48,7 @@ func TestLinkedActivityAuthorsAndCommentWrites(t *testing.T) {
 			t.Fatalf("unresolved author %+v", item)
 		}
 	}
-	fresh, err := m.writeComment(t.Context(), caller, f.node, 0, "new canonical", false)
+	fresh, err := m.writeComment(dbtest.Seed(t.Context()), caller, f.node, 0, "new canonical", false)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -70,13 +71,13 @@ func TestLinkedActivityAuthorsAndCommentWrites(t *testing.T) {
 	if _, err := fmt.Sscan(old.ID, &oldID); err != nil {
 		t.Fatal(err)
 	}
-	if _, err := m.writeComment(t.Context(), f.p, f.node, oldID, "edited by canonical owner", false); err != nil {
+	if _, err := m.writeComment(dbtest.Seed(t.Context()), f.p, f.node, oldID, "edited by canonical owner", false); err != nil {
 		t.Fatal(err)
 	}
 	if _, err := service.Unlink(t.Context(), "activity", alias); err != nil {
 		t.Fatal(err)
 	}
-	page, err = m.read(t.Context(), f.p, f.node, 50, nil)
+	page, err = m.read(dbtest.Seed(t.Context()), f.p, f.node, 50, nil)
 	if err != nil {
 		t.Fatal(err)
 	}

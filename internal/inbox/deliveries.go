@@ -142,7 +142,7 @@ func (m *messaging) sendMessage(w http.ResponseWriter, r *http.Request) {
 func (m *messaging) commitMessage(ctx context.Context, p tenant.Principal, project string, in compatSend) (CompatMessage, error) {
 	var out CompatMessage
 	key, digest := messageDigest(in.Key), messageDigest(in)
-	err := db.InTenant(ctx, m.base.pool, p.TenantID, func(tx pgx.Tx) error {
+	err := db.InTenant(tenant.WithPrincipal(ctx, p), m.base.pool, p.TenantID, func(tx pgx.Tx) error {
 		if err := messagingProject(ctx, tx, project); err != nil {
 			return err
 		}

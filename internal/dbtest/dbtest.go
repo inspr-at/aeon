@@ -35,11 +35,14 @@ const EnvDatabaseURL = "AEON_TEST_DATABASE_URL"
 // row-level security). App is a LOGIN role with NOSUPERUSER and NOBYPASSRLS
 // that owns the application tables, so FORCE ROW LEVEL SECURITY applies to it.
 type DB struct {
-	URL   string
-	Admin *pgxpool.Pool
-	App   *pgxpool.Pool
-	Role  string
-	Name  string
+	URL string
+	// AppURL connects as the NOSUPERUSER NOBYPASSRLS app role, as production
+	// does, for tests that start a whole server against this database.
+	AppURL string
+	Admin  *pgxpool.Pool
+	App    *pgxpool.Pool
+	Role   string
+	Name   string
 
 	maint string
 	once  sync.Once
@@ -63,8 +66,17 @@ func Open(t testing.TB) *DB {
 	return opened
 }
 
+// Seed marks ctx as a test fixture writer. Project row-level security shows a
+// transaction nothing project-scoped unless a principal or a service path
+// opens it (ADR-003 P2), so fixtures write and assert with every project
+// visible, like the importer. Tests of visibility itself use a principal.
+func Seed(ctx context.Context) context.Context {
+	return db.AllProjects(ctx, "test fixture")
+}
+
 // BindLegacy seeds the workspace binding represented by fixture classic roles.
 // Fixtures describe starting state, so this does not append a mutation event.
+// Classic "external" people get no workspace binding: Guest is a project role.
 func BindLegacy(t testing.TB, d *DB, tenantID, principalID string) {
 	t.Helper()
 	if err := BindLegacyTx(context.Background(), d.Admin, tenantID, principalID); err != nil {
@@ -72,8 +84,30 @@ func BindLegacy(t testing.TB, d *DB, tenantID, principalID string) {
 	}
 }
 
+// BindRole seeds a workspace binding to the built-in role key. Fixture
+// principals that call handlers directly need one to see any project data.
+func BindRole(t testing.TB, d *DB, tenantID, principalID, role string) {
+	t.Helper()
+	BindRoleWith(t, d.Admin, tenantID, principalID, role)
+}
+
+// BindRoleWith is BindRole on any connection, such as a superuser pool.
+func BindRoleWith(t testing.TB, db interface {
+	Exec(context.Context, string, ...any) (pgconn.CommandTag, error)
+}, tenantID, principalID, role string) {
+	t.Helper()
+	if _, err := db.Exec(context.Background(), `
+		INSERT INTO role_bindings(tenant_id,principal_id,role_id,scope_type)
+		SELECT $1::uuid,$2::uuid,r.id,'workspace' FROM roles r WHERE r.tenant_id=$1::uuid AND r.key=$3
+		ON CONFLICT (tenant_id,principal_id) WHERE scope_type='workspace' DO UPDATE SET role_id=EXCLUDED.role_id`, tenantID, principalID, role); err != nil {
+		t.Fatalf("bind fixture role %s: %v", role, err)
+	}
+}
+
 // BindLegacyTx seeds the same fixture binding within an existing transaction.
-func BindLegacyTx(ctx context.Context, tx interface{ Exec(context.Context, string, ...any) (pgconn.CommandTag, error) }, tenantID, principalID string) error {
+func BindLegacyTx(ctx context.Context, tx interface {
+	Exec(context.Context, string, ...any) (pgconn.CommandTag, error)
+}, tenantID, principalID string) error {
 	_, err := tx.Exec(ctx, `
 		INSERT INTO role_bindings(tenant_id,principal_id,role_id,scope_type)
 		SELECT p.tenant_id,p.id,r.id,'workspace' FROM principals p
@@ -81,7 +115,6 @@ func BindLegacyTx(ctx context.Context, tx interface{ Exec(context.Context, strin
 		  WHEN 'super_admin'=ANY(p.roles) THEN 'owner'
 		  WHEN 'admin'=ANY(p.roles) THEN 'admin'
 		  WHEN 'member'=ANY(p.roles) OR 'reviewer'=ANY(p.roles) THEN 'member'
-		  WHEN 'external'=ANY(p.roles) THEN 'guest'
 		  WHEN 'customer'=ANY(p.roles) THEN 'customer' END
 		WHERE p.tenant_id=$1::uuid AND p.id=$2::uuid AND p.kind='person'
 		ON CONFLICT DO NOTHING`, tenantID, principalID)
@@ -131,6 +164,10 @@ func New(ctx context.Context) (opened *DB, err error) {
 	if err = grantApp(ctx, d.Admin, d.Name, d.Role); err != nil {
 		return nil, err
 	}
+	app := *base
+	app.Path = "/" + d.Name
+	app.User = url.UserPassword(d.Role, password)
+	d.AppURL = app.String()
 	d.App, err = openApp(ctx, base, d.Name, d.Role, password)
 	if err != nil {
 		return nil, err

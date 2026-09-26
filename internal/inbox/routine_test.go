@@ -5,6 +5,7 @@ package inbox
 import (
 	"context"
 	"encoding/json"
+	"github.com/inspr-at/aeon/internal/dbtest"
 	"io"
 	"net/http"
 	"strings"
@@ -57,7 +58,7 @@ func TestRoutineDispatcherUsesEncryptedTargetAndFencedCompletion(t *testing.T) {
 		t.Fatalf("duplicate dispatch worked=%t calls=%d err=%v", worked, called, err)
 	}
 	var state, effective, reason string
-	err = db.InTenant(context.Background(), w.db.App, w.agent.TenantID, func(tx pgx.Tx) error {
+	err = db.InTenant(dbtest.Seed(context.Background()), w.db.App, w.agent.TenantID, func(tx pgx.Tx) error {
 		return tx.QueryRow(t.Context(), `SELECT state,effective_level,fallback_reason FROM inbox_message_deliveries WHERE message_id=$1::uuid`, message.ID).Scan(&state, &effective, &reason)
 	})
 	if err != nil || state != "delivered" || effective != "simple" || reason != "unsupported" {

@@ -16,7 +16,7 @@ import (
 func TestApprovalRiskProjection(t *testing.T) {
 	f := newFixture(t)
 	// Expand only this fixture key; requests still pass the real scope ceiling.
-	err := db.InTenant(t.Context(), f.db.App, f.tenantA, func(tx pgx.Tx) error {
+	err := db.InTenant(dbtest.Seed(t.Context()), f.db.App, f.tenantA, func(tx pgx.Tx) error {
 		_, err := tx.Exec(t.Context(), `UPDATE agent_keys SET scopes=ARRAY['nodes','harness','release','run','journey'] WHERE principal_id=$1::uuid AND scopes=ARRAY['run','nodes.read']::text[]`, f.agentA.ID)
 		return err
 	})
@@ -95,7 +95,7 @@ func TestDecisionRequiresPermissionBeingGranted(t *testing.T) {
 	f := newFixture(t)
 	decider := insertPrincipal(t, f.db.Admin, f.tenantA, tenant.Person, "custom decider")
 	var roleID string
-	err := db.InTenant(t.Context(), f.db.App, f.tenantA, func(tx pgx.Tx) error {
+	err := db.InTenant(dbtest.Seed(t.Context()), f.db.App, f.tenantA, func(tx pgx.Tx) error {
 		if err := tx.QueryRow(t.Context(), `INSERT INTO roles(tenant_id,key,name) VALUES($1::uuid,'decision_only','Decision only') RETURNING id::text`, f.tenantA).Scan(&roleID); err != nil {
 			return err
 		}
@@ -118,7 +118,7 @@ func TestDecisionRequiresPermissionBeingGranted(t *testing.T) {
 	if got := f.do(decider, "", http.MethodPost, path, `{"decision":"approved"}`); got.Code != http.StatusForbidden {
 		t.Fatalf("decision without nodes.read: %d %s", got.Code, got.Body.String())
 	}
-	if err := db.InTenant(t.Context(), f.db.App, f.tenantA, func(tx pgx.Tx) error {
+	if err := db.InTenant(dbtest.Seed(t.Context()), f.db.App, f.tenantA, func(tx pgx.Tx) error {
 		_, err := tx.Exec(t.Context(), `INSERT INTO role_permissions(tenant_id,role_id,permission) VALUES($1::uuid,$2::uuid,'nodes.read')`, f.tenantA, roleID)
 		return err
 	}); err != nil {
@@ -133,7 +133,7 @@ func TestDecisionRiskRequiresPersonRole(t *testing.T) {
 	f := newFixture(t)
 	person := func(name, role string) tenant.Principal {
 		p := tenant.Principal{TenantID: f.tenantA, Kind: tenant.Person, Name: name, Roles: []string{role}}
-		err := db.InTenant(t.Context(), f.db.App, f.tenantA, func(tx pgx.Tx) error {
+		err := db.InTenant(dbtest.Seed(t.Context()), f.db.App, f.tenantA, func(tx pgx.Tx) error {
 			return tx.QueryRow(t.Context(), `INSERT INTO principals(tenant_id,kind,name,roles) VALUES($1::uuid,'person',$2,$3) RETURNING id::text`, f.tenantA, name, p.Roles).Scan(&p.ID)
 		})
 		if err != nil {

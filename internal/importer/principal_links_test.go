@@ -26,7 +26,7 @@ func TestClassicUsernameEmailAndCanonicalAssignments(t *testing.T) {
 	var alias string
 	txdo := func(fn func(pgx.Tx) error) {
 		t.Helper()
-		if err := db.InTenant(t.Context(), d.App, tid, fn); err != nil {
+		if err := db.InTenant(dbtest.Seed(t.Context()), d.App, tid, fn); err != nil {
 			t.Fatal(err)
 		}
 	}

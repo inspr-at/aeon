@@ -421,6 +421,8 @@ func insertPrincipal(t *testing.T, pool *pgxpool.Pool, tenantID string, kind ten
 		tenantID, string(kind), name).Scan(&p.ID); err != nil {
 		t.Fatal(err)
 	}
+	// Handlers see project data only through a binding (ADR-003 P2).
+	dbtest.BindRoleWith(t, pool, tenantID, p.ID, "member")
 	return p
 }
 
@@ -491,7 +493,7 @@ func actionJSON(action string, revision int64, key, approval, release, reason st
 func (f *fixture) grant(t *testing.T, agent, person, scope, resource string) string {
 	t.Helper()
 	var id string
-	err := db.InTenant(t.Context(), f.db.App, f.tenant, func(tx pgx.Tx) error {
+	err := db.InTenant(dbtest.Seed(t.Context()), f.db.App, f.tenant, func(tx pgx.Tx) error {
 		if err := tx.QueryRow(t.Context(), `
 			INSERT INTO approval_requests (
 				tenant_id, proposed_by_principal_id, agent_principal_id,
@@ -824,7 +826,7 @@ func (f *fixture) accessApply(t *testing.T, project, release string, ready bool)
 func (f *fixture) journeyCount(t *testing.T, tenantID string) int {
 	t.Helper()
 	var n int
-	err := db.InTenant(t.Context(), f.db.App, tenantID, func(tx pgx.Tx) error {
+	err := db.InTenant(dbtest.Seed(t.Context()), f.db.App, tenantID, func(tx pgx.Tx) error {
 		return tx.QueryRow(t.Context(), `SELECT count(*) FROM journey_projects`).Scan(&n)
 	})
 	if err != nil {

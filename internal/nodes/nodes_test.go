@@ -87,7 +87,7 @@ func addPrincipal(t *testing.T, slug string) tenant.Principal {
 		t.Fatalf("tenant: %v", err)
 	}
 	var id string
-	err := db.InTenant(t.Context(), appPool, tenantID, func(tx pgx.Tx) error {
+	err := db.InTenant(dbtest.Seed(t.Context()), appPool, tenantID, func(tx pgx.Tx) error {
 		return tx.QueryRow(t.Context(), `
 			INSERT INTO principals (tenant_id, kind, name, roles)
 			VALUES ($1, 'person', $2, $3)
@@ -134,7 +134,7 @@ func TestSchemaAndTagMutationsRequirePersonAdmin(t *testing.T) {
 	admin := newPrincipal(t, "schema-role-test")
 	makePerson := func(name, role string) tenant.Principal {
 		p := tenant.Principal{TenantID: admin.TenantID, Kind: tenant.Person, Name: name, Roles: []string{role}}
-		err := db.InTenant(t.Context(), appPool, admin.TenantID, func(tx pgx.Tx) error {
+		err := db.InTenant(dbtest.Seed(t.Context()), appPool, admin.TenantID, func(tx pgx.Tx) error {
 			return tx.QueryRow(t.Context(), `INSERT INTO principals(tenant_id,kind,name,roles) VALUES($1::uuid,'person',$2,$3) RETURNING id::text`, admin.TenantID, name, p.Roles).Scan(&p.ID)
 		})
 		if err != nil {
@@ -212,7 +212,7 @@ type storedEvent struct {
 func tenantEvents(t *testing.T, tenantID string) []storedEvent {
 	t.Helper()
 	var out []storedEvent
-	err := db.InTenant(t.Context(), appPool, tenantID, func(tx pgx.Tx) error {
+	err := db.InTenant(dbtest.Seed(t.Context()), appPool, tenantID, func(tx pgx.Tx) error {
 		rows, err := tx.Query(t.Context(), `
 			SELECT type, node_id::text, before::text, after::text, actor_principal_id::text
 			FROM events ORDER BY id`)

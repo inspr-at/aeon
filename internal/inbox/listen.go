@@ -129,7 +129,7 @@ func (m *module) page(ctx context.Context, p tenant.Principal, after int64, limi
 
 func (m *module) pending(ctx context.Context, p tenant.Principal, after int64, limit int) ([]Message, error) {
 	var items []Message
-	err := db.InTenant(ctx, m.pool, p.TenantID, func(tx pgx.Tx) error {
+	err := db.InTenant(tenant.WithPrincipal(ctx, p), m.pool, p.TenantID, func(tx pgx.Tx) error {
 		rows, err := tx.Query(ctx, `SELECT `+messageCols+`
 			FROM inbox_messages
 			WHERE recipient_principal_id = $1::uuid

@@ -586,7 +586,7 @@ func issueKey(out string) string {
 func assertEvent(t *testing.T, opened *dbtest.DB, tenantID, eventType string) {
 	t.Helper()
 	var n int
-	err := db.InTenant(context.Background(), opened.App, tenantID, func(tx pgx.Tx) error {
+	err := db.InTenant(dbtest.Seed(context.Background()), opened.App, tenantID, func(tx pgx.Tx) error {
 		return tx.QueryRow(context.Background(), `SELECT count(*) FROM events WHERE type = $1`, eventType).Scan(&n)
 	})
 	if err != nil {

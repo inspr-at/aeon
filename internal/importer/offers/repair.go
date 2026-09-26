@@ -31,7 +31,7 @@ func RepairDraftDimensions(ctx context.Context, pool *pgxpool.Pool, tenantID, ac
 	if pool == nil || !uuidRE.MatchString(tenantID) || !uuidRE.MatchString(actorID) || !instanceRE.MatchString(instance) {
 		return report, errors.New("repair requires pool, tenant ID, admin principal ID and source instance")
 	}
-	err := db.InTenant(ctx, pool, tenantID, func(tx pgx.Tx) error {
+	err := db.InTenant(db.AllProjects(ctx, "classic offers importer"), pool, tenantID, func(tx pgx.Tx) error {
 		if _, err := tx.Exec(ctx, `SELECT pg_advisory_xact_lock(hashtextextended($1,0))`, tenantID+":paimos-offers:"+instance); err != nil {
 			return err
 		}

@@ -51,6 +51,7 @@ import (
 	"github.com/jackc/pgx/v5/pgxpool"
 
 	"github.com/inspr-at/aeon/internal/auth"
+	"github.com/inspr-at/aeon/internal/authz"
 	"github.com/inspr-at/aeon/internal/business/costunits"
 	"github.com/inspr-at/aeon/internal/business/crm"
 	"github.com/inspr-at/aeon/internal/business/directory"
@@ -204,6 +205,9 @@ func serveListener(ctx context.Context, cfg config.Config, ln net.Listener) erro
 		Web:   webFS,
 		Modules: []httpapi.Module{
 			authMod,
+			// ADR-003: permissions, roles, members and project members. P1 left
+			// it unmounted, so /api/me/permissions answered 403 in production.
+			authz.New(pool),
 			nodes.New(pool, nodes.SQLWriter{}),
 			relations.New(pool),
 			events.New(pool, events.WithUndoHandlers(nodes.UndoHandlers()), relations.UndoOption(), events.WithUndoHandlers(views.UndoHandlers()), events.WithUndoHandlers(knowledge.UndoHandlers()), events.WithUndoHandlers(projectgroups.UndoHandlers()), events.WithUndoHandlers(attachments.UndoHandlers()), events.WithUndoHandlers(hours.UndoHandlers(pluginRegistry)), events.WithUndoHandlers(profile.UndoHandlers()), events.WithUndoHandlers(crm.UndoHandlers(pluginRegistry)), events.WithUndoHandlers(publicquotes.UndoHandlers()), events.WithUndoHandlers(quotes.UndoHandlers(pluginRegistry))),

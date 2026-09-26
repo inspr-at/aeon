@@ -137,6 +137,8 @@ func routineFrame(v CompatMessage, project string) string {
 // DispatchOne sends at most one webhook. No target URL, sender key, response
 // body or message body enters events, errors, or logs.
 func (d *RoutineDispatcher) DispatchOne(ctx context.Context, tenantID string) (bool, error) {
+	// A system job: it serves routine targets in every project (ADR-003 P2).
+	ctx = db.AllProjects(ctx, "routine webhook dispatcher")
 	candidate, err := d.nextRoutine(ctx, tenantID)
 	if errors.Is(err, pgx.ErrNoRows) {
 		return false, nil

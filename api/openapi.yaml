@@ -62,7 +62,53 @@ paths:
       requestBody: {required: true, content: {application/json: {schema: {type: object, required: [role_id], properties: {role_id: {type: [string, 'null'], format: uuid}}}}}}
       responses:
         '200': {description: Updated member, content: {application/json: {schema: {$ref: '#/components/schemas/Member'}}}}
+        '400': {description: Invalid role; Guest is a project role (code project_only_role)}
         '403': {description: Permission denied or role escalation}
+  /projects/{id}/members:
+    get:
+      operationId: listProjectMembers
+      summary: Everyone with access to a project, one row per principal
+      description: >-
+        ADR-003 P2. A principal has access through a workspace role that holds nodes.read
+        (via workspace) or through a binding on this project (via project); role is the
+        project binding's role when there is one, else the workspace role. Deactivated
+        principals, classic aliases and service principals are omitted. Needs members.read.
+      parameters:
+        - {name: id, in: path, required: true, schema: {type: string, format: uuid}}
+      responses:
+        '200': {description: Project members, content: {application/json: {schema: {type: array, items: {$ref: '#/components/schemas/ProjectMember'}}}}}
+        '403': {description: Permission denied}
+        '404': {description: Not a visible project}
+  /projects/{id}/members/{principal_id}:
+    put:
+      operationId: setProjectRole
+      summary: Grant or change a principal's role on one project
+      description: >-
+        Needs members.manage on the project and every project-grantable permission of the role.
+        A project binding grants only the role's project-grantable permissions. Owner and
+        Customer are workspace roles. Writes an authz.binding_set event (audit type binding.set)
+        on the project.
+      parameters:
+        - {name: id, in: path, required: true, schema: {type: string, format: uuid}}
+        - {name: principal_id, in: path, required: true, schema: {type: string, format: uuid}}
+      requestBody: {required: true, content: {application/json: {schema: {type: object, additionalProperties: false, required: [role_id], properties: {role_id: {type: string, format: uuid}}}}}}
+      responses:
+        '200': {description: The project binding, content: {application/json: {schema: {$ref: '#/components/schemas/ProjectBinding'}}}}
+        '400': {description: Invalid role or principal}
+        '403': {description: Permission denied or role escalation}
+        '404': {description: Not a visible project}
+    delete:
+      operationId: removeProjectRole
+      summary: Remove a principal's binding on one project
+      description: Needs members.manage on the project. Writes an authz.binding_removed event (audit type binding.removed) on the project.
+      parameters:
+        - {name: id, in: path, required: true, schema: {type: string, format: uuid}}
+        - {name: principal_id, in: path, required: true, schema: {type: string, format: uuid}}
+      responses:
+        '204': {description: Project binding removed}
+        '403': {description: Permission denied}
+        '404': {description: No such project or binding}
+        '409': {description: Access comes from the workspace role (code via_workspace)}
   /health:
     get:
       summary: Liveness and database readiness
@@ -2991,18 +3037,49 @@ components:
           oneOf:
             - {type: 'null'}
             - {type: object, required: [id, role, permissions], properties: {id: {type: string, format: uuid}, role: {oneOf: [{$ref: '#/components/schemas/AuthzRoleRef'}, {type: 'null'}]}, permissions: {type: array, items: {type: string}}}}
-    Member:
+    ProjectMember:
       type: object
-      required: [principal_id, name, avatar_url, email, status, identity, workspace_role, project_roles, aliases, classic_role, last_active_at]
+      required: [principal_id, name, avatar_url, has_avatar, kind, via, role, workspace_role]
       properties:
         principal_id: {type: string, format: uuid}
         name: {type: string}
         avatar_url: {type: [string, 'null']}
+        has_avatar: {type: boolean}
+        kind: {type: string, enum: [person, agent]}
+        via: {type: string, enum: [workspace, project]}
+        role: {$ref: '#/components/schemas/AuthzRoleRef'}
+        workspace_role: {oneOf: [{$ref: '#/components/schemas/AuthzRoleRef'}, {type: 'null'}]}
+    ProjectBinding:
+      type: object
+      required: [id, principal_id, project_id, scope_type, role, created_at]
+      properties:
+        id: {type: string, format: uuid}
+        principal_id: {type: string, format: uuid}
+        project_id: {type: string, format: uuid}
+        scope_type: {type: string, enum: [project]}
+        role: {$ref: '#/components/schemas/AuthzRoleRef'}
+        created_at: {type: string, format: date-time}
+    ProjectRoleGrant:
+      type: object
+      required: [project_id, project_key, project_title, role]
+      properties:
+        project_id: {type: string, format: uuid}
+        project_key: {type: string}
+        project_title: {type: string}
+        role: {$ref: '#/components/schemas/AuthzRoleRef'}
+    Member:
+      type: object
+      required: [principal_id, name, avatar_url, has_avatar, email, status, identity, workspace_role, project_roles, aliases, classic_role, last_active_at]
+      properties:
+        principal_id: {type: string, format: uuid}
+        name: {type: string}
+        avatar_url: {type: [string, 'null']}
+        has_avatar: {type: boolean}
         email: {type: [string, 'null']}
         status: {type: string, enum: [active, deactivated]}
         identity: {type: [string, 'null'], enum: [inspr_id, null]}
         workspace_role: {oneOf: [{$ref: '#/components/schemas/AuthzRoleRef'}, {type: 'null'}]}
-        project_roles: {type: array, items: {type: object}}
+        project_roles: {type: array, items: {$ref: '#/components/schemas/ProjectRoleGrant'}}
         aliases: {type: array, items: {type: object}}
         classic_role: {type: [string, 'null']}
         last_active_at: {type: [string, 'null'], format: date-time}

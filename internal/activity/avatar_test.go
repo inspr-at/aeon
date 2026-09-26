@@ -4,6 +4,7 @@ package activity
 
 import (
 	"encoding/json"
+	"github.com/inspr-at/aeon/internal/dbtest"
 	"strings"
 	"testing"
 
@@ -17,6 +18,9 @@ func TestAuthorsSayWhetherTheyHaveAPicture(t *testing.T) {
 	pictured := f.p
 	f.tx(func(tx pgx.Tx) error {
 		if err := tx.QueryRow(t.Context(), `INSERT INTO principals(tenant_id,kind,name,roles) VALUES($1,'person','Pictured',ARRAY['member']) RETURNING id::text`, f.p.TenantID).Scan(&pictured.ID); err != nil {
+			return err
+		}
+		if err := dbtest.BindLegacyTx(t.Context(), tx, f.p.TenantID, pictured.ID); err != nil {
 			return err
 		}
 		_, err := tx.Exec(t.Context(), `INSERT INTO personal_profiles(tenant_id,principal_id,avatar_original_hash,avatar_hashes) VALUES($1,$2,$3,$4::jsonb)`,

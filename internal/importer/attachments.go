@@ -55,7 +55,7 @@ func ImportAttachments(ctx context.Context, pool *pgxpool.Pool, store attachment
 			}
 			var nodeID string
 			var exists bool
-			err := db.InTenant(ctx, pool, tenantID, func(tx pgx.Tx) error {
+			err := db.InTenant(db.AllProjects(ctx, "classic importer"), pool, tenantID, func(tx pgx.Tx) error {
 				if err := tx.QueryRow(ctx, `SELECT id::text FROM nodes WHERE tenant_id=$1 AND fields->'classic'->>'source_id'=$2 AND fields->'classic'->>'id'=$3 AND deleted_at IS NULL`, tenantID, snap.SourceID, strconv.FormatInt(issueID, 10)).Scan(&nodeID); err != nil {
 					return err
 				}
@@ -90,7 +90,7 @@ func ImportAttachments(ctx context.Context, pool *pgxpool.Pool, store attachment
 				return created, closeErr
 			}
 			inserted := false
-			err = db.InTenant(ctx, pool, tenantID, func(tx pgx.Tx) error {
+			err = db.InTenant(db.AllProjects(ctx, "classic importer"), pool, tenantID, func(tx pgx.Tx) error {
 				if _, err := tx.Exec(ctx, `SELECT pg_advisory_xact_lock(hashtextextended($1,43))`, tenantID+":"+snap.SourceID+":"+strconv.FormatInt(attachmentID, 10)); err != nil {
 					return err
 				}

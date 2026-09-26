@@ -13,6 +13,7 @@ import (
 
 	"github.com/jackc/pgx/v5"
 
+	"github.com/inspr-at/aeon/internal/authz"
 	"github.com/inspr-at/aeon/internal/tenant"
 )
 
@@ -426,6 +427,11 @@ func (m *Module) moveNode(ctx context.Context, p tenant.Principal, id string, pa
 		if parentID != nil && *parentID == current.ID {
 			return conflict("node cannot parent itself")
 		}
+		if !sameString(parentID, current.ParentID) {
+			if err := requireMoveTarget(ctx, tx, p, current.ID, parentID); err != nil {
+				return err
+			}
+		}
 		if parentID != nil && !sameString(parentID, current.ParentID) {
 			kind, _, err := loadKind(ctx, tx, current.KindID)
 			if err != nil {
@@ -666,4 +672,35 @@ func scanNode(row pgx.Row) (nodeJSON, error) {
 	n.Fields = json.RawMessage(fields)
 	n.Position = trimDecimal(position)
 	return n, nil
+}
+
+// requireMoveTarget: the route was authorized in the node's current project.
+// A move into another project (or out of every project) also needs nodes.move
+// there, so a project binding never carries work into a project where the
+// caller holds less (ADR-003 P2).
+func requireMoveTarget(ctx context.Context, tx pgx.Tx, p tenant.Principal, nodeID string, parentID *string) error {
+	var source, target *string
+	if err := tx.QueryRow(ctx, `SELECT project_id::text FROM nodes WHERE id=$1::uuid`, nodeID).Scan(&source); err != nil {
+		return err
+	}
+	if parentID != nil {
+		err := tx.QueryRow(ctx, `SELECT project_id::text FROM nodes WHERE id=$1::uuid AND deleted_at IS NULL`, *parentID).Scan(&target)
+		if errors.Is(err, pgx.ErrNoRows) {
+			return notFound("parent not found")
+		}
+		if err != nil {
+			return err
+		}
+	}
+	if sameString(source, target) {
+		return nil
+	}
+	scope := authz.Scope{}
+	if target != nil {
+		scope.ProjectID = *target
+	}
+	if authz.RequireTx(ctx, tx, p, "nodes.move", scope) != nil {
+		return &httpError{status: http.StatusForbidden, msg: "permission denied"}
+	}
+	return nil
 }

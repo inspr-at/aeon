@@ -387,6 +387,9 @@ func (m *Module) resolve(ctx context.Context, selector, token string, lock bool,
 	if err != nil || len(decoded) != 32 {
 		return errors.New("capability not found")
 	}
+	// The capability link, not a signed-in visitor, decides access here; it
+	// reads the quote node, which belongs to no project (ADR-003 P2).
+	ctx = db.AllProjects(ctx, "public quote link")
 	var tenantID string
 	err = db.InTenant(ctx, m.pool, zeroTenant, func(tx pgx.Tx) error {
 		if _, err := tx.Exec(ctx, `SELECT set_config('aeon.public_quote_selector', $1, true)`, selector); err != nil {

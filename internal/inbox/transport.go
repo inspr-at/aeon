@@ -99,7 +99,7 @@ func localDeliveryAdapter(name string) bool {
 
 func (m *messaging) claim(ctx context.Context, p tenant.Principal, project string, in claimInput) (*DeliveryWork, error) {
 	var work *DeliveryWork
-	err := db.InTenant(ctx, m.base.pool, p.TenantID, func(tx pgx.Tx) error {
+	err := db.InTenant(tenant.WithPrincipal(ctx, p), m.base.pool, p.TenantID, func(tx pgx.Tx) error {
 		if err := messagingProject(ctx, tx, project); err != nil {
 			return err
 		}
@@ -248,7 +248,7 @@ func (m *messaging) completeDelivery(w http.ResponseWriter, r *http.Request) {
 
 func (m *messaging) complete(ctx context.Context, p tenant.Principal, project string, in completeInput) (MessageDelivery, error) {
 	var out MessageDelivery
-	err := db.InTenant(ctx, m.base.pool, p.TenantID, func(tx pgx.Tx) error {
+	err := db.InTenant(tenant.WithPrincipal(ctx, p), m.base.pool, p.TenantID, func(tx pgx.Tx) error {
 		if err := messagingProject(ctx, tx, project); err != nil {
 			return err
 		}

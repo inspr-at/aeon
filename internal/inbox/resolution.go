@@ -56,7 +56,7 @@ func (m *messaging) resolveMessage(w http.ResponseWriter, r *http.Request) {
 	}
 	var out HeldResolution
 	ctx := r.Context()
-	err := db.InTenant(ctx, m.base.pool, p.TenantID, func(tx pgx.Tx) error {
+	err := db.InTenant(tenant.WithPrincipal(ctx, p), m.base.pool, p.TenantID, func(tx pgx.Tx) error {
 		if err := messagingProject(ctx, tx, project); err != nil {
 			return err
 		}

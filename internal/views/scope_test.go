@@ -32,7 +32,9 @@ func TestProjectViewsRoundTripSoftDeleteAndUndo(t *testing.T) {
 	must(d.Admin.QueryRow(ctx, `INSERT INTO tenants (slug, name) VALUES ('views-scope', 'Scope') RETURNING id::text`).Scan(&tenantID))
 	must(d.Admin.QueryRow(ctx, `INSERT INTO principals (tenant_id, kind, name) VALUES ($1, 'person', 'owner') RETURNING id::text`, tenantID).Scan(&ownerID))
 	must(d.Admin.QueryRow(ctx, `INSERT INTO principals (tenant_id, kind, name) VALUES ($1, 'person', 'other') RETURNING id::text`, tenantID).Scan(&otherID))
-	must(db.InTenant(ctx, d.App, tenantID, func(tx pgx.Tx) error {
+	dbtest.BindRole(t, d, tenantID, ownerID, "member")
+	dbtest.BindRole(t, d, tenantID, otherID, "member")
+	must(db.InTenant(dbtest.Seed(ctx), d.App, tenantID, func(tx pgx.Tx) error {
 		insert := func(slug, key string, parent *string) (id string) {
 			must(tx.QueryRow(ctx, `INSERT INTO nodes (tenant_id, key, kind_id, title, parent_id, position)
 				SELECT $1::uuid, $2, id, $2, $4::uuid, 0 FROM node_kinds WHERE tenant_id = $1::uuid AND slug = $3 RETURNING id::text`, tenantID, key, slug, parent).Scan(&id))

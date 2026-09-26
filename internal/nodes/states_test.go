@@ -3,6 +3,7 @@ package nodes
 
 import (
 	"encoding/json"
+	"github.com/inspr-at/aeon/internal/dbtest"
 	"net/http"
 	"net/http/httptest"
 	"strings"
@@ -56,7 +57,7 @@ func TestPatchPreconditionAtomic(t *testing.T) {
 		t.Fatalf("competing patches: %v", counts)
 	}
 	var changes int
-	if err := db.InTenant(t.Context(), appPool, p.TenantID, func(tx pgx.Tx) error {
+	if err := db.InTenant(dbtest.Seed(t.Context()), appPool, p.TenantID, func(tx pgx.Tx) error {
 		return tx.QueryRow(t.Context(), `SELECT count(*) FROM events WHERE tenant_id=$1 AND node_id=$2 AND type='node.updated'`, p.TenantID, n.ID).Scan(&changes)
 	}); err != nil {
 		t.Fatal(err)
@@ -81,7 +82,7 @@ func TestClassicAssigneeProjectionAndFacets(t *testing.T) {
 	p := newPrincipal(t, "assignee-fallback")
 	k := kindBySlug(t, p, "ticket")
 	var mapped string
-	if err := db.InTenant(t.Context(), appPool, p.TenantID, func(tx pgx.Tx) error {
+	if err := db.InTenant(dbtest.Seed(t.Context()), appPool, p.TenantID, func(tx pgx.Tx) error {
 		var identity string
 		if err := tx.QueryRow(t.Context(), `INSERT INTO identities(issuer,subject,display_name) VALUES('paimos-classic','source:7','Markus Barta') RETURNING id::text`).Scan(&identity); err != nil {
 			return err

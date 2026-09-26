@@ -25,7 +25,7 @@ func BackfillRelations(ctx context.Context, pool *pgxpool.Pool, tenantID string)
 	if tenantID == "" {
 		return report, errors.New("tenant id is required")
 	}
-	err := db.InTenant(ctx, pool, tenantID, func(tx pgx.Tx) error {
+	err := db.InTenant(db.AllProjects(ctx, "classic importer"), pool, tenantID, func(tx pgx.Tx) error {
 		if _, err := tx.Exec(ctx, `SELECT pg_advisory_xact_lock(hashtextextended($1,42))`, tenantID+":relation-backfill"); err != nil {
 			return err
 		}

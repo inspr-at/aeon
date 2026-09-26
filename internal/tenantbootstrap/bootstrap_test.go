@@ -31,7 +31,7 @@ func TestCreateBindAndTenantIsolation(t *testing.T) {
 			t.Fatalf("resolve %s: %s %v", slug, got, err)
 		}
 		var kinds, created int
-		if err := db.InTenant(ctx, d.App, id, func(tx pgx.Tx) error {
+		if err := db.InTenant(dbtest.Seed(ctx), d.App, id, func(tx pgx.Tx) error {
 			if err := tx.QueryRow(ctx, `SELECT count(*) FROM node_kinds`).Scan(&kinds); err != nil {
 				return err
 			}
@@ -58,7 +58,7 @@ func TestCreateBindAndTenantIsolation(t *testing.T) {
 		t.Fatalf("replay: %s %v", again, err)
 	}
 	var bound int
-	if err := db.InTenant(ctx, d.App, b, func(tx pgx.Tx) error {
+	if err := db.InTenant(dbtest.Seed(ctx), d.App, b, func(tx pgx.Tx) error {
 		return tx.QueryRow(ctx, `SELECT count(*) FROM events WHERE type='tenant.principal_bound'`).Scan(&bound)
 	}); err != nil {
 		t.Fatal(err)
@@ -70,7 +70,7 @@ func TestCreateBindAndTenantIsolation(t *testing.T) {
 		t.Fatal(err)
 	}
 	var actor string
-	if err := db.InTenant(ctx, d.App, b, func(tx pgx.Tx) error {
+	if err := db.InTenant(dbtest.Seed(ctx), d.App, b, func(tx pgx.Tx) error {
 		return tx.QueryRow(ctx, `SELECT actor_principal_id::text FROM events
 			WHERE type='tenant.principal_bound' ORDER BY id DESC LIMIT 1`).Scan(&actor)
 	}); err != nil {

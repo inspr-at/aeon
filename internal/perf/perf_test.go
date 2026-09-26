@@ -51,7 +51,7 @@ func TestLocalEndpointsAtScale(t *testing.T) {
 	}
 	reg.Seal()
 	var principal, agent, project, ticket string
-	err := db.InTenant(ctx, d.App, tid, func(tx pgx.Tx) error {
+	err := db.InTenant(dbtest.Seed(ctx), d.App, tid, func(tx pgx.Tx) error {
 		if _, err := tx.Exec(ctx, `INSERT INTO tenants(id,slug,name) VALUES($1,'perf1','Performance')`, tid); err != nil {
 			return err
 		}
@@ -137,7 +137,7 @@ func TestLocalEndpointsAtScale(t *testing.T) {
 	}
 	for _, table := range []string{"nodes", "attachments", "events"} {
 		var n int
-		if err := db.InTenant(ctx, d.App, tid, func(tx pgx.Tx) error { return tx.QueryRow(ctx, "SELECT count(*) FROM "+table).Scan(&n) }); err != nil {
+		if err := db.InTenant(dbtest.Seed(ctx), d.App, tid, func(tx pgx.Tx) error { return tx.QueryRow(ctx, "SELECT count(*) FROM "+table).Scan(&n) }); err != nil {
 			t.Fatal(err)
 		}
 		t.Logf("fixture %s=%d", table, n)
@@ -204,7 +204,7 @@ func call(t *testing.T, mux *http.ServeMux, p tenant.Principal, path string) {
 
 func explain(t *testing.T, ctx context.Context, d *dbtest.DB, tid, name, query string, args ...any) {
 	t.Helper()
-	err := db.InTenant(ctx, d.App, tid, func(tx pgx.Tx) error {
+	err := db.InTenant(dbtest.Seed(ctx), d.App, tid, func(tx pgx.Tx) error {
 		rows, err := tx.Query(ctx, "EXPLAIN (ANALYZE, BUFFERS) "+query, args...)
 		if err != nil {
 			return err

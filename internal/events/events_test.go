@@ -32,7 +32,7 @@ func fixture(t *testing.T) (*dbtest.DB, tenant.Principal, tenant.Principal) {
 		if err := d.Admin.QueryRow(t.Context(), `INSERT INTO tenants(slug,name) VALUES($1,'Test') RETURNING id::text`, fmt.Sprintf("event%d", i)).Scan(&p.TenantID); err != nil {
 			t.Fatal(err)
 		}
-		if err := db.InTenant(t.Context(), d.App, p.TenantID, func(tx pgx.Tx) error {
+		if err := db.InTenant(dbtest.Seed(t.Context()), d.App, p.TenantID, func(tx pgx.Tx) error {
 			return tx.QueryRow(t.Context(), `INSERT INTO principals(tenant_id,kind,name) VALUES($1,'agent','Writer') RETURNING id::text`, p.TenantID).Scan(&p.ID)
 		}); err != nil {
 			t.Fatal(err)
@@ -44,7 +44,7 @@ func fixture(t *testing.T) (*dbtest.DB, tenant.Principal, tenant.Principal) {
 func appendEvents(t *testing.T, d *dbtest.DB, p tenant.Principal, n int) []Event {
 	t.Helper()
 	result := make([]Event, 0, n)
-	err := db.InTenant(t.Context(), d.App, p.TenantID, func(tx pgx.Tx) error {
+	err := db.InTenant(dbtest.Seed(t.Context()), d.App, p.TenantID, func(tx pgx.Tx) error {
 		for i := range n {
 			e, err := (Writer{}).Append(t.Context(), tx, p, Change{Type: "test.changed", After: map[string]any{"title": fmt.Sprintf("Snapshot %d\nsecond line", i)}})
 			if err != nil {
@@ -63,7 +63,7 @@ func appendEvents(t *testing.T, d *dbtest.DB, p tenant.Principal, n int) []Event
 func TestWriterAtomicityIsolationAndAppendOnly(t *testing.T) {
 	d, a, b := fixture(t)
 	sentinel := errors.New("rollback")
-	err := db.InTenant(t.Context(), d.App, a.TenantID, func(tx pgx.Tx) error {
+	err := db.InTenant(dbtest.Seed(t.Context()), d.App, a.TenantID, func(tx pgx.Tx) error {
 		if _, err := Append(t.Context(), tx, a, Change{Type: "test.changed", Before: map[string]string{"value": "before"}, After: map[string]string{"value": "after"}}); err != nil {
 			return err
 		}
@@ -80,7 +80,7 @@ func TestWriterAtomicityIsolationAndAppendOnly(t *testing.T) {
 	if foreign.ID != 1 {
 		t.Fatal("IDs are not tenant-local")
 	}
-	err = db.InTenant(t.Context(), d.App, a.TenantID, func(tx pgx.Tx) error {
+	err = db.InTenant(dbtest.Seed(t.Context()), d.App, a.TenantID, func(tx pgx.Tx) error {
 		var n int
 		if err := tx.QueryRow(t.Context(), `SELECT count(*) FROM events`).Scan(&n); err != nil {
 			return err
@@ -107,7 +107,7 @@ func TestWriterAtomicityIsolationAndAppendOnly(t *testing.T) {
 			t.Fatal("append-only trigger permitted privileged mutation")
 		}
 	}
-	err = db.InTenant(t.Context(), d.App, a.TenantID, func(tx pgx.Tx) error {
+	err = db.InTenant(dbtest.Seed(t.Context()), d.App, a.TenantID, func(tx pgx.Tx) error {
 		_, err := Append(t.Context(), tx, b, Change{Type: "test.changed", After: map[string]string{"x": "x"}})
 		return err
 	})
@@ -115,7 +115,7 @@ func TestWriterAtomicityIsolationAndAppendOnly(t *testing.T) {
 		t.Fatal("cross-tenant event inserted")
 	}
 	for _, change := range []Change{{Type: "test.changed"}, {Type: "test.changed", Before: json.RawMessage("null")}, {Type: "test.changed", After: make(chan int)}, {Type: "bad\ninjection", After: map[string]string{"x": "x"}}} {
-		err = db.InTenant(t.Context(), d.App, a.TenantID, func(tx pgx.Tx) error { _, err := Append(t.Context(), tx, a, change); return err })
+		err = db.InTenant(dbtest.Seed(t.Context()), d.App, a.TenantID, func(tx pgx.Tx) error { _, err := Append(t.Context(), tx, a, change); return err })
 		if err == nil {
 			t.Fatalf("invalid change accepted %+v", change)
 		}
@@ -149,7 +149,7 @@ func TestCounterWaitsForCommitAndNotificationContainsOnlyHint(t *testing.T) {
 	}()
 	firstDone := make(chan error, 1)
 	go func() {
-		firstDone <- db.InTenant(ctx, d.App, a.TenantID, func(tx pgx.Tx) error {
+		firstDone <- db.InTenant(dbtest.Seed(ctx), d.App, a.TenantID, func(tx pgx.Tx) error {
 			e, err := Append(ctx, tx, a, Change{Type: "test.changed", After: map[string]string{"sensitive_content": "snapshot"}})
 			if err != nil {
 				return err
@@ -175,7 +175,7 @@ func TestCounterWaitsForCommitAndNotificationContainsOnlyHint(t *testing.T) {
 	}
 	secondDone := make(chan error, 1)
 	go func() {
-		secondDone <- db.InTenant(ctx, d.App, a.TenantID, func(tx pgx.Tx) error {
+		secondDone <- db.InTenant(dbtest.Seed(ctx), d.App, a.TenantID, func(tx pgx.Tx) error {
 			_, err := Append(ctx, tx, a, Change{Type: "test.changed", After: map[string]string{"x": "second"}})
 			return err
 		})
@@ -380,7 +380,7 @@ func TestUndoAdapterRollbackAndUnknownType(t *testing.T) {
 			t.Fatalf("unexpected undo %d %s", w.Code, w.Body.String())
 		}
 	}
-	if err := db.InTenant(t.Context(), d.App, a.TenantID, func(tx pgx.Tx) error {
+	if err := db.InTenant(dbtest.Seed(t.Context()), d.App, a.TenantID, func(tx pgx.Tx) error {
 		var name string
 		if err := tx.QueryRow(t.Context(), `SELECT name FROM principals WHERE id=$1`, a.ID).Scan(&name); err != nil {
 			return err

@@ -3,6 +3,7 @@
 package nodes
 
 import (
+	"github.com/inspr-at/aeon/internal/dbtest"
 	"net/http"
 	"strings"
 	"testing"
@@ -21,7 +22,7 @@ func TestPeopleSayWhetherTheyHaveAPicture(t *testing.T) {
 	main := mustNode(t, p, `{"kind_id":"`+project.ID+`","title":"Main"}`)
 	ctx := t.Context()
 	ids := map[string]string{}
-	err := db.InTenant(ctx, appPool, p.TenantID, func(tx pgx.Tx) error {
+	err := db.InTenant(dbtest.Seed(ctx), appPool, p.TenantID, func(tx pgx.Tx) error {
 		for _, name := range []string{"Mira", "Ann"} {
 			var id string
 			if err := tx.QueryRow(ctx, `INSERT INTO principals (tenant_id, kind, name) VALUES ($1, 'person', $2) RETURNING id::text`, p.TenantID, name).Scan(&id); err != nil {

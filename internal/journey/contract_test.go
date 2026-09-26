@@ -30,7 +30,7 @@ func TestJourneyKindIsLazyAndProjectionIsTenantScoped(t *testing.T) {
 		t.Fatalf("requirement kind seeded before journey initialization: %d", before)
 	}
 
-	err := db.InTenant(ctx, fresh.App, tenantA, func(tx pgx.Tx) error {
+	err := db.InTenant(dbtest.Seed(ctx), fresh.App, tenantA, func(tx pgx.Tx) error {
 		if _, err := tx.Exec(ctx, `SELECT aeon_seed_requirement_kind($1::uuid)`, tenantA); err != nil {
 			return err
 		}
@@ -62,7 +62,7 @@ func TestJourneyKindIsLazyAndProjectionIsTenantScoped(t *testing.T) {
 		tenant string
 		want   int
 	}{{tenantA, 1}, {tenantB, 0}} {
-		err := db.InTenant(ctx, fresh.App, tc.tenant, func(tx pgx.Tx) error {
+		err := db.InTenant(dbtest.Seed(ctx), fresh.App, tc.tenant, func(tx pgx.Tx) error {
 			var got int
 			if err := tx.QueryRow(ctx, `SELECT count(*) FROM journey_projects`).Scan(&got); err != nil {
 				return err

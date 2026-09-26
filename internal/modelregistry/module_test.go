@@ -87,7 +87,7 @@ func addPrincipal(t *testing.T, tenantID, kind, name string, roles []string) ten
 		roles = []string{}
 	}
 	var id string
-	err := db.InTenant(t.Context(), appPool, tenantID, func(tx pgx.Tx) error {
+	err := db.InTenant(dbtest.Seed(t.Context()), appPool, tenantID, func(tx pgx.Tx) error {
 		return tx.QueryRow(t.Context(), `
 			INSERT INTO principals (tenant_id, kind, name, roles)
 			VALUES ($1::uuid, $2, $3, $4) RETURNING id::text`, tenantID, kind, name, roles).Scan(&id)
@@ -137,7 +137,7 @@ func decode[T any](t *testing.T, p *tenant.Principal, method, path, body string,
 func eventCount(t *testing.T, p tenant.Principal, eventType string) int {
 	t.Helper()
 	var n int
-	err := db.InTenant(t.Context(), appPool, p.TenantID, func(tx pgx.Tx) error {
+	err := db.InTenant(dbtest.Seed(t.Context()), appPool, p.TenantID, func(tx pgx.Tx) error {
 		return tx.QueryRow(t.Context(), `SELECT count(*) FROM events WHERE type = $1`, eventType).Scan(&n)
 	})
 	if err != nil {
@@ -246,7 +246,7 @@ func TestRouteSuppressionAccountSkipsAndExpiry(t *testing.T) {
 	if scout.Profile == nil || scout.Profile.ID != haiku.ID || !strings.Contains(scout.Ladder[0].SkipReasons[0], "conserved until") {
 		t.Fatalf("suppressed %+v", scout)
 	}
-	err := db.InTenant(t.Context(), appPool, admin.TenantID, func(tx pgx.Tx) error {
+	err := db.InTenant(dbtest.Seed(t.Context()), appPool, admin.TenantID, func(tx pgx.Tx) error {
 		_, err := tx.Exec(t.Context(), `UPDATE model_role_routes SET valid_until = now() - interval '1 minute' WHERE state = 'conserved'`)
 		return err
 	})
@@ -258,7 +258,7 @@ func TestRouteSuppressionAccountSkipsAndExpiry(t *testing.T) {
 		t.Fatalf("expired suppression still skipped: %+v", scout)
 	}
 
-	err = db.InTenant(t.Context(), appPool, admin.TenantID, func(tx pgx.Tx) error {
+	err = db.InTenant(dbtest.Seed(t.Context()), appPool, admin.TenantID, func(tx pgx.Tx) error {
 		_, err := tx.Exec(t.Context(), `
 			INSERT INTO agent_accounts
 				(tenant_id, account_key, harness, daemon_id, registered_by_principal_id, label, state,
@@ -274,7 +274,7 @@ func TestRouteSuppressionAccountSkipsAndExpiry(t *testing.T) {
 	if scout.Profile == nil || scout.Profile.ID != haiku.ID || scout.Ladder[0].SkipReasons[0] != "account availability" {
 		t.Fatalf("stale probe %+v", scout)
 	}
-	err = db.InTenant(t.Context(), appPool, admin.TenantID, func(tx pgx.Tx) error {
+	err = db.InTenant(dbtest.Seed(t.Context()), appPool, admin.TenantID, func(tx pgx.Tx) error {
 		_, err := tx.Exec(t.Context(), `
 			UPDATE agent_accounts SET last_probe_at = now() WHERE account_key = 'local-codex'`)
 		if err != nil {

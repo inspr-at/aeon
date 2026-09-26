@@ -193,7 +193,7 @@ func (m *module) authorizeSend(ctx context.Context, r *http.Request, p tenant.Pr
 	sum := sha256.Sum256([]byte(secret))
 	hash := hex.EncodeToString(sum[:])
 	var scopes []string
-	err := db.InTenant(ctx, m.pool, p.TenantID, func(tx pgx.Tx) error {
+	err := db.InTenant(tenant.WithPrincipal(ctx, p), m.pool, p.TenantID, func(tx pgx.Tx) error {
 		return tx.QueryRow(ctx, `
 			SELECT scopes FROM agent_keys
 			WHERE prefix = $1 AND hash = $2 AND principal_id = $3::uuid

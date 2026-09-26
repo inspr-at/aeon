@@ -207,7 +207,7 @@ func (m *module) handleUndo(w http.ResponseWriter, r *http.Request) {
 		if err != nil {
 			return err
 		}
-		if e.ActorPrincipalID != p.ID && authz.RequireTx(r.Context(), tx, p, "events.undo_other", authz.Scope{}) != nil {
+		if e.ActorPrincipalID != p.ID && authz.RequireTx(r.Context(), tx, p, "events.undo_other", authz.RouteScope(r.Context())) != nil {
 			return ErrForbidden
 		}
 		fn := m.undo[e.Type]

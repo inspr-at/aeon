@@ -160,6 +160,9 @@ func (m *Module) projectMove(ctx context.Context, p tenant.Principal, id, projec
 		if err := ensureParentAllows(ctx, tx, projectID, kind); err != nil {
 			return err
 		}
+		if err := requireMoveTarget(ctx, tx, p, id, &projectID); err != nil {
+			return err
+		}
 		var sourceProject string
 		err = tx.QueryRow(ctx, `WITH RECURSIVE ancestors AS (
 		 SELECT n.id,n.parent_id,n.kind_id FROM nodes n WHERE n.id=$1::uuid

@@ -32,7 +32,7 @@ func setup(t *testing.T) *fixture {
 }
 func (f *fixture) tx(fn func(pgx.Tx) error) {
 	f.t.Helper()
-	if err := db.InTenant(f.t.Context(), f.d.App, f.tid, fn); err != nil {
+	if err := db.InTenant(dbtest.Seed(f.t.Context()), f.d.App, f.tid, fn); err != nil {
 		f.t.Fatal(err)
 	}
 }
@@ -126,7 +126,7 @@ func TestInvalidLinksAndDatabaseConstraints(t *testing.T) {
 		t.Fatal(err)
 	}
 	var outside, agent string
-	if err := db.InTenant(t.Context(), f.d.App, foreign, func(tx pgx.Tx) error {
+	if err := db.InTenant(dbtest.Seed(t.Context()), f.d.App, foreign, func(tx pgx.Tx) error {
 		return tx.QueryRow(t.Context(), `INSERT INTO principals(tenant_id,kind,name) VALUES($1,'person','foreign') RETURNING id::text`, foreign).Scan(&outside)
 	}); err != nil {
 		t.Fatal(err)
@@ -162,7 +162,7 @@ func TestInvalidLinksAndDatabaseConstraints(t *testing.T) {
 		{`UPDATE principals SET linked_to=$2 WHERE id=$1`, []any{agent, c}},
 		{`UPDATE principals SET kind='agent' WHERE id=$1`, []any{b}},
 	} {
-		if err := db.InTenant(t.Context(), f.d.App, f.tid, func(tx pgx.Tx) error { _, err := tx.Exec(t.Context(), q.sql, q.args...); return err }); err == nil {
+		if err := db.InTenant(dbtest.Seed(t.Context()), f.d.App, f.tid, func(tx pgx.Tx) error { _, err := tx.Exec(t.Context(), q.sql, q.args...); return err }); err == nil {
 			t.Fatal("database accepted invalid topology")
 		}
 	}
@@ -178,7 +178,7 @@ func TestAtomicRollbackAndConcurrentLinks(t *testing.T) {
 	b := f.person("b", "", "")
 	c := f.person("c", "", "")
 	// Force event insertion failure after the link update; the update must roll back.
-	if err := db.InTenant(t.Context(), f.d.Admin, f.tid, func(tx pgx.Tx) error {
+	if err := db.InTenant(dbtest.Seed(t.Context()), f.d.Admin, f.tid, func(tx pgx.Tx) error {
 		_, err := tx.Exec(t.Context(), `CREATE FUNCTION reject_link_event() RETURNS trigger LANGUAGE plpgsql AS $$ BEGIN IF NEW.type='principal.linked' THEN RAISE EXCEPTION 'test failure'; END IF; RETURN NEW; END $$; CREATE TRIGGER reject_link_event BEFORE INSERT ON events FOR EACH ROW EXECUTE FUNCTION reject_link_event()`)
 		return err
 	}); err != nil {

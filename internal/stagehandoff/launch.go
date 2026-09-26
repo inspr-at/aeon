@@ -56,7 +56,7 @@ func (m *Module) AdmitLaunch(ctx context.Context, p tenant.Principal, authorizat
 	if !uuidRE.MatchString(handoffID) || !hexRE.MatchString(a.DigestSHA256) || !hexRE.MatchString(a.ManifestDigestSHA256) || a.VersionScheme == "" || a.Version == "" || a.ReleaseChannel == "" || a.ReleaseSequence < 1 || a.CommitDigest == "" || a.ManifestCoordinate == "" {
 		return out, fail(400, "invalid launch artifact")
 	}
-	err := db.InTenant(ctx, m.pool, p.TenantID, func(tx pgx.Tx) error {
+	err := db.InTenant(tenant.WithPrincipal(ctx, p), m.pool, p.TenantID, func(tx pgx.Tx) error {
 		h, err := loadHandoff(ctx, tx, handoffID, true)
 		if err != nil {
 			return err
@@ -131,7 +131,7 @@ func (m *Module) ConsumeLaunch(ctx context.Context, p tenant.Principal, authoriz
 	if !uuidRE.MatchString(admissionID) {
 		return fail(404, "admission not found")
 	}
-	return db.InTenant(ctx, m.pool, p.TenantID, func(tx pgx.Tx) error {
+	return db.InTenant(tenant.WithPrincipal(ctx, p), m.pool, p.TenantID, func(tx pgx.Tx) error {
 		var id string
 		err := tx.QueryRow(ctx, `SELECT handoff_id::text FROM stage_launch_admissions WHERE id=$1::uuid`, admissionID).Scan(&id)
 		if errors.Is(err, pgx.ErrNoRows) {

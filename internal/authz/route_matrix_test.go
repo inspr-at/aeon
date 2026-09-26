@@ -15,7 +15,7 @@ func TestEffectiveRouteMatrix(t *testing.T) {
 	d := dbtest.Open(t)
 	ctx := t.Context()
 	var tid string
-	if err := db.InTenant(ctx, d.App, "00000000-0000-0000-0000-000000000000", func(tx pgx.Tx) error {
+	if err := db.InTenant(dbtest.Seed(ctx), d.App, "00000000-0000-0000-0000-000000000000", func(tx pgx.Tx) error {
 		return tx.QueryRow(ctx, `INSERT INTO tenants(slug,name) VALUES('az1-matrix','AZ1 matrix') RETURNING id::text`).Scan(&tid)
 	}); err != nil {
 		t.Fatal(err)
@@ -34,12 +34,28 @@ func TestEffectiveRouteMatrix(t *testing.T) {
 		}
 		people[role] = p
 	}
+	// Guest is a project role (ADR-003 P2): external people get no workspace
+	// binding, only project bindings.
+	var projectID string
+	if err := db.InTenant(dbtest.Seed(ctx), d.App, tid, func(tx pgx.Tx) error {
+		if err := tx.QueryRow(ctx, `INSERT INTO nodes(tenant_id,kind_id,key,title) SELECT $1::uuid,id,'MAT-1','Matrix' FROM node_kinds WHERE tenant_id=$1::uuid AND slug='project' RETURNING id::text`, tid).Scan(&projectID); err != nil {
+			return err
+		}
+		_, err := tx.Exec(ctx, `INSERT INTO role_bindings(tenant_id,principal_id,role_id,scope_type,scope_id) SELECT $1::uuid,$2::uuid,id,'project',$3::uuid FROM roles WHERE tenant_id=$1::uuid AND key='guest'`, tid, people["guest"].ID, projectID)
+		return err
+	}); err != nil {
+		t.Fatal(err)
+	}
+	checkIn := func(name string, p tenant.Principal, pattern string, scope Scope, want bool) {
+		t.Helper()
+		err := RequirePattern(BindPool(tenant.WithPrincipal(ctx, p), d.App), pattern, scope)
+		if (err == nil) != want {
+			t.Errorf("%s %s %+v: got %v, want allowed=%v", name, pattern, scope, err, want)
+		}
+	}
 	check := func(name string, p tenant.Principal, pattern string, want bool) {
 		t.Helper()
-		err := RequirePattern(BindPool(tenant.WithPrincipal(ctx, p), d.App), pattern, Scope{})
-		if (err == nil) != want {
-			t.Errorf("%s %s: got %v, want allowed=%v", name, pattern, err, want)
-		}
+		checkIn(name, p, pattern, Scope{}, want)
 	}
 	for _, tc := range []struct {
 		role, route string
@@ -50,7 +66,7 @@ func TestEffectiveRouteMatrix(t *testing.T) {
 		{"member", "POST /api/nodes", true}, {"member", "POST /api/kinds", false},
 		{"member", "POST /api/roles", false}, {"member", "POST /api/approvals/{approvalId}/decision", true},
 		{"viewer", "GET /api/nodes", true}, {"viewer", "POST /api/nodes", false},
-		{"guest", "GET /api/nodes", true}, {"guest", "POST /api/nodes/{nodeId}/comments", true},
+		{"guest", "GET /api/nodes", false}, {"guest", "POST /api/nodes/{nodeId}/comments", false},
 		{"guest", "GET /api/agent-keys", false},
 		{"customer", "GET /api/quotes/{quoteId}/versions/{version}", true},
 		{"customer", "POST /api/quotes/{quoteId}/versions/{version}/accept", true},
@@ -59,9 +75,18 @@ func TestEffectiveRouteMatrix(t *testing.T) {
 	} {
 		check(tc.role, people[tc.role], tc.route, tc.allow)
 	}
+	guest := people["guest"]
+	checkIn("guest", guest, "GET /api/nodes", Scope{AnyProject: true}, true)
+	checkIn("guest", guest, "GET /api/me", Scope{AnyProject: true}, true)
+	checkIn("guest", guest, "GET /api/me/permissions", Scope{AnyProject: true}, true)
+	checkIn("guest", guest, "POST /api/nodes/{nodeId}/comments", Scope{ProjectID: projectID}, true)
+	checkIn("guest", guest, "PATCH /api/nodes/{nodeId}", Scope{ProjectID: projectID}, false)
+	checkIn("guest", guest, "GET /api/members", Scope{AnyProject: true}, false)
+	checkIn("guest", guest, "POST /api/nodes/{nodeId}/comments", Scope{ProjectID: "aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa"}, false)
+	checkIn("customer", people["customer"], "GET /api/nodes", Scope{AnyProject: true}, false)
 	var agent tenant.Principal
 	agent.TenantID, agent.Kind = tid, tenant.Agent
-	if err := db.InTenant(ctx, d.App, tid, func(tx pgx.Tx) error {
+	if err := db.InTenant(dbtest.Seed(ctx), d.App, tid, func(tx pgx.Tx) error {
 		if err := tx.QueryRow(ctx, `INSERT INTO principals(tenant_id,kind,name) VALUES($1::uuid,'agent','Matrix agent') RETURNING id::text`, tid).Scan(&agent.ID); err != nil {
 			return err
 		}
@@ -84,7 +109,7 @@ func TestEffectiveRouteMatrix(t *testing.T) {
 	check("agent read scope", agent, "POST /api/nodes", false)
 	agent.Scopes = []string{"nodes.read", "nodes.write"}
 	check("agent write scope", agent, "POST /api/nodes", true)
-	if err := db.InTenant(ctx, d.App, tid, func(tx pgx.Tx) error {
+	if err := db.InTenant(dbtest.Seed(ctx), d.App, tid, func(tx pgx.Tx) error {
 		_, err := tx.Exec(ctx, `UPDATE role_bindings SET role_id=(SELECT id FROM roles WHERE tenant_id=$1::uuid AND key='viewer') WHERE principal_id=$2::uuid AND scope_type='workspace'`, tid, people["admin"].ID)
 		return err
 	}); err != nil {
