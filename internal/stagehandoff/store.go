@@ -29,6 +29,10 @@ func loadHandoff(ctx context.Context, tx pgx.Tx, id string, lock bool) (Handoff,
 	if err != nil {
 		return h, err
 	}
+	err = tx.QueryRow(ctx, `SELECT id::text FROM stage_handoffs WHERE release_node_id=$1::uuid AND stage=$2 AND operation=$3 AND attempt>$4 ORDER BY attempt DESC LIMIT 1`, h.ReleaseNodeID, h.Stage, h.Operation, h.Attempt).Scan(&h.SupersededBy)
+	if err != nil && !errors.Is(err, pgx.ErrNoRows) {
+		return h, err
+	}
 	var result Result
 	err = tx.QueryRow(ctx, `SELECT outcome,terminal_sequence,authority_epoch,prerequisite_seal_sha256,blocker_code,completed_at FROM stage_handoff_results WHERE handoff_id=$1::uuid`, id).Scan(&result.Outcome, &result.TerminalSequence, &result.AuthorityEpoch, &result.PrerequisiteSealSHA256, &result.BlockerCode, &result.CompletedAt)
 	if err == nil {
@@ -244,6 +248,9 @@ func current(ctx context.Context, tx pgx.Tx, h Handoff) (bool, error) {
 	var releaseRevision int64
 	var accessRequired bool
 	err := tx.QueryRow(ctx, `SELECT j.revision,r.revision,r.access_required FROM journey_projects j JOIN journey_releases r ON r.tenant_id=j.tenant_id AND r.project_node_id=j.project_node_id WHERE j.project_node_id=$1::uuid AND r.release_node_id=$2::uuid AND j.current_release_node_id=r.release_node_id FOR UPDATE OF j,r`, h.ProjectNodeID, h.ReleaseNodeID).Scan(&revision, &releaseRevision, &accessRequired)
+	if errors.Is(err, pgx.ErrNoRows) {
+		return false, nil
+	}
 	if err != nil {
 		return false, err
 	}
@@ -278,6 +285,15 @@ func current(ctx context.Context, tx pgx.Tx, h Handoff) (bool, error) {
 	}
 	contextDigest := digest(h.ProjectNodeID, h.ReleaseNodeID, h.Stage, h.Operation, fmt.Sprint(revision), fmt.Sprint(releaseRevision), plan, seal)
 	return contextDigest == h.ContextDigest, nil
+}
+
+// authorityOpen describes whether this attempt can accept another action now.
+// It is a projection, never a grant to the caller or a substitute for write checks.
+func authorityOpen(ctx context.Context, tx pgx.Tx, h Handoff) (bool, error) {
+	if h.SupersededBy != nil || h.Result != nil || closedHandoff(h.State) {
+		return false, nil
+	}
+	return current(ctx, tx, h)
 }
 func agentAllowed(ctx context.Context, tx pgx.Tx, p tenant.Principal, authorization string, h Handoff) (bool, error) {
 	if p.Kind != tenant.Agent {

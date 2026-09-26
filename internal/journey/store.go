@@ -60,7 +60,14 @@ type handoffRow struct {
 	State     string
 	Result    string
 	Attempt   int
+	Epoch     int64
 	At        time.Time
+}
+
+type handoffIdentity struct {
+	ID      string
+	Attempt int
+	Epoch   int64
 }
 
 type nodeSnap struct {
@@ -624,7 +631,7 @@ func loadHandoffs(ctx context.Context, tx pgx.Tx, f *facts) error {
 		return err
 	}
 	rows, err := tx.Query(ctx, `
-		SELECT h.id::text, h.stage, h.operation, h.state, coalesce(r.outcome, ''), h.attempt, h.created_at
+		SELECT h.id::text, h.stage, h.operation, h.state, coalesce(r.outcome, ''), h.attempt, h.authority_epoch, h.created_at
 		FROM stage_handoffs h
 		LEFT JOIN stage_handoff_results r
 		  ON r.tenant_id = h.tenant_id AND r.handoff_id = h.id
@@ -636,7 +643,7 @@ func loadHandoffs(ctx context.Context, tx pgx.Tx, f *facts) error {
 	var all []handoffRow
 	for rows.Next() {
 		var row handoffRow
-		if err := rows.Scan(&row.ID, &row.Stage, &row.Operation, &row.State, &row.Result, &row.Attempt, &row.At); err != nil {
+		if err := rows.Scan(&row.ID, &row.Stage, &row.Operation, &row.State, &row.Result, &row.Attempt, &row.Epoch, &row.At); err != nil {
 			return err
 		}
 		all = append(all, row)
@@ -651,11 +658,11 @@ func loadHandoffs(ctx context.Context, tx pgx.Tx, f *facts) error {
 	if accessWindow != nil {
 		accessAt = *accessWindow
 	}
-	f.DeployHandoffID, f.AccessHandoffID, f.DeployOutcome, f.VerifyOutcome, f.AccessOutcome = foldHandoffs(all, deployAt, accessAt)
+	f.DeployHandoff, f.AccessHandoff, f.DeployOutcome, f.VerifyOutcome, f.AccessOutcome = foldHandoffs(all, deployAt, accessAt)
 	return nil
 }
 
-func foldHandoffs(rows []handoffRow, deployWindow, accessWindow time.Time) (deployID, accessID, deployOutcome, verifyOutcome, accessOutcome string) {
+func foldHandoffs(rows []handoffRow, deployWindow, accessWindow time.Time) (deploy, access handoffIdentity, deployOutcome, verifyOutcome, accessOutcome string) {
 	type best struct {
 		row     handoffRow
 		present bool
@@ -663,7 +670,7 @@ func foldHandoffs(rows []handoffRow, deployWindow, accessWindow time.Time) (depl
 	latest := map[string]handoffRow{}
 	ops := map[string]best{}
 	for _, row := range rows {
-		if prev, ok := latest[row.Stage]; !ok || row.At.After(prev.At) {
+		if prev, ok := latest[row.Stage]; !ok || row.At.After(prev.At) || (row.At.Equal(prev.At) && row.ID > prev.ID) {
 			latest[row.Stage] = row
 		}
 		window := deployWindow
@@ -680,10 +687,10 @@ func foldHandoffs(rows []handoffRow, deployWindow, accessWindow time.Time) (depl
 		}
 	}
 	if row, ok := latest["deploy"]; ok {
-		deployID = row.ID
+		deploy = handoffIdentity{ID: row.ID, Attempt: row.Attempt, Epoch: row.Epoch}
 	}
 	if row, ok := latest["access"]; ok {
-		accessID = row.ID
+		access = handoffIdentity{ID: row.ID, Attempt: row.Attempt, Epoch: row.Epoch}
 	}
 	if row, ok := ops["deploy\x00deploy"]; ok {
 		deployOutcome = terminalOutcome(row.row)
@@ -694,7 +701,7 @@ func foldHandoffs(rows []handoffRow, deployWindow, accessWindow time.Time) (depl
 	if row, ok := ops["access\x00apply"]; ok {
 		accessOutcome = terminalOutcome(row.row)
 	}
-	return deployID, accessID, deployOutcome, verifyOutcome, accessOutcome
+	return deploy, access, deployOutcome, verifyOutcome, accessOutcome
 }
 
 func terminalOutcome(row handoffRow) string {

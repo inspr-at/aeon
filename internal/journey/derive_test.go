@@ -240,21 +240,38 @@ func TestDeriveStagesAndNextAction(t *testing.T) {
 
 func TestFoldHandoffsUsesTheAttemptWindow(t *testing.T) {
 	rows := []handoffRow{
-		{ID: "old-verify", Stage: "deploy", Operation: "verify", State: "failed", Result: "failed", Attempt: 1, At: unix(10)},
-		{ID: "deploy", Stage: "deploy", Operation: "deploy", State: "succeeded", Result: "succeeded", Attempt: 1, At: unix(30)},
-		{ID: "verify", Stage: "deploy", Operation: "verify", State: "succeeded", Result: "succeeded", Attempt: 2, At: unix(31)},
-		{ID: "apply", Stage: "access", Operation: "apply", State: "succeeded", Result: "succeeded", Attempt: 1, At: unix(40)},
+		{ID: "old-verify", Stage: "deploy", Operation: "verify", State: "failed", Result: "failed", Attempt: 1, Epoch: 1, At: unix(10)},
+		{ID: "deploy", Stage: "deploy", Operation: "deploy", State: "succeeded", Result: "succeeded", Attempt: 1, Epoch: 1, At: unix(30)},
+		{ID: "verify", Stage: "deploy", Operation: "verify", State: "succeeded", Result: "succeeded", Attempt: 2, Epoch: 2, At: unix(31)},
+		{ID: "apply", Stage: "access", Operation: "apply", State: "succeeded", Result: "succeeded", Attempt: 1, Epoch: 1, At: unix(40)},
 	}
-	deployID, accessID, deployOutcome, verifyOutcome, accessOutcome := foldHandoffs(rows, unix(20), unix(0))
-	if deployID != "verify" && deployID != "deploy" {
-		t.Fatalf("deploy handoff %s", deployID)
+	deploy, access, deployOutcome, verifyOutcome, accessOutcome := foldHandoffs(rows, unix(20), unix(0))
+	if deploy.ID != "verify" && deploy.ID != "deploy" {
+		t.Fatalf("deploy handoff %s", deploy.ID)
 	}
-	if deployOutcome != outcomeSucceeded || verifyOutcome != outcomeSucceeded || accessOutcome != outcomeSucceeded || accessID != "apply" {
-		t.Fatalf("outcomes %s %s %s access %s", deployOutcome, verifyOutcome, accessOutcome, accessID)
+	if deployOutcome != outcomeSucceeded || verifyOutcome != outcomeSucceeded || accessOutcome != outcomeSucceeded || access.ID != "apply" {
+		t.Fatalf("outcomes %s %s %s access %s", deployOutcome, verifyOutcome, accessOutcome, access.ID)
 	}
 	_, _, deployOutcome, verifyOutcome, _ = foldHandoffs(rows, unix(0), unix(0))
 	if verifyOutcome != outcomeSucceeded {
 		t.Fatalf("latest verify attempt should win, got %s outcome %s", verifyOutcome, deployOutcome)
+	}
+	if deploy.ID != "verify" || deploy.Attempt != 2 || deploy.Epoch != 2 || access.Attempt != 1 || access.Epoch != 1 {
+		t.Fatalf("handoff identity: deploy=%+v access=%+v", deploy, access)
+	}
+}
+
+func TestStageRailHandoffIdentity(t *testing.T) {
+	f := facts{Profile: "personal", DeployHandoff: handoffIdentity{ID: "deploy-id", Attempt: 3, Epoch: 4}}
+	stages := stageRail(f, stageDeploy, false)
+	for _, stage := range stages {
+		if stage.Key == stageDeploy {
+			if stage.HandoffID == nil || *stage.HandoffID != "deploy-id" || stage.HandoffAttempt == nil || *stage.HandoffAttempt != 3 || stage.HandoffAuthorityEpoch == nil || *stage.HandoffAuthorityEpoch != 4 {
+				t.Fatalf("deploy identity: %+v", stage)
+			}
+		} else if stage.HandoffAttempt != nil || stage.HandoffAuthorityEpoch != nil {
+			t.Fatalf("unexpected handoff identity: %+v", stage)
+		}
 	}
 }
 

@@ -85,6 +85,8 @@ type Handoff struct {
 	PluginID               string                 `json:"plugin_id"`
 	Attempt                int                    `json:"attempt"`
 	AuthorityEpoch         int64                  `json:"authority_epoch"`
+	SupersededBy           *string                `json:"superseded_by"`
+	AuthorityOpen          bool                   `json:"authority_open"`
 	JourneyRevision        int64                  `json:"journey_revision"`
 	State                  string                 `json:"state"`
 	ExpiresAt              time.Time              `json:"expires_at"`
@@ -234,6 +236,10 @@ func (m *Module) request(w http.ResponseWriter, r *http.Request) {
 	err := db.InTenant(r.Context(), m.pool, p.TenantID, func(tx pgx.Tx) error {
 		var err error
 		out, err = m.create(r.Context(), tx, p, in, plugin, ceiling, gate)
+		if err != nil {
+			return err
+		}
+		out.AuthorityOpen, err = authorityOpen(r.Context(), tx, out)
 		return err
 	})
 	respond(w, 201, out, err)
@@ -255,7 +261,11 @@ func (m *Module) get(w http.ResponseWriter, r *http.Request) {
 		if err != nil {
 			return err
 		}
-		return authorizeHandoffRead(r.Context(), tx, p, out)
+		if err := authorizeHandoffRead(r.Context(), tx, p, out); err != nil {
+			return err
+		}
+		out.AuthorityOpen, err = authorityOpen(r.Context(), tx, out)
+		return err
 	})
 	respond(w, 200, out, err)
 }

@@ -53,6 +53,7 @@ type LaunchAdmission struct {
 	BindingDigestSHA256  string     `json:"binding_digest_sha256"`
 	ArtifactDigestSHA256 string     `json:"artifact_digest_sha256"`
 	AuthorityEpoch       int64      `json:"authority_epoch"`
+	AuthorityOpen        bool       `json:"authority_open"`
 	ExpiresAt            time.Time  `json:"expires_at"`
 	ConsumedAt           *time.Time `json:"consumed_at,omitempty"`
 }
@@ -116,7 +117,8 @@ func launchKey(r *http.Request) (string, error) {
 }
 
 // launchReplay runs under the handoff lock after the AEON-169 routed-principal
-// check. The original response is returned even if the handoff has since closed.
+// check. It retains the receipt's original result and refreshes authority_open
+// so a closed or superseded attempt cannot look actionable.
 func (m *Module) launchReplay(ctx context.Context, tx pgx.Tx, h Handoff, p tenant.Principal, action, key, bodyDigest string, dst any) (bool, error) {
 	var storedAction, storedPrincipal, storedDigest string
 	var response []byte
@@ -135,6 +137,16 @@ func (m *Module) launchReplay(ctx context.Context, tx pgx.Tx, h Handoff, p tenan
 	}
 	if err := json.Unmarshal(response, dst); err != nil {
 		return true, err
+	}
+	open, err := authorityOpen(ctx, tx, h)
+	if err != nil {
+		return true, err
+	}
+	switch receipt := dst.(type) {
+	case *LaunchAdmission:
+		receipt.AuthorityOpen = open
+	case *LaunchConsumption:
+		receipt.AuthorityOpen = open
 	}
 	return true, nil
 }
@@ -269,6 +281,7 @@ func (m *Module) admitLaunchRequest(ctx context.Context, p tenant.Principal, aut
 		out.BindingDigestSHA256 = binding
 		out.ArtifactDigestSHA256 = a.DigestSHA256
 		out.AuthorityEpoch = h.AuthorityEpoch
+		out.AuthorityOpen = true
 		_, err = events.Append(ctx, tx, p, events.Change{Type: "stage_handoff.launch_admitted", NodeID: &h.ReleaseNodeID, After: map[string]any{"handoff_id": h.ID, "admission_id": out.ID}})
 		if err != nil || key == "" {
 			return err
@@ -304,6 +317,7 @@ func replayAdmission(ctx context.Context, tx pgx.Tx, h Handoff, a Artifact, bind
 	out.BindingDigestSHA256 = binding
 	out.ArtifactDigestSHA256 = artifact
 	out.AuthorityEpoch = epoch
+	out.AuthorityOpen = true
 	return nil
 }
 
@@ -365,10 +379,11 @@ func (m *Module) ConsumeLaunch(ctx context.Context, p tenant.Principal, authoriz
 }
 
 type LaunchConsumption struct {
-	HandoffID   string    `json:"handoff_id"`
-	AdmissionID string    `json:"admission_id"`
-	Consumed    bool      `json:"consumed"`
-	ConsumedAt  time.Time `json:"consumed_at"`
+	HandoffID     string    `json:"handoff_id"`
+	AdmissionID   string    `json:"admission_id"`
+	Consumed      bool      `json:"consumed"`
+	ConsumedAt    time.Time `json:"consumed_at"`
+	AuthorityOpen bool      `json:"authority_open"`
 }
 
 // ConsumeLaunchWithKey gives in-process adapters the same durable receipt as
@@ -481,6 +496,7 @@ func (m *Module) consumeLaunchRequest(ctx context.Context, p tenant.Principal, a
 		out.HandoffID = h.ID
 		out.AdmissionID = admissionID
 		out.Consumed = true
+		out.AuthorityOpen = true
 		_, err = events.Append(ctx, tx, p, events.Change{Type: "stage_handoff.launch_consumed", NodeID: &h.ReleaseNodeID, After: map[string]any{"handoff_id": h.ID, "admission_id": admissionID}})
 		if err != nil || key == "" {
 			return err
