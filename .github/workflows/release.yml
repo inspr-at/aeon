@@ -7,7 +7,7 @@ on:
       - "v*"
 
 permissions:
-  # write: attach aeon-agentd binaries and SHA256SUMS to the GitHub release
+  # write: attach aeon-agentd and aeon-cli binaries and SHA256SUMS to the GitHub release
   contents: write
   packages: write
   attestations: write
@@ -70,12 +70,25 @@ jobs:
               -o "dist/aeon-agentd-${goos}-${goarch}" \
               ./cmd/aeon-agentd
           done
+          for pair in darwin/arm64 darwin/amd64 linux/amd64 linux/arm64; do
+            goos="${pair%/*}"
+            goarch="${pair#*/}"
+            CGO_ENABLED=0 GOOS="$goos" GOARCH="$goarch" go build \
+              -trimpath \
+              -ldflags "$ldflags" \
+              -o "dist/aeon-cli-${goos}-${goarch}" \
+              ./cmd/aeon
+          done
           (
             cd dist
             sha256sum \
               aeon-agentd-darwin-arm64 \
               aeon-agentd-darwin-amd64 \
               aeon-agentd-linux-amd64 \
+              aeon-cli-darwin-arm64 \
+              aeon-cli-darwin-amd64 \
+              aeon-cli-linux-amd64 \
+              aeon-cli-linux-arm64 \
               > SHA256SUMS
           )
 
@@ -132,6 +145,8 @@ jobs:
           tag="v${VERSION}"
           notes="$(printf '%s\n' \
             "aeon-agentd ${VERSION} for darwin-arm64, darwin-amd64 and linux-amd64." \
+            "aeon-cli ${VERSION} for darwin-arm64, darwin-amd64, linux-amd64 and linux-arm64." \
+            "Install aeon-cli as aeon. A symlink named paimos selects the paimos-compatible CLI (PAIMOS_URL)." \
             "Verify SHA256SUMS before installing." \
             "" \
             "Container: ghcr.io/inspr-at/aeon:${VERSION}" \
@@ -141,6 +156,10 @@ jobs:
               dist/aeon-agentd-darwin-arm64 \
               dist/aeon-agentd-darwin-amd64 \
               dist/aeon-agentd-linux-amd64 \
+              dist/aeon-cli-darwin-arm64 \
+              dist/aeon-cli-darwin-amd64 \
+              dist/aeon-cli-linux-amd64 \
+              dist/aeon-cli-linux-arm64 \
               dist/SHA256SUMS \
               --clobber
           else
@@ -148,6 +167,10 @@ jobs:
               dist/aeon-agentd-darwin-arm64 \
               dist/aeon-agentd-darwin-amd64 \
               dist/aeon-agentd-linux-amd64 \
+              dist/aeon-cli-darwin-arm64 \
+              dist/aeon-cli-darwin-amd64 \
+              dist/aeon-cli-linux-amd64 \
+              dist/aeon-cli-linux-arm64 \
               dist/SHA256SUMS \
               --title "$tag" \
               --notes "$notes"
