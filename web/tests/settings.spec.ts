@@ -70,6 +70,22 @@ test('members see only Personal; an admin section explains itself', async ({ pag
   await expect(page.getByRole('option', { name: /Workspace settings/ })).toHaveCount(0)
 })
 
+test('the section nav stays put when switching sections, including wide Access', async ({ page }) => {
+  await setup(page)
+  await mockAccess(page, accessWorld())
+  for (const width of [1440, 1920]) {
+    await page.setViewportSize({ width, height: 900 })
+    const lefts: number[] = []
+    for (const section of ['personal', 'workspace', 'access', 'business', 'projects']) {
+      await page.goto(`/settings/${section}`)
+      const nav = sections(page)
+      await expect(nav).toBeVisible()
+      lefts.push(Math.round((await nav.boundingBox())!.x))
+    }
+    expect(new Set(lefts).size, `nav x per section at ${width}px: ${lefts.join(', ')}`).toBe(1)
+  }
+})
+
 test('Workspace shows the workspace and my role; people and keys moved to Access', async ({ page }) => {
   await setup(page)
   await mockAccess(page, accessWorld({ role: 'admin' }))

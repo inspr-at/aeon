@@ -60,7 +60,7 @@ watch(() => [current.value, route.hash] as const, async ([, hash]) => {
 </script>
 
 <template>
-  <section class="settings-page" :class="{ wide: current === 'access' }" aria-labelledby="settings-title">
+  <section class="settings-page" aria-labelledby="settings-title">
     <header class="page-head">
       <p class="eyebrow">{{ session.identity?.tenant.name ?? 'Workspace' }}</p>
       <h1 id="settings-title">Settings</h1>
@@ -76,7 +76,7 @@ watch(() => [current.value, route.hash] as const, async ([, hash]) => {
           <span v-if="section.admin && !section.permission" class="admin-mark" role="img" aria-label="Admins only" data-tip="Only workspace admins see this"><AppIcon name="shield" :size="12" /></span>
         </RouterLink>
       </nav>
-      <div class="body">
+      <div class="body" :class="{ wide: current === 'access' }">
         <component :is="VIEW[current]" v-if="allowed" :key="current" />
         <div v-else-if="deciding" class="set-skeleton" role="status" aria-label="Loading"><span class="skeleton" /><span class="skeleton" /></div>
         <div v-else class="gate glass-card">
@@ -91,9 +91,11 @@ watch(() => [current.value, route.hash] as const, async ([, hash]) => {
 </template>
 
 <style scoped>
-.settings-page { width: 100%; max-width: 1180px; margin: 0 auto; padding: 22px 28px 40px; }
-/* Access holds wide tables: it may use the room of a wide screen. */
-.settings-page.wide { max-width: 1440px; }
+/* One page width for every section, so the section nav never moves when you
+   switch sections. Access holds wide tables and uses the whole content
+   column; the other sections keep a readable width, aligned to the same edge. */
+.settings-page { width: 100%; max-width: 1440px; margin: 0 auto; padding: 22px 28px 40px; }
+.body:not(.wide) { max-width: 960px; }
 .waiting .skeleton { border-radius: 14px; }
 .nav-skeleton { height: 220px; }
 .body-skeleton { height: 320px; }
