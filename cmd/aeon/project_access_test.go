@@ -185,6 +185,13 @@ func TestProjectAccessOverHTTP(t *testing.T) {
 		w.expect(agent, "GET", "/api/nodes/"+w.ids["TB"], "", 403)
 	}
 
+	register := func(project string) string {
+		return `{"agent_principal_id":"` + w.people["harness-a"] + `","harness":"codex","host":"p2-host","harness_session_ref":"p2-vendor-ref-` + project + `-000000","worker_lease":"p2-generation-lease-0000000000000000000","management_mode":"managed","role":"worker","advertised_capabilities":["status"]}`
+	}
+	w.expect("harness-a", "POST", "/api/projects/"+w.ids["A"]+"/harness-sessions", register("a"), 201)
+	w.expect("harness-a", "POST", "/api/projects/"+w.ids["B"]+"/harness-sessions", register("b"), 403)
+	w.noLeak(guest, "/api/events after harness", w.expect(guest, "GET", "/api/events?limit=200", "", 200))
+
 	// A member of A who is only a guest on B cannot carry work into B.
 	w.expect("mixed", "PATCH", "/api/nodes/"+w.ids["TA2"], `{"title":"member edit"}`, 200)
 	w.expect("mixed", "PATCH", "/api/nodes/"+w.ids["TB"], `{"title":"guest edit"}`, 403)
@@ -195,7 +202,15 @@ func TestProjectAccessOverHTTP(t *testing.T) {
 	w.expect("mixed", "POST", "/api/nodes", `{"kind_id":"`+w.ids["ticketKind"]+`","parent_id":"`+w.ids["A"]+`","title":"member ticket"}`, 201)
 	w.expect("mixed", "POST", "/api/nodes", `{"kind_id":"`+w.ids["ticketKind"]+`","parent_id":"`+w.ids["B"]+`","title":"guest ticket"}`, 403)
 	w.expect("mixed", "POST", "/api/nodes", `{"kind_id":"`+w.ids["ticketKind"]+`","title":"workspace ticket"}`, 403)
-	w.expect("mixed", "POST", "/api/relations", `{"source_node_id":"`+w.ids["TA2"]+`","target_node_id":"`+w.ids["GA"]+`","type":"cites"}`, 201)
+	var link struct{ ID string }
+	w.decode(w.expect("mixed", "POST", "/api/relations", `{"source_node_id":"`+w.ids["TA2"]+`","target_node_id":"`+w.ids["GA"]+`","type":"cites"}`, 201), &link)
+	w.expect("mixed", "DELETE", "/api/relations/"+link.ID, "", 204)
+	var crossLink string
+	if err := w.d.Admin.QueryRow(ctx, `SELECT id::text FROM node_relations WHERE source_node_id=$1 AND target_node_id=$2`, w.ids["TA"], w.ids["TB"]).Scan(&crossLink); err != nil {
+		t.Fatal(err)
+	}
+	w.expect("mixed", "DELETE", "/api/relations/"+crossLink, "", 403)
+	w.expect(guest, "DELETE", "/api/relations/"+crossLink, "", 403)
 	w.expect("mixed", "POST", "/api/relations", `{"source_node_id":"`+w.ids["TA2"]+`","target_node_id":"`+w.ids["TB"]+`","type":"cites"}`, 403)
 	w.expect("mixed", "POST", "/api/knowledge", `{"project_id":"`+w.ids["A"]+`","type":"runbook","slug":"mixed-a","title":"Runbook A"}`, 201)
 	w.expect("mixed", "POST", "/api/knowledge", `{"project_id":"`+w.ids["B"]+`","type":"runbook","slug":"mixed-b","title":"Runbook B"}`, 403)
@@ -329,6 +344,11 @@ func (w *accessWorld) seed() {
 				return err
 			}
 		}
+		// Operational history recorded on project A's node stays with the
+		// workspace: agent sessions and access changes are not project work.
+		if _, err := tx.Exec(ctx, `INSERT INTO events(tenant_id,actor_principal_id,node_id,type,after) VALUES($1,$2,$3,'harness.heartbeat','{"host":"workspace activity"}')`, w.tid, writer, w.ids["A"]); err != nil {
+			return err
+		}
 		// Workspace activity by someone else, never shown to a project guest.
 		_, err := tx.Exec(ctx, `INSERT INTO events(tenant_id,actor_principal_id,type,after) VALUES($1,$2,'profile.updated','{"secret":"workspace activity"}')`, w.tid, writer)
 		return err
@@ -426,6 +446,14 @@ func (w *accessWorld) seed() {
 		}
 	}
 	bindProject(agent("agent-a", ""), "member", "A")
+	// A project-scoped harness agent: its writes on project A return their
+	// own events although harness history is not project work.
+	harnessAgent := agent("harness-a", "")
+	if _, err := w.d.Admin.Exec(ctx, `UPDATE agent_keys SET scopes=ARRAY['harness.read','harness.write','harness.worker'] WHERE principal_id=$1`, harnessAgent); err != nil {
+		t.Fatal(err)
+	}
+	bindProject(harnessAgent, "member", "A")
+	w.people["harness-a"] = harnessAgent
 }
 
 func (w *accessWorld) call(who, method, path, body string) (string, int) {

@@ -70,7 +70,7 @@ func failure(w http.ResponseWriter, err error) {
 	case errors.Is(err, errGraph):
 		writeError(w, 409, "conflict", "relation kind or direction is not allowed")
 	case errors.Is(err, errForbiddenRelation):
-		writeError(w, 403, "forbidden", "linking needs relations.write in both items' projects")
+		writeError(w, 403, "forbidden", "linking and unlinking need the permission in both items' projects")
 	case errors.Is(err, events.ErrConflict):
 		writeError(w, 409, "conflict", "relation conflicts with current state")
 	case errors.As(err, &pe) && (pe.Code == "23505" || pe.Code == "40001" || pe.Code == "40P01"):
@@ -198,6 +198,15 @@ func (m *module) delete(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	err := db.InTenant(r.Context(), m.pool, p.TenantID, func(tx pgx.Tx) error {
+		// Unlinking changes both ends, so it needs relations.delete in both
+		// items' projects, as linking needs relations.write (ADR-003 P2).
+		var source, target string
+		if err := tx.QueryRow(r.Context(), `SELECT source_node_id::text,target_node_id::text FROM node_relations WHERE tenant_id=$1 AND id=$2 FOR UPDATE`, p.TenantID, id).Scan(&source, &target); err != nil {
+			return err
+		}
+		if err := requireOnEnds(r.Context(), tx, p, "relations.delete", source, target); err != nil {
+			return err
+		}
 		result, err := scanRelation(tx.QueryRow(r.Context(), `DELETE FROM node_relations WHERE tenant_id=$1 AND id=$2
     RETURNING id::text,source_node_id::text,target_node_id::text,type,created_at`, p.TenantID, id))
 		if err != nil {
