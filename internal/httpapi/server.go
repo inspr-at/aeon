@@ -9,8 +9,9 @@ import (
 	"net/http"
 	"sync"
 
-	"github.com/inspr-at/aeon/internal/brand"
 	"github.com/jackc/pgx/v5/pgxpool"
+
+	"github.com/inspr-at/paimos/internal/brand"
 )
 
 // Module is anything that adds routes under /api (auth, nodes, ...).

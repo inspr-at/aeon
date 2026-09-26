@@ -4,11 +4,12 @@ package activity
 
 import (
 	"encoding/json"
-	"github.com/inspr-at/aeon/internal/dbtest"
 	"strings"
 	"testing"
 
 	"github.com/jackc/pgx/v5"
+
+	"github.com/inspr-at/paimos/internal/dbtest"
 )
 
 // Authors say whether they have a picture, in the timeline and on a fresh

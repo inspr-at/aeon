@@ -10,10 +10,11 @@ import (
 	"strings"
 	"time"
 
-	"github.com/inspr-at/aeon/internal/events"
-	"github.com/inspr-at/aeon/internal/tenant"
-	"github.com/inspr-at/aeon/internal/workorders"
 	"github.com/jackc/pgx/v5"
+
+	"github.com/inspr-at/paimos/internal/events"
+	"github.com/inspr-at/paimos/internal/tenant"
+	"github.com/inspr-at/paimos/internal/workorders"
 )
 
 const periodColumns = `id::text,principal_id::text,starts_at,ends_at,state,revision`

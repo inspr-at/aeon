@@ -12,8 +12,8 @@ import (
 	"strings"
 	"testing"
 
-	"github.com/inspr-at/aeon/internal/dbtest"
-	"github.com/inspr-at/aeon/internal/tenantbootstrap"
+	"github.com/inspr-at/paimos/internal/dbtest"
+	"github.com/inspr-at/paimos/internal/tenantbootstrap"
 )
 
 func TestPMAFixtureAndSourceIdentity(t *testing.T) {

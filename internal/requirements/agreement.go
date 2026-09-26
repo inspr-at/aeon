@@ -7,9 +7,10 @@ import (
 	"encoding/json"
 	"fmt"
 
-	"github.com/inspr-at/aeon/internal/events"
-	"github.com/inspr-at/aeon/internal/tenant"
 	"github.com/jackc/pgx/v5"
+
+	"github.com/inspr-at/paimos/internal/events"
+	"github.com/inspr-at/paimos/internal/tenant"
 )
 
 func agree(ctx context.Context, tx pgx.Tx, p tenant.Principal, project string, in agreeInput) ([]Requirement, error) {

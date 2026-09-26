@@ -15,8 +15,8 @@ import (
 	"strings"
 	"time"
 
-	"github.com/inspr-at/aeon/internal/inbox"
-	"github.com/inspr-at/aeon/internal/version"
+	"github.com/inspr-at/paimos/internal/inbox"
+	"github.com/inspr-at/paimos/internal/version"
 )
 
 type localDeliveryResult struct {

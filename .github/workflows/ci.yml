@@ -98,14 +98,14 @@ jobs:
         working-directory: web
         run: npm run build
       - name: Build server
-        run: go build -tags webembed -o bin/aeon ./cmd/aeon
+        run: go build -tags webembed -o bin/paimos ./cmd/aeon
       - name: Install Playwright
         working-directory: web
         run: npx playwright install --with-deps chromium
       - name: Start server and run smoke
         run: |
           set -euo pipefail
-          nohup ./bin/aeon serve >"$RUNNER_TEMP/aeon.log" 2>&1 &
+          nohup ./bin/paimos serve >"$RUNNER_TEMP/aeon.log" 2>&1 &
           echo $! >"$RUNNER_TEMP/aeon.pid"
           ready=0
           for _ in $(seq 1 30); do

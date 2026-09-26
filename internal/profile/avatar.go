@@ -7,18 +7,19 @@ import (
 	"encoding/json"
 	"errors"
 	"image"
+	_ "image/jpeg"
 	"image/png"
 	"io"
 	"net/http"
 	"os"
 	"strconv"
 
-	"github.com/inspr-at/aeon/internal/db"
-	"github.com/inspr-at/aeon/internal/httpapi"
 	"github.com/jackc/pgx/v5"
 	"golang.org/x/image/draw"
 	_ "golang.org/x/image/webp"
-	_ "image/jpeg"
+
+	"github.com/inspr-at/paimos/internal/db"
+	"github.com/inspr-at/paimos/internal/httpapi"
 )
 
 const maxAvatarBytes = 8 << 20

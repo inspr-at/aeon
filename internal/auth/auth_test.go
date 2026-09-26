@@ -11,8 +11,8 @@ import (
 	"testing"
 	"time"
 
-	"github.com/inspr-at/aeon/internal/httpapi"
-	"github.com/inspr-at/aeon/internal/tenant"
+	"github.com/inspr-at/paimos/internal/httpapi"
+	"github.com/inspr-at/paimos/internal/tenant"
 )
 
 func TestNewRejectsShortKey(t *testing.T) {

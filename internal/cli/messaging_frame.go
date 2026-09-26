@@ -7,7 +7,7 @@ import (
 	"strconv"
 	"strings"
 
-	"github.com/inspr-at/aeon/internal/inbox"
+	"github.com/inspr-at/paimos/internal/inbox"
 )
 
 type classicMessagePart struct {

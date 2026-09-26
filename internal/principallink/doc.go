@@ -1,11 +1,11 @@
 // SPDX-License-Identifier: AGPL-3.0-only
 
 // Package principallink supplies operator-only identity reconciliation.
-// The coordinator wires Run(ctx, pool, args, stdout) to `aeon principal`:
+// The coordinator wires Run(ctx, pool, args, stdout) to `paimos principal`:
 //
-//	aeon principal link --tenant SLUG --from ID_OR_NAME --to ID_OR_NAME
-//	aeon principal unlink --tenant SLUG --from ID_OR_NAME
-//	aeon principal link --tenant SLUG --suggest
+//	paimos principal link --tenant SLUG --from ID_OR_NAME --to ID_OR_NAME
+//	paimos principal unlink --tenant SLUG --from ID_OR_NAME
+//	paimos principal link --tenant SLUG --suggest
 //
 // New(pool) constructs the service; Link, Unlink and Suggest accept tenant
 // slugs. There is deliberately no httpapi.Module or plugin manifest: possession

@@ -9,15 +9,15 @@ import (
 	"fmt"
 	"io"
 
-	"github.com/inspr-at/aeon/internal/config"
-	"github.com/inspr-at/aeon/internal/db"
+	"github.com/inspr-at/paimos/internal/config"
+	"github.com/inspr-at/paimos/internal/db"
 )
 
-// RunCommand is the coordinator's `aeon import paimos-offers` entry point.
+// RunCommand is the coordinator's `paimos import paimos-offers` entry point.
 // --bundle - consumes a tar stream from stdin. Dry-run is the default and
 // needs no target database; --apply requires an explicit tenant and admin.
 func RunCommand(ctx context.Context, args []string, stdin io.Reader, stdout io.Writer) error {
-	f := flag.NewFlagSet("aeon import paimos-offers", flag.ContinueOnError)
+	f := flag.NewFlagSet("paimos import paimos-offers", flag.ContinueOnError)
 	f.SetOutput(io.Discard)
 	bundlePath := f.String("bundle", "-", "EQ0 export directory or - for tar on stdin")
 	instance := f.String("source-instance", "", "stable classic instance name")
@@ -26,7 +26,7 @@ func RunCommand(ctx context.Context, args []string, stdin io.Reader, stdout io.W
 	apply := f.Bool("apply", false, "write the mapped records")
 	repair := f.Bool("repair", false, "repair imported draft prose measurements without a bundle")
 	if err := f.Parse(args); err != nil || f.NArg() != 0 || *instance == "" {
-		return errors.New("usage: aeon import paimos-offers --source-instance NAME [--bundle DIR|- --apply | --repair] [--tenant-id UUID --actor-principal-id UUID]")
+		return errors.New("usage: paimos import paimos-offers --source-instance NAME [--bundle DIR|- --apply | --repair] [--tenant-id UUID --actor-principal-id UUID]")
 	}
 	if *repair {
 		if *apply || *bundlePath != "-" || *tenantID == "" || *actorID == "" {

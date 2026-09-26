@@ -16,9 +16,9 @@ import (
 	"testing"
 	"time"
 
-	"github.com/inspr-at/aeon/internal/config"
-	"github.com/inspr-at/aeon/internal/dbtest"
-	"github.com/inspr-at/aeon/web"
+	"github.com/inspr-at/paimos/internal/config"
+	"github.com/inspr-at/paimos/internal/dbtest"
+	"github.com/inspr-at/paimos/web"
 )
 
 func TestLoggerJSONInProd(t *testing.T) {

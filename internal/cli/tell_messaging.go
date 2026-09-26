@@ -13,7 +13,7 @@ import (
 	"strings"
 	"time"
 
-	"github.com/inspr-at/aeon/internal/inbox"
+	"github.com/inspr-at/paimos/internal/inbox"
 )
 
 // cmdMessagingTell is selected by the coordinator entry point RunMessaging.

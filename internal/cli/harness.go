@@ -19,7 +19,7 @@ import (
 	"strings"
 	"time"
 
-	"github.com/inspr-at/aeon/internal/client"
+	"github.com/inspr-at/paimos/internal/client"
 )
 
 // cmdHarnessV2 is the complete P5.3 harness command tree.

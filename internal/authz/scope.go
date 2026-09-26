@@ -8,10 +8,11 @@ import (
 	"strconv"
 	"strings"
 
-	"github.com/inspr-at/aeon/internal/db"
-	"github.com/inspr-at/aeon/internal/tenant"
 	"github.com/jackc/pgx/v5"
 	"github.com/jackc/pgx/v5/pgxpool"
+
+	"github.com/inspr-at/paimos/internal/db"
+	"github.com/inspr-at/paimos/internal/tenant"
 )
 
 // ProjectFilteredRoutes may be authorized by a permission held in any of the

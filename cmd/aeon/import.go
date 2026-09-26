@@ -13,14 +13,14 @@ import (
 
 	"github.com/jackc/pgx/v5"
 
-	"github.com/inspr-at/aeon/internal/attachments"
-	"github.com/inspr-at/aeon/internal/config"
-	"github.com/inspr-at/aeon/internal/db"
-	"github.com/inspr-at/aeon/internal/importer"
+	"github.com/inspr-at/paimos/internal/attachments"
+	"github.com/inspr-at/paimos/internal/config"
+	"github.com/inspr-at/paimos/internal/db"
+	"github.com/inspr-at/paimos/internal/importer"
 )
 
 func importPaimos(args []string, stdout io.Writer) error {
-	flags := flag.NewFlagSet("aeon import paimos", flag.ContinueOnError)
+	flags := flag.NewFlagSet("paimos import paimos", flag.ContinueOnError)
 	flags.SetOutput(io.Discard)
 	sourceURL := flags.String("source-url", "", "classic Paimos URL")
 	keyFile := flags.String("api-key-file", "", "bearer key file")
@@ -34,10 +34,10 @@ func importPaimos(args []string, stdout io.Writer) error {
 		return errors.New("invalid import flags")
 	}
 	if flags.NArg() != 0 || *sourceURL == "" || *keyFile == "" || *tenant == "" {
-		return errors.New("usage: aeon import paimos --source-url URL --api-key-file FILE --tenant SLUG [--project KEY] [--dry-run] [--delta] [--concurrency N] [--delay DURATION]")
+		return errors.New("usage: paimos import paimos --source-url URL --api-key-file FILE --tenant SLUG [--project KEY] [--dry-run] [--delta] [--concurrency N] [--delay DURATION]")
 	}
 	if *delta && *dryRun {
-		return errors.New("--delta writes; use aeon import reconcile to preview differences")
+		return errors.New("--delta writes; use paimos import reconcile to preview differences")
 	}
 	source, err := importer.NewHTTPSource(*sourceURL, *keyFile, nil)
 	if err != nil {
@@ -78,11 +78,11 @@ func importPaimos(args []string, stdout io.Writer) error {
 // backfillRelations replays stored import.relation events into node relations
 // and release membership. It never contacts the classic source.
 func backfillRelations(args []string, stdout io.Writer) error {
-	flags := flag.NewFlagSet("aeon import backfill-relations", flag.ContinueOnError)
+	flags := flag.NewFlagSet("paimos import backfill-relations", flag.ContinueOnError)
 	flags.SetOutput(io.Discard)
 	tenant := flags.String("tenant", "", "Aeon tenant slug")
 	if err := flags.Parse(args); err != nil || flags.NArg() != 0 || *tenant == "" {
-		return errors.New("usage: aeon import backfill-relations --tenant SLUG")
+		return errors.New("usage: paimos import backfill-relations --tenant SLUG")
 	}
 	ctx, stop := signal.NotifyContext(context.Background(), syscall.SIGTERM, syscall.SIGINT)
 	defer stop()
@@ -110,7 +110,7 @@ func backfillRelations(args []string, stdout io.Writer) error {
 // classic Paimos snapshot and attaches them to the already imported nodes.
 // It reads the classic instance only; nodes and their fields are not touched.
 func importPaimosAttachments(args []string, stdout io.Writer) error {
-	flags := flag.NewFlagSet("aeon import paimos-attachments", flag.ContinueOnError)
+	flags := flag.NewFlagSet("paimos import paimos-attachments", flag.ContinueOnError)
 	flags.SetOutput(io.Discard)
 	sourceURL := flags.String("source-url", "", "classic Paimos URL")
 	keyFile := flags.String("api-key-file", "", "bearer key file")
@@ -119,7 +119,7 @@ func importPaimosAttachments(args []string, stdout io.Writer) error {
 	concurrency := flags.Int("concurrency", 4, "maximum concurrent source requests")
 	delay := flags.Duration("delay", 0, "minimum delay between source request starts")
 	if err := flags.Parse(args); err != nil || flags.NArg() != 0 || *sourceURL == "" || *keyFile == "" || *tenant == "" {
-		return errors.New("usage: aeon import paimos-attachments --source-url URL --api-key-file FILE --tenant SLUG [--project KEY] [--concurrency N] [--delay DURATION]")
+		return errors.New("usage: paimos import paimos-attachments --source-url URL --api-key-file FILE --tenant SLUG [--project KEY] [--concurrency N] [--delay DURATION]")
 	}
 	source, err := importer.NewHTTPSource(*sourceURL, *keyFile, nil)
 	if err != nil {
@@ -146,7 +146,7 @@ func importPaimosAttachments(args []string, stdout io.Writer) error {
 	if err := db.InTenant(ctx, pool, tenantID, func(tx pgx.Tx) error {
 		return tx.QueryRow(ctx, `SELECT id FROM principals WHERE tenant_id=$1 AND kind='agent' AND name='Classic Paimos importer' ORDER BY created_at LIMIT 1`, tenantID).Scan(&actorID)
 	}); err != nil {
-		return fmt.Errorf("importer principal (run aeon import paimos first): %w", err)
+		return fmt.Errorf("importer principal (run paimos import paimos first): %w", err)
 	}
 	snap, err := source.Read(ctx, *project)
 	if err != nil {
@@ -162,7 +162,7 @@ func importPaimosAttachments(args []string, stdout io.Writer) error {
 // importReconcile compares the classic source with the Aeon tenant import. It
 // only reads: GET against classic, SELECT against Aeon.
 func importReconcile(args []string, stdout io.Writer) error {
-	flags := flag.NewFlagSet("aeon import reconcile", flag.ContinueOnError)
+	flags := flag.NewFlagSet("paimos import reconcile", flag.ContinueOnError)
 	flags.SetOutput(io.Discard)
 	sourceURL := flags.String("source-url", "", "classic Paimos URL")
 	keyFile := flags.String("api-key-file", "", "bearer key file")
@@ -173,7 +173,7 @@ func importReconcile(args []string, stdout io.Writer) error {
 	concurrency := flags.Int("concurrency", 4, "maximum concurrent source requests")
 	delay := flags.Duration("delay", 0, "minimum delay between source request starts")
 	if err := flags.Parse(args); err != nil || flags.NArg() != 0 || *sourceURL == "" || *keyFile == "" || *tenant == "" {
-		return errors.New("usage: aeon import reconcile --source-url URL --api-key-file FILE --tenant SLUG [--project KEY] [--concurrency N] [--delay DURATION]")
+		return errors.New("usage: paimos import reconcile --source-url URL --api-key-file FILE --tenant SLUG [--project KEY] [--concurrency N] [--delay DURATION]")
 	}
 	source, err := importer.NewHTTPSource(*sourceURL, *keyFile, nil)
 	if err != nil {

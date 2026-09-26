@@ -7,7 +7,7 @@ import (
 	"testing"
 	"time"
 
-	"github.com/inspr-at/aeon/internal/plugins/fence"
+	"github.com/inspr-at/paimos/internal/plugins/fence"
 )
 
 func TestDeployRequiresPersonAdmissionAndIdentity(t *testing.T) {

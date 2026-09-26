@@ -5,7 +5,7 @@ package approvals
 import (
 	"strings"
 
-	"github.com/inspr-at/aeon/internal/authz"
+	"github.com/inspr-at/paimos/internal/authz"
 )
 
 // Risk classifies requests for the person decision gate; it grants no authority.

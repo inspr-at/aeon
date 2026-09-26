@@ -5,9 +5,10 @@ package agentruns_test
 import (
 	"testing"
 
-	"github.com/inspr-at/aeon/internal/agentruns"
-	"github.com/inspr-at/aeon/internal/tenant"
 	"github.com/jackc/pgx/v5"
+
+	"github.com/inspr-at/paimos/internal/agentruns"
+	"github.com/inspr-at/paimos/internal/tenant"
 )
 
 func TestRequestedAccountIsValidatedAndAuditedWithoutReservation(t *testing.T) {

@@ -19,7 +19,7 @@
 //     tenant/principal/run binding and migration marker; old journals are read
 //     only for explicit import, never silently resumed. Durable inbox, run,
 //     approval and allowance state lives in Postgres, not a second local log.
-//   - agentdwire and cmd/paimos-agentd transport, bounded request decoding,
+//   - agentdwire and cmd/aeon-agentd transport, bounded request decoding,
 //     authenticated local socket and generation fences are ported to an AEON
 //     agentd binary or subcommand. A daemon authenticates to AEON over HTTPS
 //     with a scoped agent key; it pulls work and inbox items, reports content-

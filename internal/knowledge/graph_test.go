@@ -4,14 +4,15 @@ package knowledge
 
 import (
 	"fmt"
-	"github.com/inspr-at/aeon/internal/dbtest"
 	"reflect"
 	"strings"
 	"testing"
 
-	"github.com/inspr-at/aeon/internal/db"
-	"github.com/inspr-at/aeon/internal/events"
 	"github.com/jackc/pgx/v5"
+
+	"github.com/inspr-at/paimos/internal/db"
+	"github.com/inspr-at/paimos/internal/dbtest"
+	"github.com/inspr-at/paimos/internal/events"
 )
 
 func TestGraphMentions(t *testing.T) {

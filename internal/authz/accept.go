@@ -8,9 +8,10 @@ import (
 	"errors"
 	"strings"
 
-	"github.com/inspr-at/aeon/internal/tenant"
 	"github.com/jackc/pgx/v5"
 	"github.com/jackc/pgx/v5/pgtype"
+
+	"github.com/inspr-at/paimos/internal/tenant"
 )
 
 // ErrNoInvite means no pending, unexpired invite matches this verified email.

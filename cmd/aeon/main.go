@@ -1,6 +1,6 @@
 // SPDX-License-Identifier: AGPL-3.0-only
 
-// Command aeon is the PAIMOS AEON binary. `aeon serve` runs the server.
+// Command aeon is the PAIMOS AEON binary. `paimos serve` runs the server.
 // The same binary answers the agent command line, and behaves as paimos when
 // argv[0] is paimos.
 package main
@@ -9,6 +9,7 @@ import (
 	"context"
 	"fmt"
 	"os"
+
 	// Embed the IANA time zone database: the runtime image (alpine) has no
 	// /usr/share/zoneinfo, and time zones drive greetings, profiles, hours and
 	// quote numbering.
@@ -16,11 +17,11 @@ import (
 
 	"github.com/jackc/pgx/v5/pgxpool"
 
-	"github.com/inspr-at/aeon/internal/cli"
-	"github.com/inspr-at/aeon/internal/demo"
-	offersimport "github.com/inspr-at/aeon/internal/importer/offers"
-	"github.com/inspr-at/aeon/internal/principallink"
-	"github.com/inspr-at/aeon/internal/profile"
+	"github.com/inspr-at/paimos/internal/cli"
+	"github.com/inspr-at/paimos/internal/demo"
+	offersimport "github.com/inspr-at/paimos/internal/importer/offers"
+	"github.com/inspr-at/paimos/internal/principallink"
+	"github.com/inspr-at/paimos/internal/profile"
 )
 
 func main() {

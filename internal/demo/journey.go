@@ -9,7 +9,7 @@ import (
 	"net/http"
 	"time"
 
-	"github.com/inspr-at/aeon/internal/tenant"
+	"github.com/inspr-at/paimos/internal/tenant"
 )
 
 type journeyView struct {

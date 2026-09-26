@@ -13,7 +13,7 @@ import (
 	"strings"
 	"sync"
 
-	"github.com/inspr-at/aeon/internal/client"
+	"github.com/inspr-at/paimos/internal/client"
 )
 
 // Remote uses a scoped agent key through AEON's public HTTP contract.

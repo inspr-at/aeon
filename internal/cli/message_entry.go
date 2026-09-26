@@ -7,7 +7,7 @@ import (
 	"fmt"
 	"io"
 
-	"github.com/inspr-at/aeon/internal/version"
+	"github.com/inspr-at/paimos/internal/version"
 )
 
 // RunMessaging is the shipped entry point for CP1. It preserves the existing

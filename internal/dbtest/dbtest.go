@@ -25,7 +25,7 @@ import (
 	"github.com/jackc/pgx/v5/pgconn"
 	"github.com/jackc/pgx/v5/pgxpool"
 
-	"github.com/inspr-at/aeon/internal/db"
+	"github.com/inspr-at/paimos/internal/db"
 )
 
 // EnvDatabaseURL is the maintenance database tests use to create their own.

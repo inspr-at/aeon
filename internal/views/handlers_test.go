@@ -9,8 +9,8 @@ import (
 	"strings"
 	"testing"
 
-	"github.com/inspr-at/aeon/internal/dbtest"
-	"github.com/inspr-at/aeon/internal/tenant"
+	"github.com/inspr-at/paimos/internal/dbtest"
+	"github.com/inspr-at/paimos/internal/tenant"
 )
 
 func TestViewsShareReadOwnerWriteAndAppendEvents(t *testing.T) {

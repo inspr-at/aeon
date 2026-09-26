@@ -14,7 +14,7 @@ import (
 	"strings"
 	"time"
 
-	"github.com/inspr-at/aeon/internal/client"
+	"github.com/inspr-at/paimos/internal/client"
 )
 
 type apiNode struct {

@@ -7,10 +7,11 @@ import (
 	"net/http"
 	"strings"
 
-	"github.com/inspr-at/aeon/internal/db"
-	"github.com/inspr-at/aeon/internal/principallink/apply"
 	"github.com/jackc/pgx/v5"
 	"github.com/jackc/pgx/v5/pgconn"
+
+	"github.com/inspr-at/paimos/internal/db"
+	"github.com/inspr-at/paimos/internal/principallink/apply"
 )
 
 func (m *Module) linkAlias(w http.ResponseWriter, r *http.Request) {

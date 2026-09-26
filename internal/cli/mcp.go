@@ -8,8 +8,8 @@ import (
 
 	"github.com/modelcontextprotocol/go-sdk/mcp"
 
-	"github.com/inspr-at/aeon/internal/client"
-	"github.com/inspr-at/aeon/internal/version"
+	"github.com/inspr-at/paimos/internal/client"
+	"github.com/inspr-at/paimos/internal/version"
 )
 
 func (rt *runtime) cmdMCP() *Command {

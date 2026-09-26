@@ -14,11 +14,12 @@ import (
 	"strconv"
 	"strings"
 
-	"github.com/inspr-at/aeon/internal/attachments"
-	"github.com/inspr-at/aeon/internal/db"
-	"github.com/inspr-at/aeon/internal/tenantbootstrap"
 	"github.com/jackc/pgx/v5"
 	"github.com/jackc/pgx/v5/pgxpool"
+
+	"github.com/inspr-at/paimos/internal/attachments"
+	"github.com/inspr-at/paimos/internal/db"
+	"github.com/inspr-at/paimos/internal/tenantbootstrap"
 )
 
 // ReconcileDifference names an imported classic record by its source ID.
@@ -179,7 +180,7 @@ func projectOf(issue Record) int64 {
 
 // Reconcile reads a full classic snapshot and attachment bytes with GET only,
 // then compares it to one Aeon tenant. It does not modify either system. The
-// coordinator can expose it as `aeon import reconcile --source-url URL
+// coordinator can expose it as `paimos import reconcile --source-url URL
 // --api-key-file FILE --tenant SLUG` and encode the returned report as JSON;
 // Summary is the accompanying short human-readable line.
 func Reconcile(ctx context.Context, source *HTTPSource, pool *pgxpool.Pool, store attachments.Store, tenant, project string) (ReconcileReport, error) {

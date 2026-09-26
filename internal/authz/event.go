@@ -7,8 +7,9 @@ import (
 	"encoding/json"
 	"errors"
 
-	"github.com/inspr-at/aeon/internal/tenant"
 	"github.com/jackc/pgx/v5"
+
+	"github.com/inspr-at/paimos/internal/tenant"
 )
 
 // appendEvent uses the same events insertion contract as events.Append. Keeping

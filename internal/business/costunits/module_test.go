@@ -18,13 +18,13 @@ import (
 	"github.com/jackc/pgx/v5"
 	"github.com/jackc/pgx/v5/pgxpool"
 
-	"github.com/inspr-at/aeon/internal/db"
-	"github.com/inspr-at/aeon/internal/dbtest"
-	"github.com/inspr-at/aeon/internal/events"
-	"github.com/inspr-at/aeon/internal/nodes"
-	"github.com/inspr-at/aeon/internal/plugins"
-	"github.com/inspr-at/aeon/internal/plugins/fence"
-	"github.com/inspr-at/aeon/internal/tenant"
+	"github.com/inspr-at/paimos/internal/db"
+	"github.com/inspr-at/paimos/internal/dbtest"
+	"github.com/inspr-at/paimos/internal/events"
+	"github.com/inspr-at/paimos/internal/nodes"
+	"github.com/inspr-at/paimos/internal/plugins"
+	"github.com/inspr-at/paimos/internal/plugins/fence"
+	"github.com/inspr-at/paimos/internal/tenant"
 )
 
 const classicFields = `{"acceptance_criteria":"- [ ] billed","notes":"imported","priority":"normal","tags":["studio"],"estimate_hours":2.5,"estimate_lp":3,"budget_hours":8,"total_budget":1000,"start_date":"2026-01-02","end_date":"2026-01-09","release":"r1","sprint_ids":[99],"needs_review":false,"archived":false,"accepted_at":"2026-01-10T10:00:00Z","classic":{"source_id":"ppm","id":101,"issue_key":"PAI-101","type":"cost_unit","billing_code":"CU-INTERNAL"}}`

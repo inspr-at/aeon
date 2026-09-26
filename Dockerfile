@@ -22,12 +22,12 @@ RUN go mod download
 COPY . .
 COPY --from=web /src/web/dist ./web/dist
 # VERSION is the calendar coordinate without the leading v, injected as
-# -X github.com/inspr-at/aeon/internal/version.Version=${VERSION}
+# -X github.com/inspr-at/paimos/internal/version.Version=${VERSION}
 ARG VERSION=dev
 RUN CGO_ENABLED=0 GOOS=linux GOARCH=${TARGETARCH:-amd64} go build \
     -tags webembed \
-    -ldflags "-X github.com/inspr-at/aeon/internal/version.Version=${VERSION}" \
-    -o /aeon ./cmd/aeon
+    -ldflags "-X github.com/inspr-at/paimos/internal/version.Version=${VERSION}" \
+    -o /paimos ./cmd/aeon
 
 FROM alpine:3.24
 # Pin the Chromium runtime used for quote receipt evidence. Update it with a
@@ -36,10 +36,10 @@ RUN apk add --no-cache ca-certificates chromium=152.0.7977.82-r0 \
     && addgroup -S -g 65532 aeon && adduser -S -D -u 65532 -G aeon aeon
 # tini reaps Chromium helper processes after each render.
 RUN apk add --no-cache tini=0.19.0-r3
-COPY --from=build /aeon /aeon
+COPY --from=build /paimos /paimos
 COPY NOTICE /usr/share/doc/aeon/NOTICE
 # The runtime UID/GID is a contract with the host: csb1's aeon-files directory
 # is owned by 65532 (the former distroless nonroot user). Never let it float.
 USER 65532:65532
 EXPOSE 8080
-ENTRYPOINT ["/sbin/tini", "--", "/aeon", "serve"]
+ENTRYPOINT ["/sbin/tini", "--", "/paimos", "serve"]

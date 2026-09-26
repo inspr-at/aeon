@@ -16,11 +16,12 @@ import (
 	"strings"
 	"time"
 
-	"github.com/inspr-at/aeon/internal/attachments"
-	"github.com/inspr-at/aeon/internal/db"
-	"github.com/inspr-at/aeon/internal/tenant"
 	"github.com/jackc/pgx/v5"
 	"github.com/jackc/pgx/v5/pgxpool"
+
+	"github.com/inspr-at/paimos/internal/attachments"
+	"github.com/inspr-at/paimos/internal/db"
+	"github.com/inspr-at/paimos/internal/tenant"
 )
 
 // ClassicSource is a GET-only classic API reader. NewClassicSource accepts the
@@ -139,7 +140,7 @@ func (job ProfileImporter) Run(ctx context.Context, tenantSlug string, apply boo
 			return tx.QueryRow(ctx, `SELECT id::text FROM principals WHERE tenant_id=$1 AND kind='agent' AND name='Classic Paimos importer' ORDER BY created_at LIMIT 1`, tenantID).Scan(&actorID)
 		})
 		if err != nil {
-			return report, fmt.Errorf("importer principal (run aeon import paimos first): %w", err)
+			return report, fmt.Errorf("importer principal (run paimos import paimos first): %w", err)
 		}
 	}
 	users, err := job.Source.users(ctx)

@@ -80,7 +80,7 @@
 // tenant and applies the mapping above. It is the function the coordinator
 // calls from cmd/aeon; this package does not register a command.
 //
-//	aeon import backfill-relations --tenant SLUG
+//	paimos import backfill-relations --tenant SLUG
 //
 // Resolve SLUG to tenants.id, open the pool with db.Open, then:
 //
@@ -93,7 +93,7 @@
 // For PMA, the coordinator can wire a separate operator command backed by
 // NewPMAAdapter and PostgresWriter (this package does not edit cmd/aeon):
 //
-//	aeon import pma --source-instance NAME --source-url URL \
+//	paimos import pma --source-instance NAME --source-url URL \
 //	    --api-key-file FILE --tenant augmentoring [--project KEY] \
 //	    [--dry-run] [--concurrency N] [--delay DURATION]
 //
@@ -126,7 +126,7 @@
 // contacted by the backfill. Migration 0531 normalizes existing states atomically.
 //
 // CB3 cutover verification (AEON-117): the coordinator wires the CLI verbs;
-// this package does not edit cmd/aeon. For `aeon import reconcile --source-url
+// this package does not edit cmd/aeon. For `paimos import reconcile --source-url
 // URL --api-key-file FILE --tenant SLUG`, construct an HTTPSource, configure
 // its GET request cap/delay, open the target pool, and call
 // Reconcile(ctx, source, pool, attachments.Store{FilesDir: cfg.FilesDir}, slug,
@@ -146,7 +146,7 @@
 // Authentication, network, malformed data and target read failures still abort.
 // Reconcile never writes either system and classic requests are GET only.
 //
-// `aeon import paimos` can invoke Importer.RunDelta for the final delta. It
+// `paimos import paimos` can invoke Importer.RunDelta for the final delta. It
 // scans a complete classic GET snapshot because several classic record types
 // lack trustworthy update timestamps; writer provenance comparisons apply
 // only new or changed records. Import events are append-only, repeated runs

@@ -1,4 +1,4 @@
-module github.com/inspr-at/aeon
+module github.com/inspr-at/paimos
 
 go 1.26.0
 

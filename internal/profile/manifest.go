@@ -1,7 +1,7 @@
 // SPDX-License-Identifier: AGPL-3.0-only
 package profile
 
-import "github.com/inspr-at/aeon/internal/plugins"
+import "github.com/inspr-at/paimos/internal/plugins"
 
 // Plugin declares the compiled personal-profile module. The coordinator passes
 // this constructor to plugins.Builtin; New mounts its HTTP routes separately.

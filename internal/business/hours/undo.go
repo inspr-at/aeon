@@ -9,12 +9,13 @@ import (
 	"reflect"
 	"time"
 
-	"github.com/inspr-at/aeon/internal/business/costunits"
-	"github.com/inspr-at/aeon/internal/events"
-	"github.com/inspr-at/aeon/internal/plugins"
-	"github.com/inspr-at/aeon/internal/tenant"
-	"github.com/inspr-at/aeon/internal/workorders"
 	"github.com/jackc/pgx/v5"
+
+	"github.com/inspr-at/paimos/internal/business/costunits"
+	"github.com/inspr-at/paimos/internal/events"
+	"github.com/inspr-at/paimos/internal/plugins"
+	"github.com/inspr-at/paimos/internal/tenant"
+	"github.com/inspr-at/paimos/internal/workorders"
 )
 
 // UndoHandlers is passed by the coordinator to events.WithUndoHandlers. With

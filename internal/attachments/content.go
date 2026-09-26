@@ -11,8 +11,9 @@ import (
 	"strconv"
 	"strings"
 
-	"github.com/inspr-at/aeon/internal/db"
 	"github.com/jackc/pgx/v5"
+
+	"github.com/inspr-at/paimos/internal/db"
 )
 
 func (m *Module) content(w http.ResponseWriter, r *http.Request) {

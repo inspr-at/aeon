@@ -5,14 +5,15 @@ package inbox
 import (
 	"context"
 	"encoding/json"
-	"github.com/inspr-at/aeon/internal/dbtest"
 	"io"
 	"net/http"
 	"strings"
 	"testing"
 
-	"github.com/inspr-at/aeon/internal/db"
 	"github.com/jackc/pgx/v5"
+
+	"github.com/inspr-at/paimos/internal/db"
+	"github.com/inspr-at/paimos/internal/dbtest"
 )
 
 type routineRoundTrip func(*http.Request) (*http.Response, error)

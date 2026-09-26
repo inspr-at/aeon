@@ -15,8 +15,8 @@ import (
 
 	"golang.org/x/term"
 
-	"github.com/inspr-at/aeon/internal/client"
-	"github.com/inspr-at/aeon/internal/version"
+	"github.com/inspr-at/paimos/internal/client"
+	"github.com/inspr-at/paimos/internal/version"
 )
 
 // Run executes the CLI. args[0] is the program name. Exit status 0 is success,

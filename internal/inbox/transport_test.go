@@ -3,12 +3,13 @@
 package inbox
 
 import (
-	"github.com/inspr-at/aeon/internal/dbtest"
 	"strings"
 	"testing"
 
-	"github.com/inspr-at/aeon/internal/db"
 	"github.com/jackc/pgx/v5"
+
+	"github.com/inspr-at/paimos/internal/db"
+	"github.com/inspr-at/paimos/internal/dbtest"
 )
 
 func TestReceiverDeliveryClaimCompleteAndCursor(t *testing.T) {

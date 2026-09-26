@@ -11,8 +11,9 @@ import (
 	"io"
 	"os"
 
-	"github.com/inspr-at/aeon/internal/db"
 	"github.com/jackc/pgx/v5/pgxpool"
+
+	"github.com/inspr-at/paimos/internal/db"
 )
 
 // Summary is the JSON `aeon demo seed` prints. It never includes a key.

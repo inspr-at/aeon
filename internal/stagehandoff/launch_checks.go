@@ -10,9 +10,10 @@ import (
 	"errors"
 	"time"
 
-	"github.com/inspr-at/aeon/internal/db"
 	"github.com/jackc/pgx/v5"
 	"github.com/jackc/pgx/v5/pgxpool"
+
+	"github.com/inspr-at/paimos/internal/db"
 )
 
 const launchBindingDomain = "inspr.aeon.launch-binding.v1"

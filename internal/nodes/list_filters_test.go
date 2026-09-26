@@ -4,7 +4,6 @@ package nodes
 
 import (
 	"encoding/json"
-	"github.com/inspr-at/aeon/internal/dbtest"
 	"net/http"
 	"net/url"
 	"os"
@@ -13,8 +12,10 @@ import (
 	"testing"
 	"time"
 
-	"github.com/inspr-at/aeon/internal/db"
 	"github.com/jackc/pgx/v5"
+
+	"github.com/inspr-at/paimos/internal/db"
+	"github.com/inspr-at/paimos/internal/dbtest"
 )
 
 // The U22 list filters: exclusions, tags, cost units, releases, epics, dates,

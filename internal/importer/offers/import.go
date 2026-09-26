@@ -1,6 +1,6 @@
 // SPDX-License-Identifier: AGPL-3.0-only
 // Package offers imports an offline, GET-only classic offer bundle. The
-// coordinator wires RunCommand as `aeon import paimos-offers`; no HTTP module or
+// coordinator wires RunCommand as `paimos import paimos-offers`; no HTTP module or
 // plugin manifest is needed because this is an operator CLI, not an API.
 package offers
 
@@ -14,12 +14,13 @@ import (
 	"strings"
 	"time"
 
-	"github.com/inspr-at/aeon/internal/authz"
-	"github.com/inspr-at/aeon/internal/db"
-	"github.com/inspr-at/aeon/internal/events"
-	"github.com/inspr-at/aeon/internal/tenant"
 	"github.com/jackc/pgx/v5"
 	"github.com/jackc/pgx/v5/pgxpool"
+
+	"github.com/inspr-at/paimos/internal/authz"
+	"github.com/inspr-at/paimos/internal/db"
+	"github.com/inspr-at/paimos/internal/events"
+	"github.com/inspr-at/paimos/internal/tenant"
 )
 
 var instanceRE = regexp.MustCompile(`^[a-z][a-z0-9_-]{0,62}$`)

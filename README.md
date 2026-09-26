@@ -15,13 +15,13 @@ just dev          # run the server (API on :8080); `cd web && npm run dev` for t
 
 ## Command line
 
-`aeon` is the agent command line. `aeon serve` still runs the server. Invoking the same binary as `paimos` (argv[0]) answers the same verbs, so existing doctrine commands keep their shape.
+`paimos` is the agent command line. `paimos serve` still runs the server. Existing doctrine commands keep their shape.
 
 ```sh
-aeon auth login --url https://aeon.example --name default --key-file ./agent.key
-aeon whoami
-aeon issue list --project AEON
-aeon mcp
+paimos auth login --url https://aeon.example --name default --key-file ./agent.key
+paimos whoami
+paimos issue list --project AEON
+paimos mcp
 ```
 
 Named instances and the default live in `~/.aeon/config.yaml`. The agent API key is read from `--key-file` or stdin, never echoed, and stored under `~/.aeon/keys/` mode 0600. `AEON_URL` together with `AEON_API_KEY` (or `AEON_API_KEY_FILE`) is a process-only target. When the binary is `paimos`, `PAIMOS_URL` and `PAIMOS_API_KEY` work the same way.
@@ -40,7 +40,7 @@ nix profile install github:inspr-at/aeon#aeon
 
 The repository will be renamed to `inspr-at/paimos` at cutover. GitHub redirects the old name, so this flake reference keeps resolving.
 
-GitHub release assets, next to `aeon-agentd` and listed in the same `SHA256SUMS`: `aeon-cli-darwin-amd64`, `aeon-cli-darwin-arm64`, `aeon-cli-linux-amd64`, `aeon-cli-linux-arm64`. Put the file on `PATH` as `aeon` and symlink `paimos` to it.
+GitHub release assets, next to `aeon-agentd` and listed in the same `SHA256SUMS`: `aeon-cli-darwin-amd64`, `aeon-cli-darwin-arm64`, `aeon-cli-linux-amd64`, `aeon-cli-linux-arm64`. Put the file on `PATH` as `paimos` and symlink `paimos` to it.
 
 Invoking the binary as `paimos` gives the paimos-compatible CLI. `PAIMOS_URL` (with `PAIMOS_API_KEY` or `PAIMOS_API_KEY_FILE`) is the process-only target.
 

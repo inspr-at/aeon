@@ -4,12 +4,13 @@ package activity
 import (
 	"encoding/json"
 	"fmt"
-	"github.com/inspr-at/aeon/internal/dbtest"
 	"testing"
 	"time"
 
-	"github.com/inspr-at/aeon/internal/principallink"
 	"github.com/jackc/pgx/v5"
+
+	"github.com/inspr-at/paimos/internal/dbtest"
+	"github.com/inspr-at/paimos/internal/principallink"
 )
 
 func TestLinkedActivityAuthorsAndCommentWrites(t *testing.T) {

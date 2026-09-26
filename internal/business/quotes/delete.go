@@ -8,8 +8,9 @@ import (
 	"net/http"
 	"strconv"
 
-	"github.com/inspr-at/aeon/internal/plugins/fence"
 	"github.com/jackc/pgx/v5"
+
+	"github.com/inspr-at/paimos/internal/plugins/fence"
 )
 
 // remove deletes a draft that was never issued (QL1/AEON-109). The quote node

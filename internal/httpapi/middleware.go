@@ -14,7 +14,7 @@ import (
 	"strings"
 	"time"
 
-	"github.com/inspr-at/aeon/internal/db"
+	"github.com/inspr-at/paimos/internal/db"
 )
 
 type requestIDKey struct{}

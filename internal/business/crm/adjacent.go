@@ -9,10 +9,11 @@ import (
 	"strings"
 	"time"
 
-	"github.com/inspr-at/aeon/internal/business/quotes"
-	"github.com/inspr-at/aeon/internal/httpapi"
-	"github.com/inspr-at/aeon/internal/plugins/fence"
 	"github.com/jackc/pgx/v5"
+
+	"github.com/inspr-at/paimos/internal/business/quotes"
+	"github.com/inspr-at/paimos/internal/httpapi"
+	"github.com/inspr-at/paimos/internal/plugins/fence"
 )
 
 // ReformatCustomerNumber delegates the guarded multi-quote conversion to QP1.

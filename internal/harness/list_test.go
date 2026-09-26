@@ -7,9 +7,10 @@ import (
 	"net/url"
 	"testing"
 
-	"github.com/inspr-at/aeon/internal/harness"
-	"github.com/inspr-at/aeon/internal/tenant"
 	"github.com/jackc/pgx/v5"
+
+	"github.com/inspr-at/paimos/internal/harness"
+	"github.com/inspr-at/paimos/internal/tenant"
 )
 
 func TestTenantHarnessList(t *testing.T) {

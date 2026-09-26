@@ -8,7 +8,7 @@ import (
 	"strings"
 	"testing"
 
-	"github.com/inspr-at/aeon/internal/tenant"
+	"github.com/inspr-at/paimos/internal/tenant"
 )
 
 func TestParseAndRejectBeforeDatabase(t *testing.T) {

@@ -11,8 +11,9 @@ import (
 	"reflect"
 	"testing"
 
-	"github.com/inspr-at/aeon/internal/tenant"
 	"github.com/jackc/pgx/v5"
+
+	"github.com/inspr-at/paimos/internal/tenant"
 )
 
 func createTestTag(t *testing.T, p tenant.Principal, name string) nodeJSON {

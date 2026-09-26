@@ -4,16 +4,17 @@ package journey_test
 
 import (
 	"fmt"
-	"github.com/inspr-at/aeon/internal/dbtest"
 	"net/http"
 	"strings"
 	"testing"
 
-	"github.com/inspr-at/aeon/internal/db"
-	"github.com/inspr-at/aeon/internal/journey"
-	"github.com/inspr-at/aeon/internal/releases"
-	"github.com/inspr-at/aeon/internal/requirements"
 	"github.com/jackc/pgx/v5"
+
+	"github.com/inspr-at/paimos/internal/db"
+	"github.com/inspr-at/paimos/internal/dbtest"
+	"github.com/inspr-at/paimos/internal/journey"
+	"github.com/inspr-at/paimos/internal/releases"
+	"github.com/inspr-at/paimos/internal/requirements"
 )
 
 func importedNode(t *testing.T, f *fixture, kind, key, parent, state string) string {

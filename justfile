@@ -26,7 +26,7 @@ e2e:
 
 # Build the web app and the binary
 build: web-check
-    go build -o bin/aeon ./cmd/aeon
+    go build -o bin/paimos ./cmd/aeon
 
 # Run the server locally
 dev:

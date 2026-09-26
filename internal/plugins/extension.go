@@ -7,7 +7,7 @@ import (
 	"encoding/json"
 	"slices"
 
-	"github.com/inspr-at/aeon/internal/tenant"
+	"github.com/inspr-at/paimos/internal/tenant"
 )
 
 // Call is the only value an extension receives beside its own arguments.

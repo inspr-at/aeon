@@ -17,7 +17,7 @@ import (
 	"sync/atomic"
 	"time"
 
-	"github.com/inspr-at/aeon/internal/ownedprocess"
+	"github.com/inspr-at/paimos/internal/ownedprocess"
 )
 
 type wireProcess struct {

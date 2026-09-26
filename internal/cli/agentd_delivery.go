@@ -14,9 +14,9 @@ import (
 	"syscall"
 	"time"
 
-	"github.com/inspr-at/aeon/internal/agentd"
-	"github.com/inspr-at/aeon/internal/agentdwire"
-	"github.com/inspr-at/aeon/internal/inbox"
+	"github.com/inspr-at/paimos/internal/agentd"
+	"github.com/inspr-at/paimos/internal/agentdwire"
+	"github.com/inspr-at/paimos/internal/inbox"
 )
 
 // Managed targets keep the classic {socket,session_id} reference shape. In

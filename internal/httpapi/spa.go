@@ -9,7 +9,7 @@ import (
 	"path"
 	"strings"
 
-	"github.com/inspr-at/aeon/internal/brand"
+	"github.com/inspr-at/paimos/internal/brand"
 )
 
 // placeholderHTML is served when the binary has no web build; it carries the

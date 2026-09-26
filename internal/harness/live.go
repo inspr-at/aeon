@@ -6,9 +6,10 @@ import (
 	"net/http"
 	"time"
 
-	"github.com/inspr-at/aeon/internal/authz"
-	"github.com/inspr-at/aeon/internal/tenant"
 	"github.com/jackc/pgx/v5"
+
+	"github.com/inspr-at/paimos/internal/authz"
+	"github.com/inspr-at/paimos/internal/tenant"
 )
 
 // LiveWindow is how fresh a heartbeat must be for a session to count as live:

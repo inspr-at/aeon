@@ -19,7 +19,7 @@ import (
 	"path/filepath"
 	"time"
 
-	"github.com/inspr-at/aeon/internal/releasehistory"
+	"github.com/inspr-at/paimos/internal/releasehistory"
 )
 
 func main() {

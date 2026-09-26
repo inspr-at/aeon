@@ -10,7 +10,7 @@ import (
 
 	"github.com/jackc/pgx/v5"
 
-	"github.com/inspr-at/aeon/internal/agentaccounts"
+	"github.com/inspr-at/paimos/internal/agentaccounts"
 )
 
 // Resolution is the role choice exposed by GET /api/models/resolve.

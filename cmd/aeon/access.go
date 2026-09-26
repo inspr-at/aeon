@@ -10,10 +10,11 @@ import (
 	"io"
 	"strings"
 
-	"github.com/inspr-at/aeon/internal/authz"
-	"github.com/inspr-at/aeon/internal/db"
 	"github.com/jackc/pgx/v5"
 	"github.com/jackc/pgx/v5/pgxpool"
+
+	"github.com/inspr-at/paimos/internal/authz"
+	"github.com/inspr-at/paimos/internal/db"
 )
 
 const accessUsage = "usage: aeon access bind --tenant SLUG --principal NAME|ID (--project KEY --role ROLEKEY | --workspace-role ROLEKEY) | aeon access unbind --tenant SLUG --principal NAME|ID (--project KEY | --workspace-role)"

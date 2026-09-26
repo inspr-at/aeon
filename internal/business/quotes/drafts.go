@@ -15,9 +15,10 @@ import (
 	"strconv"
 	"time"
 
-	"github.com/inspr-at/aeon/internal/events"
-	"github.com/inspr-at/aeon/internal/plugins/fence"
 	"github.com/jackc/pgx/v5"
+
+	"github.com/inspr-at/paimos/internal/events"
+	"github.com/inspr-at/paimos/internal/plugins/fence"
 )
 
 var draftETagRe = regexp.MustCompile(`^"qd-([1-9][0-9]*)"$`)

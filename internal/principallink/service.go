@@ -8,11 +8,12 @@ import (
 	"fmt"
 	"strings"
 
-	"github.com/inspr-at/aeon/internal/db"
-	"github.com/inspr-at/aeon/internal/principallink/apply"
-	"github.com/inspr-at/aeon/internal/tenantbootstrap"
 	"github.com/jackc/pgx/v5"
 	"github.com/jackc/pgx/v5/pgxpool"
+
+	"github.com/inspr-at/paimos/internal/db"
+	"github.com/inspr-at/paimos/internal/principallink/apply"
+	"github.com/inspr-at/paimos/internal/tenantbootstrap"
 )
 
 type Service struct{ pool *pgxpool.Pool }
