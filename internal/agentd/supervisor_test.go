@@ -13,14 +13,22 @@ import (
 )
 
 type fakeAPI struct {
-	mu      sync.Mutex
-	run     Run
-	profile Profile
-	claims  int
-	reports []Telemetry
-	acks    int
-	page    InboxPage
-	pageFn  func(int64) InboxPage
+	mu                         sync.Mutex
+	run                        Run
+	profile                    Profile
+	claims                     int
+	reports                    []Telemetry
+	acks                       int
+	page                       InboxPage
+	pageFn                     func(int64) InboxPage
+	harnessRegistration        HarnessSession
+	harnessCaps                []string
+	harnessBeats               int
+	harnessControls            []HarnessControl
+	harnessCompletions         []string
+	harnessDeliveries          []HarnessDelivery
+	harnessDeliveryCompletions int
+	harnessStops               []string
 }
 
 func (*fakeAPI) Identity(context.Context) (string, string, error) { return "tenant", "agent", nil }
@@ -28,7 +36,7 @@ func (a *fakeAPI) Queued(context.Context) ([]Run, error)          { return []Run
 func (a *fakeAPI) GetRun(context.Context, string) (Run, error)    { return a.run, nil }
 func (a *fakeAPI) Profiles(context.Context) ([]Profile, error)    { return []Profile{a.profile}, nil }
 func (*fakeAPI) Node(context.Context, string) (Node, error) {
-	return Node{ID: "order", Title: "Do work", Body: "Criteria"}, nil
+	return Node{ID: "order", Key: "TASK-1", Title: "Do work", Body: "Criteria"}, nil
 }
 func (*fakeAPI) WorkOrder(context.Context, string) (WorkOrder, error) {
 	return WorkOrder{NodeID: "order", Status: "ready"}, nil
@@ -62,6 +70,52 @@ func (a *fakeAPI) Ack(context.Context, string) error {
 }
 func (*fakeAPI) AddEvidence(context.Context, string, string, string) error { return nil }
 func (*fakeAPI) Probe(context.Context, string, string, string, bool) error { return nil }
+func (*fakeAPI) ProjectForNode(context.Context, string) (string, error)    { return "project", nil }
+func (a *fakeAPI) RegisterHarness(_ context.Context, s HarnessSession, _, _, _, _, _ string, caps []string) (HarnessSession, error) {
+	s.ID = "session"
+	a.mu.Lock()
+	a.harnessRegistration = s
+	a.harnessCaps = append([]string(nil), caps...)
+	a.mu.Unlock()
+	return s, nil
+}
+func (a *fakeAPI) HeartbeatHarness(context.Context, HarnessSession, string) error {
+	a.mu.Lock()
+	defer a.mu.Unlock()
+	a.harnessBeats++
+	return nil
+}
+func (a *fakeAPI) YieldHarness(context.Context, HarnessSession) ([]HarnessControl, error) {
+	a.mu.Lock()
+	defer a.mu.Unlock()
+	result := a.harnessControls
+	a.harnessControls = nil
+	return result, nil
+}
+func (a *fakeAPI) DrainHarness(context.Context, HarnessSession) ([]HarnessDelivery, error) {
+	a.mu.Lock()
+	defer a.mu.Unlock()
+	return a.harnessDeliveries, nil
+}
+func (a *fakeAPI) CompleteHarnessControl(_ context.Context, _ HarnessSession, id, outcome, reason string) error {
+	a.mu.Lock()
+	defer a.mu.Unlock()
+	a.harnessCompletions = append(a.harnessCompletions, id+":"+outcome+":"+reason)
+	return nil
+}
+func (a *fakeAPI) CompleteHarnessDelivery(context.Context, HarnessSession, HarnessDelivery) error {
+	a.mu.Lock()
+	defer a.mu.Unlock()
+	a.harnessDeliveryCompletions++
+	a.harnessDeliveries = nil
+	return nil
+}
+func (a *fakeAPI) StopHarness(_ context.Context, _ HarnessSession, reason string) error {
+	a.mu.Lock()
+	defer a.mu.Unlock()
+	a.harnessStops = append(a.harnessStops, reason)
+	return nil
+}
 
 type fakeAdapter struct{ proc *fakeProcess }
 
@@ -110,6 +164,57 @@ func testSupervisor(t *testing.T) (*Supervisor, *fakeAPI, *fakeProcess) {
 		t.Fatal(err)
 	}
 	return s, a, p
+}
+
+func TestManagedHarnessLifecycleAndControls(t *testing.T) {
+	s, a, p := testSupervisor(t)
+	defer s.Close(context.Background())
+	if err := s.PollOnce(t.Context()); err != nil {
+		t.Fatal(err)
+	}
+	a.mu.Lock()
+	registration := a.harnessRegistration
+	caps := append([]string(nil), a.harnessCaps...)
+	a.harnessControls = []HarnessControl{{ID: "interrupt-1", Kind: "interrupt"}}
+	a.harnessDeliveries = []HarnessDelivery{{ID: "delivery-1", Cursor: 1, Body: "Please check this"}}
+	a.mu.Unlock()
+	if registration.ID != "session" || registration.ProjectID != "project" || len(registration.Lease) < 32 || len(caps) != 5 {
+		t.Fatalf("managed registration binding or capabilities invalid: %v", caps)
+	}
+	if err := s.serviceHarness(t.Context(), s.runs["run"]); err != nil {
+		t.Fatal(err)
+	}
+	p.mu.Lock()
+	calls := p.calls
+	p.mu.Unlock()
+	a.mu.Lock()
+	completions := append([]string(nil), a.harnessCompletions...)
+	deliveries := a.harnessDeliveryCompletions
+	beats := a.harnessBeats
+	a.mu.Unlock()
+	if calls != 2 || len(completions) != 1 || completions[0] != "interrupt-1:applied:agentd_applied" || deliveries != 1 || beats < 2 {
+		t.Fatalf("control/drain: calls=%d completions=%v deliveries=%d beats=%d", calls, completions, deliveries, beats)
+	}
+	a.mu.Lock()
+	a.harnessControls = []HarnessControl{{ID: "stop-1", Kind: "stop"}}
+	a.mu.Unlock()
+	if err := s.serviceHarness(t.Context(), s.runs["run"]); err != nil {
+		t.Fatal(err)
+	}
+	entry := s.runs["run"]
+	entry.mu.Lock()
+	done := entry.monitorDone
+	entry.mu.Unlock()
+	select {
+	case <-done:
+	case <-time.After(3 * time.Second):
+		t.Fatal("owned child did not stop")
+	}
+	a.mu.Lock()
+	defer a.mu.Unlock()
+	if len(a.harnessCompletions) != 2 || a.harnessCompletions[1] != "stop-1:applied:agentd_applied" || len(a.harnessStops) != 1 || a.harnessStops[0] != "stopped" {
+		t.Fatalf("stop completion: controls=%v stops=%v", a.harnessCompletions, a.harnessStops)
+	}
 }
 
 func TestSupervisorClaimControlReplayAndScope(t *testing.T) {

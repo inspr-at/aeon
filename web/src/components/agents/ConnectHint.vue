@@ -3,12 +3,11 @@
 import { ref } from 'vue'
 import AppIcon from '../AppIcon.vue'
 
-// The empty state: how an agent shows up here. Managed agents started by the local
-// daemon register themselves; any other harness registers with the aeon CLI.
+// The empty state describes the two supported session lifecycles.
 const origin = window.location.origin
 const steps = [
-  { label: 'Log the agent in once with its agent key', command: `aeon auth login --url ${origin} --name default --key-file ./agent.key` },
-  { label: 'Register the session from inside the harness', command: 'aeon harness register --project KEY --agent NAME --harness claude --host $(hostname) --harness-session-file PATH --worker-lease-file PATH' },
+  { label: 'For a manual session, log the agent in with its key', command: `aeon auth login --url ${origin} --name default --key-file ./agent.key` },
+  { label: 'Register that session from inside its harness', command: 'aeon harness register --project KEY --agent NAME --harness claude --host $(hostname) --management unmanaged --harness-session-file PATH --worker-lease-file PATH' },
 ]
 const copied = ref(-1)
 async function copy(index: number) {
@@ -21,7 +20,7 @@ async function copy(index: number) {
   <div class="connect">
     <span class="halo"><AppIcon name="agent" :size="22" /></span>
     <h3>No agent has connected yet</h3>
-    <p class="lead">Codex, Claude, Pi, Cursor and Grok sessions show up here while they work: what they are on, how they pace, and what they need from you.</p>
+    <p class="lead">Sessions appear here when aeon-agentd starts a queued work order, or when a worker registers a session with the aeon CLI. This page does not start or attach to an existing local process.</p>
     <ol class="steps">
       <li v-for="(step, index) in steps" :key="index">
         <span class="step-label"><span class="n">{{ index + 1 }}</span>{{ step.label }}</span>
@@ -33,7 +32,7 @@ async function copy(index: number) {
         </span>
       </li>
     </ol>
-    <p class="fine">Sessions started by <code>paimos-agentd</code> register themselves. Use <code>claude</code>, <code>codex</code>, <code>pi</code>, <code>cursor</code> or <code>grok</code> for <code>--harness</code>.</p>
+    <p class="fine"><code>aeon-agentd</code> owns and controls only children it launches; those sessions are managed. The manual command above registers an unmanaged session that can report progress, but cannot be interrupted or stopped from this page. Use <code>claude</code>, <code>codex</code>, <code>pi</code>, <code>cursor</code> or <code>grok</code> for <code>--harness</code>.</p>
   </div>
 </template>
 

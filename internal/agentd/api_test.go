@@ -4,6 +4,7 @@ package agentd
 
 import (
 	"context"
+	"encoding/json"
 	"net/http"
 	"net/http/httptest"
 	"sync"
@@ -81,5 +82,92 @@ func TestRemoteUsesAeonRunAndInboxContract(t *testing.T) {
 	}
 	if err := ValidateBaseURL("https://example.com"); err != nil {
 		t.Fatal(err)
+	}
+}
+
+func TestRemoteManagedHarnessContract(t *testing.T) {
+	seen := map[string]bool{}
+	var mu sync.Mutex
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if r.Header.Get("Authorization") != "Bearer scoped-key" {
+			w.WriteHeader(http.StatusUnauthorized)
+			return
+		}
+		mu.Lock()
+		seen[r.Method+" "+r.URL.Path] = true
+		mu.Unlock()
+		w.Header().Set("Content-Type", "application/json")
+		switch r.URL.Path {
+		case "/api/nodes/lookup":
+			if r.URL.Query().Get("keys") != "TASK-1" {
+				t.Error("work order lookup key mismatch")
+			}
+			_, _ = w.Write([]byte(`{"items":[{"key":"TASK-1","project_id":"project"}]}`))
+		case "/api/projects/project/harness-sessions":
+			var body struct {
+				RunID      string `json:"run_id"`
+				TicketID   string `json:"ticket_node_id"`
+				Management string `json:"management_mode"`
+				Lease      string `json:"worker_lease"`
+			}
+			if json.NewDecoder(r.Body).Decode(&body) != nil || body.RunID != "run" || body.TicketID != "order" || body.Management != "managed" || body.Lease != "private-worker-lease-32-characters-minimum" {
+				t.Error("managed registration body invalid")
+			}
+			_, _ = w.Write([]byte(`{"id":"session","project_id":"project"}`))
+		default:
+			if r.Header.Get("X-Aeon-Worker-Lease") != "private-worker-lease-32-characters-minimum" {
+				t.Error("worker lease header missing")
+			}
+			switch r.URL.Path {
+			case "/api/projects/project/harness-sessions/session/yield":
+				_, _ = w.Write([]byte(`{"controls":[{"id":"control","kind":"interrupt"}]}`))
+			case "/api/projects/project/harness-sessions/session/drain":
+				_, _ = w.Write([]byte(`[{"delivery_id":"delivery","cursor":3,"body":"hello"}]`))
+			default:
+				_, _ = w.Write([]byte(`{}`))
+			}
+		}
+	}))
+	defer server.Close()
+	r := NewRemote(server.URL, "scoped-key")
+	ctx := context.Background()
+	project, err := r.ProjectForNode(ctx, "TASK-1")
+	if err != nil || project != "project" {
+		t.Fatalf("project lookup: %v", err)
+	}
+	s, err := r.RegisterHarness(ctx, HarnessSession{ID: "generation/reference", ProjectID: project, Lease: "private-worker-lease-32-characters-minimum"},
+		"agent", "run", "order", Codex, "host", []string{"status", "interrupt", "stop"})
+	if err != nil || s.ID != "session" {
+		t.Fatalf("registration: %v", err)
+	}
+	if err := r.HeartbeatHarness(ctx, s, "working"); err != nil {
+		t.Fatal(err)
+	}
+	controls, err := r.YieldHarness(ctx, s)
+	if err != nil || len(controls) != 1 || controls[0].Kind != "interrupt" {
+		t.Fatalf("yield: %v", err)
+	}
+	deliveries, err := r.DrainHarness(ctx, s)
+	if err != nil || len(deliveries) != 1 || deliveries[0].Cursor != 3 {
+		t.Fatalf("drain: %v", err)
+	}
+	if err := r.CompleteHarnessControl(ctx, s, "control", "applied", "agentd_applied"); err != nil {
+		t.Fatal(err)
+	}
+	if err := r.CompleteHarnessDelivery(ctx, s, deliveries[0]); err != nil {
+		t.Fatal(err)
+	}
+	if err := r.StopHarness(ctx, s, "process_exited"); err != nil {
+		t.Fatal(err)
+	}
+	mu.Lock()
+	defer mu.Unlock()
+	for _, path := range []string{"GET /api/nodes/lookup", "POST /api/projects/project/harness-sessions",
+		"POST /api/projects/project/harness-sessions/session/heartbeat", "POST /api/projects/project/harness-sessions/session/yield",
+		"POST /api/projects/project/harness-sessions/session/drain", "POST /api/projects/project/harness-sessions/session/controls/control/complete",
+		"POST /api/projects/project/harness-sessions/session/complete-delivery", "POST /api/projects/project/harness-sessions/session/stop"} {
+		if !seen[path] {
+			t.Errorf("missing %s", path)
+		}
 	}
 }

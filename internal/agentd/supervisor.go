@@ -7,6 +7,7 @@ import (
 	"crypto/rand"
 	"crypto/sha256"
 	"encoding/hex"
+	"encoding/json"
 	"errors"
 	"fmt"
 	"os"
@@ -52,7 +53,11 @@ type Record struct {
 
 type owned struct {
 	mu            sync.Mutex
+	harnessMu     sync.Mutex
 	record        Record
+	harness       HarnessSession
+	inboxCapable  bool
+	pending       []HarnessControl
 	process       Process
 	monitorDone   chan struct{}
 	stopRequested bool
@@ -211,8 +216,9 @@ func (s *Supervisor) Status() []Record {
 	return out
 }
 
-// PollOnce fetches queued work and pending inbox messages. A missing or stale
-// reservation fails closed and leaves the run queued for later reconciliation.
+// PollOnce fetches queued work. Owned inbox messages are leased by each managed
+// harness session, so they cannot race a separate principal-wide inbox poll.
+// A missing or stale reservation fails closed and leaves the run queued.
 func (s *Supervisor) PollOnce(ctx context.Context) error {
 	for _, account := range s.accounts {
 		probe := s.adapters[account.Harness].(AccountProber)
@@ -233,7 +239,7 @@ func (s *Supervisor) PollOnce(ctx context.Context) error {
 			return err
 		}
 	}
-	return s.DeliverInbox(ctx)
+	return nil
 }
 
 func (s *Supervisor) StartRun(ctx context.Context, run Run) error {
@@ -267,6 +273,9 @@ func (s *Supervisor) StartRun(ctx context.Context, run Run) error {
 	}
 	if node.ID != run.WorkOrderID || strings.TrimSpace(node.Title) == "" {
 		return errors.New("work order node unavailable")
+	}
+	if node.Key == "" {
+		return errors.New("work order key unavailable")
 	}
 	order, err := s.api.WorkOrder(ctx, run.WorkOrderID)
 	if err != nil {
@@ -329,11 +338,53 @@ func (s *Supervisor) StartRun(ctx context.Context, run Run) error {
 	s.mu.Lock()
 	s.runs[run.ID] = entry
 	s.mu.Unlock()
+	projectID, err := s.api.ProjectForNode(ctx, node.Key)
+	if err != nil {
+		_ = s.update(ctx, entry, Telemetry{Kind: "finished", Status: "failed", ErrorCode: "child_exit_failed"})
+		return err
+	}
+	host, err := os.Hostname()
+	if err != nil || host == "" || len(host) > 128 {
+		_ = s.update(ctx, entry, Telemetry{Kind: "finished", Status: "failed", ErrorCode: "child_exit_failed"})
+		return errors.New("valid harness host unavailable")
+	}
+	ref, err := randomID()
+	if err != nil {
+		return err
+	}
+	leaseA, err := randomID()
+	if err != nil {
+		return err
+	}
+	leaseB, err := randomID()
+	if err != nil {
+		return err
+	}
+	caps := []string{"status", "stop"}
+	if profile.Harness != Grok {
+		caps = append(caps, "interrupt")
+	}
+	entry.inboxCapable = profile.Harness == Claude || profile.Harness == Codex || profile.Harness == Pi
+	if entry.inboxCapable {
+		caps = append(caps, "inbox", "steer")
+	}
+	entry.harness, err = s.api.RegisterHarness(ctx, HarnessSession{ID: s.generation + "/" + ref, ProjectID: projectID, Lease: leaseA + leaseB},
+		s.principalID, run.ID, run.WorkOrderID, profile.Harness, host, caps)
+	if err != nil {
+		_ = s.update(ctx, entry, Telemetry{Kind: "finished", Status: "failed", ErrorCode: "child_exit_failed"})
+		return err
+	}
+	closeHarness := func(reason string) {
+		cleanup, cancel := context.WithTimeout(context.Background(), 10*time.Second)
+		defer cancel()
+		_ = s.api.StopHarness(cleanup, entry.harness, reason)
+	}
 	observe := func(ev AdapterEvent) { s.observe(entry, ev) }
 	proc, err := adapter.Start(ctx, StartRequest{TenantID: s.tenantID, PrincipalID: s.principalID, Run: run, Profile: profile,
 		AccountKey: route.AccountKey, Workspace: s.workspace, StateRoot: filepath.Dir(s.journal.JournalPath()), Prompt: prompt, Generation: s.generation}, observe)
 	if err != nil {
 		_ = s.update(ctx, entry, Telemetry{Kind: "finished", Status: "failed", ErrorCode: "child_exit_failed"})
+		closeHarness("process_failed")
 		return err
 	}
 	entry.mu.Lock()
@@ -344,16 +395,26 @@ func (s *Supervisor) StartRun(ctx context.Context, run Run) error {
 	entry.mu.Unlock()
 	if saveErr != nil {
 		_ = proc.Stop(ctx)
+		closeHarness("process_failed")
 		return saveErr
 	}
 	if err := s.update(ctx, entry, Telemetry{Kind: "started", Status: "running"}); err != nil {
 		_ = proc.Stop(ctx)
+		closeHarness("process_failed")
 		return err
 	}
+	heartbeatErr := s.api.HeartbeatHarness(ctx, entry.harness, "working")
 	entry.mu.Lock()
 	entry.monitorDone = make(chan struct{})
+	if heartbeatErr != nil {
+		entry.stopRequested = true
+	}
 	entry.mu.Unlock()
 	go s.monitor(entry)
+	if heartbeatErr != nil {
+		_ = proc.Stop(ctx)
+		return heartbeatErr
+	}
 	go s.heartbeat(entry, duration)
 	return nil
 }
@@ -373,6 +434,9 @@ func (s *Supervisor) heartbeat(entry *owned, duration time.Duration) {
 		case <-ticker.C:
 			ctx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
 			err := s.update(ctx, entry, Telemetry{Kind: "heartbeat"})
+			if err == nil {
+				err = s.serviceHarness(ctx, entry)
+			}
 			cancel()
 			if err != nil {
 				entry.mu.Lock()
@@ -434,6 +498,8 @@ func (s *Supervisor) monitor(entry *owned) {
 		return
 	}
 	err := proc.Wait()
+	entry.harnessMu.Lock()
+	defer entry.harnessMu.Unlock()
 	entry.mu.Lock()
 	stopped := entry.stopRequested
 	entry.mu.Unlock()
@@ -459,6 +525,75 @@ func (s *Supervisor) monitor(entry *owned) {
 	ctx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
 	defer cancel()
 	_ = s.update(ctx, entry, Telemetry{Kind: "finished", Status: status, ErrorCode: code})
+	reason := "process_exited"
+	if status == "failed" {
+		reason = "process_failed"
+	} else if status == "cancelled" {
+		reason = "stopped"
+	}
+	_ = s.api.StopHarness(ctx, entry.harness, reason)
+}
+
+// serviceHarness uses the harness module's yield claim queue and managed inbox
+// drain. The harness lock keeps completion ahead of terminal session closure.
+func (s *Supervisor) serviceHarness(ctx context.Context, entry *owned) error {
+	entry.harnessMu.Lock()
+	defer entry.harnessMu.Unlock()
+	entry.mu.Lock()
+	running := entry.record.State == "running"
+	entry.mu.Unlock()
+	if !running {
+		return nil
+	}
+	controls, err := s.api.YieldHarness(ctx, entry.harness)
+	if err != nil {
+		return err
+	}
+	entry.pending = append(entry.pending, controls...)
+	for len(entry.pending) > 0 {
+		control := entry.pending[0]
+		outcome, reason := "applied", "agentd_applied"
+		_, err := s.Control(ctx, ControlRequest{TenantID: s.tenantID, PrincipalID: s.principalID,
+			RunID: entry.record.RunID, Generation: s.generation, CorrelationID: control.ID, Operation: control.Kind})
+		if errors.Is(err, ErrUnsupported) || errors.Is(err, ErrNotOwned) {
+			outcome, reason, err = "rejected", "child_unavailable", nil
+		}
+		if err != nil {
+			return err
+		}
+		if err := s.api.CompleteHarnessControl(ctx, entry.harness, control.ID, outcome, reason); err != nil {
+			return err
+		}
+		entry.pending = entry.pending[1:]
+	}
+	if entry.inboxCapable {
+		// A drain returns at most one leased message and replays it until completed.
+		items, err := s.api.DrainHarness(ctx, entry.harness)
+		if err != nil {
+			return err
+		}
+		for _, item := range items {
+			if len(item.Body) > 64<<10 {
+				return errors.New("harness delivery exceeds local bound")
+			}
+			req := ControlRequest{TenantID: s.tenantID, PrincipalID: s.principalID,
+				RunID: entry.record.RunID, Generation: s.generation, CorrelationID: item.ID,
+				Operation: "steer", Text: item.Body}
+			if item.SenderPrincipalID == s.principalID {
+				var in inboxControl
+				if json.Unmarshal([]byte(item.Body), &in) == nil && in.RunID != "" {
+					req.RunID, req.Generation, req.Operation, req.Text = in.RunID, in.Generation, in.Operation, in.Text
+				}
+			}
+			if _, err := s.Control(ctx, req); err != nil {
+				return err
+			}
+			if err := s.api.CompleteHarnessDelivery(ctx, entry.harness, item); err != nil {
+				return err
+			}
+		}
+	}
+	return s.api.HeartbeatHarness(ctx, entry.harness, "working")
 }
 
 func (s *Supervisor) update(ctx context.Context, entry *owned, t Telemetry) error {

@@ -45,8 +45,29 @@ type Profile struct {
 
 type Node struct {
 	ID    string `json:"id"`
+	Key   string `json:"key"`
 	Title string `json:"title"`
 	Body  string `json:"body"`
+}
+
+// HarnessSession is the public binding plus the private worker lease held only
+// by this daemon generation. The lease is never persisted in the run journal.
+type HarnessSession struct {
+	ID        string `json:"id"`
+	ProjectID string `json:"project_id"`
+	Lease     string `json:"-"`
+}
+
+type HarnessControl struct {
+	ID   string `json:"id"`
+	Kind string `json:"kind"`
+}
+
+type HarnessDelivery struct {
+	ID                string `json:"delivery_id"`
+	Cursor            int64  `json:"cursor"`
+	SenderPrincipalID string `json:"sender_principal_id"`
+	Body              string `json:"body"`
 }
 
 type WorkOrder struct {
@@ -105,6 +126,14 @@ type API interface {
 	Ack(context.Context, string) error
 	AddEvidence(context.Context, string, string, string) error
 	Probe(context.Context, string, string, string, bool) error
+	ProjectForNode(context.Context, string) (string, error)
+	RegisterHarness(context.Context, HarnessSession, string, string, string, string, string, []string) (HarnessSession, error)
+	HeartbeatHarness(context.Context, HarnessSession, string) error
+	YieldHarness(context.Context, HarnessSession) ([]HarnessControl, error)
+	DrainHarness(context.Context, HarnessSession) ([]HarnessDelivery, error)
+	CompleteHarnessControl(context.Context, HarnessSession, string, string, string) error
+	CompleteHarnessDelivery(context.Context, HarnessSession, HarnessDelivery) error
+	StopHarness(context.Context, HarnessSession, string) error
 }
 
 type StartRequest struct {

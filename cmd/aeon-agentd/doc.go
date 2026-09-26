@@ -3,6 +3,11 @@
 // Command aeon-agentd is the operator-local, fenced harness supervisor.
 // It authenticates to an AEON server with a scoped agent key. Server module
 // wiring stays with the coordinator; this command does not embed the server.
+// The coordinator mounts harness.New(pool) as an httpapi.Module and registers
+// harness.Plugin() as its manifest. Each child is registered through those
+// public routes with a run and work order binding; no server wiring is needed
+// here. The daemon key needs harness.write and harness.worker in addition to
+// nodes.read for resolving the work order's project.
 //
 // This repository has no flake.nix, so there is no packages.<system>.aeon-agentd
 // Nix output. Install a GitHub release binary, or build from source with the
