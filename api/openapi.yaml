@@ -1818,6 +1818,32 @@ paths:
         '400': {description: Invalid filter or cursor}
         '401': {description: Authentication required}
         '403': {description: Scope required}
+  /harness-sessions/live:
+    get:
+      operationId: listLiveAgents
+      summary: Agents actively working right now, per visible project (AEON-184)
+      description: >-
+        One compact read for the Projects page. A session is live while it is not stopped, its heartbeat is at most
+        fresh_seconds old, its phase is starting, working or stopping, and its activity is not idle. It is listed under
+        its own project and, when its bound ticket has since moved, under the ticket's project as well. Row-level
+        security and project visibility (ADR-003 P2) decide what exists for the caller: an invisible project
+        contributes nothing. principal_id and name are present only with members.read or harness.read at that project
+        (as approval agent names, AEON-171); session_id only with harness.read in the workspace. Needs nodes.read in
+        the workspace or any project binding; an agent key also needs harness.read.
+      responses:
+        '200':
+          description: Live agents, oldest session first
+          content:
+            application/json:
+              schema:
+                type: object
+                required: [items, at, fresh_seconds]
+                properties:
+                  items: {type: array, items: {$ref: '#/components/schemas/LiveAgent'}}
+                  at: {type: string, format: date-time, description: The server clock when read}
+                  fresh_seconds: {type: integer, description: How old a heartbeat may be for its session to count as live}
+        '401': {description: Authentication required}
+        '403': {description: Scope required}
   /runs:
     get:
       operationId: listAgentRuns
@@ -4718,6 +4744,25 @@ components:
               properties:
                 id: {type: string, format: uuid}
                 name: {type: string}
+    LiveAgent:
+      type: object
+      required: [project_id, harness, management_mode, role, phase, activity, ticket, since, heartbeat_at]
+      properties:
+        project_id: {type: string, format: uuid}
+        session_id: {type: string, format: uuid, description: Present only with harness.read in the workspace}
+        principal_id: {type: string, format: uuid, description: Present only with members.read or harness.read at the project}
+        name: {type: string, description: The agent principal's name; present with principal_id}
+        harness: {type: string, enum: [codex, claude, pi, cursor, grok]}
+        management_mode: {type: string, enum: [managed, unmanaged]}
+        role: {type: string, enum: [worker, coordinator]}
+        phase: {type: string, enum: [starting, working, stopping]}
+        activity: {type: string, enum: [busy, unknown]}
+        ticket:
+          oneOf:
+            - {$ref: '#/components/schemas/NodeSummary'}
+            - {type: 'null'}
+        since: {type: string, format: date-time, description: When the session started}
+        heartbeat_at: {type: string, format: date-time}
     ProjectMessage:
       allOf:
         - {$ref: './openapi-messaging.yaml#/components/schemas/Message'}

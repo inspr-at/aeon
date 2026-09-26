@@ -10,6 +10,8 @@
 // State is stopped after closure, otherwise phase. Historical node bindings
 // retain their summaries after soft deletion. Existing Plugin() supplies the
 // compiled manifest; no new manifest registration or cmd wiring is needed.
+// AEON-184 adds GET /api/harness-sessions/live: the agents actively working
+// in each visible project right now, for the Projects page (live.go).
 package harness
 
 import (
@@ -45,6 +47,7 @@ func (m *Module) Mount(mux *http.ServeMux) {
 	}{
 		{"POST /api/projects/{projectId}/harness-sessions", "harness.write", false, 201, m.register},
 		{"GET /api/harness-sessions", "harness.read", false, 200, m.listAll},
+		{"GET /api/harness-sessions/live", "harness.read", false, 200, m.live},
 		{"GET /api/projects/{projectId}/harness-sessions", "harness.read", false, 200, m.list},
 		{"GET /api/projects/{projectId}/harness-sessions/orchestrator", "harness.read", false, 200, m.orchestrator},
 		{"GET /api/projects/{projectId}/harness-sessions/{sessionId}", "harness.read", false, 200, m.status},
