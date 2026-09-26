@@ -58,6 +58,15 @@ func (f *fixture) tx(fn func(pgx.Tx) error) {
 	}
 }
 
+func (f *fixture) databaseNow() time.Time {
+	f.t.Helper()
+	var now time.Time
+	f.tx(func(tx pgx.Tx) error {
+		return tx.QueryRow(f.t.Context(), `SELECT clock_timestamp()`).Scan(&now)
+	})
+	return now
+}
+
 func (f *fixture) addNode(key string) string {
 	f.t.Helper()
 	var id string
@@ -249,7 +258,8 @@ func TestCommentLifecycleAuthorizationIsolationAndConcurrency(t *testing.T) {
 		return nil
 	})
 	for _, age := range []time.Duration{15 * time.Minute, 16 * time.Minute, -time.Minute} {
-		id := f.event("comment.created", time.Now().Add(-age), nil, commentSnapshot{Body: "Outside window"})
+		// The handler checks PostgreSQL's clock, so boundary fixtures use it too.
+		id := f.event("comment.created", f.databaseNow().Add(-age), nil, commentSnapshot{Body: "Outside window"})
 		for _, method := range []string{"PATCH", "DELETE"} {
 			f.call(&f.p, method, path+"/"+id, `{"body_markdown":"Too late"}`, 403)
 		}
@@ -313,7 +323,7 @@ func TestCommentLifecycleAuthorizationIsolationAndConcurrency(t *testing.T) {
 	// Even a 14-minute-old comment remains editable; caller can be an agent.
 	agent := f.p
 	agent.Kind = tenant.Agent
-	allowed := f.event("comment.created", time.Now().Add(-14*time.Minute), nil, commentSnapshot{Body: "Still editable"})
+	allowed := f.event("comment.created", f.databaseNow().Add(-14*time.Minute), nil, commentSnapshot{Body: "Still editable"})
 	f.call(&agent, "PATCH", path+"/"+allowed, `{"body_markdown":"In window"}`, 200)
 	for _, body := range []string{`{}`, `null`, `{"body_markdown":null}`, `{"body_markdown":" "}`, `{"body_markdown":"ok","author_id":"fake"}`, `{"body_markdown":"ok"} {}`, `{"body_markdown":2}`, fmt.Sprintf(`{"body_markdown":%q}`, strings.Repeat("a", 65537))} {
 		f.call(&f.p, "POST", path, body, 400)
