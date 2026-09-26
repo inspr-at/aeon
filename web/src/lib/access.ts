@@ -181,6 +181,11 @@ export const projectRolesOf = (roles: Role[], registry: Permission[]) => roles.f
 // ---------- People ----------
 // The last active owner can never be demoted, deactivated or removed; the server says who that is.
 export const isLastOwner = (person: Pick<Person, 'last_owner'>) => person.last_owner
+// Changing an owner's role (or making someone owner) needs Transfer ownership
+// (internal/authz/members.go); making someone owner is already an escalation.
+export const OWNER_TRANSFER = 'ownership.transfer'
+export const ownerChangeNeedsTransfer = (current: Role | null | undefined, mine: Set<string>) => !!current?.builtin && current.key === 'owner' && !mine.has(OWNER_TRANSFER)
+export const OWNER_TRANSFER_REASON = 'Changing an owner’s role needs Transfer ownership, which you do not hold. An owner can change it.'
 export const LAST_OWNER_REASON = 'The last active owner keeps Owner, so the workspace always has someone who can manage it. Make another person an owner first.'
 export function projectSummary(roles: ProjectRole[]): string {
   if (!roles.length) return ''

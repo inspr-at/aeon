@@ -1,6 +1,6 @@
 // SPDX-License-Identifier: AGPL-3.0-only
 import { afterEach, describe, expect, it, vi } from 'vitest'
-import { accessChanged, can, clearPermissions, myPermissions, myWorkspaceRole, permissionsAvailable, permissionsKnown, refreshPermissions } from '../src/lib/authz'
+import { accessChanged, can, clearPermissions, myPermissions, myWorkspaceRole, permissionsAvailable, permissionsKnown, refreshPermissions, revokePermissions } from '../src/lib/authz'
 
 afterEach(() => { clearPermissions(); vi.unstubAllGlobals() })
 
@@ -77,5 +77,31 @@ describe('can()', () => {
     expect(permissionsKnown()).toBe(true)
     expect(permissionsAvailable()).toBe(false)
     expect(myPermissions().size).toBe(0)
+  })
+  it('review #1: an answer still in flight when access changes never lands', async () => {
+    let finishOld!: (value: { ok: boolean; json: () => Promise<unknown> }) => void
+    const fetch = vi.fn()
+      .mockImplementationOnce(() => new Promise(resolve => { finishOld = resolve }))
+      .mockImplementationOnce(async () => ({ ok: true, json: async () => ({ workspace: { role: null, permissions: [] }, project: { id: 'p', role: null, permissions: [] } }) }))
+      .mockImplementation(async () => ({ ok: true, json: async () => ({ workspace: { role: null, permissions: [] }, project: null }) }))
+    vi.stubGlobal('fetch', fetch)
+    expect(can('members.manage', 'p')).toBe(false) // asks for project p; the answer is slow
+    const change = accessChanged() // my role was reduced meanwhile
+    finishOld({ ok: true, json: async () => ({ workspace: { role: null, permissions: ['members.manage'] }, project: { id: 'p', role: null, permissions: ['members.manage'] } }) })
+    await change
+    expect(can('members.manage', 'p')).toBe(false)
+  })
+  it('review #2: a session that ended grants nothing and asks nothing until refreshed', async () => {
+    const fetch = vi.fn(async () => ({ ok: true, json: async () => ({ workspace: { role: null, permissions: ['members.read'] }, project: null }) }))
+    vi.stubGlobal('fetch', fetch)
+    await refreshPermissions()
+    expect(can('members.read')).toBe(true)
+    revokePermissions()
+    const asked = fetch.mock.calls.length
+    expect(can('members.read')).toBe(false)
+    expect(can('members.read', 'other')).toBe(false)
+    expect(fetch.mock.calls.length).toBe(asked)
+    await accessChanged()
+    expect(can('members.read')).toBe(true)
   })
 })

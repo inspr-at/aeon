@@ -23,19 +23,23 @@ const emit = defineEmits<{ close: [] }>()
 const access = useAccess()
 const projects = useProjects()
 const email = ref(props.prefill?.email ?? '')
-const workspaceRole = ref<string>(props.prefill ? props.prefill.workspaceRoleId ?? '' : defaultWorkspaceRole(access.roles))
-const projectRows = ref<{ project_id: string; role_id: string }[]>(props.prefill?.projectRoles.map(r => ({ ...r })) ?? [])
+const mine = computed(() => myPermissions())
+const grantable = (roleId: string) => !beyond(access.roleById.get(roleId)?.permissions ?? [], mine.value).length
+const projectRoles = computed(() => projectRolesOf(access.roles, access.registry))
+// Guest is a project role; it is offered on projects only.
+const workspaceRoles = computed(() => workspaceRolesOf(access.roles))
+const okWorkspace = (id: string) => workspaceRoles.value.some(r => r.id === id) && grantable(id)
+const okProject = (id: string) => projectRoles.value.some(r => r.id === id) && grantable(id)
+// A default or an "Invite again" prefill keeps only roles I may give there.
+const start = props.prefill ? props.prefill.workspaceRoleId ?? '' : defaultWorkspaceRole(access.roles)
+const workspaceRole = ref<string>(start && okWorkspace(start) ? start : '')
+const projectRows = ref<{ project_id: string; role_id: string }[]>(props.prefill?.projectRoles.filter(r => okProject(r.role_id)).map(r => ({ ...r })) ?? [])
 const days = ref<number>(14)
 const errors = ref<Record<string, string>>({})
 const saving = ref(false)
 const result = ref<{ invite: Invite; join_url: string } | null>(null)
 const copied = ref(false)
-const mine = computed(() => myPermissions())
-const grantable = (roleId: string) => !beyond(access.roleById.get(roleId)?.permissions ?? [], mine.value).length
 const whyNot = (roleId: string) => { const missing = beyond(access.roleById.get(roleId)?.permissions ?? [], mine.value); return missing.length ? `needs ${missing.slice(0, 2).map(permissionLabel).join(', ')}${missing.length > 2 ? ' and more' : ''}, which you do not hold` : '' }
-const projectRoles = computed(() => projectRolesOf(access.roles, access.registry))
-// Guest is a project role; it is offered on projects only.
-const workspaceRoles = computed(() => workspaceRolesOf(access.roles))
 const effect = computed(() => { const role = access.roleById.get(workspaceRole.value); return role ? effectLine(role.permissions, access.registry) : 'No workspace access: only the projects below.' })
 const freeProjects = (row: { project_id: string }) => projects.projects.filter(p => p.id === row.project_id || !projectRows.value.some(r => r.project_id === p.id))
 function addProject() {
@@ -48,6 +52,8 @@ function validate(): boolean {
   const out: Record<string, string> = {}
   if (!validEmail(email.value)) out.email = email.value.trim() ? 'Enter an email address like name@example.com.' : 'Enter the email address they sign in with.'
   if (!workspaceRole.value && !projectRows.value.length) out.access = 'Give a workspace role or at least one project, or they could not see anything.'
+  else if (workspaceRole.value && !okWorkspace(workspaceRole.value)) out.access = 'Choose a workspace role you can give.'
+  else if (projectRows.value.some(r => !okProject(r.role_id))) out.access = 'Choose a project role you can give for every project.'
   errors.value = out
   return !Object.keys(out).length
 }

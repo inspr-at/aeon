@@ -11,7 +11,7 @@ import AppIcon from '../AppIcon.vue'
 import Avatar from '../Avatar.vue'
 import ChoicePicker from '../settings/ChoicePicker.vue'
 import RolePicker from './RolePicker.vue'
-import { problem } from './accessText'
+import { problem, undoing } from './accessText'
 
 // Who can work on one project, and through what: a role on this project, their
 // workspace role (which reaches every project), or both. Project roles can be
@@ -70,7 +70,7 @@ async function choose(roleId: string | null) {
     await load()
     const name = access.roleById.get(roleId)?.name ?? 'the role'
     toast(before ? `${target.name} is ${name} on ${props.project.title}` : `${target.name} can work on ${props.project.title} as ${name}`, {
-      action: { label: 'Undo', run: () => void (before ? access.setProjectRole(props.project.id, target.id, before) : access.removeProjectMember(props.project.id, target.id)).then(load) },
+      action: { label: 'Undo', run: () => undoing((before ? access.setProjectRole(props.project.id, target.id, before) : access.removeProjectMember(props.project.id, target.id)).then(load), `${target.name}’s access could not be put back`) },
     })
   } catch (e) { roleError.value = problem(e, `${target.name}’s access did not change`) }
   finally { busy.value = false }
@@ -92,7 +92,7 @@ async function remove(entry: Entry) {
   try {
     await access.removeProjectMember(props.project.id, entry.principal_id)
     await load()
-    toast(`${entry.name} is off ${props.project.title}`, { action: { label: 'Undo', run: () => void access.setProjectRole(props.project.id, entry.principal_id, role).then(load) } })
+    toast(`${entry.name} is off ${props.project.title}`, { action: { label: 'Undo', run: () => undoing(access.setProjectRole(props.project.id, entry.principal_id, role).then(load), `${entry.name} could not be put back on ${props.project.title}`) } })
   } catch (e) {
     toast(problem(e, `${entry.name} stays on ${props.project.title}`), { tone: 'error' })
     // 404 or via_workspace: what is shown is out of date.

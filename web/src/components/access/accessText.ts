@@ -2,6 +2,7 @@
 // Shared words for the Access screens: errors in a sentence, and what a
 // deactivation does.
 import { AccessError } from '../../lib/access'
+import { toast } from '../../lib/toast'
 
 // "<what did not happen>: <the server's reason>." A reason names the field when
 // there is one, so forms can show it beside that field instead.
@@ -18,4 +19,8 @@ export function deactivatePoints(name: string): string[] {
     `Their tickets, comments and history stay, still shown as ${first}’s.`,
     'You can reactivate them later; their roles and project access come back as they were.',
   ]
+}
+// An Undo or Reactivate from a toast: a refusal is said, never swallowed.
+export function undoing(action: Promise<unknown>, what: string): void {
+  void action.catch(e => toast(problem(e, what), { tone: 'error' }))
 }

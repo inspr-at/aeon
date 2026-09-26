@@ -68,7 +68,7 @@ test('no escalation: an admin cannot give Owner, and is told why', async ({ page
   await open(page, '/settings/access/people', { role: 'admin' })
   await row(page, 'Mira Holm').getByRole('button', { name: /Workspace role of Mira Holm/ }).click()
   const owner = page.getByRole('radio', { name: /^Owner/ })
-  await expect(owner).toContainText('Includes a permission you do not hold: Manage the workspace.')
+  await expect(owner).toContainText('Includes permissions you do not hold: Manage the workspace, Transfer ownership.')
   await owner.click()
   await expect(page.getByRole('button', { name: 'Give Mira Holm Owner' })).toBeDisabled()
 })
@@ -326,6 +326,52 @@ test('without See members, Access is not offered at all', async ({ page }) => {
   await page.goto('/settings/access')
   await expect(page.getByRole('heading', { name: 'Access is for people who manage the workspace' })).toBeVisible()
   await expect(page.getByRole('navigation', { name: 'Settings sections' }).getByRole('link', { name: /Access/ })).toHaveCount(0)
+})
+
+test('review #3: a duplicate leaves out what I do not hold and never sends it', async ({ page }) => {
+  const world = await open(page, '/settings/access/roles/new?from=role-owner', { role: 'admin' })
+  await expect(page.locator('.role-editor')).toContainText('Left out of the copy, because you do not hold them: Manage the workspace, Transfer ownership.')
+  await page.getByLabel('Name', { exact: true }).fill('Almost owner')
+  await page.getByRole('button', { name: 'Create role' }).click()
+  await expect(page.locator('.savebar')).toContainText('Saved')
+  const sent = calls(world, 'POST', /\/api\/roles$/)[0]!.body.permissions as string[]
+  expect(sent).not.toContain('ownership.transfer')
+  expect(sent).not.toContain('workspace.manage')
+})
+
+test('review #4: an owner’s role changes only with Transfer ownership', async ({ page }) => {
+  // Two owners (Mira and Jonas), so neither is the last one; I am an admin.
+  await mockWork(page, fixtures())
+  const world = accessWorld({ role: 'admin', secondOwner: true })
+  world.people.find(p => p.principal_id === JONAS)!.workspace_role = 'role-owner'
+  await mockAccess(page, world)
+  await page.goto('/settings/access/people')
+  await row(page, 'Mira Holm').getByRole('button', { name: /Workspace role of Mira Holm/ }).click()
+  const picker = page.getByRole('dialog', { name: 'Role of Mira Holm' })
+  await expect(picker).toContainText('Changing an owner’s role needs Transfer ownership, which you do not hold.')
+  await expect(picker.getByRole('radio', { name: /^Admin/ })).toHaveClass(/off/)
+  await expect(picker.getByRole('button', { name: /^Give/ })).toHaveCount(0)
+  await picker.getByRole('button', { name: 'Close' }).click()
+  expect(calls(world, 'PUT', /workspace-role$/)).toHaveLength(0)
+})
+
+test('review #7: scopes I no longer hold leave the new key and are never sent', async ({ page }) => {
+  const world = await open(page, '/settings/access/agents')
+  const coordinator = page.getByRole('list', { name: 'Agents' }).getByRole('listitem').filter({ hasText: 'aeon-coordinator' })
+  await coordinator.getByRole('button', { name: /active key/ }).click()
+  await coordinator.getByRole('button', { name: 'New key' }).click()
+  const sheet = page.getByRole('dialog', { name: 'New key for aeon-coordinator' })
+  await sheet.getByRole('checkbox', { name: /nodes\.write/ }).check()
+  await sheet.getByRole('checkbox', { name: /nodes\.read/ }).check()
+  // My own role loses nodes.write; the next access check (window focus) says so.
+  const owner = world.roles.find(r => r.id === 'role-owner')!
+  owner.permissions = owner.permissions.filter(k => k !== 'nodes.write')
+  await page.evaluate(() => window.dispatchEvent(new Event('focus')))
+  await expect(sheet.getByRole('checkbox', { name: /nodes\.write/ })).toBeDisabled()
+  await expect(sheet.getByRole('checkbox', { name: /nodes\.write/ })).not.toBeChecked()
+  await sheet.getByRole('button', { name: 'Create key' }).click()
+  await expect(page.getByRole('dialog', { name: 'Key ready' })).toBeVisible()
+  expect((calls(world, 'POST', /\/agent-keys$/)[0]!.body as { scopes: string[] }).scopes).toEqual(['nodes.read'])
 })
 
 test('tabs are a tablist: arrows move between them', async ({ page }) => {

@@ -24,7 +24,7 @@ const ago = (hours: number) => new Date(now - hours * 3_600_000).toISOString()
 type Risk = 'low' | 'medium' | 'high'
 // agent_grantable mirrors internal/authz/registry.go: human governance, approval
 // decisions and the portal never go on an agent key.
-const NOT_FOR_AGENTS = new Set(['members.manage', 'roles.manage', 'keys.manage', 'keys.read', 'settings.manage', 'audit.read', 'approvals.decide', 'approvals.decide_high', 'portal.quotes'])
+const NOT_FOR_AGENTS = new Set(['ownership.transfer', 'members.manage', 'roles.manage', 'keys.manage', 'keys.read', 'settings.manage', 'audit.read', 'approvals.decide', 'approvals.decide_high', 'portal.quotes'])
 const P = (key: string, group: string, description: string, risk: Risk, project = true) => ({ key, group, description, risk, grantable_at: project ? ['workspace', 'project'] : ['workspace'], agent_grantable: !NOT_FOR_AGENTS.has(key) })
 export const REGISTRY = [
   P('nodes.read', 'Work', 'See projects, tickets and their history', 'low'),
@@ -47,6 +47,7 @@ export const REGISTRY = [
   P('kinds.manage', 'Workspace', 'Change ticket types and their fields', 'high', false),
   P('settings.manage', 'Workspace', 'Change workspace settings', 'high', false),
   P('workspace.manage', 'Workspace', 'Rename or close the workspace and appoint owners', 'high', false),
+  P('ownership.transfer', 'Ownership', 'Transfer workspace ownership', 'high', false),
   P('portal.quotes', 'Customer portal', 'See and accept their own quotes', 'low', false),
 ]
 const ALL = REGISTRY.map(p => p.key)
@@ -56,7 +57,7 @@ const builtin = (key: string, name: string, description: string, permissions: st
 export function roles(): MockRole[] {
   return [
     builtin('owner', 'Owner', 'Everything, including the workspace itself and who owns it.', ALL.filter(k => k !== 'portal.quotes')),
-    builtin('admin', 'Admin', 'Runs the workspace: people, roles, settings and agents.', ALL.filter(k => k !== 'portal.quotes' && k !== 'workspace.manage')),
+    builtin('admin', 'Admin', 'Runs the workspace: people, roles, settings and agents.', ALL.filter(k => k !== 'portal.quotes' && k !== 'workspace.manage' && k !== 'ownership.transfer')),
     builtin('member', 'Member', 'Does the work: tickets, knowledge, quotes and hours.', MEMBER),
     builtin('viewer', 'Viewer', 'Reads everything, changes nothing.', ['nodes.read', 'knowledge.read', 'quotes.read', 'members.read']),
     builtin('guest', 'Guest', 'An outside collaborator on the projects they are given.', ['nodes.read', 'nodes.write', 'comments.write', 'knowledge.read']),
@@ -240,6 +241,8 @@ export async function mockAccess(page: Page, world: AccessWorld, options: { also
       if (!target) return fail(route, 404, 'not_found', 'This person is no longer here.')
       if (next === 'role-guest') return fail(route, 400, 'project_only_role', 'Guest is a project role; grant it on a project instead', 'role_id')
       if (lastOwner(id) && next !== 'role-owner') return fail(route, 409, 'last_owner', 'The last active owner cannot be removed', 'role_id')
+      // internal/authz/members.go: changing an owner, or making one, needs ownership.transfer.
+      if ((target.workspace_role === 'role-owner' || next === 'role-owner') && !mine(world).has('ownership.transfer')) return fail(route, 403, 'forbidden', 'Permission denied')
       const beyond = world.roles.find(r => r.id === next)?.permissions.filter(k => !mine(world).has(k)) ?? []
       if (beyond.length) return fail(route, 403, 'forbidden', 'You cannot grant a role with permissions you do not hold', 'role_id')
       const before = roleRef(target.workspace_role)

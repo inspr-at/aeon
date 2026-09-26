@@ -15,6 +15,7 @@ const keyOf = (projectId?: string) => projectId || ''
 // callers update as soon as the server's effective set arrives.
 export function can(permission: string, projectId?: string): boolean {
   revision.value
+  if (revoked) return false
   const key = keyOf(projectId)
   const current = cache.get(key)
   if (current === undefined) { void refreshPermissions(projectId); return false }
@@ -51,13 +52,20 @@ function ask(projectId?: string): Promise<void> {
   return request
 }
 
-export function clearPermissions(): void { epoch++; cache.clear(); requests.clear(); asked.clear(); revision.value++ }
+export function clearPermissions(): void { epoch++; revoked = false; cache.clear(); requests.clear(); asked.clear(); revision.value++ }
+// The session ended (a 401): nothing is granted any more and nothing is asked
+// until the session is refreshed, so the page keeps its drafts without a request
+// loop. Every answer in flight is dropped.
+let revoked = false
+export function revokePermissions(): void { epoch++; revoked = true; requests.clear(); for (const key of cache.keys()) cache.set(key, null); revision.value++ }
 // My access may have changed (a role change, window focus): every scope already
 // asked about is asked again. The answers on screen stay until the new ones
 // arrive, so gated tabs and open sheets never flicker away; a failed answer
 // still grants nothing. Sign-out uses clearPermissions instead.
 export async function accessChanged(): Promise<void> {
-  const keys = new Set(['', ...cache.keys()])
+  revoked = false
+  // Scopes still in flight are asked again too: their older answers must not land.
+  const keys = new Set(['', ...cache.keys(), ...requests.keys()])
   await Promise.all([...keys].map(key => ask(key || undefined)))
 }
 

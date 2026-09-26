@@ -1,7 +1,7 @@
 <!-- SPDX-License-Identifier: AGPL-3.0-only -->
 <script setup lang="ts">
 import { computed, nextTick, onMounted, ref, useId, watch } from 'vue'
-import { beyond, diff, effectLine, LAST_OWNER_REASON, type Permission, permissionLabel, projectRolesOf, type Role, workspaceRolesOf } from '../../lib/access'
+import { beyond, diff, effectLine, LAST_OWNER_REASON, OWNER_TRANSFER_REASON, ownerChangeNeedsTransfer, type Permission, permissionLabel, projectRolesOf, type Role, workspaceRolesOf } from '../../lib/access'
 import AppIcon from '../AppIcon.vue'
 import FloatingPanel from '../work/FloatingPanel.vue'
 import RiskBadge from './RiskBadge.vue'
@@ -26,9 +26,11 @@ const NONE = '__none__'
 const options = computed(() => [...offered.value.map(role => ({ id: role.id, role })), ...(props.allowNone ? [{ id: NONE, role: null }] : [])])
 const picked = ref<string>(props.current ?? (props.allowNone ? NONE : ''))
 const currentRole = computed(() => props.roles.find(role => role.id === props.current) ?? null)
+// Why nothing but the current role can be chosen: the last owner, or an owner's role without Transfer ownership.
+const lockReason = computed(() => props.locked ? LAST_OWNER_REASON : props.scope === 'workspace' && ownerChangeNeedsTransfer(currentRole.value, props.mine) ? OWNER_TRANSFER_REASON : '')
 const pickedRole = computed(() => props.roles.find(role => role.id === picked.value) ?? null)
 function reasonFor(role: Role | null): string {
-  if (props.locked && role?.id !== props.current) return LAST_OWNER_REASON
+  if (lockReason.value && (role?.id ?? null) !== props.current) return lockReason.value
   if (!role) return ''
   const missing = beyond(role.permissions, props.mine)
   if (missing.length) return `Includes ${missing.length === 1 ? 'a permission' : 'permissions'} you do not hold: ${missing.slice(0, 3).map(permissionLabel).join(', ')}${missing.length > 3 ? ` and ${missing.length - 3} more` : ''}.`
@@ -77,24 +79,24 @@ watch(picked, () => void nextTick(reveal))
   <FloatingPanel :anchor="anchor" :width="400" :tallest="620" :label="`Role of ${whom}`" @close="restore => emit('close', restore)">
     <div class="picker" @keydown="keys">
       <p class="eyebrow title">{{ scope === 'workspace' ? 'Workspace role' : 'Project role' }} · {{ whom }}</p>
-      <p v-if="locked" :id="`${id}-locked`" class="locked"><AppIcon name="shield" :size="14" /><span>{{ LAST_OWNER_REASON }}</span></p>
+      <p v-if="lockReason" :id="`${id}-locked`" class="locked"><AppIcon name="shield" :size="14" /><span>{{ lockReason }}</span></p>
       <div ref="list" class="options" role="radiogroup" :aria-label="`Role for ${whom}`">
         <button
           v-for="option in options" :id="`${id}-${option.id}`" :key="option.id" type="button" role="radio" class="option"
           :aria-checked="picked === option.id" :tabindex="picked === option.id ? 0 : -1" :class="{ off: !!reasonFor(option.role) }"
-          :aria-describedby="reasonFor(option.role) ? (locked ? `${id}-locked` : `${id}-${option.id}-why`) : undefined" @click="picked = option.id"
+          :aria-describedby="reasonFor(option.role) ? (lockReason ? `${id}-locked` : `${id}-${option.id}-why`) : undefined" @click="picked = option.id"
         >
           <span class="dot" aria-hidden="true"><span /></span>
           <span class="text">
             <span class="name">{{ option.role?.name ?? noneLabel }}<span v-if="option.id === (current ?? (allowNone ? NONE : ''))" class="now">now</span><span v-if="option.role && !option.role.builtin" class="custom">Custom</span></span>
             <span class="desc" :data-tip="option.role?.description">{{ option.role ? option.role.description : scope === 'workspace' ? 'Only the projects they are given.' : 'No role on this project.' }}</span>
             <!-- While the last owner is locked the reason is said once, above; otherwise per role. -->
-            <span v-if="reasonFor(option.role) && !locked" :id="`${id}-${option.id}-why`" class="why"><AppIcon name="info" :size="12" />{{ reasonFor(option.role) }}</span>
+            <span v-if="reasonFor(option.role) && !lockReason" :id="`${id}-${option.id}-why`" class="why"><AppIcon name="info" :size="12" />{{ reasonFor(option.role) }}</span>
           </span>
         </button>
       </div>
       <!-- Always in place, so the menu opens where the full preview will fit. -->
-      <div v-if="!locked" class="preview" :class="{ idle: !changed }" role="region" aria-label="What changes" tabindex="0" aria-live="polite">
+      <div v-if="!lockReason" class="preview" :class="{ idle: !changed }" role="region" aria-label="What changes" tabindex="0" aria-live="polite">
         <p class="eyebrow">What changes</p>
         <p v-if="!changed" class="effect idle-text">Pick another role to see what it adds or takes away.</p>
         <p v-else class="effect">{{ pickedRole ? effectLine(pickedRole.permissions, registry) : scope === 'workspace' ? 'Only the projects they are given, nothing in the workspace.' : 'No access on this project beyond their workspace role.' }}</p>
@@ -111,7 +113,7 @@ watch(picked, () => void nextTick(reveal))
       </div>
       <p v-if="refusal" :id="`${id}-error`" class="refusal" role="alert"><AppIcon name="alert" :size="13" /><span>{{ refusal }}</span></p>
       <div class="actions">
-        <template v-if="locked"><button type="button" class="btn sm" @click="emit('close', true)">Close</button></template>
+        <template v-if="lockReason"><button type="button" class="btn sm" @click="emit('close', true)">Close</button></template>
         <template v-else>
           <button type="button" class="btn sm" @click="emit('close', true)">Cancel</button>
           <button type="button" class="btn sm primary" :disabled="!changed || !!pickedReason || busy" :data-tip="pickedReason || undefined" @click="apply">{{ changed ? applyLabel : 'Choose a role' }}</button>

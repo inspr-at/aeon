@@ -15,7 +15,7 @@ import KeysTable from './KeysTable.vue'
 import NewKeySheet from './NewKeySheet.vue'
 import RolePicker from './RolePicker.vue'
 import StatusChip from './StatusChip.vue'
-import { problem } from './accessText'
+import { problem, undoing } from './accessText'
 
 // Agents: each with its role (what its keys can do at most) and its keys.
 // Service principals run inside Aeon itself; they are shown as internal and are
@@ -56,7 +56,7 @@ async function chooseRole(roleId: string | null) {
   try {
     await access.setWorkspaceRole(target.agent.principal_id, roleId)
     picker.value = null
-    toast(`${target.agent.name} is now ${access.roleById.get(roleId ?? '')?.name ?? 'without a workspace role'}; its keys follow`, { action: { label: 'Undo', run: () => void access.setWorkspaceRole(target.agent.principal_id, before) } })
+    toast(`${target.agent.name} is now ${access.roleById.get(roleId ?? '')?.name ?? 'without a workspace role'}; its keys follow`, { action: { label: 'Undo', run: () => undoing(access.setWorkspaceRole(target.agent.principal_id, before), `${target.agent.name}’s role could not be put back`) } })
   } catch (e) { roleError.value = problem(e, `${target.agent.name} keeps its role`) }
   finally { busy.value = false }
 }

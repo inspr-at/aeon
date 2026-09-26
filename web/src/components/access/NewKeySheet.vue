@@ -1,6 +1,6 @@
 <!-- SPDX-License-Identifier: AGPL-3.0-only -->
 <script setup lang="ts">
-import { computed, nextTick, ref } from 'vue'
+import { computed, nextTick, ref, watch } from 'vue'
 import { AccessError, COORDINATOR_SCOPES, MAX_KEY_SCOPES, agentScopeCeiling, createAgentKey, groupPermissions, keyScopes, permissionLabel, type Agent, type AgentKeyCreated } from '../../lib/access'
 import { myPermissions } from '../../lib/authz'
 import { useAccess } from '../../stores/access'
@@ -27,6 +27,8 @@ const term = ref('')
 const mine = computed(() => myPermissions())
 const ceiling = computed(() => agentScopeCeiling(props.agent, access.roles))
 const held = computed(() => new Set([...mine.value].filter(k => !ceiling.value || ceiling.value.has(k))))
+// When my permissions or the agent's role shrink, scopes no longer allowed leave the selection.
+watch(held, now => { const kept = [...scopes.value].filter(k => now.has(k)); if (kept.length !== scopes.value.size) scopes.value = new Set(kept) })
 const why = (key: string) => !mine.value.has(key) ? 'you do not hold this' : `beyond ${props.agent.name}’s role${role.value ? ` (${role.value})` : ''}`
 const available = computed(() => keyScopes(access.registry))
 const groups = computed(() => {
@@ -45,6 +47,8 @@ const role = computed(() => props.agent.workspace_role?.name)
 async function create() {
   tried.value = true
   if (scopeProblem.value) { document.getElementById('key-scopes')?.focus(); return }
+  // Only scopes I may give go on the key.
+  if ([...scopes.value].some(k => !held.value.has(k))) { scopes.value = new Set([...scopes.value].filter(k => held.value.has(k))); error.value = 'Some scopes are no longer yours to give and were cleared; check the list and create again.'; return }
   busy.value = true
   error.value = ''
   try {
@@ -84,7 +88,7 @@ async function copy() { if (!created.value) return; try { await navigator.clipbo
         <div v-for="group in groups" :key="group.group" class="scope-group" role="group" :aria-label="group.group">
           <p class="group-h">{{ group.group }}</p>
           <label v-for="scope in group.items" :key="scope.key" class="scope-row" :class="{ off: !held.has(scope.key) }">
-            <input type="checkbox" :checked="scopes.has(scope.key)" :disabled="!held.has(scope.key) && !scopes.has(scope.key)" @change="toggle(scope.key)" />
+            <input type="checkbox" :checked="scopes.has(scope.key)" :disabled="!held.has(scope.key)" @change="toggle(scope.key)" />
             <span class="scope-text"><span>{{ permissionLabel(scope.key) }}</span><span class="mono key">{{ scope.key }}{{ held.has(scope.key) ? '' : ` · ${why(scope.key)}` }}</span></span>
           </label>
         </div>

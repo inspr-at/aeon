@@ -14,7 +14,7 @@ import ChoicePicker from '../settings/ChoicePicker.vue'
 import AccessSheet from './AccessSheet.vue'
 import RolePicker from './RolePicker.vue'
 import StatusChip from './StatusChip.vue'
-import { deactivatePoints, problem } from './accessText'
+import { deactivatePoints, problem, undoing } from './accessText'
 
 // One person: who they are, their workspace role and what it lets them do, the
 // projects they are given and with which role, the classic identities linked to
@@ -40,7 +40,7 @@ async function chooseWorkspace(roleId: string | null) {
     await access.setWorkspaceRole(props.person.principal_id, roleId)
     roleAnchor.value = null
     const name = access.roles.find(r => r.id === roleId)?.name
-    toast(name ? `${props.person.name} is now ${name}` : `${props.person.name} has no workspace role now`, { action: { label: 'Undo', run: () => void access.setWorkspaceRole(props.person.principal_id, before) } })
+    toast(name ? `${props.person.name} is now ${name}` : `${props.person.name} has no workspace role now`, { action: { label: 'Undo', run: () => undoing(access.setWorkspaceRole(props.person.principal_id, before), `${props.person.name}’s role could not be put back`) } })
   } catch (e) { roleError.value = problem(e, `${props.person.name} keeps their role`) }
   finally { busy.value = false }
 }
@@ -81,7 +81,7 @@ async function removeProject(entry: ProjectRole) {
   if (!ok) return
   try {
     await access.removeProjectMember(entry.project_id, props.person.principal_id)
-    toast(`${props.person.name} is off ${entry.project_title}`, { action: { label: 'Undo', run: () => void access.setProjectRole(entry.project_id, props.person.principal_id, entry.role.id) } })
+    toast(`${props.person.name} is off ${entry.project_title}`, { action: { label: 'Undo', run: () => undoing(access.setProjectRole(entry.project_id, props.person.principal_id, entry.role.id), `${props.person.name} could not be put back on ${entry.project_title}`) } })
   } catch (e) { toast(problem(e, `${props.person.name} stays on ${entry.project_title}`), { tone: 'error' }) }
 }
 
@@ -89,13 +89,13 @@ async function removeProject(entry: ProjectRole) {
 async function unlink(alias: { principal_id: string; name: string }) {
   const ok = await confirmAction({ title: `Unlink ${alias.name} from ${props.person.name}?`, points: [`Its classic history shows as ${alias.name} again, not as ${first.value}.`, 'It goes back to the imported identities, where it can be linked again.'], confirmLabel: 'Unlink', danger: true })
   if (!ok) return
-  try { await access.unlinkAlias(props.person.principal_id, alias.principal_id); toast(`${alias.name} is unlinked`, { action: { label: 'Undo', run: () => void access.linkAlias(props.person.principal_id, alias.principal_id) } }) }
+  try { await access.unlinkAlias(props.person.principal_id, alias.principal_id); toast(`${alias.name} is unlinked`, { action: { label: 'Undo', run: () => undoing(access.linkAlias(props.person.principal_id, alias.principal_id), `${alias.name} could not be linked again`) } }) }
   catch (e) { toast(problem(e, `${alias.name} stays linked`), { tone: 'error' }) }
 }
 async function deactivate() {
   const ok = await confirmAction({ title: `Deactivate ${props.person.name}?`, points: deactivatePoints(props.person.name), confirmLabel: `Deactivate ${first.value}`, danger: true })
   if (!ok) return
-  try { await access.deactivate(props.person.principal_id); toast(`${props.person.name} is deactivated`, { action: { label: 'Reactivate', run: () => void access.reactivate(props.person.principal_id) } }) }
+  try { await access.deactivate(props.person.principal_id); toast(`${props.person.name} is deactivated`, { action: { label: 'Reactivate', run: () => undoing(access.reactivate(props.person.principal_id), `${props.person.name} stays deactivated`) } }) }
   catch (e) { toast(problem(e, `${props.person.name} stays active`), { tone: 'error' }) }
 }
 async function reactivate() {

@@ -27,7 +27,10 @@ const base = computed<Role | null>(() => props.role ? (props.role.based_on ? acc
 const initial = computed(() => props.role?.permissions ?? props.from?.permissions ?? [])
 const name = ref(props.role?.name ?? (props.from ? `${props.from.name} copy` : ''))
 const description = ref(props.role?.description ?? (props.from ? props.from.description : ''))
-const picked = ref(new Set<string>(initial.value))
+// A duplicate starts from what I may give: permissions of the source that I do
+// not hold are left out (and said so), never sent.
+const leftOut = computed(() => props.role ? [] : beyond(props.from?.permissions ?? [], myPermissions()))
+const picked = ref(new Set<string>(props.role ? initial.value : initial.value.filter(k => !leftOut.value.includes(k))))
 const term = ref('')
 type View = 'all' | 'selected' | 'high' | 'changes'
 const view = ref<View>('all')
@@ -71,8 +74,9 @@ async function save() {
   if (saving.value) return
   errors.value = {}
   if (!name.value.trim()) { errors.value.name = 'A role needs a name.'; void nextTick(() => document.getElementById('role-name')?.focus()); return }
-  const escalating = beyond(diff(initial.value, selected.value).added, mine.value)
-  if (escalating.length) { errors.value.permissions = `You cannot give permissions you do not hold: ${escalating.map(permissionLabel).join(', ')}.`; return }
+  // The server requires me to hold every permission in the role I save.
+  const escalating = beyond(selected.value, mine.value)
+  if (escalating.length) { errors.value.permissions = `You can only save a role made of permissions you hold. Untick ${escalating.map(permissionLabel).join(', ')}, or ask someone who holds ${escalating.length === 1 ? 'it' : 'them'}.`; return }
   saving.value = true
   try {
     if (props.role) {
@@ -162,6 +166,7 @@ onMounted(() => { if (!props.role) void nextTick(() => document.getElementById('
           <span v-if="vsBase.removed.length" class="minus"><AppIcon name="minus" :size="11" />{{ vsBase.removed.length }} removed</span>
         </template>
       </p>
+      <p v-if="leftOut.length" class="set-note"><AppIcon name="info" :size="14" />Left out of the copy, because you do not hold {{ leftOut.length === 1 ? 'it' : 'them' }}: {{ leftOut.map(permissionLabel).join(', ') }}.</p>
       <p v-if="errors.permissions" class="set-note error" role="alert"><AppIcon name="alert" :size="14" />{{ errors.permissions }}</p>
       <section v-for="g in groups" :key="g.group" class="group" :aria-labelledby="`g-${g.group}`">
         <div class="g-head">

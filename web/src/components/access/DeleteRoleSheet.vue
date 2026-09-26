@@ -1,7 +1,7 @@
 <!-- SPDX-License-Identifier: AGPL-3.0-only -->
 <script setup lang="ts">
 import { computed, ref } from 'vue'
-import { beyond, deleteRole, type Role } from '../../lib/access'
+import { beyond, deleteRole, projectRolesOf, workspaceRolesOf, type Role } from '../../lib/access'
 import { myPermissions } from '../../lib/authz'
 import { toast } from '../../lib/toast'
 import { useAccess } from '../../stores/access'
@@ -15,7 +15,9 @@ const props = defineProps<{ role: Role }>()
 const emit = defineEmits<{ close: []; deleted: [] }>()
 const access = useAccess()
 const inUse = computed(() => props.role.member_count > 0)
-const targets = computed(() => access.roles.filter(r => r.id !== props.role.id))
+// Its holders may be bound in the workspace or on projects, so the replacement
+// must be legal in both places.
+const targets = computed(() => { const both = new Set(projectRolesOf(workspaceRolesOf(access.roles), access.registry).map(r => r.id)); return access.roles.filter(r => r.id !== props.role.id && both.has(r.id)) })
 const allowed = (r: Role) => !beyond(r.permissions, myPermissions()).length
 const reassign = ref(props.role.based_on && targets.value.some(r => r.id === props.role.based_on && allowed(r)) ? props.role.based_on : targets.value.find(allowed)?.id ?? '')
 const error = ref('')
