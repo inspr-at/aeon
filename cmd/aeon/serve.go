@@ -52,7 +52,6 @@ import (
 	"github.com/jackc/pgx/v5/pgxpool"
 
 	"github.com/inspr-at/aeon/internal/auth"
-	"github.com/inspr-at/aeon/internal/authz"
 	"github.com/inspr-at/aeon/internal/business/costunits"
 	"github.com/inspr-at/aeon/internal/business/crm"
 	"github.com/inspr-at/aeon/internal/business/directory"
