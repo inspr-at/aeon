@@ -50,14 +50,26 @@ func TestDatabasesAreIsolated(t *testing.T) {
 	if owner != a.Role {
 		t.Fatalf("principals owner %s, want app role %s", owner, a.Role)
 	}
-	var migrationsOwner string
+	// DDL ownership includes SECURITY DEFINER functions and sequences, not
+	// merely tables. Extension members remain owned by the bootstrap user.
+	var foreignObjects int
 	if err := a.Admin.QueryRow(ctx, `
-		SELECT tableowner FROM pg_tables
-		WHERE schemaname = 'public' AND tablename = 'schema_migrations'`).Scan(&migrationsOwner); err != nil {
+		SELECT count(*) FROM (
+			SELECT c.oid, 'pg_class'::regclass AS classid, c.relowner AS owner FROM pg_class c
+			JOIN pg_namespace n ON n.oid=c.relnamespace
+			WHERE n.nspname='public' AND c.relkind IN ('r','p','S')
+			UNION ALL
+			SELECT p.oid, 'pg_proc'::regclass, p.proowner FROM pg_proc p
+			JOIN pg_namespace n ON n.oid=p.pronamespace
+			WHERE n.nspname='public'
+		) objects
+		WHERE owner <> $1::regrole
+		AND NOT EXISTS (SELECT 1 FROM pg_depend d
+		                WHERE d.classid=objects.classid AND d.objid=objects.oid AND d.deptype='e')`, a.Role).Scan(&foreignObjects); err != nil {
 		t.Fatal(err)
 	}
-	if migrationsOwner == a.Role {
-		t.Fatal("schema_migrations must stay with the migrating user")
+	if foreignObjects != 0 {
+		t.Fatalf("%d application tables, sequences or functions are not owned by app role", foreignObjects)
 	}
 
 	if _, err := a.Admin.Exec(ctx, `INSERT INTO tenants (slug, name) VALUES ('iso', 'Iso')`); err != nil {

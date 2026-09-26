@@ -43,7 +43,7 @@ type projectMoveSnapshot struct {
 func loadJourneyMembership(ctx context.Context, tx pgx.Tx, id string) (*journeyMembership, error) {
 	var m journeyMembership
 	err := tx.QueryRow(ctx, `SELECT project_node_id::text,feature_node_id::text,release_node_id::text,walker_position,source,scope_revision_required,access_change,estimated_hours::text
-	 FROM journey_tickets WHERE ticket_node_id=$1::uuid`, id).
+	 FROM journey_tickets WHERE ticket_node_id=$1::uuid FOR UPDATE`, id).
 		Scan(&m.ProjectID, &m.FeatureID, &m.ReleaseID, &m.WalkerPosition, &m.Source, &m.ScopeRevisionRequired, &m.AccessChange, &m.EstimatedHours)
 	if errors.Is(err, pgx.ErrNoRows) {
 		return nil, nil
@@ -178,9 +178,6 @@ func (m *Module) projectMove(ctx context.Context, p tenant.Principal, id, projec
 		if err != nil {
 			return err
 		}
-		if beforeJourney != nil && beforeJourney.ProjectID != sourceProject {
-			return conflict("issue journey membership differs from its project")
-		}
 		var newKey string
 		if err := tx.QueryRow(ctx, `SELECT aeon_next_node_key(current_setting('aeon.tenant_id')::uuid,$1)`, prefix).Scan(&newKey); err != nil {
 			return dbErr("allocate node key", err)
@@ -198,30 +195,9 @@ func (m *Module) projectMove(ctx context.Context, p tenant.Principal, id, projec
 		if _, err := tx.Exec(ctx, `INSERT INTO node_key_aliases(tenant_id,key,node_id) VALUES($1::uuid,$2,$3::uuid)`, p.TenantID, current.Key, id); err != nil {
 			return dbErr("reserve former key", err)
 		}
-		var afterJourney *journeyMembership
-		if beforeJourney != nil {
-			var targetJourney bool
-			if err := tx.QueryRow(ctx, `SELECT EXISTS(SELECT 1 FROM journey_projects WHERE project_node_id=$1::uuid)`, projectID).Scan(&targetJourney); err != nil {
-				return err
-			}
-			if targetJourney {
-				_, err = tx.Exec(ctx, `UPDATE journey_tickets SET project_node_id=$2::uuid,feature_node_id=NULL,release_node_id=NULL,
-				 walker_position=(SELECT coalesce(max(walker_position),-1)+1 FROM journey_tickets WHERE project_node_id=$2::uuid),
-				 source='manual',scope_revision_required=true WHERE ticket_node_id=$1::uuid`, id, projectID)
-			} else {
-				_, err = tx.Exec(ctx, `DELETE FROM journey_tickets WHERE ticket_node_id=$1::uuid`, id)
-			}
-			if err != nil {
-				return err
-			}
-			if _, err := tx.Exec(ctx, `UPDATE journey_projects SET revision=revision+1,updated_at=now()
-			 WHERE project_node_id=$1::uuid OR project_node_id=$2::uuid`, sourceProject, projectID); err != nil {
-				return err
-			}
-			afterJourney, err = loadJourneyMembership(ctx, tx, id)
-			if err != nil {
-				return err
-			}
+		afterJourney, err := transferJourneyMembership(ctx, tx, id, sourceProject, projectID, beforeJourney)
+		if err != nil {
+			return err
 		}
 		if err := m.record(ctx, tx, p.ID, &id, evNodeProjectMoved,
 			projectMoveSnapshot{Node: current, Journey: beforeJourney}, projectMoveSnapshot{Node: moved, Journey: afterJourney}); err != nil {
