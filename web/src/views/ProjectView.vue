@@ -605,9 +605,17 @@ function updateKnowledge(patch: Partial<KnowledgeFilters>) {
 function landed() {
   return new Promise<boolean>(resolve => { const stop = router.afterEach((_to, _from, failure) => { stop(); resolve(!failure) }) })
 }
+// The row for the address, not the entry the pane has finished loading. j and k
+// change the address at once; the pane keeps the previous entry until its fetch
+// returns, and under load that is still in flight when Esc is pressed.
+function dockedRowId(): string | null {
+  const open = dockEntry.value
+  if (!open) return null
+  return knowledge.sequence.value.find(item => item.type === open.type && item.slug === open.slug)?.id ?? knowledgeEntry.value?.entryId() ?? null
+}
 // Closing the docked entry: back to the list it was opened from, the row selected.
 async function closeKnowledgeDock() {
-  const id = knowledgeEntry.value?.entryId() ?? null
+  const id = dockedRowId()
   const list = { path: `/p/${encodeURIComponent(routeKey.value)}/knowledge`, query: knowledgeListQuery.value }
   const done = landed()
   if (window.history.state?.back === router.resolve(list).fullPath) router.back()

@@ -25,6 +25,13 @@ const toggle = (page: Page, name: 'Entries' | 'Graph') => page.getByRole('group'
 const canvas = (page: Page) => page.locator('.kg-canvas')
 // U25: on wide screens (1200px and up) a selected entry opens in the preview pane beside the graph.
 const pane = (page: Page) => page.locator('.entry-page.dock')
+// The heading exists only once this entry's fetch has landed. The graph can be
+// ready while that chunk and request are still queued behind it.
+async function dockedHeading(page: Page, title: string) {
+  const dock = pane(page)
+  await expect(dock).toHaveAttribute('data-loaded', 'true', { timeout: 15_000 })
+  await expect(dock.getByRole('heading', { level: 1 })).toHaveText(title)
+}
 // The graph fits its camera and picks the bubble under the pointer on animation frames.
 const frames = (page: Page, count = 3) => page.evaluate(n => new Promise<void>(done => { const step = (left: number) => left ? requestAnimationFrame(() => step(left - 1)) : done(); step(n) }), count)
 // The canvas box once layout has stopped moving (the pane opening narrows it).
@@ -79,15 +86,17 @@ test('graph toggle and filters preserve the URL; selection, keyboard open and hi
 test('the pane closes back to the graph, which keeps the display and filters', async ({ page }) => {
   await setup(page)
   await page.goto('/p/PHAROS/knowledge?mode=graph&type=runbook&entry=runbook/deploy-release'); await ready(page)
-  await expect(pane(page).getByRole('heading', { level: 1 })).toHaveText('Deploy a release to production')
+  await dockedHeading(page, 'Deploy a release to production')
   await expect(page.getByRole('group', { name: 'Knowledge display', exact: true })).toBeVisible()
   await expect(toggle(page, 'Graph')).toHaveAttribute('aria-pressed', 'true')
   await pane(page).getByRole('button', { name: 'Close the preview' }).click()
-  await expect(page).toHaveURL(/\/knowledge\?(?=.*mode=graph)(?=.*type=runbook)(?!.*entry=)/)
+  // Closing waits on the router's session check. Under load that outlasts the default 5s; the address is the settled signal.
+  await expect(page).toHaveURL(/\/knowledge\?(?=.*mode=graph)(?=.*type=runbook)(?!.*entry=)/, { timeout: 15_000 })
   await expect(canvas(page)).toBeFocused()
   // Expanding keeps the way back to the graph.
   // The pane's controls are used once its entry has loaded.
-  await canvas(page).press('ArrowRight'); await expect(pane(page).getByRole('heading', { level: 1 })).toHaveText('Rotate the fleet host keys')
+  await canvas(page).press('ArrowRight')
+  await dockedHeading(page, 'Rotate the fleet host keys')
   await pane(page).getByRole('button', { name: 'Open as full page' }).click()
   await expect(page).toHaveURL(/knowledge\/runbook\/[^?]+\?(?=.*mode=graph)/)
   await page.keyboard.press('Escape')

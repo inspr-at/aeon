@@ -504,7 +504,7 @@ const whoUpdated = computed(() => entry.value?.imported ? 'imported' : entry.val
 </script>
 
 <template>
-  <component :is="dock ? 'aside' : 'article'" ref="root" class="entry-page" :class="[mode, { editing }]" tabindex="-1" :aria-label="entry ? `${meta.label}: ${entry.title}` : 'Knowledge entry'">
+  <component :is="dock ? 'aside' : 'article'" ref="root" class="entry-page" :class="[mode, { editing }]" tabindex="-1" :data-loaded="entry && entry.type === type && entry.slug === slug ? 'true' : 'false'" :aria-label="entry ? `${meta.label}: ${entry.title}` : 'Knowledge entry'">
     <!-- The bar: back, what it is, where it is in the list, and the actions. -->
     <header class="e-bar"><div class="e-bar-inner">
       <RouterLink v-if="!dock" class="icon-btn sm flat" :to="listLink()" aria-label="Back to Knowledge" data-tip="Back to Knowledge · Esc" @click.prevent="emit('close')"><AppIcon name="chevron-left" :size="16" /></RouterLink>

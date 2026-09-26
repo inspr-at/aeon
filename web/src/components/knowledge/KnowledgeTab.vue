@@ -160,10 +160,21 @@ async function copyCommand() {
 }
 // The row the entry page was on is the cursor when the tab shows again.
 function reveal(id: string, focus = false) {
-  if (graphMode.value) { if (focus) graph.value?.focus(); return }
+  if (graphMode.value) { if (focus) graph.value?.focus?.(); return }
   if (!props.state.sequence.value.some(item => item.id === id)) return
   cursorId.value = id
-  void nextTick(() => { const el = rowEl(id); if (focus) el?.focus({ preventScroll: true }); el?.scrollIntoView({ block: 'nearest' }) })
+  const place = () => {
+    const el = rowEl(id)
+    if (!el) return
+    // The pane's removal moves focus on a later frame than this tick. Put the
+    // row back after that frame, or the browser leaves focus on the body.
+    if (focus && document.activeElement !== el) el.focus({ preventScroll: true })
+    el.scrollIntoView({ block: 'nearest' })
+  }
+  void nextTick(() => {
+    place()
+    if (focus) requestAnimationFrame(() => place())
+  })
 }
 onMounted(() => window.addEventListener('keydown', keydown))
 onBeforeUnmount(() => { window.removeEventListener('keydown', keydown); clearTimeout(timer); phoneQuery.removeEventListener('change', onPhone) })
