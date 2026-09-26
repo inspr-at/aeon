@@ -25,10 +25,10 @@ type visibility struct {
 
 // AllProjects marks ctx for a service path that must read or write every
 // project regardless of any caller: the importer, the embedding worker, quote
-// confirmation jobs, the public quote link, tenant bootstrap and other system
-// jobs. It overrides a principal in ctx, so request handlers use it only for a
-// narrowly scoped step whose authorization they have already checked. The
-// reason names the path at the call site; it is kept for debugging.
+// confirmation jobs, the public quote link, file gc and other system jobs.
+// It overrides a principal in ctx, so request handlers use it only for a
+// narrowly scoped step whose authorization they have already checked (the
+// quote portal). The reason names the path at the call site.
 func AllProjects(ctx context.Context, reason string) context.Context {
 	return context.WithValue(ctx, visibilityKey{}, visibility{value: "*", reason: reason})
 }
@@ -48,12 +48,6 @@ func OnlyProjects(ctx context.Context, projectIDs ...string) context.Context {
 // what it sees. Nothing project-scoped is visible; workspace events are.
 func NoProjects(ctx context.Context, reason string) context.Context {
 	return context.WithValue(ctx, visibilityKey{}, visibility{value: "", reason: reason})
-}
-
-// ExplicitVisibility reports the service visibility set on ctx, if any.
-func ExplicitVisibility(ctx context.Context) (string, bool) {
-	v, ok := ctx.Value(visibilityKey{}).(visibility)
-	return v.value, ok
 }
 
 // enterTenant scopes a new transaction to tenantID and its project visibility:
