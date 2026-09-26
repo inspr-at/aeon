@@ -12,6 +12,8 @@ import (
 
 	"github.com/inspr-at/aeon/internal/db"
 	"github.com/inspr-at/aeon/internal/dbtest"
+	"github.com/inspr-at/aeon/internal/releases"
+	"github.com/inspr-at/aeon/internal/tenant"
 	"github.com/jackc/pgx/v5"
 )
 
@@ -116,13 +118,15 @@ func TestProjectVisibilityFailsClosed(t *testing.T) {
 	if none.nodes != 0 || none.relations != 0 || none.nodeEvents != 0 || none.attachments != 0 || none.embeddingJobs != 0 {
 		t.Fatalf("unset visibility shows project data: %+v", none)
 	}
-	// Workspace events are not project data; system code without a principal
-	// (sign-in) still reads them.
-	if none.workspaceEvents == 0 {
-		t.Fatalf("unset visibility hides workspace events: %+v", none)
+	// Without a principal or a service visibility, not even workspace
+	// activity is visible; an explicit service path (sign-in, bootstrap)
+	// reads workspace events that name no project, and still no project data.
+	if none.workspaceEvents != 0 {
+		t.Fatalf("unset visibility shows workspace events: %+v", none)
 	}
-	if got := countVisible(t, db.NoProjects(ctx, "test"), f); got != none {
-		t.Fatalf("NoProjects %+v, unset %+v", got, none)
+	system := countVisible(t, db.NoProjects(ctx, "test"), f)
+	if system.workspaceEvents == 0 || system.nodes != 0 || system.nodeEvents != 0 || system.relations != 0 {
+		t.Fatalf("NoProjects: %+v", system)
 	}
 	all := countVisible(t, db.AllProjects(ctx, "test"), f)
 	if all.nodes != 5 || all.relations != 1 || all.nodeEvents != 2 || all.attachments != 2 || all.embeddingJobs != 5 {
@@ -488,4 +492,107 @@ func jsonEqual(t *testing.T, a, b string) bool {
 		return false
 	}
 	return reflect.DeepEqual(x, y)
+}
+
+// Review round 2, findings 1 and 2: references inside arrays count (a release
+// plan names its tickets, features and screens in tickets[] and features[]),
+// a batch names its items, and neither an event without a node nor the
+// caller's own event skips the check. A transaction with no principal and no
+// service visibility reads no event at all.
+func TestNestedAndNodelessEventReferences(t *testing.T) {
+	d := dbtest.Open(t)
+	f := newVisibilityFixture(t, d, "p2-nested-refs")
+	ctx := t.Context()
+	// The actor is a guest of project A only.
+	if _, err := d.Admin.Exec(ctx, `INSERT INTO role_bindings(tenant_id,principal_id,role_id,scope_type,scope_id) SELECT $1,$2,id,'project',$3 FROM roles WHERE tenant_id=$1 AND key='guest'`, f.tenant, f.actor, f.projectA); err != nil {
+		t.Fatal(err)
+	}
+	plan := func(ticket, screen string) string {
+		w := releases.Walker{ReleaseID: f.ticketA, ProjectID: f.projectA, State: "planning", Revision: 2,
+			Features: []releases.Feature{{NodeID: f.ticketA, Key: "TA-1", Title: "Feature"}},
+			Tickets:  []releases.Ticket{{NodeID: ticket, Key: "K-1", Title: "secret title", ScreenIDs: []string{screen}}}}
+		b, err := json.Marshal(w)
+		if err != nil {
+			t.Fatal(err)
+		}
+		return string(b)
+	}
+	batch := func(ids ...string) string {
+		items := []map[string]any{}
+		for _, id := range ids {
+			items = append(items, map[string]any{"id": id, "key": "K-" + id[:4], "parent_id": nil, "fields": map[string]any{"x": 1}})
+		}
+		b, err := json.Marshal(map[string]any{"items": items})
+		if err != nil {
+			t.Fatal(err)
+		}
+		return string(b)
+	}
+	cases := []struct {
+		name, typ  string
+		node       *string
+		after      string
+		visibleToA bool
+	}{
+		{"plan within A", "journey.release_planned", &f.ticketA, plan(f.ticketA, f.ticketA), true},
+		{"plan with a ticket of B", "journey.release_planned", &f.ticketA, plan(f.ticketB, f.ticketA), false},
+		{"plan with a screen of B", "journey.release_planned", &f.ticketA, plan(f.ticketA, f.ticketB), false},
+		{"batch within A", "node.bulk_changed", nil, batch(f.ticketA), true},
+		{"batch touching B", "node.bulk_changed", nil, batch(f.ticketA, f.ticketB), false},
+		{"own workspace activity", "profile.updated", nil, `{"principal_id":"` + f.actor + `"}`, true},
+		{"own harness event naming B", "harness.heartbeat", &f.ticketA, `{"project_id":"` + f.projectB + `"}`, false},
+		{"deeply nested", "node.updated", &f.ticketA, strings.Repeat(`{"a":`, 20) + `{"parent_id":"` + f.ticketA + `"}` + strings.Repeat(`}`, 20), false},
+	}
+	err := db.InTenant(dbtest.Seed(ctx), d.App, f.tenant, func(tx pgx.Tx) error {
+		for _, c := range cases {
+			if _, err := tx.Exec(ctx, `INSERT INTO events(tenant_id,actor_principal_id,node_id,type,after) VALUES($1,$2,$3,$4,$5::jsonb)`, f.tenant, f.actor, c.node, c.typ, c.after); err != nil {
+				return fmt.Errorf("%s: %w", c.name, err)
+			}
+		}
+		return nil
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	visible := func(ctx context.Context) map[string]bool {
+		out := map[string]bool{}
+		err := db.InTenant(ctx, d.App, f.tenant, func(tx pgx.Tx) error {
+			rows, err := tx.Query(ctx, `SELECT type, after::text FROM events WHERE actor_principal_id=$1`, f.actor)
+			if err != nil {
+				return err
+			}
+			defer rows.Close()
+			for rows.Next() {
+				var typ, after string
+				if err := rows.Scan(&typ, &after); err != nil {
+					return err
+				}
+				for _, c := range cases {
+					if c.typ == typ && jsonEqual(t, c.after, after) {
+						out[c.name] = true
+					}
+				}
+			}
+			return rows.Err()
+		})
+		if err != nil {
+			t.Fatal(err)
+		}
+		return out
+	}
+	actor := tenant.Principal{ID: f.actor, TenantID: f.tenant, Kind: tenant.Person}
+	asGuest := visible(tenant.WithPrincipal(ctx, actor))
+	all := visible(db.AllProjects(ctx, "test"))
+	unset := visible(ctx)
+	for _, c := range cases {
+		if asGuest[c.name] != c.visibleToA {
+			t.Errorf("%s: visible to its actor, a guest of A = %v, want %v", c.name, asGuest[c.name], c.visibleToA)
+		}
+		if !all[c.name] {
+			t.Errorf("%s: hidden from every-project visibility", c.name)
+		}
+		if unset[c.name] {
+			t.Errorf("%s: visible without a principal or service visibility", c.name)
+		}
+	}
 }

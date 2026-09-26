@@ -133,6 +133,9 @@ func (w *Worker) tenantIDs(ctx context.Context) ([]string, error) {
 }
 
 func (w *Worker) processTenant(ctx context.Context, tenantID string) (int, error) {
+	// A system job without a principal: wake rows and their events are
+	// workspace rows (ADR-003 P2).
+	ctx = db.NoProjects(ctx, "inbox wake worker")
 	claimed, err := w.claim(ctx, tenantID)
 	if err != nil || len(claimed) == 0 {
 		return 0, err

@@ -26,7 +26,7 @@ func (m *Module) bind(ctx context.Context, p tenant.Principal, pluginID string, 
 		return Call{}, Plugin{}, ErrDenied
 	}
 	var row *installRow
-	err := m.inTenant(ctx, p.TenantID, func(tx pgx.Tx) error {
+	err := m.inTenant(tenant.WithPrincipal(ctx, p), p.TenantID, func(tx pgx.Tx) error {
 		var loadErr error
 		row, loadErr = loadInstall(ctx, tx, p.TenantID, pluginID, false)
 		return loadErr

@@ -8,7 +8,10 @@
 --   '{uuid,...}'   only these projects (project bindings, e.g. Guest);
 --   '' or unset    nothing project-scoped at all.
 -- aeon.principal_ids names the caller (and its canonical person) so a
--- project-only caller still reads the events it wrote itself.
+-- project-only caller still reads the events it wrote itself. aeon.system is
+-- 'on' only for explicit service paths (db.AllProjects, NoProjects,
+-- OnlyProjects), which may read workspace activity; a transaction with no
+-- principal and no service visibility reads nothing (0823).
 --
 -- Each covered table gets one RESTRICTIVE policy next to its tenant policy.
 -- Policies read the setting through scalar sub-selects, which Postgres runs
@@ -23,6 +26,11 @@ LANGUAGE sql STABLE AS $$
     SELECT CASE WHEN coalesce(current_setting('aeon.visible_projects', true), '') IN ('', '*')
                 THEN '{}'::uuid[]
                 ELSE current_setting('aeon.visible_projects', true)::uuid[] END
+$$;
+
+CREATE FUNCTION aeon_visibility_system() RETURNS boolean
+LANGUAGE sql STABLE AS $$
+    SELECT coalesce(current_setting('aeon.system', true), '') = 'on'
 $$;
 
 CREATE FUNCTION aeon_current_principals() RETURNS uuid[]
@@ -102,6 +110,7 @@ BEGIN
     PERFORM set_config('aeon.tenant_id', p_tenant::text, true);
     PERFORM set_config('aeon.visible_projects', '', true);
     PERFORM set_config('aeon.principal_ids', '', true);
+    PERFORM set_config('aeon.system', '', true);
     visibility := aeon_principal_visibility(p_tenant, p_principal);
     IF p_key_creator IS NOT NULL THEN
         visibility := aeon_visibility_intersect(visibility, aeon_principal_visibility(p_tenant, p_key_creator));

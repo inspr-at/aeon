@@ -323,6 +323,19 @@ func TestProjectAccessOverHTTP(t *testing.T) {
 	w.expect("owner", "POST", "/api/events/"+lastEvent("TB3", "node.project_moved")+"/undo", "", 201)
 	w.expect("owner", "POST", "/api/events/"+lastEvent("TA2", "relation.deleted")+"/undo", "", 201)
 	w.noLeak(guest, "/api/events after undo", w.expect(guest, "GET", "/api/events?limit=200", "", 200))
+
+	// Review round 2, finding 2: a workspace member bulk-edits A and B, then
+	// loses the workspace role and stays a guest of A. The batch event has no
+	// node; its items name B, so it is no longer theirs to read.
+	w.expect("member", "POST", "/api/nodes/bulk", `{"ids":["`+w.ids["TA2"]+`","`+w.ids["TB"]+`"],"state":"qa"}`, 200)
+	if _, err := w.d.Admin.Exec(ctx, `DELETE FROM role_bindings WHERE principal_id=$1`, w.people["member"]); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := w.d.Admin.Exec(ctx, `INSERT INTO role_bindings(tenant_id,principal_id,role_id,scope_type,scope_id) VALUES($1,$2,$3,'project',$4)`, w.tid, w.people["member"], w.ids["role:guest"], w.ids["A"]); err != nil {
+		t.Fatal(err)
+	}
+	w.noLeak("member", "/api/events after demotion", w.expect("member", "GET", "/api/events?limit=200", "", 200))
+	w.noLeak("member", "/api/events/stream after demotion", w.stream("member"))
 }
 
 func contains(list []string, want string) bool {

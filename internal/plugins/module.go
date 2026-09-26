@@ -162,7 +162,7 @@ func (m *Module) List(ctx context.Context, p tenant.Principal) ([]CatalogItem, e
 		return nil, unauthorized()
 	}
 	var rows map[string]installRow
-	err := m.inTenant(ctx, p.TenantID, func(tx pgx.Tx) error {
+	err := m.inTenant(tenant.WithPrincipal(ctx, p), p.TenantID, func(tx pgx.Tx) error {
 		var err error
 		rows, err = listInstalls(ctx, tx, p.TenantID)
 		return err
@@ -216,7 +216,7 @@ func (m *Module) Configure(ctx context.Context, p tenant.Principal, pluginID str
 		return Installation{}, err
 	}
 	var out Installation
-	err = m.inTenant(ctx, p.TenantID, func(tx pgx.Tx) error {
+	err = m.inTenant(tenant.WithPrincipal(ctx, p), p.TenantID, func(tx pgx.Tx) error {
 		current, err := loadInstall(ctx, tx, p.TenantID, pluginID, true)
 		if err != nil {
 			return err

@@ -10,14 +10,22 @@
 -- Each event records the nodes it names in node_refs when it is written
 -- (events are append-only, so the list never changes): every value of a
 -- node-reference key (parent_id, project_id, node_id, feature_id, release_id,
--- ticket_id, requirement_id, *_node_id(s), *_ticket_ids) at the top level of
--- its before and after snapshots and inside their nested objects (node,
--- journey, ...), except the free-form fields and the classic record. A value
--- that is not a node ID is recorded as the nil UUID, which names no node, so
--- the event stays hidden (fail closed). A classic relation's target key is
+-- ticket_id, requirement_id, *_node_id(s), *_ticket_ids) anywhere in its
+-- before and after snapshots, through nested objects and arrays (a release
+-- plan's tickets[] and features[], a batch's items[]), except inside the
+-- free-form fields and the classic record. A batch names each of its items
+-- (items[].id). A value that is not a node ID, and a structure nested deeper
+-- than 16 levels, is recorded as the nil UUID, which names no node, so the
+-- event stays hidden (fail closed). A classic relation's target key is
 -- resolved to its node when the event is written. Reading then never parses
 -- the snapshots: the policy tests node_refs against the caller's visible
 -- nodes, a set Postgres hashes once per statement.
+--
+-- Every arm of the policy but the every-project one applies that test: an
+-- event with or without a node, and the caller's own events alike. Events
+-- without a node are workspace activity: readable by their actor and by
+-- explicit service paths (aeon.system), never by a transaction that has
+-- neither a principal nor a service visibility.
 --
 -- A caller who sees only some projects reads only project work in the event
 -- feed (nodes, comments, attachments, relations, imports, journey, intake,
@@ -53,29 +61,41 @@ LANGUAGE sql IMMUTABLE AS $$
     WHERE jsonb_typeof(x) <> 'null'
 $$;
 
-CREATE FUNCTION aeon_json_node_refs(snapshot jsonb) RETURNS uuid[]
+CREATE FUNCTION aeon_json_node_refs(snapshot jsonb, depth integer DEFAULT 0) RETURNS uuid[]
 LANGUAGE plpgsql IMMUTABLE AS $$
 DECLARE
     refs uuid[] := '{}';
-    top record;
-    nested record;
+    member record;
+    element jsonb;
 BEGIN
-    IF snapshot IS NULL OR jsonb_typeof(snapshot) <> 'object' THEN
+    IF snapshot IS NULL OR jsonb_typeof(snapshot) NOT IN ('object', 'array') THEN
         RETURN refs;
     END IF;
-    FOR top IN SELECT key, value FROM jsonb_each(snapshot) LOOP
-        IF aeon_node_ref_key(top.key) THEN
-            refs := refs || aeon_json_ref_values(top.value);
-        ELSIF jsonb_typeof(top.value) = 'object' AND top.key NOT IN ('fields', 'record') THEN
-            FOR nested IN SELECT key, value FROM jsonb_each(top.value) LOOP
-                IF aeon_node_ref_key(nested.key) THEN
-                    refs := refs || aeon_json_ref_values(nested.value);
-                END IF;
-            END LOOP;
+    IF depth > 16 THEN
+        RETURN ARRAY['00000000-0000-0000-0000-000000000000'::uuid];
+    END IF;
+    IF jsonb_typeof(snapshot) = 'array' THEN
+        FOR element IN SELECT value FROM jsonb_array_elements(snapshot) LOOP
+            refs := refs || aeon_json_node_refs(element, depth + 1);
+        END LOOP;
+        RETURN refs;
+    END IF;
+    FOR member IN SELECT key, value FROM jsonb_each(snapshot) LOOP
+        IF aeon_node_ref_key(member.key) THEN
+            refs := refs || aeon_json_ref_values(member.value);
+        ELSIF member.key NOT IN ('fields', 'record') THEN
+            refs := refs || aeon_json_node_refs(member.value, depth + 1);
         END IF;
     END LOOP;
     RETURN refs;
 END;
+$$;
+
+-- The items a batch names by their own id.
+CREATE FUNCTION aeon_json_item_ids(snapshot jsonb) RETURNS uuid[]
+LANGUAGE sql IMMUTABLE AS $$
+    SELECT coalesce(array_agg(coalesce(aeon_uuid_or_null(item->>'id'), '00000000-0000-0000-0000-000000000000'::uuid)), '{}'::uuid[])
+    FROM jsonb_array_elements(CASE WHEN jsonb_typeof(snapshot->'items') = 'array' THEN snapshot->'items' ELSE '[]'::jsonb END) AS item
 $$;
 
 -- Runs with the writer's visibility: a classic relation target it cannot
@@ -87,6 +107,9 @@ DECLARE
     target_key text;
     target uuid;
 BEGIN
+    IF p_type = 'node.bulk_changed' THEN
+        refs := refs || aeon_json_item_ids(p_before) || aeon_json_item_ids(p_after);
+    END IF;
     IF p_type = 'import.relation' THEN
         target_key := p_after->'record'->>'target_key';
         SELECT n.id INTO target FROM nodes n WHERE n.tenant_id = p_tenant AND n.key = target_key;
@@ -140,16 +163,17 @@ $$;
 DROP POLICY events_project_visibility ON events;
 CREATE POLICY events_project_visibility ON events AS RESTRICTIVE FOR SELECT
     USING ((SELECT aeon_visible_all())
-        OR (node_id IS NOT NULL
-            AND EXISTS (SELECT 1 FROM nodes n WHERE n.tenant_id = events.tenant_id AND n.id = events.node_id)
-            AND CASE
-                WHEN split_part(type, '.', 1) NOT IN ('node', 'nodes', 'comment', 'comments', 'attachment',
-                    'attachments', 'relation', 'relations', 'import', 'journey', 'intake', 'requirement',
-                    'requirements', 'release', 'releases', 'knowledge', 'view', 'views', 'tag', 'tags',
-                    'kind', 'kinds', 'profile') THEN actor_principal_id = ANY ((SELECT aeon_current_principals())::uuid[])
-                ELSE cardinality(node_refs) = 0
-                     OR NOT EXISTS (SELECT 1 FROM unnest(node_refs) AS ref(id)
-                                    WHERE ref.id NOT IN (SELECT n.id FROM nodes n))
-            END)
-        OR (node_id IS NULL AND (cardinality((SELECT aeon_current_principals())::uuid[]) = 0
-                                 OR actor_principal_id = ANY ((SELECT aeon_current_principals())::uuid[]))));
+        OR (CASE
+                WHEN node_id IS NULL THEN
+                    (SELECT aeon_visibility_system())
+                    OR actor_principal_id = ANY ((SELECT aeon_current_principals())::uuid[])
+                ELSE EXISTS (SELECT 1 FROM nodes n WHERE n.tenant_id = events.tenant_id AND n.id = events.node_id)
+                    AND (split_part(type, '.', 1) IN ('node', 'nodes', 'comment', 'comments', 'attachment',
+                            'attachments', 'relation', 'relations', 'import', 'journey', 'intake', 'requirement',
+                            'requirements', 'release', 'releases', 'knowledge', 'view', 'views', 'tag', 'tags',
+                            'kind', 'kinds', 'profile')
+                         OR actor_principal_id = ANY ((SELECT aeon_current_principals())::uuid[]))
+            END
+            AND (cardinality(node_refs) = 0
+                 OR NOT EXISTS (SELECT 1 FROM unnest(node_refs) AS ref(id)
+                                WHERE ref.id NOT IN (SELECT n.id FROM nodes n)))));

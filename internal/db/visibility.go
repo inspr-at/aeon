@@ -44,8 +44,10 @@ func OnlyProjects(ctx context.Context, projectIDs ...string) context.Context {
 }
 
 // NoProjects marks ctx for system code that touches only workspace rows (the
-// sign-in flow, key issuance), so an incidental caller in ctx cannot change
-// what it sees. Nothing project-scoped is visible; workspace events are.
+// sign-in flow, key issuance, tenant bootstrap, the inbox wake worker), so an
+// incidental caller in ctx cannot change what it sees. Nothing
+// project-scoped is visible; workspace events that name no project are. A
+// transaction with neither a principal nor a service visibility sees neither.
 func NoProjects(ctx context.Context, reason string) context.Context {
 	return context.WithValue(ctx, visibilityKey{}, visibility{value: "", reason: reason})
 }
@@ -55,7 +57,7 @@ func NoProjects(ctx context.Context, reason string) context.Context {
 // in ctx (computed once, in the database, from its bindings), else none.
 func enterTenant(ctx context.Context, tx pgx.Tx, tenantID string) error {
 	if v, ok := ctx.Value(visibilityKey{}).(visibility); ok {
-		_, err := tx.Exec(ctx, `SELECT set_config($1,$2,true),set_config($3,$4,true),set_config('aeon.principal_ids','',true)`,
+		_, err := tx.Exec(ctx, `SELECT set_config($1,$2,true),set_config($3,$4,true),set_config('aeon.principal_ids','',true),set_config('aeon.system','on',true)`,
 			TenantSetting, tenantID, VisibleProjectsSetting, v.value)
 		return err
 	}
@@ -67,7 +69,7 @@ func enterTenant(ctx context.Context, tx pgx.Tx, tenantID string) error {
 		_, err := tx.Exec(ctx, `SELECT aeon_enter_principal($1::uuid,$2::uuid,$3::uuid)`, tenantID, p.ID, creator)
 		return err
 	}
-	_, err := tx.Exec(ctx, `SELECT set_config($1,$2,true),set_config($3,'',true),set_config('aeon.principal_ids','',true)`,
+	_, err := tx.Exec(ctx, `SELECT set_config($1,$2,true),set_config($3,'',true),set_config('aeon.principal_ids','',true),set_config('aeon.system','',true)`,
 		TenantSetting, tenantID, VisibleProjectsSetting)
 	return err
 }

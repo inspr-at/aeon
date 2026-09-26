@@ -683,8 +683,10 @@ var errMoveForbidden = errors.New("move not permitted")
 // moveScopes lists the projects a re-parenting changes, "" standing for the
 // workspace: the node's own project, the project of its current parent and
 // the project of its new parent (no parent, or a parent outside every
-// project, is the workspace). A parent the caller cannot see resolves to
-// pgx.ErrNoRows for the new parent and to the workspace for the current one.
+// project, is the workspace). A new parent the caller cannot see is
+// pgx.ErrNoRows. A current parent the caller cannot see (a nested project
+// under another project) refuses the move: detaching a node changes its
+// parent's project, which the caller cannot even see (fail closed).
 func moveScopes(ctx context.Context, tx pgx.Tx, nodeID string, newParent *string) ([]string, error) {
 	var own, currentParentProject *string
 	var hasParent, parentVisible bool
@@ -693,10 +695,10 @@ func moveScopes(ctx context.Context, tx pgx.Tx, nodeID string, newParent *string
 		WHERE n.id=$1::uuid`, nodeID).Scan(&own, &hasParent, &parentVisible, &currentParentProject); err != nil {
 		return nil, err
 	}
-	scopes := []string{deref(own), ""}
-	if hasParent && parentVisible {
-		scopes[1] = deref(currentParentProject)
+	if hasParent && !parentVisible {
+		return nil, errMoveForbidden
 	}
+	scopes := []string{deref(own), deref(currentParentProject)}
 	if newParent == nil {
 		return append(scopes, ""), nil
 	}
