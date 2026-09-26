@@ -12,7 +12,7 @@ export type IconName =
   | 'command' | 'option' | 'backspace'
   | 'book' | 'runbook' | 'guideline' | 'memory' | 'server' | 'folders' | 'terminal' | 'hash' | 'graph'
   | 'bookmark' | 'star' | 'calendar' | 'coin' | 'not' | 'sort' | 'select' | 'shift'
-  | 'cards' | 'columns' | 'grip'
+  | 'cards' | 'columns' | 'grip' | 'sort-name' | 'progress'
 </script>
 <script setup lang="ts">
 withDefaults(defineProps<{ name: IconName; size?: number }>(), { size: 16 })
@@ -117,6 +117,9 @@ withDefaults(defineProps<{ name: IconName; size?: number }>(), { size: 16 })
     <template v-else-if="name === 'calendar'"><rect x="2.2" y="3.2" width="11.6" height="10.6" rx="2.2" /><path d="M2.2 6.8h11.6M5.4 1.8v2.8M10.6 1.8v2.8" /></template>
     <template v-else-if="name === 'coin'"><circle cx="8" cy="8" r="6" /><path d="M9.9 5.9c-.4-.6-1.1-1-1.9-1-1.1 0-1.9.6-1.9 1.4 0 2 3.8 1 3.8 3.1 0 .8-.8 1.4-1.9 1.4-.8 0-1.6-.4-2-1M8 3.8v1.1M8 11v1.2" /></template>
     <template v-else-if="name === 'not'"><circle cx="8" cy="8" r="5.8" /><path d="m3.9 12.1 8.2-8.2" /></template>
+    <!-- Project sorts: A to Z beside a downward arrow; a ring three quarters round. -->
+    <template v-else-if="name === 'sort-name'"><path d="M1.9 7.2 4.1 2l2.2 5.2M2.6 5.6h3" /><path d="M2.2 9.3h3.9l-3.9 4.8h3.9" /><path d="M11.4 2.4v11.2M9 11.2l2.4 2.4 2.4-2.4" /></template>
+    <template v-else-if="name === 'progress'"><circle cx="8" cy="8" r="5.8" stroke-opacity=".32" /><path d="M8 2.2a5.8 5.8 0 1 1-5.8 5.8" /></template>
     <path v-else-if="name === 'sort'" d="M4.8 2.6v10.8M2.4 11l2.4 2.4 2.4-2.4M11.2 13.4V2.6M8.8 5l2.4-2.4L13.6 5" />
     <template v-else-if="name === 'select'"><rect x="2.2" y="2.2" width="11.6" height="11.6" rx="3" /><path d="m5.2 8.2 2 2 3.6-4.2" /></template>
     <path v-else-if="name === 'shift'" d="M8 2.2 2.6 8h2.9v5.2h5V8h2.9Z" />
