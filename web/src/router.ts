@@ -5,6 +5,7 @@ import { setPageTitle } from './lib/brand'
 import { useProjects } from './stores/projects'
 import { useSession } from './stores/session'
 import { sessionEnded } from './lib/api'
+import { toast } from './lib/toast'
 import { takeSignInReturn } from './lib/signInReturn'
 import ProjectsView from './views/ProjectsView.vue'
 import SignInView from './views/SignInView.vue'
@@ -94,14 +95,11 @@ export const router = createRouter({
 
 sessionEnded.handler = path => {
   const session = useSession()
+  const alreadyEnded = session.requiresSignIn
   session.invalidate()
-  // A /me check in the guard owns its redirect, including the destination that
-  // was being attempted. Other API calls can arrive from raw api() consumers.
-  if (path === '/me') return
-  const current = router.currentRoute.value
-  if (current.path !== '/signin') {
-    void router.replace({ path: '/signin', query: { error: 'expired', return: current.fullPath } })
-  }
+  // The current view may hold a draft or a secret shown only once. Keep it
+  // mounted; the next protected navigation is handled by the guard below.
+  if (!alreadyEnded && path !== '/me') toast('Your session has ended', { tone: 'error' })
 }
 
 // Overlapping checks would race each other and the later failure could clear a

@@ -23,7 +23,12 @@ export const useAccess = defineStore('access', () => {
   const owner = () => session.identity ? `${session.identity.tenant.id}:${session.identity.principal.id}` : ''
   let heldFor = owner()
   function reset() { registry.value = []; roles.value = []; members.value = null; state.value = 'idle'; error.value = ''; request = undefined; heldFor = owner() }
-  watch(owner, now => { if (now !== heldFor) reset() })
+  // A 401 clears identity but leaves this view mounted so drafts and one-time
+  // links survive. A subsequent sign-in starts with fresh access data.
+  watch([owner, () => session.requiresSignIn], ([now, needsSignIn]) => {
+    if (needsSignIn && !now) return
+    if (now !== heldFor || (!needsSignIn && !now)) reset()
+  })
 
   const imported = computed(() => members.value?.imported ?? [])
   // The server lists imported classic identities among people too; they show only in their own group.
@@ -41,6 +46,7 @@ export const useAccess = defineStore('access', () => {
   })
 
   function load(force = false): Promise<void> {
+    if (session.requiresSignIn) return Promise.resolve()
     if (request) return request
     if (state.value === 'ready' && !force) return Promise.resolve()
     if (state.value !== 'ready') state.value = 'loading'

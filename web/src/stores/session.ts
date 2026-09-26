@@ -1,7 +1,7 @@
 // SPDX-License-Identifier: AGPL-3.0-only
 import { defineStore } from 'pinia'
 import { ref } from 'vue'
-import { api, getSession, type Identity } from '../lib/api'
+import { api, getSession, sessionEnded, type Identity } from '../lib/api'
 import { restoreTheme } from '../lib/theme'
 import { accessChanged, clearPermissions, refreshPermissions, revokePermissions } from '../lib/authz'
 import { clearSignInReturn } from '../lib/signInReturn'
@@ -79,6 +79,7 @@ export const useSession = defineStore('session', () => {
     if (response.status === 404) throw new SignInError('disabled')
     if (response.status === 400) throw new SignInError('invalid')
     if (!response.ok) throw new SignInError('failed')
+    sessionEnded.blocked = false
     requiresSignIn.value = false
   }
 

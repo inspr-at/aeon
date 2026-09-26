@@ -104,7 +104,7 @@ async function copy() { if (!created.value) return; try { await navigator.clipbo
       <p class="once"><AppIcon name="info" :size="14" /><span>This key is shown only now. Copy it into {{ agent.name }}’s configuration; afterwards only its prefix, aeon_{{ created.prefix }}_…, is shown.{{ created.expires_at ? ` It works until ${absoluteTime(created.expires_at)}.` : '' }}</span></p>
       <div class="token">
         <input class="field mono" readonly :value="created.token" aria-label="New agent key" @focus="($event.target as HTMLInputElement).select()" />
-        <button type="button" class="btn primary token-copy" @click="copy"><AppIcon :name="copied ? 'check' : 'copy'" :size="14" />{{ copied ? 'Copied' : 'Copy key' }}</button>
+        <button type="button" class="btn primary token-copy" data-session-keep @click="copy"><AppIcon :name="copied ? 'check' : 'copy'" :size="14" />{{ copied ? 'Copied' : 'Copy key' }}</button>
       </div>
     </div>
     <template #foot>
@@ -112,7 +112,7 @@ async function copy() { if (!created.value) return; try { await navigator.clipbo
         <button type="button" class="btn" :disabled="busy" @click="emit('close')">Cancel</button>
         <button type="button" class="btn primary" :disabled="busy || !allowed" :data-tip="allowed ? undefined : lostPermission('keys.manage')" @click="create"><AppIcon name="key" :size="13" />{{ busy ? 'Creating…' : 'Create key' }}</button>
       </template>
-      <button v-else type="button" class="btn primary" @click="emit('close')">Done</button>
+      <button v-else type="button" class="btn primary" data-session-keep @click="emit('close')">Done</button>
     </template>
   </AccessSheet>
 </template>

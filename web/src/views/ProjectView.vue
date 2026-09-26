@@ -636,10 +636,26 @@ function dockedRowId(): string | null {
 async function closeKnowledgeDock() {
   const id = dockedRowId()
   const list = { path: `/p/${encodeURIComponent(routeKey.value)}/knowledge`, query: knowledgeListQuery.value }
-  const done = landed()
-  if (window.history.state?.back === router.resolve(list).fullPath) router.back()
-  else void router.replace(list)
-  if (!(await done)) return
+  if (window.history.state?.back === router.resolve(list).fullPath) {
+    const settled = settledNavigation(router)
+    router.back()
+    await settled.promise
+  }
+  // A graph selection or filter can overtake the close while the /me guard is
+  // pending. Retry from the landed address so its display and filters survive.
+  let retriedAbort = false
+  while (route.path === list.path && route.query.entry) {
+    const settled = settledNavigation(router)
+    let failure
+    try { failure = await router.replace({ path: list.path, query: knowledgeListQuery.value }) }
+    catch (error) { settled.stop(); throw error }
+    if (isNavigationFailure(failure, NavigationFailureType.cancelled)) await settled.promise
+    else settled.stop()
+    if (isNavigationFailure(failure, NavigationFailureType.cancelled)) continue
+    if (isNavigationFailure(failure, NavigationFailureType.aborted) && !retriedAbort) { retriedAbort = true; continue }
+    break
+  }
+  if (route.path !== list.path || route.query.entry) return
   await nextTick()
   if (id) knowledgeTab.value?.reveal(id, true)
 }

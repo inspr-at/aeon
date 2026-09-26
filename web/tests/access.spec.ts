@@ -396,23 +396,26 @@ test('review #7: scopes I no longer hold leave the new key and are never sent', 
   expect((calls(world, 'POST', /\/agent-keys$/)[0]!.body as { scopes: string[] }).scopes).toEqual(['nodes.read'])
 })
 
-test('review r2 #1: a 401 on an Access call leaves no protected editor or permission refetch loop', async ({ page }) => {
+test('review r2 #1: a 401 on an Access call revokes every grant at once, without a refetch loop', async ({ page }) => {
   const world = await open(page, '/settings/access/roles/new?from=role-member')
   await page.getByLabel('Name', { exact: true }).fill('Night shift')
-  await expect(page.getByLabel('Name', { exact: true })).toHaveValue('Night shift')
   world.sessionEnded = true
   await page.getByRole('button', { name: 'Create role' }).click()
-  await expect(page).toHaveURL(/\/signin\?error=expired&return=\/settings\/access\/roles\/new/)
-  await expect(page.getByRole('heading', { name: 'Sign in', level: 1 })).toBeVisible()
-  await expect(page.locator('.access-card')).toHaveCount(0)
+  const card = page.locator('.access-card')
+  await expect(card.getByRole('alert').first()).toContainText('Your session has ended, so nothing here can change.')
+  await expect(page.locator('.toast', { hasText: 'Your session has ended' })).toBeVisible()
+  // Inert, and nothing typed is lost: the editor is read-only with the name kept.
+  await expect(page.getByLabel('Name', { exact: true })).toHaveValue('Night shift')
   await expect(page.getByRole('button', { name: 'Create role' })).toHaveCount(0)
   const asked = () => calls(world, 'GET', /\/api\/me\/permissions/).length
   const before = asked()
   await page.evaluate(() => window.dispatchEvent(new Event('focus')))
-  expect(asked()).toBe(before)
+  await page.waitForTimeout(600)
+  expect(asked()).toBeLessThanOrEqual(before + 1) // one focus re-check, then latched again
+  await expect(page.getByLabel('Name', { exact: true })).toHaveValue('Night shift')
 })
 
-test('review r2 #2: a 401 removes an open join link and its protected sheet', async ({ page }) => {
+test('review r2 #2: a join link on screen stays when the session ends', async ({ page }) => {
   const world = await open(page, '/settings/access/invites')
   await page.getByRole('button', { name: 'Invite people' }).click()
   const sheet = page.getByRole('dialog', { name: 'Invite people' })
@@ -423,10 +426,28 @@ test('review r2 #2: a 401 removes an open join link and its protected sheet', as
   expect(link).toMatch(/join/)
   world.sessionEnded = true
   await page.evaluate(() => window.dispatchEvent(new Event('focus')))
-  await expect(page).toHaveURL(/\/signin\?error=expired&return=\/settings\/access\/invites/)
-  await expect(page.getByRole('heading', { name: 'Sign in', level: 1 })).toBeVisible()
-  await expect(ready).toHaveCount(0)
-  await expect(page.getByRole('tablist', { name: 'Access' })).toHaveCount(0)
+  await expect(page.locator('.access-card').getByRole('alert').first()).toContainText('Your session has ended')
+  await expect(ready.getByRole('textbox')).toHaveValue(link)
+  await expect(page.getByRole('tablist', { name: 'Access' })).toBeVisible()
+  await ready.getByRole('button', { name: 'Done' }).click()
+  await expect(page.locator('.access-card')).toBeVisible()
+})
+
+test('an ended session keeps a one-time join link copyable', async ({ page, context }) => {
+  await context.grantPermissions(['clipboard-read', 'clipboard-write'])
+  const world = await open(page, '/settings/access/invites')
+  await page.getByRole('button', { name: 'Invite people' }).click()
+  const sheet = page.getByRole('dialog', { name: 'Invite people' })
+  await sheet.getByLabel('Email').fill('late@studio.at')
+  await sheet.getByRole('button', { name: 'Create invite link' }).click()
+  const ready = page.getByRole('dialog', { name: 'Invite ready' })
+  const link = await ready.getByRole('textbox').inputValue()
+  world.sessionEnded = true
+  await page.evaluate(() => window.dispatchEvent(new Event('focus')))
+  await expect(ready.getByRole('textbox')).toHaveValue(link)
+  await expect(ready.getByRole('button', { name: 'Sign in again' })).toBeEnabled()
+  await ready.getByRole('button', { name: 'Copy link' }).click()
+  expect(await page.evaluate(() => navigator.clipboard.readText())).toBe(link)
 })
 
 test('review r3 #1: another person signing in never sees the previous session’s access data', async ({ page }) => {

@@ -133,7 +133,7 @@ onMounted(() => { void projects.load() })
       <p class="once"><AppIcon name="info" :size="14" /><span>This link is shown only now. Copy it and send it yourself: {{ brand.short_name }} sends no email. It works once, for {{ result.invite.email }}, until {{ absoluteTime(result.invite.expires_at) }}.</span></p>
       <div class="join">
         <input class="field mono join-url" readonly :value="result.join_url" aria-label="Join link" @focus="($event.target as HTMLInputElement).select()" />
-        <button type="button" class="btn primary join-copy" @click="copy"><AppIcon :name="copied ? 'check' : 'copy'" :size="14" />{{ copied ? 'Copied' : 'Copy link' }}</button>
+        <button type="button" class="btn primary join-copy" data-session-keep @click="copy"><AppIcon :name="copied ? 'check' : 'copy'" :size="14" />{{ copied ? 'Copied' : 'Copy link' }}</button>
       </div>
       <p class="hint">After they sign in with this address, they appear under People with the roles you chose.</p>
     </div>
@@ -145,7 +145,7 @@ onMounted(() => { void projects.load() })
       </template>
       <template v-else>
         <button type="button" class="btn" @click="another">Invite someone else</button>
-        <button type="button" class="btn primary" @click="emit('close')">Done</button>
+        <button type="button" class="btn primary" data-session-keep @click="emit('close')">Done</button>
       </template>
     </template>
   </AccessSheet>

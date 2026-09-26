@@ -161,25 +161,35 @@ test('INSPR ID sign-in resumes the saved path after the full-page callback', asy
   await expect(page).toHaveURL('/agents')
 })
 
-test('a raw api 401 clears identity and carries the current path to sign-in', async ({ page }) => {
-  await mockAPI(page)
+test('a raw api 401 clears identity but keeps the current view until navigation', async ({ page }) => {
+  const calls = await mockAPI(page)
   await page.goto('/')
   await expect(page.getByRole('heading', { name: 'Projects', level: 1 })).toBeVisible()
   await page.route('**/api/raw-revocation', route => route.fulfill({ status: 401, json: { error: 'unauthorized' } }))
   expect(await page.evaluate(() => import('/src/lib/api.ts').then(async ({ api }) => (await api('/raw-revocation')).status))).toBe(401)
-  await expect(page).toHaveURL(/\/signin\?error=expired&return=\//)
-  await expect(page.getByRole('heading', { name: 'Sign in', level: 1 })).toBeVisible()
+  await expect(page).toHaveURL('/')
+  await expect(page.getByRole('heading', { name: 'Projects', level: 1 })).toBeVisible()
+  await expect(page.locator('.session-ended')).toContainText('Your session has ended')
+  expect(await page.evaluate(() => import('/src/stores/session.ts').then(({ useSession }) => useSession().identity))).toBeNull()
+  const before = calls.length
+  expect(await page.evaluate(() => import('/src/lib/api.ts').then(async ({ api }) => (await api('/kinds')).status))).toBe(401)
+  expect(calls.length).toBe(before)
+  await page.evaluate(() => import('/src/router.ts').then(({ router }) => router.push('/agents')))
+  await expect(page).toHaveURL('/signin?error=expired&return=/agents')
   await expect(page.getByRole('heading', { name: 'Projects', level: 1 })).toHaveCount(0)
 })
 
-test('a raw api 401 also sends a public route to sign-in', async ({ page }) => {
+test('a raw api 401 also leaves a public route in place until protected navigation', async ({ page }) => {
   await mockAPI(page)
   await page.goto('/offers/studio/token')
   await expect(page).toHaveURL('/offers/studio/token')
   await expect.poll(() => page.evaluate(() => import('/src/router.ts').then(({ router }) => router.currentRoute.value.fullPath))).toBe('/offers/studio/token')
   await page.route('**/api/raw-revocation', route => route.fulfill({ status: 401, json: { error: 'unauthorized' } }))
   expect(await page.evaluate(() => import('/src/lib/api.ts').then(async ({ api }) => (await api('/raw-revocation')).status))).toBe(401)
-  await expect(page).toHaveURL('/signin?error=expired&return=/offers/studio/token')
+  await expect(page).toHaveURL('/offers/studio/token')
+  await expect(page.locator('.session-ended')).toContainText('Your session has ended')
+  await page.evaluate(() => import('/src/router.ts').then(({ router }) => router.push('/agents')))
+  await expect(page).toHaveURL('/signin?error=expired&return=/agents')
   await expect(page.getByRole('heading', { name: 'Sign in', level: 1 })).toBeVisible()
 })
 

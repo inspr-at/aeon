@@ -111,7 +111,9 @@ test('the pane closes back to the graph, which keeps the display and filters', a
   await expect(page.getByRole('group', { name: 'Knowledge display', exact: true })).toBeVisible()
   await expect(toggle(page, 'Graph')).toHaveAttribute('aria-pressed', 'true')
   await pane(page).getByRole('button', { name: 'Close the preview' }).click()
-  await expect(page).toHaveURL(/\/knowledge\?(?=.*mode=graph)(?=.*type=runbook)(?!.*entry=)/)
+  // Closing rechecks /me before the route can land; under four software-WebGL
+  // workers that check can take longer than Playwright's default five seconds.
+  await expect(page).toHaveURL(/\/knowledge\?(?=.*mode=graph)(?=.*type=runbook)(?!.*entry=)/, { timeout: 15_000 })
   await expect(canvas(page)).toBeFocused()
   // Expanding keeps the way back to the graph.
   // The pane's controls are used once its entry has loaded.
@@ -121,6 +123,22 @@ test('the pane closes back to the graph, which keeps the display and filters', a
   await expect(page).toHaveURL(/knowledge\/runbook\/[^?]+\?(?=.*mode=graph)/)
   await page.keyboard.press('Escape')
   await expect(page).toHaveURL(/\/knowledge\?(?=.*mode=graph)/); await ready(page)
+})
+
+test('a competing graph selection cannot cancel closing the pane', async ({ page }) => {
+  await setup(page)
+  await page.goto('/p/PHAROS/knowledge?mode=graph&type=runbook&entry=runbook/deploy-release')
+  await ready(page)
+  await dockedHeading(page, 'Deploy a release to production')
+  await recordCancelledNavigations(page)
+  const check = await holdNextSessionCheck(page)
+  await page.evaluate(() => document.querySelector<HTMLButtonElement>('[aria-label="Close the preview"]')!.click())
+  await check.requested
+  await page.evaluate(() => document.querySelector<HTMLElement>('.kg-canvas')!.dispatchEvent(new KeyboardEvent('keydown', { key: 'ArrowRight', bubbles: true })))
+  check.release()
+  await expect(page).toHaveURL(/\/knowledge\?(?=.*mode=graph)(?=.*type=runbook)(?!.*entry=)/)
+  await expect(pane(page)).toHaveCount(0)
+  expect(await page.evaluate(() => (window as unknown as { navigationFailures: number[] }).navigationFailures)).toContain(8)
 })
 
 test('below the docking width the graph keeps its own selection card', async ({ page }) => {

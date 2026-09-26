@@ -19,6 +19,11 @@ import { learnPictures } from './avatar.ts'
 export interface Version { version: string; scheme: string; brand?: import('./brand').Brand }
 
 export async function api(path: string, init: RequestInit = {}) {
+  // A revoked tab stays readable, but must not send another protected request.
+  // Sign-in and public resources remain available to recover in a new tab.
+  if (sessionEnded.blocked && path !== '/auth/dev-login' && !path.startsWith('/public/') && path !== '/version') {
+    return new Response(null, { status: 401 })
+  }
   const response = await fetch(`/api${path}`, {
     credentials: 'same-origin',
     cache: 'no-store',
@@ -28,7 +33,7 @@ export async function api(path: string, init: RequestInit = {}) {
   })
   // Every caller, including those that handle Response themselves, must revoke a
   // session on 401. Do this before returning the response to the caller.
-  if (response.status === 401) sessionEnded.handler?.(path)
+  if (response.status === 401) { sessionEnded.blocked = true; sessionEnded.handler?.(path) }
   return response
 }
 
@@ -83,8 +88,7 @@ async function json<T>(path: string, method = 'GET', body?: unknown, headers: Re
   })
   if (!response.ok) {
     const data = await response.json().catch(() => ({}))
-    // Keep the caller's useful error wording after api() has already revoked the
-    // session and started navigation to sign-in.
+    // Keep the caller's useful error wording after api() has revoked the session.
     if (response.status === 401) throw new APIError(401, 'your session has ended', data && typeof data === 'object' ? data : {})
     // Modules answer {error} or {code, message}; either reads as the reason.
     const reason = typeof data?.error === 'string' && data.error ? data.error : typeof data?.message === 'string' && data.message ? data.message : `Request failed (${response.status})`
@@ -93,7 +97,7 @@ async function json<T>(path: string, method = 'GET', body?: unknown, headers: Re
   return response.status === 204 ? undefined as T : response.json()
 }
 // The router registers what happens when a request finds the session ended.
-export const sessionEnded: { handler: ((path: string) => void) | null } = { handler: null }
+export const sessionEnded: { blocked: boolean; handler: ((path: string) => void) | null } = { blocked: false, handler: null }
 function query(values: object): string {
   const params = new URLSearchParams()
   for (const [key, value] of Object.entries(values)) {
