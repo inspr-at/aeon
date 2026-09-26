@@ -7,6 +7,41 @@ import (
 	"time"
 )
 
+func TestStageRailReportsExactGate(t *testing.T) {
+	f := facts{
+		Revision:           3,
+		RequirementsDigest: "digest",
+		BuildGateID:        "build-gate",
+		GateLiveByID: map[string]bool{
+			"build-gate": true,
+		},
+	}
+	stage := func(key string) JourneyStage {
+		t.Helper()
+		for _, item := range stageRail(f, stageBuild, false) {
+			if item.Key == key {
+				return item
+			}
+		}
+		t.Fatalf("missing stage %s", key)
+		return JourneyStage{}
+	}
+	if got := stage(stagePlan); got.GateScope != ScopeBuild || !got.GateLive || ptrVal(got.GateApprovalID) != "build-gate" {
+		t.Fatalf("plan gate: %+v", got)
+	}
+	if got := stage(stageBuild); got.GateScope != ScopeCandidate || got.GateLive || got.GateApprovalID != nil {
+		t.Fatalf("build stage must report absent candidate gate: %+v", got)
+	}
+	if got := stage(stageRequirements); got.GateScope != requirementsScope(3, "digest") {
+		t.Fatalf("requirements scope: %+v", got)
+	}
+	f.CandidateGateID = "candidate-gate"
+	f.GateLiveByID["candidate-gate"] = true
+	if got := stage(stageBuild); got.GateScope != ScopeCandidate || !got.GateLive || ptrVal(got.GateApprovalID) != "candidate-gate" {
+		t.Fatalf("candidate gate: %+v", got)
+	}
+}
+
 func TestDeriveStagesAndNextAction(t *testing.T) {
 	release := func(state string, access bool) *releaseFacts {
 		return &releaseFacts{ID: "rel", Number: 1, State: state, AccessRequired: access}

@@ -26,6 +26,7 @@ type eventSnap struct {
 	Revision                   int64    `json:"revision"`
 	Decision                   string   `json:"decision"`
 	BriefConfirmed             bool     `json:"brief_confirmed"`
+	Disposable                 bool     `json:"disposable"`
 	RequirementsRevision       int64    `json:"requirements_revision"`
 	AgreedRequirementsRevision int64    `json:"agreed_requirements_revision"`
 	CurrentReleaseID           *string  `json:"current_release_id"`
@@ -274,6 +275,9 @@ func loadFacts(ctx context.Context, tx pgx.Tx, projectID string, lockRelease boo
 	}
 	if f.NodeKey == "" || f.ProjectKey == "" || f.TenantSlug == "" {
 		return facts{}, fail(404, "project not found")
+	}
+	if err := tx.QueryRow(ctx, `SELECT EXISTS(SELECT 1 FROM journey_disposable_projects WHERE project_node_id=$1::uuid)`, projectID).Scan(&f.Disposable); err != nil {
+		return facts{}, err
 	}
 	return f, nil
 }
@@ -805,6 +809,22 @@ func requirePerson(ctx context.Context, tx pgx.Tx, p tenant.Principal) error {
 }
 
 func writeEvent(ctx context.Context, tx pgx.Tx, p tenant.Principal, projectID, eventType string, before, after any) (int64, error) {
+	production, _ := ctx.Value(productionContextKey{}).(bool)
+	if production {
+		encoded, err := json.Marshal(after)
+		if err != nil {
+			return 0, err
+		}
+		var fields map[string]json.RawMessage
+		if err := json.Unmarshal(encoded, &fields); err != nil {
+			return 0, err
+		}
+		if fields == nil {
+			return 0, errors.New("production event requires an object snapshot")
+		}
+		fields["production"] = json.RawMessage("true")
+		after = fields
+	}
 	ev, err := events.Append(ctx, tx, p, events.Change{
 		NodeID: &projectID,
 		Type:   eventType,
@@ -828,6 +848,7 @@ func snapFrom(f facts, view Journey, action, approvalID, cap, reason string, sup
 		Revision:                   f.Revision,
 		Decision:                   f.Decision,
 		BriefConfirmed:             f.BriefConfirmed,
+		Disposable:                 f.Disposable,
 		RequirementsRevision:       f.RequirementsRevision,
 		AgreedRequirementsRevision: f.AgreedRequirementsRevision,
 		CurrentReleaseID:           view.CurrentReleaseID,

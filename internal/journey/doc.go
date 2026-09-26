@@ -17,9 +17,11 @@
 // decision, the agreed requirements revision, the current release node state,
 // R2 gate decisions, and terminal stage handoff results. Never infer progress
 // from a worker heartbeat, timer, forecast, or a client-supplied stage string.
-// Each stages[] entry includes gate_approval_id as historical identity and
-// gate_live as the server's current approval/grant validity check across that
-// stage's gates. It is false when none are live, without erasing history.
+// Each stages[] entry names its gate_scope, includes gate_approval_id as
+// historical identity and gate_live as the server's current approval/grant
+// validity check. Plan reports Build and Build reports Candidate, including
+// when the Candidate gate is absent. Gate_live is false when none is live,
+// without erasing history.
 // Preserve history when a later release starts; Live becomes the prior release
 // state while Plan is current. Park/drop retains the Shape stage with Reopen.
 // Personal skips Shape after a brief; Access is skipped only when the release
@@ -187,4 +189,19 @@
 // writer, R2 approvals and httpapi.Module. Each module tests tenant isolation,
 // authorization, optimistic revision, idempotency, event atomicity and stale
 // evidence. The coordinator alone mounts modules and conducts release QA.
+//
+// AEON-188 adds an explicit read-only disposable flag to the Journey document.
+// The coordinator wires RunOperator into `aeon journey`; the host-only commands
+// are `mark-disposable --tenant SLUG --project KEY` and
+// `seed --tenant SLUG --project KEY --to-stage build|candidate|deploy`.
+// Development is the default; production host runs require --production and
+// --confirm-project equal to --project. Production events record production:true
+// and the Access operator. MarkDisposable appends an operator event and
+// refuses deployed or released projects. SeedDisposable uses the normal
+// journey revision, receipt and transition path for release opening, build
+// start and candidate marking, with an explicit audited build-gate waiver on
+// disposable projects. It cannot create requirements, complete tickets or
+// decide candidate/deploy gates. A person still approves those gates through
+// the normal UI. An unmet work prerequisite rolls the seed transaction back;
+// a pending human gate commits preparation and reports the pending action.
 package journey

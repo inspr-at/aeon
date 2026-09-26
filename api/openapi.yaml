@@ -3573,7 +3573,7 @@ components:
       properties: {name: {type: string}, url: {type: string}, status: {type: string}, conclusion: {type: string}}
     Journey:
       type: object
-      required: [project_node_id, project_key, tenant_slug, profile, revision, stage, stage_source, stages, next_action, requirements_revision, requirements_digest_sha256, requirements_approval_scope, launch_readiness]
+      required: [project_node_id, project_key, tenant_slug, profile, revision, stage, stage_source, disposable, stages, next_action, requirements_revision, requirements_digest_sha256, requirements_approval_scope, launch_readiness]
       properties:
         project_node_id: {type: string, format: uuid, description: Project node id, read from the node. Not taken from the client.}
         project_key: {type: string, description: 'Route key used in /p/{project_key} links (e.g. PHAROS), read from the project node. Not a request field.'}
@@ -3584,6 +3584,7 @@ components:
         stage: {type: string, enum: [inspire, shape, requirements, plan, build, deploy, access, live]}
         stage_source: {type: string, enum: [journey, derived], description: Whether stage selection uses recorded journey history or the imported-project data derivation}
         imported: {type: boolean, description: 'True for a project imported from classic Paimos with its history; its stages before Plan were never recorded here'}
+        disposable: {type: boolean, description: 'True only after the development operator marks this project disposable; read-only and never inferred from gate state.'}
         stages: {type: array, items: {$ref: '#/components/schemas/JourneyStage'}}
         next_action: {$ref: '#/components/schemas/JourneyNextAction'}
         requirements_revision: {type: integer, minimum: 0}
@@ -3599,10 +3600,11 @@ components:
         reason: {type: string, description: Current blocker or empty when admission can proceed}
     JourneyStage:
       type: object
-      required: [key, state, gate_live, handoff_id, handoff_attempt, handoff_authority_epoch]
+      required: [key, state, gate_scope, gate_live, handoff_id, handoff_attempt, handoff_authority_epoch]
       properties:
         key: {type: string, enum: [inspire, shape, requirements, plan, build, deploy, access, live]}
         state: {type: string, enum: [done, current, later, skipped, blocked]}
+        gate_scope: {type: string, description: 'Exact approval scope reported by this stage. Empty for Inspire and Live. Plan reports journey.build; Build reports journey.candidate even before its gate exists.'}
         gate_approval_id: {type: [string, 'null'], format: uuid}
         gate_live: {type: boolean, description: Whether any approval and grant for the stage gate are currently valid; false when no gate is recorded}
         handoff_id: {type: [string, 'null'], format: uuid}

@@ -37,6 +37,7 @@ type Journey struct {
 	Stage                string            `json:"stage"`
 	StageSource          string            `json:"stage_source"`
 	Imported             bool              `json:"imported"`
+	Disposable           bool              `json:"disposable"`
 	Stages               []JourneyStage    `json:"stages"`
 	NextAction           JourneyNextAction `json:"next_action"`
 	RequirementsRevision int64             `json:"requirements_revision"`
@@ -55,6 +56,7 @@ type LaunchReadiness struct {
 type JourneyStage struct {
 	Key                   string  `json:"key"`
 	State                 string  `json:"state"`
+	GateScope             string  `json:"gate_scope"`
 	GateApprovalID        *string `json:"gate_approval_id"`
 	GateLive              bool    `json:"gate_live"`
 	HandoffID             *string `json:"handoff_id"`
