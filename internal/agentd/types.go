@@ -65,15 +65,24 @@ type HarnessControl struct {
 
 type HarnessDelivery struct {
 	ID                string `json:"delivery_id"`
+	MessageID         string `json:"message_id"`
 	Cursor            int64  `json:"cursor"`
 	SenderPrincipalID string `json:"sender_principal_id"`
 	Body              string `json:"body"`
 }
 
 type WorkOrder struct {
-	NodeID             string `json:"node_id"`
-	Status             string `json:"status"`
-	MaxDurationSeconds *int64 `json:"max_duration_seconds"`
+	NodeID             string          `json:"node_id"`
+	Status             string          `json:"status"`
+	Revision           int64           `json:"revision"`
+	Criteria           []WorkCriterion `json:"criteria"`
+	MaxDurationSeconds *int64          `json:"max_duration_seconds"`
+}
+
+type WorkCriterion struct {
+	ID          string     `json:"id"`
+	Description string     `json:"description"`
+	CheckedAt   *time.Time `json:"checked_at"`
 }
 
 // Telemetry carries content-free, nonnegative deltas. TurnCountDelta is one
@@ -149,6 +158,14 @@ type StartRequest struct {
 	StateRoot   string
 	Prompt      string
 	Generation  string
+	// Tools is a loopback MCP capability for this run; the daemon key stays in
+	// the supervisor. It expires when the owned process exits.
+	Tools *RunTools
+}
+
+type RunTools struct {
+	URL   string `json:"url"`
+	Token string `json:"token"`
 }
 
 type AdapterEvent struct {

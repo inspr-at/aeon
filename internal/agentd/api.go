@@ -4,6 +4,9 @@ package agentd
 
 import (
 	"context"
+	"crypto/hmac"
+	"crypto/sha256"
+	"encoding/hex"
 	"errors"
 	"fmt"
 	"net/url"
@@ -22,6 +25,66 @@ type Remote struct {
 }
 
 func NewRemote(baseURL, token string) *Remote { return &Remote{Client: client.New(baseURL, token)} }
+
+// runCredential derives a local capability without exposing the daemon key to
+// a vendor process. Its scope is also checked by the owning supervisor.
+func (r *Remote) runCredential(tenantID, principalID, runID, generation string) string {
+	mac := hmac.New(sha256.New, []byte(r.Client.Token))
+	for _, part := range []string{"aeon-managed-tools-v1", tenantID, principalID, runID, generation} {
+		_, _ = mac.Write([]byte(part))
+		_, _ = mac.Write([]byte{0})
+	}
+	return hex.EncodeToString(mac.Sum(nil))
+}
+
+// RunToolAPI is deliberately narrower than the daemon API. Each method uses
+// an existing authenticated Aeon route, whose handler enforces tenant RLS,
+// caller scope and event writes. The daemon key needs comments.write,
+// work_orders.read/write, approvals.request and inbox.send in addition to its
+// existing run/harness scopes. There is no new httpapi.Module or plugin to
+// mount: NewSupervisor starts and closes this local MCP surface per run.
+type RunToolAPI interface {
+	WorkOrder(context.Context, string) (WorkOrder, error)
+	Comment(context.Context, string, string) error
+	SetWorkStatus(context.Context, string, int64, string) (WorkOrder, error)
+	CheckCriterion(context.Context, string, string, bool) error
+	Evidence(context.Context, string, string, string, string) error
+	RequestApproval(context.Context, string, string, string, string) error
+	ReplyInbox(context.Context, string, string, string, string) error
+}
+
+func (r *Remote) Comment(ctx context.Context, nodeID, body string) error {
+	return r.Client.Do(ctx, "POST", "/api/nodes/"+url.PathEscape(nodeID)+"/comments", map[string]string{"body_markdown": body}, nil)
+}
+
+func (r *Remote) SetWorkStatus(ctx context.Context, orderID string, revision int64, status string) (WorkOrder, error) {
+	var out WorkOrder
+	err := r.Client.Do(ctx, "PATCH", "/api/work-orders/"+url.PathEscape(orderID), map[string]any{"expected_revision": revision, "status": status}, &out)
+	return out, err
+}
+
+func (r *Remote) CheckCriterion(ctx context.Context, orderID, criterionID string, checked bool) error {
+	return r.Client.Do(ctx, "POST", "/api/work-orders/"+url.PathEscape(orderID)+"/criteria/"+url.PathEscape(criterionID)+"/check", map[string]bool{"checked": checked}, nil)
+}
+
+func (r *Remote) Evidence(ctx context.Context, orderID, runID, criterionID, reference string) error {
+	return r.Client.Do(ctx, "POST", "/api/work-orders/"+url.PathEscape(orderID)+"/evidence",
+		map[string]string{"kind": "text", "reference": reference, "criterion_id": criterionID, "run_id": runID}, nil)
+}
+
+func (r *Remote) RequestApproval(ctx context.Context, runID, scope, rationale, expiry string) error {
+	return r.Client.Do(ctx, "POST", "/api/approvals", map[string]string{
+		"scope": scope, "resource_kind": "run", "resource_id": runID,
+		"run_id": runID, "rationale": rationale, "expires_at": expiry,
+	}, nil)
+}
+
+func (r *Remote) ReplyInbox(ctx context.Context, messageID, recipientID, body, key string) error {
+	return r.Client.Do(ctx, "POST", "/api/inbox/messages", map[string]string{
+		"recipient_principal_id": recipientID, "body": body,
+		"idempotency_key": key, "reply_to_id": messageID,
+	}, nil)
+}
 
 func (r *Remote) Identity(ctx context.Context) (string, string, error) {
 	me, err := r.Client.Me(ctx)

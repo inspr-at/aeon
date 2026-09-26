@@ -338,6 +338,10 @@ func TestClaudeBridgeMapsSDKResultUsage(t *testing.T) {
 		t.Skip("Node is unavailable")
 	}
 	root := t.TempDir()
+	root, err = filepath.EvalSymlinks(root)
+	if err != nil {
+		t.Fatal(err)
+	}
 	bridge, err := claudeAssets.ReadFile("claudeassets/bridge.mjs")
 	if err != nil {
 		t.Fatal(err)
@@ -383,5 +387,67 @@ func TestClaudeBridgeMapsSDKResultUsage(t *testing.T) {
 	}
 	if !turn || !usage {
 		t.Fatalf("Claude bridge did not map result usage: turn=%t usage=%t output=%s", turn, usage, output)
+	}
+}
+
+func TestClaudeBridgeDeniesEditsOutsideWorkspace(t *testing.T) {
+	node, err := exec.LookPath("node")
+	if err != nil {
+		t.Skip("Node is unavailable")
+	}
+	root := t.TempDir()
+	root, err = filepath.EvalSymlinks(root)
+	if err != nil {
+		t.Fatal(err)
+	}
+	workspace := filepath.Join(root, "work")
+	outside := filepath.Join(root, "outside")
+	for _, path := range []string{workspace, outside} {
+		if err := os.Mkdir(path, 0700); err != nil {
+			t.Fatal(err)
+		}
+	}
+	if err := os.Symlink(outside, filepath.Join(workspace, "escape")); err != nil {
+		t.Fatal(err)
+	}
+	bridge, err := claudeAssets.ReadFile("claudeassets/bridge.mjs")
+	if err != nil {
+		t.Fatal(err)
+	}
+	bridgePath := filepath.Join(root, "bridge.mjs")
+	if err := os.WriteFile(bridgePath, bridge, 0600); err != nil {
+		t.Fatal(err)
+	}
+	sdk := fmt.Sprintf(`export function query({ options }) {
+  return {
+    streamInput: async () => {}, interrupt: async () => ({ still_queued: [] }), close: () => {},
+    async *[Symbol.asyncIterator]() {
+      if (options.permissionMode !== 'dontAsk' || options.additionalDirectories?.length !== 0) throw Error('permissions');
+      const entry = options.hooks?.PreToolUse?.[0];
+      if (entry?.matcher !== 'Edit|Write' || entry.hooks?.length !== 1) throw Error('hook');
+      const hook = entry.hooks[0], root = options.cwd, outside = %q;
+      for (const name of ['Edit', 'Write']) {
+        for (const file_path of [outside + '/file', root + '/../outside/file', root + '/escape/file']) {
+          const result = await hook({ tool_name: name, tool_input: { file_path } });
+          if (result.hookSpecificOutput?.permissionDecision !== 'deny') throw Error('outside edit');
+        }
+        const allowed = await hook({ tool_name: name, tool_input: { file_path: root + '/inside/file' } });
+        if (allowed.hookSpecificOutput?.permissionDecision === 'deny') throw Error('inside edit');
+      }
+      yield { type: 'system', subtype: 'init', session_id: 'fake-session', model: 'test-model', capabilities: ['interrupt_receipt_v1'] };
+      yield { type: 'result', modelUsage: { model: { inputTokens: 1, outputTokens: 1 } } };
+    }
+  };
+}`, outside)
+	sdkPath := filepath.Join(root, "sdk.mjs")
+	if err := os.WriteFile(sdkPath, []byte(sdk), 0600); err != nil {
+		t.Fatal(err)
+	}
+	cmd := exec.Command(node, bridgePath, sdkPath, "/bin/true", workspace)
+	cmd.Stdin = strings.NewReader(`{"op":"start","prompt":"hello"}` + "\n")
+	output, _ := cmd.Output() // The fake Query closes without a normal stop receipt.
+	if !strings.Contains(string(output), `"kind":"session_started"`) ||
+		!strings.Contains(string(output), `"kind":"usage"`) {
+		t.Fatalf("Claude bridge path gate did not pass: %s", output)
 	}
 }
