@@ -4880,12 +4880,13 @@ components:
       allOf:
         - {$ref: '#/components/schemas/AllowanceWindowWrite'}
         - type: object
-          required: [id, account_id, used, reserved]
+          required: [id, account_id, used, reserved, provisional]
           properties:
             id: {type: string, format: uuid}
             account_id: {type: string, format: uuid}
             used: {type: integer, format: int64}
             reserved: {type: integer, format: int64}
+            provisional: {type: boolean, description: "True when this window has no measured usage for its unit, or at least one settled reservation lacked measured usage. Zero-valued legacy telemetry is treated as unknown."}
     AccountRouteRequest:
       type: object
       required: [run_id, daemon_id, account_ids, estimated_units]

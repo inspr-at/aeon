@@ -24,5 +24,8 @@
 // turns monotonic telemetry sums into used units and is idempotent per
 // reservation. Release returns unused reserved units only for a queued run or
 // a terminal fenced transition, and it does not touch a live process. Draining
-// blocks new reservations and leaves an owned run where it is.
+// blocks new reservations and leaves an owned run where it is. Account and
+// window responses expose provisional=true when a window has no positive
+// measurement for its unit or a settled reservation lacked one. Historical
+// zero telemetry cannot prove measured zero, so it remains provisional.
 package agentaccounts

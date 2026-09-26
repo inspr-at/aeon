@@ -43,13 +43,14 @@ const stateLabel: Record<AgentAccount['state'], string> = { available: 'Availabl
           <button v-if="admin && account.state !== 'unavailable'" type="button" class="btn sm ghost toggle" :disabled="busy === account.id" @click="toggle(account)">{{ account.state === 'draining' ? 'Resume' : 'Drain' }}</button>
         </div>
         <template v-if="window">
-          <div class="meter" role="meter" :aria-valuenow="Math.round(window.left * 100)" aria-valuemin="0" aria-valuemax="100" :aria-label="`${account.label}: ${Math.round(window.left * 100)}% of ${UNIT_LABEL[window.window.unit]} left`">
+          <div class="meter" role="meter" :aria-valuenow="Math.round(window.left * 100)" aria-valuemin="0" aria-valuemax="100" :aria-label="`${account.label}: ${Math.round(window.left * 100)}% of ${UNIT_LABEL[window.window.unit]} left${'provisional' in window.window && window.window.provisional ? ', provisional' : ''}`">
             <span class="fill" :class="window.pace" :style="{ width: `${Math.max(2, window.left * 100)}%` }" />
             <span class="pace-mark" :style="{ left: `${Math.min(100, (1 - window.expected) * 100)}%` }" :data-tip="`Pace allows ${Math.round(window.expected * 100)}% used by now`" />
           </div>
           <p class="facts">
             <span class="left"><b>{{ Math.round(window.left * 100) }}%</b> {{ UNIT_LABEL[window.window.unit] }} left</span>
             <span class="pace" :class="window.pace">{{ PACE_LABEL[window.pace] }}</span>
+            <span v-if="'provisional' in window.window && window.window.provisional" class="provisional" title="Measured usage is unavailable for this allowance window">Provisional</span>
             <span class="reset">resets in {{ duration(window.resetsIn) }}</span>
           </p>
         </template>
@@ -94,5 +95,6 @@ const stateLabel: Record<AgentAccount['state'], string> = { available: 'Availabl
 .pace { font-weight: 600; color: var(--ok); }
 .pace.ahead { color: var(--gold-ink); }
 .pace.under { color: var(--ink-2); font-weight: 500; }
+.provisional { font-weight: 600; color: var(--ink-2); }
 .reset { margin-left: auto; color: var(--ink-3); }
 </style>

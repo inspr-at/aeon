@@ -8,6 +8,7 @@ import (
 	"encoding/json"
 	"fmt"
 	"os"
+	"os/exec"
 	"path/filepath"
 	"strings"
 	"testing"
@@ -43,6 +44,11 @@ func TestFakeVendorProcess(t *testing.T) {
 			}
 			if command.Op == "start" {
 				_ = write.Encode(map[string]string{"kind": "session_started", "harness_session_id": "claude-session", "effective_model": "test-model", "model_evidence_status": "vendor_reported"})
+				_ = write.Encode(map[string]any{"kind": "turn_started"})
+				_ = write.Encode(map[string]any{"kind": "usage", "input_tokens_total": 12, "output_tokens_total": 3, "cost_usd_total": json.Number("0.0000125")})
+				_ = write.Encode(map[string]any{"kind": "usage", "input_tokens_total": 12, "output_tokens_total": 3, "cost_usd_total": json.Number("0.0000125")})
+				_ = write.Encode(map[string]any{"kind": "usage", "input_tokens_total": 15, "output_tokens_total": 4, "cost_usd_total": json.Number("0.000020")})
+				_ = write.Encode(map[string]any{"kind": "turn_completed"})
 			} else {
 				_ = write.Encode(map[string]string{"kind": "control_applied", "correlation_id": command.CorrelationID})
 			}
@@ -71,10 +77,19 @@ func TestFakeVendorProcess(t *testing.T) {
 		case "turn/start":
 			result = map[string]any{"turn": map[string]string{"id": "turn-1", "status": "inProgress"}}
 		case "turn/steer":
+			for _, total := range []int{20, 20, 19} {
+				_ = write.Encode(map[string]any{"jsonrpc": "2.0", "method": "thread/tokenUsage/updated", "params": map[string]any{
+					"threadId": "thread-1", "tokenUsage": map[string]any{"total": map[string]int{"inputTokens": total, "outputTokens": 4}}}})
+			}
 			result = map[string]string{"turnId": "turn-1"}
 		case "session/new":
 			result = map[string]any{"sessionId": "session-1", "modes": map[string]string{"currentModeId": "default"}, "models": map[string]string{"currentModelId": "test-model"}}
 		case "session/prompt":
+			for i := 0; i < 2; i++ {
+				_ = write.Encode(map[string]any{"jsonrpc": "2.0", "method": "session/update", "params": map[string]any{
+					"sessionId": "session-1", "update": map[string]any{"sessionUpdate": "usage_update", "used": 100,
+						"size": 1000, "cost": map[string]any{"amount": json.Number("0.0000075"), "currency": "USD"}}}})
+			}
 			time.Sleep(500 * time.Millisecond)
 			result = map[string]string{"stopReason": "end_turn"}
 		case "initialize":
@@ -134,12 +149,27 @@ func TestCodexAppServerProtocolAndSteer(t *testing.T) {
 	a.SetExpectedEmails(map[string]string{"account": "agent@example.test"})
 	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
 	defer cancel()
-	p, err := a.Start(ctx, r, func(AdapterEvent) {})
+	events := make(chan AdapterEvent, 16)
+	p, err := a.Start(ctx, r, func(ev AdapterEvent) { events <- ev })
 	if err != nil {
 		t.Fatal(err)
 	}
 	if err := p.Control(ctx, "steer", "follow up"); err != nil {
 		t.Fatal(err)
+	}
+	var turns, input, output int64
+	for turns < 2 || input < 20 {
+		select {
+		case ev := <-events:
+			turns += ev.TurnCountDelta
+			input += ev.InputTokensDelta
+			output += ev.OutputTokensDelta
+		case <-ctx.Done():
+			t.Fatalf("Codex usage missing: turns=%d input=%d output=%d", turns, input, output)
+		}
+	}
+	if turns != 2 || input != 20 || output != 4 {
+		t.Fatalf("Codex usage: turns=%d input=%d output=%d", turns, input, output)
 	}
 	if err := p.Control(ctx, "interrupt", ""); err != nil {
 		t.Fatal(err)
@@ -197,9 +227,23 @@ func TestCursorACPAndAccountBinding(t *testing.T) {
 	a := NewCursorAdapter(fakeVendorPath(t, "cursor"), map[string]string{"account": "42"})
 	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
 	defer cancel()
-	p, err := a.Start(ctx, r, func(AdapterEvent) {})
+	events := make(chan AdapterEvent, 16)
+	p, err := a.Start(ctx, r, func(ev AdapterEvent) { events <- ev })
 	if err != nil {
 		t.Fatal(err)
+	}
+	var turns, cost int64
+	for turns < 1 || cost < 8 {
+		select {
+		case ev := <-events:
+			turns += ev.TurnCountDelta
+			cost += ev.CostMicrosDelta
+		case <-ctx.Done():
+			t.Fatalf("Cursor usage missing: turns=%d cost=%d", turns, cost)
+		}
+	}
+	if turns != 1 || cost != 8 {
+		t.Fatalf("Cursor usage: turns=%d cost=%d", turns, cost)
 	}
 	if err := p.Control(ctx, "steer", "unsafe"); err != ErrUnsupported {
 		t.Fatalf("Cursor steer should be closed: %v", err)
@@ -256,9 +300,25 @@ func TestClaudeBridgeControlProtocol(t *testing.T) {
 	a := NewClaudeAdapter(path, sdk, path, map[string]string{"account": home})
 	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
 	defer cancel()
-	p, err := a.Start(ctx, r, func(AdapterEvent) {})
+	events := make(chan AdapterEvent, 16)
+	p, err := a.Start(ctx, r, func(ev AdapterEvent) { events <- ev })
 	if err != nil {
 		t.Fatal(err)
+	}
+	var turns, input, output, cost int64
+	for turns < 1 || input < 15 || cost < 20 {
+		select {
+		case ev := <-events:
+			turns += ev.TurnCountDelta
+			input += ev.InputTokensDelta
+			output += ev.OutputTokensDelta
+			cost += ev.CostMicrosDelta
+		case <-ctx.Done():
+			t.Fatalf("Claude usage missing: turns=%d input=%d output=%d cost=%d", turns, input, output, cost)
+		}
+	}
+	if turns != 1 || input != 15 || output != 4 || cost != 20 {
+		t.Fatalf("Claude usage: turns=%d input=%d output=%d cost=%d", turns, input, output, cost)
 	}
 	if err := p.Control(ctx, "steer", "follow up"); err != nil {
 		t.Fatal(err)
@@ -270,4 +330,58 @@ func TestClaudeBridgeControlProtocol(t *testing.T) {
 		t.Fatal(err)
 	}
 	_ = p.Wait()
+}
+
+func TestClaudeBridgeMapsSDKResultUsage(t *testing.T) {
+	node, err := exec.LookPath("node")
+	if err != nil {
+		t.Skip("Node is unavailable")
+	}
+	root := t.TempDir()
+	bridge, err := claudeAssets.ReadFile("claudeassets/bridge.mjs")
+	if err != nil {
+		t.Fatal(err)
+	}
+	bridgePath := filepath.Join(root, "bridge.mjs")
+	if err := os.WriteFile(bridgePath, bridge, 0600); err != nil {
+		t.Fatal(err)
+	}
+	sdkPath := filepath.Join(root, "sdk.mjs")
+	const sdk = `export function query() {
+  return {
+    streamInput: async () => {}, interrupt: async () => ({ still_queued: [] }), close: () => {},
+    async *[Symbol.asyncIterator]() {
+      yield { type: 'system', subtype: 'init', session_id: 'fake-session', model: 'test-model', capabilities: ['interrupt_receipt_v1'] };
+      yield { type: 'result', modelUsage: { model: { inputTokens: 10, cacheCreationInputTokens: 3, cacheReadInputTokens: 4, outputTokens: 5 } }, total_cost_usd: 0.0000125 };
+    }
+  };
+}`
+	if err := os.WriteFile(sdkPath, []byte(sdk), 0600); err != nil {
+		t.Fatal(err)
+	}
+	cmd := exec.Command(node, bridgePath, sdkPath, "/bin/true", root)
+	cmd.Stdin = strings.NewReader(`{"op":"start","prompt":"hello","model":"test-model","effort":"high"}` + "\n")
+	output, _ := cmd.Output() // The fake Query closes without a normal stop receipt.
+	var turn, usage bool
+	for _, line := range strings.Split(strings.TrimSpace(string(output)), "\n") {
+		var frame struct {
+			Kind    string          `json:"kind"`
+			Input   int64           `json:"input_tokens_total"`
+			Output  int64           `json:"output_tokens_total"`
+			CostUSD json.RawMessage `json:"cost_usd_total"`
+		}
+		if json.Unmarshal([]byte(line), &frame) != nil {
+			continue
+		}
+		if frame.Kind == "turn_started" {
+			turn = true
+		}
+		if frame.Kind == "usage" && frame.Input == 17 && frame.Output == 5 {
+			cost, ok := usdMicros(frame.CostUSD)
+			usage = ok && cost == 13
+		}
+	}
+	if !turn || !usage {
+		t.Fatalf("Claude bridge did not map result usage: turn=%t usage=%t output=%s", turn, usage, output)
+	}
 }

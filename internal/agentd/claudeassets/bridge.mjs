@@ -232,6 +232,29 @@ function observeTool(message) {
       message.event?.content_block?.type === "tool_use") emit({ kind: "tool_started" });
 }
 
+function safeTokens(value) {
+  return Number.isSafeInteger(value) && value >= 0 ? value : 0;
+}
+
+function observeUsage(message) {
+  if (message?.type !== "result") return;
+  // modelUsage includes subagents and sidechains; result.usage covers only the
+  // main loop. Both modelUsage and total_cost_usd are cumulative for Query.
+  if (!message.modelUsage || typeof message.modelUsage !== "object") return;
+  let input = 0;
+  let output = 0;
+  for (const usage of Object.values(message.modelUsage)) {
+    input += safeTokens(usage?.inputTokens) + safeTokens(usage?.cacheCreationInputTokens) +
+      safeTokens(usage?.cacheReadInputTokens);
+    output += safeTokens(usage?.outputTokens);
+  }
+  const frame = { kind: "usage", input_tokens_total: input, output_tokens_total: output };
+  if (typeof message.total_cost_usd === "number" && Number.isFinite(message.total_cost_usd) &&
+      message.total_cost_usd >= 0) frame.cost_usd_total = message.total_cost_usd;
+  if (Number.isSafeInteger(input) && Number.isSafeInteger(output) &&
+      (input > 0 || output > 0 || frame.cost_usd_total !== undefined)) emit(frame);
+}
+
 try {
   if (start.native_messages !== undefined) throw new Error("direct message targets are unavailable in AEON");
   const { query } = await import(pathToFileURL(sdkPath));
@@ -439,6 +462,7 @@ try {
     observeTool(message);
     if (message?.type === "result") {
       turnActive = false;
+      observeUsage(message);
       emit({ kind: "turn_completed" });
     }
   }

@@ -36,16 +36,17 @@ type Account struct {
 
 // Window is one allowance bound for a single unit.
 type Window struct {
-	ID         string    `json:"id"`
-	AccountID  string    `json:"account_id"`
-	StartsAt   time.Time `json:"starts_at"`
-	EndsAt     time.Time `json:"ends_at"`
-	Unit       string    `json:"unit"`
-	Allowance  int64     `json:"allowance"`
-	PaceModel  string    `json:"pace_model"`
-	BurstRatio float64   `json:"burst_ratio"`
-	Used       int64     `json:"used"`
-	Reserved   int64     `json:"reserved"`
+	ID          string    `json:"id"`
+	AccountID   string    `json:"account_id"`
+	StartsAt    time.Time `json:"starts_at"`
+	EndsAt      time.Time `json:"ends_at"`
+	Unit        string    `json:"unit"`
+	Allowance   int64     `json:"allowance"`
+	PaceModel   string    `json:"pace_model"`
+	BurstRatio  float64   `json:"burst_ratio"`
+	Used        int64     `json:"used"`
+	Reserved    int64     `json:"reserved"`
+	Provisional bool      `json:"provisional"`
 }
 
 // Reservation is one held estimate against a window.
