@@ -6,6 +6,7 @@ import (
 	"context"
 	"encoding/json"
 	"fmt"
+	"math/rand/v2"
 	"reflect"
 	"strings"
 	"testing"
@@ -594,5 +595,207 @@ func TestNestedAndNodelessEventReferences(t *testing.T) {
 		if unset[c.name] {
 			t.Errorf("%s: visible without a principal or service visibility", c.name)
 		}
+	}
+}
+
+// A node reference is any UUID that is a node of this tenant, under any key,
+// including inside fields. Principal, role and binding ids are not nodes.
+// Journey release ids, a group's project_ids and a reassigned binding's
+// scope_id are the shapes key-name matching left visible to a guest of A.
+func TestEventReferencesByValue(t *testing.T) {
+	d := dbtest.Open(t)
+	f := newVisibilityFixture(t, d, "p2-value-refs")
+	ctx := t.Context()
+	var relA, relB, relB2, gone string
+	err := db.InTenant(dbtest.Seed(ctx), d.App, f.tenant, func(tx pgx.Tx) error {
+		relA = insertNode(ctx, t, tx, f, "ticket", "RA-1", &f.projectA)
+		relB = insertNode(ctx, t, tx, f, "ticket", "RB-1", &f.projectB)
+		relB2 = insertNode(ctx, t, tx, f, "ticket", "RB-2", &f.projectB)
+		gone = insertNode(ctx, t, tx, f, "ticket", "DB-1", &f.projectB)
+		return nil
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if _, err := d.Admin.Exec(ctx, `UPDATE nodes SET deleted_at=now() WHERE tenant_id=$1 AND id=$2`, f.tenant, gone); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := d.Admin.Exec(ctx, `INSERT INTO role_bindings(tenant_id,principal_id,role_id,scope_type,scope_id) SELECT $1,$2,id,'project',$3 FROM roles WHERE tenant_id=$1 AND key='guest'`, f.tenant, f.actor, f.projectA); err != nil {
+		t.Fatal(err)
+	}
+	const (
+		stranger = "aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa"
+		roleID   = "bbbbbbbb-bbbb-4bbb-8bbb-bbbbbbbbbbbb"
+		groupID  = "cccccccc-cccc-4ccc-8ccc-cccccccccccc"
+	)
+	journey := func(marker, current string, superseded []string) map[string]any {
+		return map[string]any{
+			"marker": marker, "project_node_id": f.projectA, "profile": "delivery", "revision": 4,
+			"decision": "go", "brief_confirmed": true, "requirements_revision": 2, "agreed_requirements_revision": 2,
+			"current_release_id": current, "release_state": "planned", "stage": "build", "action": "decide",
+			"approval_request_id": stranger, "superseded_release_ids": superseded,
+		}
+	}
+	group := func(marker string, projects []string) map[string]any {
+		return map[string]any{
+			"marker": marker, "id": groupID, "name": "Clients", "position": 1, "project_ids": projects,
+			"created_by": f.actor, "created_at": "2026-09-26T00:00:00Z", "updated_at": "2026-09-26T00:00:00Z",
+		}
+	}
+	binding := func(marker, scopeType string, scope any) map[string]any {
+		return map[string]any{
+			"marker": marker, "principal_id": f.actor, "role_id": roleID, "binding_id": groupID,
+			"scope_type": scopeType, "scope_id": scope,
+		}
+	}
+	type marked struct {
+		marker     string
+		typ        string
+		node       *string
+		before     any
+		after      any
+		visible    bool
+		wantRefs   []string
+		absentRefs []string
+	}
+	cases := []marked{
+		{"journey-decided-b", "journey.decided", &f.projectA, nil, journey("journey-decided-b", relB, []string{relB2}), false, []string{f.projectA, relB, relB2}, []string{stranger, f.actor}},
+		{"journey-opened-b", "journey.release_opened", &f.projectA, nil, journey("journey-opened-b", relB, []string{relB, relB2}), false, []string{relB, relB2}, []string{stranger}},
+		{"journey-planned-b", "journey.release_planned", &f.projectA, nil, journey("journey-planned-b", relB, []string{gone}), false, []string{relB, gone}, []string{stranger}},
+		{"journey-decided-a", "journey.decided", &f.projectA, nil, journey("journey-decided-a", relA, []string{relA}), true, []string{f.projectA, relA}, []string{stranger, f.actor}},
+		{"group-created-b", "project_group.created", nil, nil, group("group-created-b", []string{f.projectA, f.projectB}), false, []string{f.projectA, f.projectB}, []string{f.actor, groupID}},
+		{"group-created-a", "project_group.created", nil, nil, group("group-created-a", []string{f.projectA}), true, []string{f.projectA}, []string{f.actor, groupID}},
+		{"group-deleted-b", "project_group.deleted", nil, group("group-deleted-b", []string{f.projectB}), nil, false, []string{f.projectB}, []string{f.actor, groupID}},
+		{"binding-b", "authz.binding_reassigned", nil, nil, binding("binding-b", "project", f.projectB), false, []string{f.projectB}, []string{f.actor, roleID, groupID}},
+		{"binding-a", "authz.binding_reassigned", nil, nil, binding("binding-a", "project", f.projectA), true, []string{f.projectA}, []string{f.actor, roleID, groupID}},
+		{"binding-workspace", "authz.binding_reassigned", nil, nil, binding("binding-workspace", "workspace", nil), true, nil, []string{f.actor, roleID, groupID}},
+		{"fields-b", "node.updated", &f.ticketA, nil, map[string]any{"marker": "fields-b", "fields": map[string]any{"custom_slot": relB, "classic": map[string]any{"project_id": 9}}}, false, []string{relB}, nil},
+		{"fields-a", "node.updated", &f.ticketA, nil, map[string]any{"marker": "fields-a", "fields": map[string]any{"custom_slot": relA, "classic": map[string]any{"project_id": "9", "assignee_id": 7}, "assignee_id": f.actor}}, true, []string{relA}, []string{f.actor}},
+		{"deleted-b", "node.updated", &f.ticketA, nil, map[string]any{"marker": "deleted-b", "slot": gone}, false, []string{gone}, nil},
+	}
+	rng := rand.New(rand.NewPCG(153, 4))
+	plantKeys := []string{"current_release_id", "superseded_release_ids", "project_ids", "scope_id", "slot", "note_ref"}
+	hidePool := []string{f.projectB, f.ticketB, relB, relB2, gone}
+	showPool := []string{f.projectA, f.ticketA, relA}
+	for i := 0; i < 24; i++ {
+		key := plantKeys[rng.IntN(len(plantKeys))]
+		hidden := i%2 == 0
+		id := showPool[rng.IntN(len(showPool))]
+		if hidden {
+			id = hidePool[rng.IntN(len(hidePool))]
+		}
+		var planted any = id
+		if strings.HasSuffix(key, "_ids") {
+			planted = []any{id}
+		}
+		marker := fmt.Sprintf("prop-%02d", i)
+		cases = append(cases, marked{
+			marker: marker, typ: "node.updated", node: &f.ticketA, visible: !hidden,
+			after: map[string]any{
+				"marker": marker, "principal_id": f.actor, "role_id": roleID, "binding_id": groupID,
+				"body": buryValue(rng, key, planted, rng.IntN(5)),
+			},
+			wantRefs:   []string{id},
+			absentRefs: []string{f.actor, roleID, groupID},
+		})
+	}
+	actor := tenant.Principal{ID: f.actor, TenantID: f.tenant, Kind: tenant.Person}
+	err = db.InTenant(tenant.WithPrincipal(ctx, actor), d.App, f.tenant, func(tx pgx.Tx) error {
+		for _, c := range cases {
+			var before, after any
+			if c.before != nil {
+				raw, err := json.Marshal(c.before)
+				if err != nil {
+					return err
+				}
+				before = string(raw)
+			}
+			if c.after != nil {
+				raw, err := json.Marshal(c.after)
+				if err != nil {
+					return err
+				}
+				after = string(raw)
+			}
+			if _, err := tx.Exec(ctx, `INSERT INTO events(tenant_id,actor_principal_id,node_id,type,before,after) VALUES($1,$2,$3,$4,$5::jsonb,$6::jsonb)`, f.tenant, f.actor, c.node, c.typ, before, after); err != nil {
+				return fmt.Errorf("%s: %w", c.marker, err)
+			}
+		}
+		return nil
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	seen := func(ctx context.Context) map[string]bool {
+		out := map[string]bool{}
+		err := db.InTenant(ctx, d.App, f.tenant, func(tx pgx.Tx) error {
+			rows, err := tx.Query(ctx, `SELECT coalesce(after->>'marker', before->>'marker') FROM events WHERE actor_principal_id=$1 AND coalesce(after->>'marker', before->>'marker') <> ''`, f.actor)
+			if err != nil {
+				return err
+			}
+			defer rows.Close()
+			for rows.Next() {
+				var marker string
+				if err := rows.Scan(&marker); err != nil {
+					return err
+				}
+				out[marker] = true
+			}
+			return rows.Err()
+		})
+		if err != nil {
+			t.Fatal(err)
+		}
+		return out
+	}
+	asGuest := seen(tenant.WithPrincipal(ctx, actor))
+	all := seen(db.AllProjects(ctx, "test"))
+	unset := seen(ctx)
+	for _, c := range cases {
+		if asGuest[c.marker] != c.visible {
+			t.Errorf("%s: visible to a guest of A = %v, want %v", c.marker, asGuest[c.marker], c.visible)
+		}
+		if !all[c.marker] {
+			t.Errorf("%s: hidden from every-project visibility", c.marker)
+		}
+		if unset[c.marker] {
+			t.Errorf("%s: visible without a principal or service visibility", c.marker)
+		}
+		var refs []string
+		if err := d.Admin.QueryRow(ctx, `SELECT coalesce(array(SELECT unnest(node_refs)::text), '{}') FROM events WHERE tenant_id=$1 AND coalesce(after->>'marker', before->>'marker')=$2`, f.tenant, c.marker).Scan(&refs); err != nil {
+			t.Fatal(err)
+		}
+		have := map[string]bool{}
+		for _, id := range refs {
+			have[id] = true
+		}
+		for _, id := range c.wantRefs {
+			if !have[id] {
+				t.Errorf("%s: node_refs %v lacks %s", c.marker, refs, id)
+			}
+		}
+		for _, id := range c.absentRefs {
+			if have[id] {
+				t.Errorf("%s: node_refs %v includes non-node %s", c.marker, refs, id)
+			}
+		}
+	}
+}
+
+// buryValue nests value under key through objects and arrays, sometimes inside
+// fields. Keys are not the historical reference-key list.
+func buryValue(rng *rand.Rand, key string, value any, depth int) any {
+	if depth <= 0 {
+		return map[string]any{key: value}
+	}
+	switch rng.IntN(4) {
+	case 0:
+		return map[string]any{"fields": buryValue(rng, key, value, depth-1)}
+	case 1:
+		return []any{buryValue(rng, key, value, depth-1), map[string]any{"n": rng.IntN(9)}}
+	case 2:
+		return map[string]any{"slot_" + fmt.Sprint(rng.IntN(10000)): buryValue(rng, key, value, depth-1)}
+	default:
+		return map[string]any{"wrap": buryValue(rng, key, value, depth-1), "note": "plain"}
 	}
 }

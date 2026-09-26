@@ -8,18 +8,24 @@
 -- 43 relations that cross projects, and moved tickets keep their history.
 --
 -- Each event records the nodes it names in node_refs when it is written
--- (events are append-only, so the list never changes): every value of a
--- node-reference key (parent_id, project_id, node_id, feature_id, release_id,
--- ticket_id, requirement_id, *_node_id(s), *_ticket_ids) anywhere in its
--- before and after snapshots, through nested objects and arrays (a release
--- plan's tickets[] and features[], a batch's items[]), except inside the
--- free-form fields and the classic record. A batch names each of its items
--- (items[].id). A value that is not a node ID, and a structure nested deeper
--- than 16 levels, is recorded as the nil UUID, which names no node, so the
--- event stays hidden (fail closed). A classic relation's target key is
--- resolved to its node when the event is written. Reading then never parses
--- the snapshots: the policy tests node_refs against the caller's visible
--- nodes, a set Postgres hashes once per statement.
+-- (events are append-only, so the list never changes). The before and after
+-- snapshots are walked, objects and arrays, including fields: every string
+-- that is a UUID is collected. A collected UUID is a node reference when it
+-- is the id of a node of the same tenant, deleted nodes included. One query
+-- against the nodes primary key decides the whole set. Principal, event,
+-- role and binding ids are not nodes and do not count. Reference keys
+-- (parent_id, project_id, node_id, feature_id, release_id, ticket_id,
+-- requirement_id, *_node_id(s), *_ticket_ids) and a batch's items[].id still
+-- mark a value that was detected as a reference but does not resolve: that
+-- value, and a structure nested deeper than 16 levels, is the nil UUID,
+-- which names no node, so the event stays hidden (fail closed). Those keys
+-- are not how a UUID becomes a reference. Inside fields and the classic
+-- record the same UUID rule applies, but a non-UUID there is not a broken
+-- reference (classic ids are integers). A classic relation's target key is
+-- resolved to its node when the event is written, with the writer's
+-- visibility. Reading then never parses the snapshots: the policy tests
+-- node_refs against the caller's visible nodes, a set Postgres hashes once
+-- per statement.
 --
 -- Every arm of the policy but the every-project one applies that test: an
 -- event with or without a node, and the caller's own events alike. Events
@@ -61,33 +67,77 @@ LANGUAGE sql IMMUTABLE AS $$
     WHERE jsonb_typeof(x) <> 'null'
 $$;
 
-CREATE FUNCTION aeon_json_node_refs(snapshot jsonb, depth integer DEFAULT 0) RETURNS uuid[]
+-- candidates: UUID strings that count only when they are nodes.
+-- required: UUID strings detected as references; a miss becomes the nil UUID.
+-- markers: nil UUIDs for references that did not resolve, and for a structure
+-- nested deeper than 16 levels. strict is false inside fields and record.
+CREATE FUNCTION aeon_json_collect(snapshot jsonb, depth integer, strict boolean,
+    OUT candidates uuid[], OUT required uuid[], OUT markers uuid[])
 LANGUAGE plpgsql IMMUTABLE AS $$
 DECLARE
-    refs uuid[] := '{}';
     member record;
     element jsonb;
+    sub_c uuid[];
+    sub_r uuid[];
+    sub_m uuid[];
+    ref uuid;
+    nil_id uuid := '00000000-0000-0000-0000-000000000000';
+    loose boolean;
 BEGIN
-    IF snapshot IS NULL OR jsonb_typeof(snapshot) NOT IN ('object', 'array') THEN
-        RETURN refs;
+    candidates := '{}';
+    required := '{}';
+    markers := '{}';
+    IF snapshot IS NULL OR jsonb_typeof(snapshot) = 'null' THEN
+        RETURN;
+    END IF;
+    IF jsonb_typeof(snapshot) NOT IN ('object', 'array') THEN
+        IF jsonb_typeof(snapshot) = 'string' THEN
+            ref := aeon_uuid_or_null(snapshot #>> '{}');
+            IF ref IS NOT NULL THEN
+                candidates := ARRAY[ref];
+            END IF;
+        END IF;
+        RETURN;
     END IF;
     IF depth > 16 THEN
-        RETURN ARRAY['00000000-0000-0000-0000-000000000000'::uuid];
+        markers := ARRAY[nil_id];
+        RETURN;
     END IF;
     IF jsonb_typeof(snapshot) = 'array' THEN
         FOR element IN SELECT value FROM jsonb_array_elements(snapshot) LOOP
-            refs := refs || aeon_json_node_refs(element, depth + 1);
+            SELECT c.candidates, c.required, c.markers INTO sub_c, sub_r, sub_m
+            FROM aeon_json_collect(element, depth + 1, strict) AS c;
+            candidates := candidates || sub_c;
+            required := required || sub_r;
+            markers := markers || sub_m;
         END LOOP;
-        RETURN refs;
+        RETURN;
     END IF;
     FOR member IN SELECT key, value FROM jsonb_each(snapshot) LOOP
-        IF aeon_node_ref_key(member.key) THEN
-            refs := refs || aeon_json_ref_values(member.value);
-        ELSIF member.key NOT IN ('fields', 'record') THEN
-            refs := refs || aeon_json_node_refs(member.value, depth + 1);
+        loose := member.key IN ('fields', 'record');
+        IF strict AND NOT loose AND aeon_node_ref_key(member.key) THEN
+            FOREACH ref IN ARRAY aeon_json_ref_values(member.value) LOOP
+                IF ref = nil_id THEN
+                    markers := markers || ref;
+                ELSE
+                    required := required || ref;
+                END IF;
+            END LOOP;
+            CONTINUE;
+        END IF;
+        IF jsonb_typeof(member.value) IN ('object', 'array') THEN
+            SELECT c.candidates, c.required, c.markers INTO sub_c, sub_r, sub_m
+            FROM aeon_json_collect(member.value, depth + 1, strict AND NOT loose) AS c;
+            candidates := candidates || sub_c;
+            required := required || sub_r;
+            markers := markers || sub_m;
+        ELSIF jsonb_typeof(member.value) = 'string' THEN
+            ref := aeon_uuid_or_null(member.value #>> '{}');
+            IF ref IS NOT NULL THEN
+                candidates := candidates || ref;
+            END IF;
         END IF;
     END LOOP;
-    RETURN refs;
 END;
 $$;
 
@@ -98,17 +148,65 @@ LANGUAGE sql IMMUTABLE AS $$
     FROM jsonb_array_elements(CASE WHEN jsonb_typeof(snapshot->'items') = 'array' THEN snapshot->'items' ELSE '[]'::jsonb END) AS item
 $$;
 
--- Runs with the writer's visibility: a classic relation target it cannot
--- see, or that is not imported, becomes the nil UUID.
+-- The node lookup sees every node of the tenant, deleted ones included, so a
+-- writer who cannot see a named node still records it. The caller's
+-- visibility is restored before the classic key lookup, which keeps the
+-- writer's view: a target they cannot see becomes the nil UUID.
 CREATE FUNCTION aeon_event_node_refs(p_tenant uuid, p_type text, p_before jsonb, p_after jsonb) RETURNS uuid[]
-LANGUAGE plpgsql STABLE AS $$
+LANGUAGE plpgsql VOLATILE AS $$
 DECLARE
-    refs uuid[] := aeon_json_node_refs(p_before) || aeon_json_node_refs(p_after);
+    nil_id uuid := '00000000-0000-0000-0000-000000000000';
+    prior text := current_setting('aeon.visible_projects', true);
+    candidates uuid[] := '{}';
+    required uuid[] := '{}';
+    markers uuid[] := '{}';
+    sub_c uuid[];
+    sub_r uuid[];
+    sub_m uuid[];
+    ref uuid;
+    found uuid[] := '{}';
+    probe uuid[];
     target_key text;
     target uuid;
+    extra uuid[] := '{}';
 BEGIN
+    SELECT c.candidates, c.required, c.markers INTO sub_c, sub_r, sub_m
+    FROM aeon_json_collect(p_before, 0, true) AS c;
+    candidates := sub_c;
+    required := sub_r;
+    markers := sub_m;
+    SELECT c.candidates, c.required, c.markers INTO sub_c, sub_r, sub_m
+    FROM aeon_json_collect(p_after, 0, true) AS c;
+    candidates := candidates || sub_c;
+    required := required || sub_r;
+    markers := markers || sub_m;
     IF p_type = 'node.bulk_changed' THEN
-        refs := refs || aeon_json_item_ids(p_before) || aeon_json_item_ids(p_after);
+        FOREACH ref IN ARRAY aeon_json_item_ids(p_before) || aeon_json_item_ids(p_after) LOOP
+            IF ref = nil_id THEN
+                markers := markers || ref;
+            ELSE
+                required := required || ref;
+            END IF;
+        END LOOP;
+    END IF;
+    probe := candidates || required;
+    IF cardinality(probe) > 0 THEN
+        -- Raised outside the lookup's subtransaction so the query sees every
+        -- project, then put back even when the lookup fails.
+        PERFORM set_config('aeon.visible_projects', '*', true);
+        BEGIN
+            SELECT coalesce(array_agg(DISTINCT n.id), '{}') INTO found
+            FROM unnest(probe) AS c(id)
+            JOIN nodes n ON n.tenant_id = p_tenant AND n.id = c.id;
+        EXCEPTION WHEN OTHERS THEN
+            PERFORM set_config('aeon.visible_projects', coalesce(prior, ''), true);
+            RAISE;
+        END;
+        PERFORM set_config('aeon.visible_projects', coalesce(prior, ''), true);
+    END IF;
+    IF EXISTS (SELECT 1 FROM unnest(required) AS r(id)
+               WHERE r.id <> nil_id AND NOT (r.id = ANY(found))) THEN
+        markers := markers || nil_id;
     END IF;
     IF p_type = 'import.relation' THEN
         target_key := p_after->'record'->>'target_key';
@@ -116,9 +214,9 @@ BEGIN
         IF target IS NULL THEN
             SELECT a.node_id INTO target FROM node_key_aliases a WHERE a.tenant_id = p_tenant AND a.key = target_key;
         END IF;
-        refs := refs || coalesce(target, '00000000-0000-0000-0000-000000000000'::uuid);
+        extra := ARRAY[coalesce(target, nil_id)];
     END IF;
-    RETURN refs;
+    RETURN found || markers || extra;
 END;
 $$;
 
