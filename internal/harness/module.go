@@ -16,6 +16,8 @@
 // harness.bound and harness.stopped events are emitted transactionally through
 // events.Append and the aeon_events notification trigger; /api/events/stream
 // replays them with tenant/project visibility. Clients treat them as read hints.
+// AEON-184 adds GET /api/harness-sessions/live: the agents actively working
+// in each visible project right now, for the Projects page (live.go).
 package harness
 
 import (
@@ -53,6 +55,7 @@ func (m *Module) Mount(mux *http.ServeMux) {
 	}{
 		{"POST /api/projects/{projectId}/harness-sessions", "harness.write", false, 201, m.register},
 		{"GET /api/harness-sessions", "harness.read", false, 200, m.listAll},
+		{"GET /api/harness-sessions/live", "harness.read", false, 200, m.live},
 		{"GET /api/projects/{projectId}/harness-sessions", "harness.read", false, 200, m.list},
 		{"GET /api/projects/{projectId}/harness-sessions/orchestrator", "harness.read", false, 200, m.orchestrator},
 		{"GET /api/projects/{projectId}/harness-sessions/{sessionId}", "harness.read", false, 200, m.status},

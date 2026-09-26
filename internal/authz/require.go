@@ -166,74 +166,20 @@ func Load(ctx context.Context, pool *pgxpool.Pool, p tenant.Principal, projectID
 // self-service permissions (own profile, own access) of a project role count
 // too, so a project-only Guest can load their own profile.
 func loadTx(ctx context.Context, tx pgx.Tx, p tenant.Principal, projectID string) (Effective, error) {
-	result := Effective{Workspace: Grant{Permissions: []string{}}}
-	if projectID != "" {
-		result.Project = &ProjectGrant{ID: projectID, Permissions: []string{}}
-	}
-	// Linked people have no binding of their own. Their session retains its
-	// principal ID, but permissions come from the signed-in canonical person.
-	var status, kind, bindingID, canonicalStatus string
-	if err := tx.QueryRow(ctx, `SELECT p.status,p.kind,canonical.id::text,canonical.status
-		FROM principals p JOIN principals canonical
-		  ON canonical.tenant_id=p.tenant_id AND canonical.id=coalesce(p.linked_to,p.id)
-		WHERE p.tenant_id=$1::uuid AND p.id=$2::uuid`, p.TenantID, p.ID).Scan(&status, &kind, &bindingID, &canonicalStatus); err != nil {
-		return Effective{}, err
-	}
-	if status != "active" || canonicalStatus != "active" || kind != string(p.Kind) {
-		return Effective{}, ErrForbidden
-	}
-	rows, err := tx.Query(ctx, `SELECT b.scope_type,coalesce(b.scope_id::text,''),r.id::text,r.key,r.name,r.builtin,rp.permission
-          FROM role_bindings b JOIN roles r ON r.tenant_id=b.tenant_id AND r.id=b.role_id
-          LEFT JOIN role_permissions rp ON rp.tenant_id=r.tenant_id AND rp.role_id=r.id
-		  WHERE b.tenant_id=$1::uuid AND b.principal_id=$2::uuid
-		  ORDER BY b.scope_type,b.scope_id,rp.permission`, p.TenantID, bindingID)
+	g, err := readGrants(ctx, tx, p)
 	if err != nil {
 		return Effective{}, err
 	}
-	defer rows.Close()
-	anyProject := []string{}
-	for rows.Next() {
-		var scopeType, scopeID, id, key, name string
-		var builtin bool
-		var perm *string
-		if err := rows.Scan(&scopeType, &scopeID, &id, &key, &name, &builtin, &perm); err != nil {
-			return Effective{}, err
+	result := Effective{Workspace: Grant{Role: g.workspaceRole, Permissions: unique(g.workspace)}}
+	if projectID != "" {
+		result.Project = &ProjectGrant{ID: projectID, Permissions: []string{}}
+		if grant, ok := g.projects[projectID]; ok {
+			result.Project.Role = grant.Role
+			result.Project.Permissions = grant.Permissions
 		}
-		ref := &RoleRef{ID: id, Key: key, Name: name}
-		perms := []string{}
-		if builtin {
-			perms = builtinPermissions(key)
-		} else if perm != nil {
-			perms = []string{*perm}
-		}
-		if scopeType == "workspace" {
-			result.Workspace.Role = ref
-			result.Workspace.Permissions = append(result.Workspace.Permissions, perms...)
-			continue
-		}
-		for _, key := range perms {
-			if ProjectGrantable(key) || selfPermission(key) {
-				anyProject = append(anyProject, key)
-			}
-		}
-		if result.Project != nil && scopeID == projectID {
-			result.Project.Role = ref
-			for _, key := range perms {
-				if ProjectGrantable(key) {
-					result.Project.Permissions = append(result.Project.Permissions, key)
-				}
-			}
-		}
-	}
-	if err := rows.Err(); err != nil {
-		return Effective{}, err
-	}
-	rows.Close()
-	result.Workspace.Permissions = unique(result.Workspace.Permissions)
-	result.anyProject = unique(append(anyProject, result.Workspace.Permissions...))
-	if result.Project != nil {
 		result.Project.Permissions = unique(append(result.Project.Permissions, result.Workspace.Permissions...))
 	}
+	result.anyProject = unique(append(g.anyProject, result.Workspace.Permissions...))
 	if p.Kind == tenant.Agent && p.KeyCreatorID != "" {
 		creator := tenant.Principal{ID: p.KeyCreatorID, TenantID: p.TenantID, Kind: tenant.Person}
 		ceiling, err := loadTx(ctx, tx, creator, projectID)
@@ -247,6 +193,126 @@ func loadTx(ctx context.Context, tx pgx.Tx, p tenant.Principal, projectID string
 		result.anyProject = intersect(result.anyProject, ceiling.anyProject)
 	}
 	return result, nil
+}
+
+// grants is one read of a principal's bindings: the workspace binding's
+// permissions, each project binding's project-grantable permissions (without
+// the workspace's), and what every project binding adds for AnyProject routes.
+type grants struct {
+	workspaceRole *RoleRef
+	workspace     []string
+	projects      map[string]*ProjectGrant
+	anyProject    []string
+}
+
+func readGrants(ctx context.Context, tx pgx.Tx, p tenant.Principal) (grants, error) {
+	g := grants{workspace: []string{}, projects: map[string]*ProjectGrant{}, anyProject: []string{}}
+	// Linked people have no binding of their own. Their session retains its
+	// principal ID, but permissions come from the signed-in canonical person.
+	var status, kind, bindingID, canonicalStatus string
+	if err := tx.QueryRow(ctx, `SELECT p.status,p.kind,canonical.id::text,canonical.status
+		FROM principals p JOIN principals canonical
+		  ON canonical.tenant_id=p.tenant_id AND canonical.id=coalesce(p.linked_to,p.id)
+		WHERE p.tenant_id=$1::uuid AND p.id=$2::uuid`, p.TenantID, p.ID).Scan(&status, &kind, &bindingID, &canonicalStatus); err != nil {
+		return g, err
+	}
+	if status != "active" || canonicalStatus != "active" || kind != string(p.Kind) {
+		return g, ErrForbidden
+	}
+	rows, err := tx.Query(ctx, `SELECT b.scope_type,coalesce(b.scope_id::text,''),r.id::text,r.key,r.name,r.builtin,rp.permission
+          FROM role_bindings b JOIN roles r ON r.tenant_id=b.tenant_id AND r.id=b.role_id
+          LEFT JOIN role_permissions rp ON rp.tenant_id=r.tenant_id AND rp.role_id=r.id
+		  WHERE b.tenant_id=$1::uuid AND b.principal_id=$2::uuid
+		  ORDER BY b.scope_type,b.scope_id,rp.permission`, p.TenantID, bindingID)
+	if err != nil {
+		return g, err
+	}
+	defer rows.Close()
+	for rows.Next() {
+		var scopeType, scopeID, id, key, name string
+		var builtin bool
+		var perm *string
+		if err := rows.Scan(&scopeType, &scopeID, &id, &key, &name, &builtin, &perm); err != nil {
+			return g, err
+		}
+		ref := &RoleRef{ID: id, Key: key, Name: name}
+		perms := []string{}
+		if builtin {
+			perms = builtinPermissions(key)
+		} else if perm != nil {
+			perms = []string{*perm}
+		}
+		if scopeType == "workspace" {
+			g.workspaceRole = ref
+			g.workspace = append(g.workspace, perms...)
+			continue
+		}
+		for _, key := range perms {
+			if ProjectGrantable(key) || selfPermission(key) {
+				g.anyProject = append(g.anyProject, key)
+			}
+		}
+		grant := g.projects[scopeID]
+		if grant == nil {
+			grant = &ProjectGrant{ID: scopeID, Permissions: []string{}}
+			g.projects[scopeID] = grant
+		}
+		grant.Role = ref
+		for _, key := range perms {
+			if ProjectGrantable(key) {
+				grant.Permissions = append(grant.Permissions, key)
+			}
+		}
+	}
+	return g, rows.Err()
+}
+
+// allows is permitEffective for one project (or the workspace, ""), on grants read once.
+func (g grants) allows(permission, projectID string) bool {
+	if contains(g.workspace, permission) {
+		return true
+	}
+	grant := g.projects[projectID]
+	return projectID != "" && grant != nil && contains(grant.Permissions, permission)
+}
+
+// ProjectCheck answers RequireTx's question for many projects without asking
+// the database again: permission in the workspace (projectID "") or in that
+// project, capped by an agent key's creator and scopes.
+type ProjectCheck func(permission, projectID string) bool
+
+// ProjectsTx reads the caller's bindings (and its key creator's) once, inside
+// an existing db.InTenant transaction, for pages that decide per project for
+// many projects at once. An inactive caller or creator is denied everything.
+func ProjectsTx(ctx context.Context, tx pgx.Tx, p tenant.Principal) (ProjectCheck, error) {
+	deny := func(string, string) bool { return false }
+	own, err := readGrants(ctx, tx, p)
+	if errors.Is(err, ErrForbidden) {
+		return deny, nil
+	}
+	if err != nil {
+		return nil, err
+	}
+	var creator *grants
+	if p.Kind == tenant.Agent && p.KeyCreatorID != "" {
+		c, err := readGrants(ctx, tx, tenant.Principal{ID: p.KeyCreatorID, TenantID: p.TenantID, Kind: tenant.Person})
+		if errors.Is(err, ErrForbidden) {
+			return deny, nil
+		}
+		if err != nil {
+			return nil, err
+		}
+		creator = &c
+	}
+	return func(permission, projectID string) bool {
+		if _, ok := Lookup(permission); !ok || !own.allows(permission, projectID) {
+			return false
+		}
+		if creator != nil && !creator.allows(permission, projectID) {
+			return false
+		}
+		return p.Kind != tenant.Agent || containsScope(p.Scopes, permission)
+	}, nil
 }
 
 // ProjectGrantable reports whether a registry permission may be granted by a

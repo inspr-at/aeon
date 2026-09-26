@@ -5,6 +5,8 @@ import { useRoute, useRouter } from 'vue-router'
 import { useProjects, type Project } from '../stores/projects'
 import { useProjectGroups } from '../stores/projectGroups'
 import { useSession } from '../stores/session'
+import { useLiveAgents } from '../stores/liveAgents'
+import { liveChanges, liveSummary, type LiveAgent } from '../lib/liveAgents'
 import { onPreferenceFailure, usePreference } from '../lib/preferences'
 import { plural } from '../lib/work'
 import { toast, type ToastAction } from '../lib/toast'
@@ -37,6 +39,7 @@ const COLUMN_LABELS: Record<string, string> = { key: 'Key', project: 'Project', 
 
 const store = useProjects()
 const groups = useProjectGroups()
+const live = useLiveAgents()
 const session = useSession()
 const route = useRoute()
 const router = useRouter()
@@ -63,6 +66,7 @@ const page = ref<HTMLElement>()
 const listCard = ref<HTMLElement>()
 const now = ref(Date.now())
 let clock: ReturnType<typeof setInterval> | undefined
+let stopLive: (() => void) | undefined
 
 // ---------- Sorting ----------
 const routeSort = computed<SortKey>(() => SORTS.some(s => s.value === route.query.sort) ? route.query.sort as SortKey : 'activity')
@@ -117,7 +121,8 @@ const openTotal = computed(() => active.value.reduce((sum, project) => sum + pro
 function groupName(id: string) { return groups.def(id)?.name ?? 'No group' }
 function to(project: Project) { return `/p/${encodeURIComponent(project.routeKey)}` }
 function label(project: Project) {
-  return `${project.routeKey} ${project.title}, ${project.open + project.in_progress} open, ${project.in_progress} in progress, ${project.done} done${selected.value.has(project.id) ? ', selected' : ''}`
+  const working = liveSummary(live.forProject(project.id))
+  return `${project.routeKey} ${project.title}, ${project.open + project.in_progress} open, ${project.in_progress} in progress, ${project.done} done${working ? `, ${working}` : ''}${selected.value.has(project.id) ? ', selected' : ''}`
 }
 const validateName = (name: string, except?: string) => nameProblem(name, defs.value, except)
 
@@ -536,6 +541,23 @@ async function drop(event: DragEvent) {
 // Each group keeps its own order: a card is arranged among its group's cards.
 const announcement = ref('')
 function announce(text: string) { announcement.value = ''; void nextTick(() => { announcement.value = text }) }
+// Agents starting or stopping work (AEON-184) are said in the same polite region.
+// What was already going on when the page opened is not news; changes settle for
+// a moment first, so a burst is said once and a start undone at once is not said.
+const LIVE_NEWS_SETTLE_MS = 2500
+let liveSaid: Map<string, LiveAgent[]> | null = null
+let liveNewsTimer: ReturnType<typeof setTimeout> | undefined
+watch(() => live.state === 'ready' ? live.byProject : null, after => {
+  if (!after) return
+  if (!liveSaid) { liveSaid = after; return }
+  clearTimeout(liveNewsTimer)
+  liveNewsTimer = setTimeout(() => {
+    const now = live.byProject
+    const news = liveChanges(liveSaid, now, id => store.byId(id)?.title)
+    liveSaid = now
+    if (news) announce(news)
+  }, LIVE_NEWS_SETTLE_MS)
+})
 function sectionOf(id: string) { return sections.value.find(s => s.items.some(p => p.id === id)) }
 // Every project in the order the screen shows them now, the base a new custom order starts from.
 function screenOrder() { return [...store.projects].sort(order).map(p => p.id) }
@@ -800,6 +822,7 @@ onMounted(() => {
   // stamps the event first, and handlers attached in the same instant would skip it.
   page.value?.addEventListener('click', clickCapture, true)
   clock = setInterval(() => { now.value = Date.now() }, 60_000)
+  stopLive = live.watch()
 })
 watch(listCard, element => {
   sizer?.disconnect()
@@ -808,7 +831,7 @@ watch(listCard, element => {
   sizer = new ResizeObserver(([entry]) => { listWidth.value = entry!.contentRect.width })
   sizer.observe(element)
 }, { flush: 'post' })
-onBeforeUnmount(() => { if (drag) { drag.ghost?.remove(); release(); drag = null } dropSwallow(); stopFailures(); stopPruning(); clearTimeout(pruneTimer); window.removeEventListener('keydown', keydown); page.value?.removeEventListener('click', clickCapture, true); clearInterval(clock); sizer?.disconnect(); phoneQuery.removeEventListener('change', phoneChange) })
+onBeforeUnmount(() => { if (drag) { drag.ghost?.remove(); release(); drag = null } dropSwallow(); stopFailures(); stopPruning(); clearTimeout(pruneTimer); window.removeEventListener('keydown', keydown); page.value?.removeEventListener('click', clickCapture, true); clearInterval(clock); stopLive?.(); clearTimeout(liveNewsTimer); sizer?.disconnect(); phoneQuery.removeEventListener('change', phoneChange) })
 const who = computed(() => session.identity?.tenant.name ?? 'Workspace')
 // One line under the sorts says how to arrange your own order. Touch screens
 // scroll when a card is dragged, so there the card's menu arranges it.

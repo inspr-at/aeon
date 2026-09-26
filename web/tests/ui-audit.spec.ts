@@ -7,7 +7,7 @@ import AxeBuilder from '@axe-core/playwright'
 import { createHash } from 'node:crypto'
 import { mkdirSync, writeFileSync } from 'node:fs'
 import { resolve, join } from 'node:path'
-import { fixtures, me, mockView, mockWork } from './work-fixtures'
+import { fixtures, liveAgent, me, mockView, mockWork } from './work-fixtures'
 import { agentData, mockAgents } from './agents-fixtures'
 import { businessData, mockBusiness } from './business-fixtures'
 import { crmData, HOFER, mockCRM } from './crm-fixtures'
@@ -24,7 +24,7 @@ import { JONAS as ACCESS_JONAS, ME as ACCESS_ME, accessWorld, mockAccess } from 
 import { mockEffectivePermissions } from './authz-fixtures'
 
 type Finding = Raw & { id: string; route: string; state: string; viewport: string; theme: string; screenshot: string }
-type Setup = 'default' | 'editor' | 'journey' | 'public' | 'signed-out' | 'groups' | 'cards' | 'views'
+type Setup = 'default' | 'editor' | 'journey' | 'public' | 'signed-out' | 'groups' | 'cards' | 'views' | 'live' | 'live-list'
 type Scenario = { state: string; route: string; setup?: Setup; act?: (page: Page) => Promise<void> }
 
 const output = resolve(process.cwd(), 'test-results/qa2b-findings.json')
@@ -103,6 +103,9 @@ const scenarios: Scenario[] = [
   // AEON-136: project groups, the chip row, cards, menus, the move dialog and selection.
   { state: 'projects groups', route: '/', setup: 'groups', act: visible('.group-head') },
   { state: 'projects cards', route: '/', setup: 'cards', act: visible('.card') },
+  { state: 'projects live agents cards', route: '/', setup: 'live', act: visible('.card .live-chip') },
+  { state: 'projects live agents list', route: '/', setup: 'live-list', act: visible('.project-item .live-chip') },
+  { state: 'projects live agents details', route: '/', setup: 'live', act: async page => { await visible('.card .live-chip')(page); await page.locator('.card .live-chip').first().click(); await expect(page.getByRole('dialog', { name: /^Agents working on/ })).toBeVisible() } },
   { state: 'projects group menu', route: '/', setup: 'groups', act: async page => { await visible('.group-head')(page); await page.getByRole('button', { name: 'Actions for group Focus' }).click(); await expect(page.getByRole('menu')).toBeVisible() } },
   { state: 'projects display', route: '/', setup: 'groups', act: async page => { await visible('.group-head')(page); await page.getByRole('button', { name: /^Display/ }).click(); await expect(page.getByRole('dialog', { name: 'Display options' })).toBeVisible() } },
   { state: 'projects move dialog', route: '/', setup: 'cards', act: async page => { await visible('.card')(page); await page.locator('.card-link').first().focus(); await page.keyboard.press('m'); await expect(page.getByRole('dialog', { name: /^Move .* to a group$/ })).toBeVisible() } },
@@ -134,6 +137,15 @@ async function installMocks(page: Page, setup: Setup) {
   if (setup === 'groups' || setup === 'cards') {
     data.preferences['project-groups'] = { groups: [{ id: 'g:focus', name: 'Focus' }, { id: 'g:later', name: 'Later' }], place: { 'p-pharos': 'g:focus' }, hidden: ['archived', 'g:later'] }
     if (setup === 'cards') data.preferences.projects = { view: 'cards' }
+  }
+  // AEON-184: agents at work on two projects, one of them with company.
+  if (setup === 'live' || setup === 'live-list') {
+    data.preferences.projects = { view: setup === 'live' ? 'cards' : 'list' }
+    data.live.push(
+      liveAgent({ project_id: 'p-pharos', session_id: 's-live-1', principal_id: '33333333-3333-4333-8333-333333333333', name: 'pharos-session', ticket: { id: 'n-1', key: 'PHAROS-11', title: 'Connect Hetzner Cloud for managed provisioning', project_id: 'p-pharos' } }, 16),
+      liveAgent({ project_id: 'p-pharos', session_id: 's-live-2', principal_id: '44444444-4444-4444-8444-444444444444', name: 'camy', harness: 'codex', ticket: null }, 3),
+      liveAgent({ project_id: 'p-aeon', harness: 'grok', ticket: { id: 'n-a1', key: 'AEON-1', title: 'Aeon foundation', project_id: 'p-aeon' } }, 40),
+    )
   }
   if (setup === 'views') data.views.push(
     mockView({ id: AUDIT_VIEW, name: 'High priority', filters: { priority: 'high' } }),
