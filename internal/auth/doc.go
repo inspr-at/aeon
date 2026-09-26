@@ -23,7 +23,8 @@
 //	/api/approvals: approvals.read for list, approvals.request for proposal;
 //	  decisions and revocations have no agent mapping.
 //	/api/inbox, /api/projects/{id}/messages|message-targets|message-deliveries:
-//	  inbox.read or inbox.send.
+//	  inbox.read or inbox.send. GET /api/inbox/messages/{id}/receipt is
+//	  inbox.receipt.
 //	/api/models, /api/plugins: models.read or plugins.read; writes have no
 //	  agent mapping.
 //	/api/work-orders: work_orders.read or work_orders.write; run creation

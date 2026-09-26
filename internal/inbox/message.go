@@ -209,7 +209,10 @@ func (m *module) send(ctx context.Context, p tenant.Principal, in sendInput) (Me
 		if err != nil {
 			return mapWrite(err)
 		}
-		return enqueueWakes(ctx, tx, p, out)
+		if err := enqueueWakes(ctx, tx, p, out); err != nil {
+			return err
+		}
+		return insertReceipt(ctx, tx, p, out.ID, "queued", receiptTarget{}, "", "")
 	})
 	return out, err
 }

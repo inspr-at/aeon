@@ -308,6 +308,10 @@ func coreAgentScope(r *http.Request) (string, bool) {
 			}
 		}
 	case "inbox":
+		// Hand-off proof is narrower than reading the recipient inbox.
+		if read && len(parts) >= 4 && parts[1] == "messages" && parts[3] == "receipt" {
+			return "inbox.receipt", true
+		}
 		if read {
 			return "inbox.read", true
 		}
