@@ -108,7 +108,7 @@ onMounted(loadKeys)
 
     <RolePicker
       v-if="picker" :anchor="picker.anchor" :subject="picker.agent.name" :roles="access.roles" :current="picker.agent.workspace_role?.id ?? null" :registry="access.registry"
-      :mine="myPermissions()" scope="workspace" allow-none none-label="No role" :busy="busy" :error="roleError" @choose="chooseRole" @close="picker = null"
+      :mine="myPermissions()" scope="workspace" allow-none none-label="No role" :busy="busy" :can-apply="can('members.manage')" :error="roleError" @choose="chooseRole" @close="picker = null"
     />
     <NewKeySheet v-if="newKey" :agent="newKey" @close="newKey = null" @created="created" />
   </div>

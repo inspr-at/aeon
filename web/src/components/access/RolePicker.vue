@@ -1,7 +1,7 @@
 <!-- SPDX-License-Identifier: AGPL-3.0-only -->
 <script setup lang="ts">
 import { computed, nextTick, onMounted, ref, useId, watch } from 'vue'
-import { beyond, diff, effectLine, LAST_OWNER_REASON, OWNER_TRANSFER_REASON, ownerChangeNeedsTransfer, type Permission, permissionLabel, projectRolesOf, type Role, workspaceRolesOf } from '../../lib/access'
+import { beyond, diff, effectLine, LAST_OWNER_REASON, lostPermission, OWNER_TRANSFER_REASON, ownerChangeNeedsTransfer, type Permission, permissionLabel, projectRolesOf, type Role, workspaceRolesOf } from '../../lib/access'
 import AppIcon from '../AppIcon.vue'
 import FloatingPanel from '../work/FloatingPanel.vue'
 import RiskBadge from './RiskBadge.vue'
@@ -16,7 +16,9 @@ const props = withDefaults(defineProps<{
   scope: 'workspace' | 'project'; allowNone?: boolean; noneLabel?: string; locked?: boolean; busy?: boolean
   // Why the server refused the last choice, in words; shown at the choice until another role is picked.
   error?: string
-}>(), { allowNone: false, noneLabel: 'No workspace role', locked: false, busy: false, error: '' })
+  // Whether I may still change it (members.manage here); false keeps the choice and blocks Apply.
+  canApply?: boolean
+}>(), { canApply: true, allowNone: false, noneLabel: 'No workspace role', locked: false, busy: false, error: '' })
 const emit = defineEmits<{ choose: [roleId: string | null]; close: [restoreFocus: boolean] }>()
 const id = useId()
 const byKey = computed(() => new Map(props.registry.map(p => [p.key, p])))
@@ -55,7 +57,7 @@ function keys(event: KeyboardEvent) {
     document.getElementById(`${id}-${picked.value}`)?.focus({ preventScroll: true })
   } else if (event.key === 'Enter' && changed.value && !pickedReason.value) { event.preventDefault(); apply() }
 }
-function apply() { if (!changed.value || pickedReason.value || props.busy) return; emit('choose', picked.value === NONE ? null : picked.value) }
+function apply() { if (!changed.value || pickedReason.value || props.busy || !props.canApply) return; emit('choose', picked.value === NONE ? null : picked.value) }
 onMounted(() => { document.getElementById(`${id}-${picked.value}`)?.focus({ preventScroll: true }); void nextTick(reveal) })
 // The preview grows when a role is picked; the picked role stays in view.
 const list = ref<HTMLElement>()
@@ -111,12 +113,13 @@ watch(picked, () => void nextTick(reveal))
           <span v-if="change.removed.length > 6" class="more">and {{ change.removed.length - 6 }} more</span>
         </div>
       </div>
+      <p v-if="!canApply" class="refusal" role="alert"><AppIcon name="shield" :size="13" /><span>{{ lostPermission('members.manage') }}</span></p>
       <p v-if="refusal" :id="`${id}-error`" class="refusal" role="alert"><AppIcon name="alert" :size="13" /><span>{{ refusal }}</span></p>
       <div class="actions">
         <template v-if="lockReason"><button type="button" class="btn sm" @click="emit('close', true)">Close</button></template>
         <template v-else>
           <button type="button" class="btn sm" @click="emit('close', true)">Cancel</button>
-          <button type="button" class="btn sm primary" :disabled="!changed || !!pickedReason || busy" :data-tip="pickedReason || undefined" @click="apply">{{ changed ? applyLabel : 'Choose a role' }}</button>
+          <button type="button" class="btn sm primary" :disabled="!changed || !!pickedReason || busy || !canApply" :data-tip="canApply ? pickedReason || undefined : lostPermission('members.manage')" @click="apply">{{ changed ? applyLabel : 'Choose a role' }}</button>
         </template>
       </div>
     </div>

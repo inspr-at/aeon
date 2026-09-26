@@ -193,7 +193,7 @@ async function link(personId: string) {
 
     <RolePicker
       v-if="picker" :anchor="picker.anchor" :subject="picker.person.name" :roles="access.roles" :current="picker.person.workspace_role?.id ?? null" :registry="access.registry"
-      :mine="myPermissions()" scope="workspace" allow-none none-label="Projects only" :locked="lastOwner(picker.person)" :busy="busy" :error="roleError" @choose="chooseRole" @close="picker = null"
+      :mine="myPermissions()" scope="workspace" allow-none none-label="Projects only" :locked="lastOwner(picker.person)" :busy="busy" :can-apply="can('members.manage')" :error="roleError" @choose="chooseRole" @close="picker = null"
     />
     <RowMenu v-if="menu" :anchor="menu.anchor" :items="actions" :label="`Actions for ${menu.person.name}`" @select="act" @close="menu = null" />
     <ChoicePicker v-if="linking" :anchor="linking.anchor" :label="`Link ${linking.name} to`" :choices="linkChoices" current="" placeholder="Find a person…" @choose="link" @close="linking = null" />

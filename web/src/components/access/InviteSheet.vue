@@ -5,8 +5,8 @@ export interface InvitePrefill { email: string; workspaceRoleId: string | null; 
 <script setup lang="ts">
 import { brand } from '../../lib/brand'
 import { computed, nextTick, onMounted, ref } from 'vue'
-import { EXPIRY_DAYS, beyond, defaultProjectRole, defaultWorkspaceRole, effectLine, permissionLabel, projectRolesOf, validEmail, workspaceRolesOf, type Invite } from '../../lib/access'
-import { myPermissions } from '../../lib/authz'
+import { beyond, defaultProjectRole, defaultWorkspaceRole, effectLine, EXPIRY_DAYS, type Invite, lostPermission, permissionLabel, projectRolesOf, validEmail, workspaceRolesOf } from '../../lib/access'
+import { can, myPermissions } from '../../lib/authz'
 import { absoluteTime } from '../../lib/work'
 import { useAccess } from '../../stores/access'
 import { useProjects } from '../../stores/projects'
@@ -57,7 +57,9 @@ function validate(): boolean {
   errors.value = out
   return !Object.keys(out).length
 }
+const allowed = computed(() => can('members.manage'))
 async function submit() {
+  if (!allowed.value) return
   if (saving.value || !validate()) { void nextTick(() => document.querySelector<HTMLElement>('.invite-form [aria-invalid="true"]')?.focus()); return }
   saving.value = true
   try {
@@ -131,7 +133,8 @@ onMounted(() => { void projects.load() })
     <template #foot>
       <template v-if="!result">
         <button type="button" class="btn" @click="emit('close')">Cancel</button>
-        <button type="button" class="btn primary" :disabled="saving" @click="submit"><AppIcon name="send" :size="13" />{{ saving ? 'Creating…' : 'Create invite link' }}</button>
+        <p v-if="!allowed" class="lost" role="alert">{{ lostPermission('members.manage') }}</p>
+        <button type="button" class="btn primary" :disabled="saving || !allowed" @click="submit"><AppIcon name="send" :size="13" />{{ saving ? 'Creating…' : 'Create invite link' }}</button>
       </template>
       <template v-else>
         <button type="button" class="btn" @click="another">Invite someone else</button>
@@ -166,4 +169,5 @@ select.field { appearance: auto; padding-right: 8px; }
   .join .btn { height: 44px; }
   .add { height: 44px; }
 }
+.lost { flex: 1 1 100%; margin: 0; font-size: 12.5px; line-height: 1.45; color: var(--danger); }
 </style>

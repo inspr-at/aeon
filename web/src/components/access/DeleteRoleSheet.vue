@@ -1,8 +1,8 @@
 <!-- SPDX-License-Identifier: AGPL-3.0-only -->
 <script setup lang="ts">
 import { computed, ref } from 'vue'
-import { beyond, deleteRole, projectRolesOf, workspaceRolesOf, type Role } from '../../lib/access'
-import { myPermissions } from '../../lib/authz'
+import { beyond, deleteRole, lostPermission, projectRolesOf, type Role, workspaceRolesOf } from '../../lib/access'
+import { can, myPermissions } from '../../lib/authz'
 import { toast } from '../../lib/toast'
 import { useAccess } from '../../stores/access'
 import AppIcon from '../AppIcon.vue'
@@ -24,7 +24,9 @@ const error = ref('')
 const busy = ref(false)
 const holders = computed(() => props.role.member_count === 1 ? '1 person or agent holds' : `${props.role.member_count} people and agents hold`)
 const targetName = computed(() => access.roleById.get(reassign.value)?.name ?? '')
+const permitted = computed(() => can('roles.manage'))
 async function remove() {
+  if (!permitted.value) { error.value = lostPermission('roles.manage'); return }
   if (inUse.value && !reassign.value) { error.value = 'Choose the role they get instead.'; return }
   busy.value = true
   try {
@@ -55,11 +57,12 @@ async function remove() {
           <option v-for="r in targets" :key="r.id" :value="r.id" :disabled="!allowed(r)">{{ r.name }}{{ allowed(r) ? '' : ' (you cannot give this)' }}</option>
         </select>
       </div>
+      <p v-if="!permitted" class="error" role="alert"><AppIcon name="shield" :size="12" />{{ lostPermission('roles.manage') }}</p>
       <p v-if="error" id="reassign-error" class="error" role="alert"><AppIcon name="alert" :size="12" />{{ error }}</p>
     </div>
     <template #foot>
       <button type="button" class="btn" @click="emit('close')">Keep the role</button>
-      <button type="button" class="btn danger-solid" :disabled="busy" @click="remove">{{ inUse && targetName ? `Delete and give ${targetName}` : 'Delete role' }}</button>
+      <button type="button" class="btn danger-solid" :disabled="busy || !permitted" :data-tip="permitted ? undefined : lostPermission('roles.manage')" @click="remove">{{ inUse && targetName ? `Delete and give ${targetName}` : 'Delete role' }}</button>
     </template>
   </AccessSheet>
 </template>

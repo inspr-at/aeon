@@ -411,6 +411,51 @@ test('review r2 #2: a join link on screen stays when the session ends', async ({
   await expect(page.locator('.access-card')).toBeVisible()
 })
 
+test('review r3 #1: another person signing in never sees the previous session’s access data', async ({ page }) => {
+  const first = await open(page, '/settings/access/people')
+  await expect(people(page)).toContainText('Jonas Weber')
+  // Sign out, and Mira signs in to another workspace with a smaller directory.
+  const second = accessWorld({ secondOwner: true })
+  second.me = MIRA
+  second.people = second.people.filter(p => p.principal_id === MIRA || p.principal_id === LENA)
+  await mockAccess(page, second)
+  await page.route(/\/api\/me$/, route => route.fulfill({ json: { principal: { id: MIRA, name: 'Mira Holm', kind: 'person', roles: [] }, tenant: { id: 't2', name: 'Agentur K' } } }))
+  await page.locator('.section-nav').getByRole('link', { name: /^Personal/ }).click()
+  await page.locator('.section-nav').getByRole('link', { name: /^Access/ }).click()
+  await expect(people(page)).toContainText('Lena Graf')
+  await expect(people(page)).not.toContainText('Jonas Weber')
+  expect(calls(second, 'GET', /\/api\/members$/).length).toBeGreaterThan(0)
+  void first
+})
+
+test('review r3 #2: open dialogs keep their draft but cannot submit once the permission is gone', async ({ page }) => {
+  const world = await open(page, '/settings/access/invites')
+  await page.getByRole('button', { name: 'Invite people' }).click()
+  const sheet = page.getByRole('dialog', { name: 'Invite people' })
+  await sheet.getByLabel('Email').fill('draft@studio.at')
+  const owner = world.roles.find(r => r.id === 'role-owner')!
+  owner.permissions = owner.permissions.filter(k => k !== 'members.manage')
+  await page.evaluate(() => window.dispatchEvent(new Event('focus')))
+  await expect(sheet.getByRole('alert')).toContainText('You no longer have Manage members, so this cannot be saved.')
+  await expect(sheet.getByRole('button', { name: 'Create invite link' })).toBeDisabled()
+  await expect(sheet.getByLabel('Email')).toHaveValue('draft@studio.at')
+  expect(calls(world, 'POST', /\/members\/invites$/)).toHaveLength(0)
+  await sheet.getByRole('button', { name: 'Cancel' }).click()
+
+  await page.goto('/settings/access/agents')
+  const coordinator = page.getByRole('list', { name: 'Agents' }).getByRole('listitem').filter({ hasText: 'aeon-coordinator' })
+  await coordinator.getByRole('button', { name: /active key/ }).click()
+  await coordinator.getByRole('button', { name: 'New key' }).click()
+  const keySheet = page.getByRole('dialog', { name: 'New key for aeon-coordinator' })
+  await keySheet.getByRole('checkbox', { name: /nodes\.read/ }).check()
+  owner.permissions = owner.permissions.filter(k => k !== 'keys.manage')
+  await page.evaluate(() => window.dispatchEvent(new Event('focus')))
+  await expect(keySheet.getByRole('button', { name: 'Create key' })).toBeDisabled()
+  await expect(keySheet).toContainText('You no longer have Manage agent keys')
+  await expect(keySheet.getByRole('checkbox', { name: /nodes\.read/ })).toBeChecked()
+  expect(calls(world, 'POST', /\/agent-keys$/)).toHaveLength(0)
+})
+
 test('tabs are a tablist: arrows move between them', async ({ page }) => {
   await open(page)
   await page.getByRole('tab', { name: /People/ }).focus()

@@ -1,8 +1,8 @@
 <!-- SPDX-License-Identifier: AGPL-3.0-only -->
 <script setup lang="ts">
 import { computed, nextTick, ref, watch } from 'vue'
-import { AccessError, COORDINATOR_SCOPES, MAX_KEY_SCOPES, agentScopeCeiling, createAgentKey, groupPermissions, keyScopes, permissionLabel, type Agent, type AgentKeyCreated } from '../../lib/access'
-import { myPermissions } from '../../lib/authz'
+import { AccessError, type Agent, type AgentKeyCreated, agentScopeCeiling, COORDINATOR_SCOPES, createAgentKey, groupPermissions, keyScopes, lostPermission, MAX_KEY_SCOPES, permissionLabel } from '../../lib/access'
+import { can, myPermissions } from '../../lib/authz'
 import { useAccess } from '../../stores/access'
 import { absoluteTime } from '../../lib/work'
 import AppIcon from '../AppIcon.vue'
@@ -40,11 +40,13 @@ const tried = ref(false)
 function toggle(key: string) { const next = new Set(scopes.value); if (next.has(key)) next.delete(key); else next.add(key); scopes.value = next }
 function preset(keys: string[]) { scopes.value = new Set(keys) }
 const presetOn = (keys: string[]) => keys.length === scopes.value.size && keys.every(k => scopes.value.has(k))
+const allowed = computed(() => can('keys.manage'))
 const scopeProblem = computed(() => !scopes.value.size ? 'Choose at least one thing it may do; a key without scopes can do nothing.'
   : scopes.value.size > MAX_KEY_SCOPES ? `A key holds at most ${MAX_KEY_SCOPES} scopes; clear ${scopes.value.size - MAX_KEY_SCOPES}.` : '')
 const copied = ref(false)
 const role = computed(() => props.agent.workspace_role?.name)
 async function create() {
+  if (!allowed.value) { error.value = lostPermission('keys.manage'); return }
   tried.value = true
   if (scopeProblem.value) { document.getElementById('key-scopes')?.focus(); return }
   // Only scopes I may give go on the key.
@@ -95,6 +97,7 @@ async function copy() { if (!created.value) return; try { await navigator.clipbo
         <p v-if="!groups.length" class="empty">No scope matches “{{ term }}”.</p>
         <p v-if="tried && scopeProblem" id="key-scopes-error" class="field-error" role="alert"><AppIcon name="alert" :size="12" />{{ scopeProblem }}</p>
       </fieldset>
+      <p v-if="!allowed" class="set-note error" role="alert"><AppIcon name="shield" :size="14" />{{ lostPermission('keys.manage') }}</p>
       <p v-if="error" class="set-note error" role="alert"><AppIcon name="alert" :size="14" />{{ error }}</p>
     </div>
     <div v-else class="body">
@@ -107,7 +110,7 @@ async function copy() { if (!created.value) return; try { await navigator.clipbo
     <template #foot>
       <template v-if="!created">
         <button type="button" class="btn" @click="emit('close')">Cancel</button>
-        <button type="button" class="btn primary" :disabled="busy" @click="create"><AppIcon name="key" :size="13" />{{ busy ? 'Creating…' : 'Create key' }}</button>
+        <button type="button" class="btn primary" :disabled="busy || !allowed" :data-tip="allowed ? undefined : lostPermission('keys.manage')" @click="create"><AppIcon name="key" :size="13" />{{ busy ? 'Creating…' : 'Create key' }}</button>
       </template>
       <button v-else type="button" class="btn primary" @click="emit('close')">Done</button>
     </template>

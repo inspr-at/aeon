@@ -1,9 +1,10 @@
 // SPDX-License-Identifier: AGPL-3.0-only
 import { defineStore } from 'pinia'
-import { computed, ref } from 'vue'
+import { computed, ref, watch } from 'vue'
 import * as wire from '../lib/access'
 import type { Agent, Members, Permission, Person, Role } from '../lib/access'
 import { accessChanged } from '../lib/authz'
+import { useSession } from './session'
 
 // Settings -> Access: the registry, the roles and the members, read together and
 // kept current. Every change goes to the server first; the list is then read
@@ -15,6 +16,14 @@ export const useAccess = defineStore('access', () => {
   const state = ref<'idle' | 'loading' | 'ready' | 'error'>('idle')
   const error = ref('')
   let request: Promise<void> | undefined
+  // What is held belongs to one person in one workspace. Signing out, another
+  // person signing in or another workspace starts from nothing, and answers to
+  // requests made for the previous one are dropped.
+  const session = useSession()
+  const owner = () => session.identity ? `${session.identity.tenant.id}:${session.identity.principal.id}` : ''
+  let heldFor = owner()
+  function reset() { registry.value = []; roles.value = []; members.value = null; state.value = 'idle'; error.value = ''; request = undefined; heldFor = owner() }
+  watch(owner, now => { if (now !== heldFor) reset() })
 
   const imported = computed(() => members.value?.imported ?? [])
   // The server lists imported classic identities among people too; they show only in their own group.
@@ -35,19 +44,24 @@ export const useAccess = defineStore('access', () => {
     if (request) return request
     if (state.value === 'ready' && !force) return Promise.resolve()
     if (state.value !== 'ready') state.value = 'loading'
-    request = (async () => {
+    const asker = heldFor
+    let mine: Promise<void> | undefined = undefined
+    mine = (async () => {
       try {
         const [nextRegistry, nextRoles, nextMembers] = await Promise.all([wire.getRegistry(), wire.getRoles(), wire.getMembers()])
+        if (asker !== heldFor) return
         registry.value = nextRegistry
         roles.value = nextRoles
         members.value = nextMembers
         state.value = 'ready'
         error.value = ''
       } catch (e) {
+        if (asker !== heldFor) return
         if (state.value !== 'ready') state.value = 'error'
         error.value = e instanceof Error ? e.message : 'Access could not be loaded.'
-      } finally { request = undefined }
+      } finally { if (request === mine) request = undefined }
     })()
+    request = mine
     return request
   }
   // After a change: the lists again, and my own permissions.
