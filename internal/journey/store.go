@@ -254,16 +254,18 @@ func loadFacts(ctx context.Context, tx pgx.Tx, projectID string, lockRelease boo
 	// The binding is the node's own key and the tenant row. Callers cannot
 	// supply either; a missing row fails closed rather than echoing blanks.
 	if err := tx.QueryRow(ctx, `
-		SELECT n.key, t.slug
+		SELECT n.key,
+		       coalesce(nullif(n.fields->>'project_key',''),nullif(n.fields->'classic'->>'key',''),split_part(n.key,'-',1)),
+		       t.slug
 		FROM nodes n
 		JOIN tenants t ON t.id = n.tenant_id
-		WHERE n.id = $1::uuid`, projectID).Scan(&f.ProjectKey, &f.TenantSlug); err != nil {
+		WHERE n.id = $1::uuid`, projectID).Scan(&f.NodeKey, &f.ProjectKey, &f.TenantSlug); err != nil {
 		if errors.Is(err, pgx.ErrNoRows) {
 			return facts{}, fail(404, "project not found")
 		}
 		return facts{}, err
 	}
-	if f.ProjectKey == "" || f.TenantSlug == "" {
+	if f.NodeKey == "" || f.ProjectKey == "" || f.TenantSlug == "" {
 		return facts{}, fail(404, "project not found")
 	}
 	return f, nil

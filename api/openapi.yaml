@@ -3438,7 +3438,8 @@ components:
       required: [project_node_id, project_key, tenant_slug, profile, revision, stage, stage_source, stages, next_action, requirements_revision, requirements_digest_sha256, requirements_approval_scope, launch_readiness]
       properties:
         project_node_id: {type: string, format: uuid, description: Project node id, read from the node. Not taken from the client.}
-        project_key: {type: string, pattern: '^[A-Z][A-Z0-9]{1,9}-[1-9][0-9]*$', description: Immutable key of the project node (nodes.key). Not a request field and not node fields.project_key.}
+        project_key: {type: string, description: Route key used in /p/{project_key} links (e.g. PHAROS), read from the project node. Not a request field.}
+        node_key: {type: string, pattern: '^[A-Z][A-Z0-9]{1,9}-[1-9][0-9]*$', description: Immutable key of the project node (nodes.key, e.g. PRJ-17). Not a request field.}
         tenant_slug: {type: string, minLength: 1, description: Slug of the tenant that owns the node. Not taken from the client.}
         profile: {type: string, enum: [personal, professional, enterprise]}
         revision: {type: integer, minimum: 1}
