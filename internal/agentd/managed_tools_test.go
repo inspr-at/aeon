@@ -68,7 +68,7 @@ func TestManagedToolsRunBinding(t *testing.T) {
 	ctx := t.Context()
 	f := &fakeRunTools{}
 	active := true
-	const token = "0123456789abcdef0123456789abcdef0123456789abcdef0123456789abcdef"
+	const token = "0123456789abcdef0123456789abcdef0123456789abcdef0123456789abcdef" // gitleaks:allow synthetic test token
 	doneRequested := false
 	host, err := startManagedTools(token, toolBinding{api: f, workOrderID: "order-a", runID: "run-a", workspace: t.TempDir(), branch: "aeon/run-a", active: func() bool { return active }, requestDone: func() { doneRequested = true }, replySender: func(id string) (string, bool) {
 		if id == "33333333-3333-3333-3333-333333333333" {
