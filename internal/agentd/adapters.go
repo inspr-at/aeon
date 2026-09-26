@@ -216,7 +216,14 @@ func (a *CodexAdapter) Start(ctx context.Context, r StartRequest, observe func(A
 			ID string `json:"id"`
 		} `json:"thread"`
 	}
-	raw, err = p.request(op, "jsonrpc", "thread/start", map[string]any{"cwd": r.Workspace, "approvalPolicy": "never", "model": r.Profile.Model})
+	threadArgs := map[string]any{"cwd": r.Workspace, "approvalPolicy": "never", "model": r.Profile.Model}
+	if r.Tools != nil {
+		threadArgs["config"] = map[string]any{"mcp_servers": map[string]any{"aeon": map[string]any{
+			"url": r.Tools.URL, "http_headers": map[string]string{"Authorization": "Bearer " + r.Tools.Token}, "required": true,
+		}}}
+		threadArgs["sandboxPolicy"] = map[string]any{"type": "workspaceWrite", "writableRoots": []string{r.Workspace}, "networkAccess": false}
+	}
+	raw, err = p.request(op, "jsonrpc", "thread/start", threadArgs)
 	if err != nil || json.Unmarshal(raw, &thread) != nil || thread.Thread.ID == "" {
 		return fail(errors.New("Codex thread start failed"))
 	}
@@ -526,7 +533,12 @@ func (a *CursorAdapter) Start(ctx context.Context, r StartRequest, observe func(
 	if err != nil || json.Unmarshal(raw, &init) != nil || init.ProtocolVersion != 1 {
 		return fail(errors.New("Cursor ACP initialize failed"))
 	}
-	raw, err = p.request(op, "jsonrpc", "session/new", map[string]any{"cwd": r.Workspace, "mcpServers": []any{}})
+	mcpServers := []any{}
+	if r.Tools != nil {
+		mcpServers = append(mcpServers, map[string]any{"name": "aeon", "type": "http", "url": r.Tools.URL,
+			"headers": map[string]string{"Authorization": "Bearer " + r.Tools.Token}})
+	}
+	raw, err = p.request(op, "jsonrpc", "session/new", map[string]any{"cwd": r.Workspace, "mcpServers": mcpServers})
 	var session struct {
 		SessionID string `json:"sessionId"`
 		Models    struct {
@@ -698,7 +710,7 @@ func (a *ClaudeAdapter) Start(ctx context.Context, r StartRequest, observe func(
 			}
 		}
 	})
-	if err := p.send(map[string]string{"op": "start", "prompt": r.Prompt, "model": r.Profile.Model, "effort": r.Profile.Effort, "correlation_id": "initial"}); err != nil {
+	if err := p.send(map[string]any{"op": "start", "prompt": r.Prompt, "model": r.Profile.Model, "effort": r.Profile.Effort, "correlation_id": "initial", "tools": r.Tools}); err != nil {
 		_ = p.Stop(context.Background())
 		return nil, err
 	}

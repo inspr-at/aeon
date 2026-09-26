@@ -14,6 +14,8 @@ const MAX_PENDING_STEERS = 256;
 const CORRELATION_TTL_MS = 60 * 1000;
 const CONTROL_INPUT_TIMEOUT_MS = 30 * 1000;
 const DEFAULT_TOOLS = ["Read", "Glob", "Grep", "Edit", "Write"];
+const AEON_TOOLS = ["aeon_comment", "aeon_status", "aeon_check_criterion", "aeon_evidence",
+  "aeon_request_approval", "aeon_reply", "aeon_terminal"];
 
 function emit(frame) {
   process.stdout.write(JSON.stringify(frame) + "\n");
@@ -258,8 +260,16 @@ function observeUsage(message) {
 try {
   if (start.native_messages !== undefined) throw new Error("direct message targets are unavailable in AEON");
   const { query } = await import(pathToFileURL(sdkPath));
-  const mcpServers = {};
-  const allowedTools = DEFAULT_TOOLS;
+  const toolBinding = start.tools;
+  if (toolBinding !== undefined &&
+      (typeof toolBinding?.url !== "string" || !/^http:\/\/127\.0\.0\.1:[0-9]+$/u.test(toolBinding.url) ||
+       typeof toolBinding?.token !== "string" || !/^[0-9a-f]{64}$/u.test(toolBinding.token))) {
+    throw new Error("invalid managed tool binding");
+  }
+  const mcpServers = toolBinding ? { aeon: { type: "http", url: toolBinding.url,
+    headers: { Authorization: `Bearer ${toolBinding.token}` } } } : {};
+  const allowedTools = toolBinding ? [...DEFAULT_TOOLS, ...AEON_TOOLS.map((name) => `mcp__aeon__${name}`)] : DEFAULT_TOOLS;
+  start.tools = undefined;
   input = new InputStream(userMessage(start.prompt));
   start.prompt = "";
   const queryOptions = {
