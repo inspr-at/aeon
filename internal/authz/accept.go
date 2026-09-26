@@ -55,36 +55,36 @@ func AcceptInvite(ctx context.Context, tx pgx.Tx, tenantID, identityID, email, n
 	if len(display) > 200 {
 		display = display[:200]
 	}
+	inviter := tenant.Principal{ID: createdBy, TenantID: tenantID, Kind: tenant.Person}
+	grants, err := inviteProjectGrants(ctx, tx, tenantID, inviteID)
+	if err != nil {
+		return tenant.Principal{}, err
+	}
+	// The inviter's authority is checked again at acceptance, as at creation: an
+	// invite from someone since demoted or deactivated grants nothing.
+	if err := requireTx(ctx, tx, inviter, "members.manage", Scope{}); err != nil {
+		return tenant.Principal{}, ErrNoInvite
+	}
+	if workspaceRole != nil {
+		if _, err := grantRole(ctx, tx, inviter, *workspaceRole, "workspace_role_id"); err != nil {
+			return tenant.Principal{}, ErrNoInvite
+		}
+	}
+	for _, g := range grants {
+		if _, err := grantRole(ctx, tx, inviter, g.role, "project_roles"); err != nil {
+			return tenant.Principal{}, ErrNoInvite
+		}
+	}
 	var person tenant.Principal
 	person, err = scanNewPerson(ctx, tx, tenantID, identityID, display, email)
 	if err != nil {
 		return tenant.Principal{}, err
 	}
-	inviter := tenant.Principal{ID: createdBy, TenantID: tenantID, Kind: tenant.Person}
 	if workspaceRole != nil {
 		if err := bindScope(ctx, tx, inviter, person.ID, *workspaceRole, "workspace", ""); err != nil {
 			return tenant.Principal{}, err
 		}
 	}
-	rows, err := tx.Query(ctx, `SELECT project_id::text, role_id::text FROM invite_project_roles WHERE tenant_id=$1::uuid AND invite_id=$2::uuid`, tenantID, inviteID)
-	if err != nil {
-		return tenant.Principal{}, err
-	}
-	type projectGrant struct{ project, role string }
-	grants := []projectGrant{}
-	for rows.Next() {
-		var g projectGrant
-		if err := rows.Scan(&g.project, &g.role); err != nil {
-			rows.Close()
-			return tenant.Principal{}, err
-		}
-		grants = append(grants, g)
-	}
-	if err := rows.Err(); err != nil {
-		rows.Close()
-		return tenant.Principal{}, err
-	}
-	rows.Close()
 	for _, g := range grants {
 		var live bool
 		err := tx.QueryRow(ctx, `SELECT deleted_at IS NULL FROM nodes WHERE tenant_id=$1::uuid AND id=$2::uuid`, tenantID, g.project).Scan(&live)
@@ -153,4 +153,23 @@ func bindScope(ctx context.Context, tx pgx.Tx, actor tenant.Principal, principal
 		after["project_id"] = projectID
 	}
 	return appendEvent(ctx, tx, actor, "binding.set", nil, after)
+}
+
+type projectGrant struct{ project, role string }
+
+func inviteProjectGrants(ctx context.Context, tx pgx.Tx, tenantID, inviteID string) ([]projectGrant, error) {
+	rows, err := tx.Query(ctx, `SELECT project_id::text, role_id::text FROM invite_project_roles WHERE tenant_id=$1::uuid AND invite_id=$2::uuid`, tenantID, inviteID)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	grants := []projectGrant{}
+	for rows.Next() {
+		var g projectGrant
+		if err := rows.Scan(&g.project, &g.role); err != nil {
+			return nil, err
+		}
+		grants = append(grants, g)
+	}
+	return grants, rows.Err()
 }

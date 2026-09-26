@@ -34,6 +34,11 @@ func TestInviteAcceptanceRequiresVerifiedMatchingEmail(t *testing.T) {
 		if err := tx.QueryRow(ctx, `SELECT id::text FROM roles WHERE tenant_id=$1::uuid AND key='member'`, tid).Scan(&roleID); err != nil {
 			return err
 		}
+		// Authority comes from bindings (ADR-003), not the legacy role text.
+		if _, err := tx.Exec(ctx, `INSERT INTO role_bindings(tenant_id,principal_id,role_id,scope_type)
+			SELECT $1::uuid,$2::uuid,id,'workspace' FROM roles WHERE tenant_id=$1::uuid AND key='owner'`, tid, ownerID); err != nil {
+			return err
+		}
 		_, err := tx.Exec(ctx, `INSERT INTO invites(tenant_id,email,workspace_role_id,token_hash,expires_at,created_by)
 			VALUES($1::uuid,'person@example.com',$2::uuid,$3::bytea,now() + interval '7 days',$4::uuid)`, tid, roleID, sum[:], ownerID)
 		return err
@@ -54,6 +59,25 @@ func TestInviteAcceptanceRequiresVerifiedMatchingEmail(t *testing.T) {
 		t.Fatalf("expired invite: %v", err)
 	}
 	if _, err := d.Admin.Exec(ctx, `UPDATE invites SET created_at=now(), expires_at=now() + interval '7 days' WHERE tenant_id=$1::uuid`, tid); err != nil {
+		t.Fatal(err)
+	}
+	// An inviter who has since lost the authority to grant the role enrols no one.
+	setOwnerRole := func(key string) {
+		t.Helper()
+		if _, err := d.Admin.Exec(ctx, `UPDATE role_bindings SET role_id=(SELECT id FROM roles WHERE tenant_id=$1::uuid AND key=$3)
+			WHERE tenant_id=$1::uuid AND principal_id=$2::uuid AND scope_type='workspace'`, tid, ownerID, key); err != nil {
+			t.Fatal(err)
+		}
+	}
+	if _, err := d.Admin.Exec(ctx, `ALTER TABLE role_bindings DISABLE TRIGGER role_bindings_last_owner`); err != nil {
+		t.Fatal(err)
+	}
+	setOwnerRole("viewer")
+	if _, _, err := m.resolveOIDCPerson(ctx, tid, "invite-oidc", "https://id.example", "demoted", "person@example.com", "Person", true, token); err != errNotMember {
+		t.Fatalf("invite from a demoted inviter: %v", err)
+	}
+	setOwnerRole("owner")
+	if _, err := d.Admin.Exec(ctx, `ALTER TABLE role_bindings ENABLE TRIGGER role_bindings_last_owner`); err != nil {
 		t.Fatal(err)
 	}
 	person, _, err := m.resolveOIDCPerson(ctx, tid, "invite-oidc", "https://id.example", "accepted", "person@example.com", "Accepted Person", true, token)
