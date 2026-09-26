@@ -11,6 +11,7 @@ import (
 	"io"
 	"os"
 
+	"github.com/inspr-at/aeon/internal/db"
 	"github.com/jackc/pgx/v5/pgxpool"
 )
 
@@ -26,25 +27,35 @@ type Summary struct {
 
 // Run executes `demo seed --tenant SLUG`.
 func Run(ctx context.Context, pool *pgxpool.Pool, args []string, stdout io.Writer) error {
-	if err := requireDev(); err != nil {
+	slug, err := Validate(args)
+	if err != nil {
 		return err
 	}
-	if len(args) == 0 || args[0] != "seed" {
-		return errors.New("usage: aeon demo seed --tenant SLUG")
-	}
-	fs := flag.NewFlagSet("demo seed", flag.ContinueOnError)
-	fs.SetOutput(io.Discard)
-	slug := fs.String("tenant", "", "tenant slug")
-	if err := fs.Parse(args[1:]); err != nil || fs.NArg() != 0 || *slug == "" {
-		return errors.New("usage: aeon demo seed --tenant SLUG")
-	}
-	sum, err := Seed(ctx, pool, *slug)
+	sum, err := Seed(ctx, pool, slug)
 	if err != nil {
 		return err
 	}
 	enc := json.NewEncoder(stdout)
 	enc.SetEscapeHTML(false)
 	return enc.Encode(sum)
+}
+
+// Validate checks the development guard and explicit target before the CLI
+// opens a database connection.
+func Validate(args []string) (string, error) {
+	if err := requireDev(); err != nil {
+		return "", err
+	}
+	if len(args) == 0 || args[0] != "seed" {
+		return "", errors.New("usage: aeon demo seed --tenant SLUG")
+	}
+	fs := flag.NewFlagSet("demo seed", flag.ContinueOnError)
+	fs.SetOutput(io.Discard)
+	slug := fs.String("tenant", "", "tenant slug")
+	if err := fs.Parse(args[1:]); err != nil || fs.NArg() != 0 || *slug == "" {
+		return "", errors.New("usage: aeon demo seed --tenant SLUG")
+	}
+	return *slug, nil
 }
 
 func requireDev() error {
@@ -56,14 +67,24 @@ func requireDev() error {
 
 // Seed fills slug. A second call on a completed tenant does not write again.
 func Seed(ctx context.Context, pool *pgxpool.Pool, slug string) (Summary, error) {
+	return seedWithHook(ctx, pool, slug, nil)
+}
+
+func seedWithHook(ctx context.Context, pool *pgxpool.Pool, slug string, afterStep func(string) error) (Summary, error) {
 	if err := requireDev(); err != nil {
 		return Summary{}, err
 	}
 	if pool == nil {
 		return Summary{}, fmt.Errorf("database pool is required")
 	}
-	s := &seeder{ctx: ctx, pool: pool, slug: slug}
-	if err := s.run(); err != nil {
+	if slug == "" {
+		return Summary{}, errors.New("explicit tenant slug is required")
+	}
+	s := &seeder{pool: pool, slug: slug, afterStep: afterStep}
+	if err := db.InTransaction(ctx, pool, func(txCtx context.Context) error {
+		s.ctx = txCtx
+		return s.run()
+	}); err != nil {
 		return Summary{}, err
 	}
 	return s.out, nil

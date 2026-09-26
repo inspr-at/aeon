@@ -32,6 +32,7 @@ type seeder struct {
 	ids       map[string]string
 	lumenID   string
 	out       Summary
+	afterStep func(string) error
 }
 
 type idBody struct {
@@ -50,6 +51,13 @@ func (s *seeder) run() error {
 		return fmt.Errorf("tenant %q: %w", s.slug, err)
 	}
 	s.tenantID = id
+	// Serialize seeds for this tenant so a concurrent invocation sees the
+	// completion marker after the first transaction commits.
+	if err := db.InTenant(db.NoProjects(s.ctx, "demo seed"), s.pool, id, func(tx pgx.Tx) error {
+		return tx.QueryRow(s.ctx, `SELECT id::text FROM tenants WHERE id=$1::uuid FOR UPDATE`, id).Scan(&id)
+	}); err != nil {
+		return fmt.Errorf("lock tenant %q: %w", s.slug, err)
+	}
 	if s.admin, err = s.person("demo-operator", "Demo Operator", "admin"); err != nil {
 		return err
 	}
@@ -74,6 +82,9 @@ func (s *seeder) run() error {
 	if err := s.tree(); err != nil {
 		return err
 	}
+	if err := s.step("tree"); err != nil {
+		return err
+	}
 	if err := s.knowledge(); err != nil {
 		return err
 	}
@@ -81,6 +92,9 @@ func (s *seeder) run() error {
 		return err
 	}
 	if err := s.agents(); err != nil {
+		return err
+	}
+	if err := s.step("agents"); err != nil {
 		return err
 	}
 	if err := s.journey(); err != nil {
@@ -96,6 +110,13 @@ func (s *seeder) run() error {
 		return err
 	}
 	return s.finish(false)
+}
+
+func (s *seeder) step(name string) error {
+	if s.afterStep != nil {
+		return s.afterStep(name)
+	}
+	return nil
 }
 
 func (s *seeder) person(subject, name, role string) (tenant.Principal, error) {

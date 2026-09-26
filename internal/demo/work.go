@@ -9,10 +9,7 @@ import (
 
 	"github.com/inspr-at/aeon/internal/agentruns"
 	"github.com/inspr-at/aeon/internal/auth"
-	"github.com/inspr-at/aeon/internal/db"
-	"github.com/inspr-at/aeon/internal/events"
 	"github.com/inspr-at/aeon/internal/tenant"
-	"github.com/jackc/pgx/v5"
 )
 
 const (
@@ -40,42 +37,16 @@ func (s *seeder) agents() error {
 }
 
 func (s *seeder) agent(name string, scopes []string) (tenant.Principal, string, error) {
-	_, agentID, token, err := auth.OperatorCreateAgentKey(s.ctx, s.pool, s.tenantID, name, "", scopes, nil)
+	keyID, agentID, token, err := auth.OperatorCreateAgentKey(s.ctx, s.pool, s.tenantID, name, "", scopes, nil)
 	if err != nil {
 		return tenant.Principal{}, "", fmt.Errorf("agent %s: %w", name, err)
 	}
 	if name == "Lumen Scribe" {
-		if err := s.allowJourneyGates(agentID); err != nil {
+		if err := auth.OperatorGrantJourneyScopes(s.ctx, s.pool, s.tenantID, keyID, agentID); err != nil {
 			return tenant.Principal{}, "", err
 		}
 	}
 	return tenant.Principal{ID: agentID, TenantID: s.tenantID, Kind: tenant.Agent, Name: name}, token, nil
-}
-
-// allowJourneyGates adds the journey prefixes the journey module checks.
-// aeon agent-key create rejects them because they are not permission-registry
-// keys. Proposals still go through the approvals API, which reads this list.
-func (s *seeder) allowJourneyGates(agentID string) error {
-	added := []string{"journey.requirements", "journey.build"}
-	return db.InTenant(tenant.WithPrincipal(s.ctx, s.admin), s.pool, s.tenantID, func(tx pgx.Tx) error {
-		var keyID string
-		tag, err := tx.Exec(s.ctx, `UPDATE agent_keys SET scopes = scopes || $2::text[]
-			WHERE principal_id=$1::uuid AND NOT (scopes @> $2::text[])`, agentID, added)
-		if err != nil {
-			return err
-		}
-		if tag.RowsAffected() == 0 {
-			return nil
-		}
-		if err := tx.QueryRow(s.ctx, `SELECT id::text FROM agent_keys WHERE principal_id=$1::uuid ORDER BY created_at DESC LIMIT 1`, agentID).Scan(&keyID); err != nil {
-			return err
-		}
-		_, err = events.Append(s.ctx, tx, s.admin, events.Change{
-			Type:  "demo.key_scopes",
-			After: map[string]any{"key_id": keyID, "principal_id": agentID, "added": added},
-		})
-		return err
-	})
 }
 
 func (s *seeder) work() error {
