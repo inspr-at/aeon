@@ -1,0 +1,26 @@
+{
+  "profile": "INSPR",
+  "ticket": "AEON-155",
+  "decision": "Markus, 2026-09-25: the INSPR workspace's default quote profile is a neutral INSPR profile. It carries no company, address, register or tax data; the sender block is filled from the workspace's quote settings.",
+  "fonts": [
+    { "file": "fonts/SourceSans3-Regular.ttf.woff2", "family": "Source Sans 3", "weight": 400, "style": "normal", "license": "OFL-1.1", "license_file": "licenses/SourceSans3-OFL-1.1.txt", "release": "https://github.com/adobe-fonts/source-sans/releases/download/3.052R/WOFF2-source-sans-3.052R.zip", "release_sha256": "d7f6724027fe5ca0bab44d6121284f1fa8f66dec5f2864aa969aed347041ac95", "release_path": "WOFF2/TTF/SourceSans3-Regular.ttf.woff2", "sha256": "53492fb3a0def77354f166a55d09b63a10855e91c206c7620a81cf56e97f8ec3" },
+    { "file": "fonts/SourceSans3-It.ttf.woff2", "family": "Source Sans 3", "weight": 400, "style": "italic", "license": "OFL-1.1", "license_file": "licenses/SourceSans3-OFL-1.1.txt", "release": "https://github.com/adobe-fonts/source-sans/releases/download/3.052R/WOFF2-source-sans-3.052R.zip", "release_sha256": "d7f6724027fe5ca0bab44d6121284f1fa8f66dec5f2864aa969aed347041ac95", "release_path": "WOFF2/TTF/SourceSans3-It.ttf.woff2", "sha256": "4d80b3b801f4c457f1b4adbd3911d8501338e6d282141663770c38d3a2e97859" },
+    { "file": "fonts/SourceSans3-Semibold.ttf.woff2", "family": "Source Sans 3", "weight": 600, "style": "normal", "license": "OFL-1.1", "license_file": "licenses/SourceSans3-OFL-1.1.txt", "release": "https://github.com/adobe-fonts/source-sans/releases/download/3.052R/WOFF2-source-sans-3.052R.zip", "release_sha256": "d7f6724027fe5ca0bab44d6121284f1fa8f66dec5f2864aa969aed347041ac95", "release_path": "WOFF2/TTF/SourceSans3-Semibold.ttf.woff2", "sha256": "47b9b661b9f395fe7f0d0e119637fba5c8dad97bde3df60066fd24229c0792f4" },
+    { "file": "fonts/SourceSans3-SemiboldIt.ttf.woff2", "family": "Source Sans 3", "weight": 600, "style": "italic", "license": "OFL-1.1", "license_file": "licenses/SourceSans3-OFL-1.1.txt", "release": "https://github.com/adobe-fonts/source-sans/releases/download/3.052R/WOFF2-source-sans-3.052R.zip", "release_sha256": "d7f6724027fe5ca0bab44d6121284f1fa8f66dec5f2864aa969aed347041ac95", "release_path": "WOFF2/TTF/SourceSans3-SemiboldIt.ttf.woff2", "sha256": "552d2d08e719d09413fbfff81f6fa16f153ad87edf6a49d69df9c303fea71ae6" },
+    { "file": "fonts/SourceSans3-Bold.ttf.woff2", "family": "Source Sans 3", "weight": 700, "style": "normal", "license": "OFL-1.1", "license_file": "licenses/SourceSans3-OFL-1.1.txt", "release": "https://github.com/adobe-fonts/source-sans/releases/download/3.052R/WOFF2-source-sans-3.052R.zip", "release_sha256": "d7f6724027fe5ca0bab44d6121284f1fa8f66dec5f2864aa969aed347041ac95", "release_path": "WOFF2/TTF/SourceSans3-Bold.ttf.woff2", "sha256": "8d35c6d40e750a4ee23bbbba2bd604ad098d172907369b43281507e16b8e2e7a" },
+    { "file": "fonts/SourceSans3-BoldIt.ttf.woff2", "family": "Source Sans 3", "weight": 700, "style": "italic", "license": "OFL-1.1", "license_file": "licenses/SourceSans3-OFL-1.1.txt", "release": "https://github.com/adobe-fonts/source-sans/releases/download/3.052R/WOFF2-source-sans-3.052R.zip", "release_sha256": "d7f6724027fe5ca0bab44d6121284f1fa8f66dec5f2864aa969aed347041ac95", "release_path": "WOFF2/TTF/SourceSans3-BoldIt.ttf.woff2", "sha256": "8c4b66aea0e7887dfd1e296b03ae53b76ce25256fae1437777514933acaef0f3" },
+    { "file": "fonts/SourceSerif4Display-Regular.ttf.woff2", "family": "Source Serif 4 Display", "weight": 400, "style": "normal", "license": "OFL-1.1", "license_file": "licenses/SourceSerif4-OFL-1.1.txt", "release": "https://github.com/adobe-fonts/source-serif/releases/download/4.005R/source-serif-4.005_WOFF2.zip", "release_sha256": "af10e80dcd2296748b04cb9917db9f7ba0ae65101165fd2f0c16b9812d9abd28", "release_path": "source-serif-4.005_WOFF2/TTF/SourceSerif4Display-Regular.ttf.woff2", "sha256": "c75301c83bef55b3787f3060c2f62cb5d902a6706419149b7ff9d0c7927055ac" }
+  ],
+  "licenses": [
+    { "file": "licenses/SourceSans3-OFL-1.1.txt", "text": "LICENSE.md of adobe-fonts/source-sans at tag 3.052R, verbatim", "reserved_font_name": "Source" },
+    { "file": "licenses/SourceSerif4-OFL-1.1.txt", "text": "LICENSE.md of adobe-fonts/source-serif release 4.005R (Desktop archive), verbatim", "reserved_font_name": "Source" }
+  ],
+  "font_note": "The font files are Adobe's own WOFF2 releases, byte for byte; they are neither subset nor renamed, so the Reserved Font Name stays with the unmodified fonts.",
+  "mark": {
+    "file": "assets/mark.svg",
+    "origin": "markus-barta/paimos docs/DESIGN_REFERENCE.md, frontend/public/assets/brand/paimos-logo.svg",
+    "origin_sha256": "970f026a738885b60bf9fac122b3563fe2b9fe242199845920acdc3975628396",
+    "change": "Removed the title and desc elements and the role, aria-labelledby and shape-rendering attributes, which the profile SVG validator does not accept. The square viewBox, the transform, all path data and both fills (#0E6F6C, #D69B31) are unchanged.",
+    "sha256": "1813d91c65db6ec81aaf9b05fc49d5b994d3e913784da0e36f00b85beaa38553"
+  }
+}
