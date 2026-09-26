@@ -23,12 +23,15 @@ func WriteProfileBundleTar(w io.Writer, bundle ProfileBundle) error {
 		return errors.New("bundle requires profile.json (at most 1 MiB)")
 	}
 	names := make([]string, 0, len(bundle.Files))
-	var total int64 = int64(len(bundle.Profile))
+	// ReadProfileBundleTar reads at most maxProfileBundle+1 bytes of the whole
+	// stream, so the limit applies to the tar as written: a 512-byte header per
+	// file, contents padded to 512 bytes, and the 1024-byte end marker.
+	total := tarEntrySize(len(bundle.Profile)) + 1024
 	for name, data := range bundle.Files {
 		if !safeBundlePath(name) || name == "profile.json" || len(data) > 10<<20 {
 			return fmt.Errorf("invalid or oversized bundle file %q", name)
 		}
-		total += int64(len(data))
+		total += tarEntrySize(len(data))
 		names = append(names, name)
 	}
 	if total > maxProfileBundle {
@@ -53,4 +56,9 @@ func WriteProfileBundleTar(w io.Writer, bundle ProfileBundle) error {
 		}
 	}
 	return out.Close()
+}
+
+// tarEntrySize is the USTAR size of one regular file entry: header plus padded data.
+func tarEntrySize(n int) int64 {
+	return 512 + (int64(n)+511)/512*512
 }
