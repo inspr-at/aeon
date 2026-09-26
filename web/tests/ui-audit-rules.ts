@@ -136,6 +136,8 @@ export function domAudit(): Raw[] {
       if (a.contains(b) || b.contains(a) || a.closest('label') === b.closest('label') && a.closest('label')) continue
       // The row link deliberately extends behind its separate action button.
       if ((a.matches('.card-link') || b.matches('.card-link')) && a.parentElement === b.parentElement) continue
+      // A card's or row's live agents chip (AEON-184) sits over its link, beside it in the DOM.
+      if ((a.matches('.item-link') && b.closest('.live')?.parentElement === a.parentElement) || (b.matches('.item-link') && a.closest('.live')?.parentElement === b.parentElement)) continue
       // A scrim and a fixed app edge intentionally cover scrolling content.
       if (a.matches('.sheet-scrim') || b.matches('.sheet-scrim') || a.closest('.app-footer, .app-header') !== b.closest('.app-footer, .app-header') && (a.closest('.app-footer') || b.closest('.app-footer'))) continue
       // Open menus cover the page below; their background controls are not peers.

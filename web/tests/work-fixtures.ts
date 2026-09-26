@@ -40,6 +40,8 @@ export interface MockOptions {
   failUpload?: boolean
   // The signed-in person is a workspace admin (shared project groups).
   admin?: boolean
+  // GET /api/harness-sessions/live answers with this status instead (AEON-184).
+  liveStatus?: number
 }
 
 const CLOSED = ['done', 'cancelled', 'archived', 'delivered', 'accepted']
@@ -105,12 +107,27 @@ export function fixtures(options: MockOptions = {}) {
   const views: MockView[] = []
   const batches: { id: number; before: MockNode[]; after: MockNode[]; undone: boolean }[] = []
   const people: { id: string; name: string; has_avatar?: boolean }[] = [me, mira]
-  return { projects, nodes, people, activity, relations, attachments, preferences, events, views, batches, counter: { next: 100 } }
+  // Agents working right now (AEON-184): GET /api/harness-sessions/live items.
+  const live: LiveAgentMock[] = []
+  return { projects, nodes, people, activity, relations, attachments, preferences, events, views, batches, live, counter: { next: 100 } }
 }
 // A 1x1 PNG for every attachment variant.
 export const PNG = Buffer.from('iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAYAAAAfFcSJAAAADUlEQVR42mNk+M9QDwADhgGAWjR9awAAAABJRU5ErkJggg==', 'base64')
 
 export type Fixtures = ReturnType<typeof fixtures>
+export interface LiveAgentMock {
+  project_id: string; session_id?: string; principal_id?: string; name?: string
+  harness: 'codex' | 'claude' | 'pi' | 'cursor' | 'grok'; management_mode: 'managed' | 'unmanaged'; role: 'worker' | 'coordinator'
+  phase: 'starting' | 'working' | 'stopping'; activity: 'busy' | 'unknown'
+  ticket: { id: string; key: string; title: string } | null; since: string; heartbeat_at: string
+}
+// One live agent on the fixture clock: started `minutes` ago, heartbeat half a minute ago.
+export function liveAgent(fields: Partial<LiveAgentMock> & Pick<LiveAgentMock, 'project_id'>, minutes = 12): LiveAgentMock {
+  return {
+    harness: 'claude', management_mode: 'unmanaged', role: 'worker', phase: 'working', activity: 'busy', ticket: null,
+    since: new Date(now - minutes * 60_000).toISOString(), heartbeat_at: new Date(now - 30_000).toISOString(), ...fields,
+  }
+}
 export interface Call { path: string; method: string; query: URLSearchParams; body: unknown; headers: Record<string, string> }
 
 function item(node: MockNode, data: Fixtures) {
@@ -174,6 +191,7 @@ const personName = (data: Fixtures, id: unknown) => typeof id === 'string' ? dat
 
 export async function mockWork(page: Page, data: Fixtures, options: MockOptions = {}) {
   const calls: Call[] = []
+  const started = Date.now()
   await page.route('**/api/**', async route => {
     const request = route.request(), url = new URL(request.url()), path = url.pathname, method = request.method(), query = url.searchParams
     let body: unknown = null
@@ -390,6 +408,11 @@ export async function mockWork(page: Page, data: Fixtures, options: MockOptions 
       return route.fulfill({ json: { ...rest, kind_id: `k-${kind}`, position: '0', deleted_at: null } })
     }
     if (path === '/api/version') return route.fulfill({ json: { version: '260923120000.0.0', scheme: 'inspr-calendar-v2' } })
+    if (path === '/api/harness-sessions/live') {
+      if (options.liveStatus) return route.fulfill({ status: options.liveStatus, json: { error: 'not here' } })
+      // The server's clock follows the fixture clock from the moment the mock starts.
+      return route.fulfill({ json: { items: data.live, at: new Date(now + (Date.now() - started)).toISOString(), fresh_seconds: 120 } })
+    }
     if (path === '/api/projects') {
       if (options.failProjects) return route.fulfill({ status: 503, json: { error: 'Projects are resting' } })
       const archived = query.get('include_archived') === 'true'

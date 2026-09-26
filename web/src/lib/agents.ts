@@ -3,6 +3,7 @@
 // their typed controls, runs, approvals, accounts with allowance windows, models
 // and project messages. Worker-only endpoints (heartbeat, drain, claim) are absent.
 import { api, APIError } from './api.ts'
+import type { LivePage } from './liveAgents.ts'
 
 export type Harness = 'codex' | 'claude' | 'pi' | 'cursor' | 'grok'
 export interface HarnessSession {
@@ -80,6 +81,8 @@ const query = (params: Record<string, string | number | boolean | undefined>) =>
 // Tenant-wide sessions, newest first, with project and ticket summaries.
 export const listAllSessions = (params: { ticket?: string; agent?: string; project?: string; state?: string; cursor?: string; limit?: number } = {}) =>
   request<Paged<HarnessSession>>(`/harness-sessions${query({ limit: 200, ...params })}`)
+// Agents working right now in every visible project, in one read (AEON-184).
+export const getLiveAgents = () => request<LivePage>('/harness-sessions/live')
 export const listRuns = (params: { session?: string; agent?: string; work_order?: string; cursor?: string; limit?: number } = {}) =>
   request<Paged<AgentRun>>(`/runs${query({ limit: 50, ...params })}`)
 export const requestControl = (projectId: string, sessionId: string, kind: SessionControl['kind']) => request<SessionControl>(`${sessionPath(projectId, sessionId)}/controls/${kind}`, 'POST', {})
