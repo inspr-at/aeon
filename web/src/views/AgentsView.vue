@@ -70,7 +70,7 @@ function openAgent(principalId: string) {
 // ---------- Actions ----------
 async function decide(approval: Approval, decision: 'approved' | 'denied', reason: string) {
   await agents.decide(approval, decision, reason)
-  toast(`${decision === 'approved' ? 'Approved' : 'Denied'}: ${agents.askerName(approval.agent_principal_id).name} was told.`)
+  toast(`${decision === 'approved' ? 'Approved' : 'Denied'}: ${agents.askerName(approval.agent_principal_id, approval.agent_name).name} was told.`)
   await nextTick()
   const next = agents.pending[0]
   cursor.value = next ? `a:${next.id}` : ''

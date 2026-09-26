@@ -25,6 +25,12 @@
 // read-only operations (including dotted read refinements) are low; all other
 // requests are medium. Risk is presentation metadata and grants no authority.
 //
+// AEON-171 adds agent_name to list and get responses (propose, decide and
+// revoke return the same projection as get). It is principals.name for the
+// proposing agent, joined on tenant_id and id inside the request's
+// db.InTenant transaction. The join does not change which approval rows are
+// visible. A principal the transaction cannot see leaves agent_name null.
+//
 // Every read and write runs inside db.InTenant. The mutation and its event
 // share that transaction via events.Append. LiveGrant checks expiry,
 // revocation and the acting key's ceiling; callers use it inside the

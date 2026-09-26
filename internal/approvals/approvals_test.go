@@ -625,3 +625,88 @@ func TestLiveGrantRejectsBadIDs(t *testing.T) {
 		t.Fatalf("empty body %d", w.Code)
 	}
 }
+
+func TestListAndGetApprovalAgentName(t *testing.T) {
+	f := newFixture(t)
+	ctx := t.Context()
+
+	created := f.do(f.agentA, f.wide, http.MethodPost, "/api/approvals", proposalJSON("run.claim", "tenant", nil, nil))
+	if created.Code != http.StatusCreated {
+		t.Fatalf("propose %d %s", created.Code, created.Body.String())
+	}
+	var raw map[string]any
+	if err := json.Unmarshal(created.Body.Bytes(), &raw); err != nil {
+		t.Fatal(err)
+	}
+	if raw["agent_name"] != f.agentA.Name {
+		t.Fatalf("propose agent_name %#v", raw["agent_name"])
+	}
+	proposal := decodeApproval(t, created)
+	var snap string
+	if err := f.db.Admin.QueryRow(ctx, `
+		SELECT after->>'agent_name' FROM events
+		WHERE tenant_id = $1::uuid AND type = 'approval.proposed' AND after->>'id' = $2`,
+		f.tenantA, proposal.ID).Scan(&snap); err != nil {
+		t.Fatal(err)
+	}
+	if snap != f.agentA.Name {
+		t.Fatalf("event agent_name %q", snap)
+	}
+
+	if _, err := f.db.Admin.Exec(ctx, `UPDATE principals SET name = $2 WHERE id = $1::uuid`, f.agentA.ID, "Harbor Clerk"); err != nil {
+		t.Fatal(err)
+	}
+	listed := f.do(f.personA, "", http.MethodGet, "/api/approvals", "")
+	if listed.Code != http.StatusOK {
+		t.Fatalf("list %d %s", listed.Code, listed.Body.String())
+	}
+	var items []Approval
+	if err := json.Unmarshal(listed.Body.Bytes(), &items); err != nil {
+		t.Fatal(err)
+	}
+	if len(items) != 1 || items[0].AgentName == nil || *items[0].AgentName != "Harbor Clerk" || items[0].ID != proposal.ID {
+		t.Fatalf("list agent_name %#v", items)
+	}
+	if err := f.db.Admin.QueryRow(ctx, `
+		SELECT after->>'agent_name' FROM events
+		WHERE tenant_id = $1::uuid AND type = 'approval.proposed' AND after->>'id' = $2`,
+		f.tenantA, proposal.ID).Scan(&snap); err != nil {
+		t.Fatal(err)
+	}
+	if snap != f.agentA.Name {
+		t.Fatalf("rename rewrote the event snapshot %q", snap)
+	}
+
+	other := f.do(f.agentB, f.tokenB, http.MethodPost, "/api/approvals", proposalJSON("nodes.read", "tenant", nil, nil))
+	if other.Code != http.StatusCreated {
+		t.Fatalf("agent b propose %d %s", other.Code, other.Body.String())
+	}
+	if decodeApproval(t, other).AgentName == nil || *decodeApproval(t, other).AgentName != f.agentB.Name {
+		t.Fatalf("agent b name %s", other.Body.String())
+	}
+	mine := f.do(f.agentA, f.wide, http.MethodGet, "/api/approvals", "")
+	var own []Approval
+	if err := json.Unmarshal(mine.Body.Bytes(), &own); err != nil {
+		t.Fatal(err)
+	}
+	if len(own) != 1 || own[0].AgentName == nil || *own[0].AgentName != "Harbor Clerk" {
+		t.Fatalf("agent list leaked or dropped the name %#v", own)
+	}
+	foreign := f.do(f.personB, "", http.MethodGet, "/api/approvals", "")
+	var others []Approval
+	if err := json.Unmarshal(foreign.Body.Bytes(), &others); err != nil {
+		t.Fatal(err)
+	}
+	if foreign.Code != http.StatusOK || len(others) != 0 {
+		t.Fatalf("foreign list %d %s", foreign.Code, foreign.Body.String())
+	}
+
+	decided := f.do(f.personA, "", http.MethodPost, "/api/approvals/"+proposal.ID+"/decision", `{"decision":"approved","reason":"named"}`)
+	if decided.Code != http.StatusOK {
+		t.Fatalf("decide %d %s", decided.Code, decided.Body.String())
+	}
+	got := decodeApproval(t, decided)
+	if got.AgentName == nil || *got.AgentName != "Harbor Clerk" {
+		t.Fatalf("decide agent_name %#v", got.AgentName)
+	}
+}

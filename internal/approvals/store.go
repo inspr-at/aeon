@@ -23,11 +23,16 @@ const (
 	eventRevoked  = "approval.revoked"
 )
 
+// approvalFrom is the list and get projection. agent_name is principals.name
+// for the proposing agent, joined in the same tenant transaction. A missing
+// or invisible principal leaves the name null and does not drop the row.
 const approvalFrom = `
-	SELECT r.id::text, r.agent_principal_id::text, r.scope, r.resource_kind,
+	SELECT r.id::text, r.agent_principal_id::text, p.name, r.scope, r.resource_kind,
 	       r.resource_id::text, r.run_id::text, r.rationale, r.expires_at, r.proposed_at,
 	       d.decision, d.decided_by_principal_id::text
 	FROM approval_requests r
+	LEFT JOIN principals p
+	  ON p.tenant_id = r.tenant_id AND p.id = r.agent_principal_id
 	LEFT JOIN approval_decisions d
 	  ON d.tenant_id = r.tenant_id AND d.request_id = r.id`
 
@@ -323,13 +328,15 @@ func lockRequest(ctx context.Context, tx pgx.Tx, id string) (Approval, bool, err
 	var resourceID, runID *string
 	var expired bool
 	err := tx.QueryRow(ctx, `
-		SELECT id::text, agent_principal_id::text, scope, resource_kind,
-		       resource_id::text, run_id::text, rationale, expires_at, proposed_at,
-		       expires_at <= now()
-		FROM approval_requests
-		WHERE id = $1::uuid
-		FOR UPDATE`, id).Scan(
-		&a.ID, &a.AgentPrincipalID, &a.Scope, &a.ResourceKind,
+		SELECT r.id::text, r.agent_principal_id::text, p.name, r.scope, r.resource_kind,
+		       r.resource_id::text, r.run_id::text, r.rationale, r.expires_at, r.proposed_at,
+		       r.expires_at <= now()
+		FROM approval_requests r
+		LEFT JOIN principals p
+		  ON p.tenant_id = r.tenant_id AND p.id = r.agent_principal_id
+		WHERE r.id = $1::uuid
+		FOR UPDATE OF r`, id).Scan(
+		&a.ID, &a.AgentPrincipalID, &a.AgentName, &a.Scope, &a.ResourceKind,
 		&resourceID, &runID, &a.Rationale, &a.ExpiresAt, &a.ProposedAt, &expired)
 	a.ResourceID = resourceID
 	a.RunID = runID
@@ -345,7 +352,7 @@ func scanApproval(row pgx.Row) (Approval, error) {
 	var a Approval
 	var resourceID, runID, decision, decidedBy *string
 	err := row.Scan(
-		&a.ID, &a.AgentPrincipalID, &a.Scope, &a.ResourceKind,
+		&a.ID, &a.AgentPrincipalID, &a.AgentName, &a.Scope, &a.ResourceKind,
 		&resourceID, &runID, &a.Rationale, &a.ExpiresAt, &a.ProposedAt,
 		&decision, &decidedBy)
 	a.ResourceID = resourceID

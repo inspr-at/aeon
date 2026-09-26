@@ -182,7 +182,7 @@ async function runNext() {
   }
   const key = action.key as ActionKey
   const withGate = approval.value
-  const body = `${withGate && withGate.decision === null ? `This approves the ${gate.value} gate that ${agents.askerName(withGate.agent_principal_id).name} asked for. ` : ''}${ACTION_LONG[action.key]}`
+  const body = `${withGate && withGate.decision === null ? `This approves the ${gate.value} gate that ${agents.askerName(withGate.agent_principal_id, withGate.agent_name).name} asked for. ` : ''}${ACTION_LONG[action.key]}`
   const ok = await confirmAction({ title: `${action.label}?`, body, confirmLabel: next.value.label })
   if (!ok) return
   await act(key, { approval: withGate, done: DONE[key]?.(releaseLabel.value) })

@@ -22,6 +22,7 @@ import (
 type Approval struct {
 	ID                   string    `json:"id"`
 	AgentPrincipalID     string    `json:"agent_principal_id"`
+	AgentName            *string   `json:"agent_name"`
 	Risk                 string    `json:"risk"`
 	Scope                string    `json:"scope"`
 	ResourceKind         string    `json:"resource_kind"`

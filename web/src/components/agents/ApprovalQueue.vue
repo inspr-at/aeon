@@ -12,7 +12,7 @@ import AppIcon from '../AppIcon.vue'
 type Held = ProjectMessage & { projectId: string }
 const props = defineProps<{
   pending: Approval[]; held: Held[]; history: Approval[]; now: number; cursor: string; canDecide: boolean; canDecideApproval: (approval: Approval) => boolean; canResolve: boolean; canRevoke: boolean; loaded: boolean
-  asker: (principalId: string) => Asker; resource: (approval: Approval) => Resource
+  asker: (principalId: string, fallbackName?: string | null) => Asker; resource: (approval: Approval) => Resource
   decide: (approval: Approval, decision: 'approved' | 'denied', reason: string) => Promise<void>
   revoke: (approval: Approval) => Promise<void>
   resolve: (request: Held, decision: 'resolved' | 'dismissed', note: string) => Promise<void>
@@ -70,8 +70,9 @@ function reasonKeys(event: KeyboardEvent, approval: Approval) {
   if (event.key === 'Enter' && !event.shiftKey) { event.preventDefault(); void submit(approval) }
   else if (event.key === 'Escape') { event.preventDefault(); event.stopPropagation(); cancel() }
 }
+const named = (approval: Approval) => props.asker(approval.agent_principal_id, approval.agent_name)
 async function revoke(approval: Approval) {
-  const ok = await confirmAction({ title: 'Revoke this permission?', body: `${props.asker(approval.agent_principal_id).name} loses “${scopeLabel(approval.scope)}” right away. Work it already started is not undone.`, confirmLabel: 'Revoke', danger: true })
+  const ok = await confirmAction({ title: 'Revoke this permission?', body: `${named(approval).name} loses “${scopeLabel(approval.scope)}” right away. Work it already started is not undone.`, confirmLabel: 'Revoke', danger: true })
   if (!ok) return
   try { await props.revoke(approval); revoked.value = new Set([...revoked.value, approval.id]) }
   catch (e) { error.value = e instanceof Error ? e.message : 'Revoking did not work. Please try again.' }
@@ -98,7 +99,7 @@ defineExpose({ begin, cancel, isOpen: () => !!open.value })
     <ul v-else class="items" aria-label="Requests waiting for you">
       <li
         v-for="approval in pending" :key="approval.id" class="item" :class="[riskFor(approval), { active: cursor === `a:${approval.id}`, open: open?.id === approval.id }]"
-        :data-row="`a:${approval.id}`" tabindex="-1" :aria-label="`${scopeLabel(approval.scope)}, asked by ${asker(approval.agent_principal_id).name}`"
+        :data-row="`a:${approval.id}`" tabindex="-1" :aria-label="`${scopeLabel(approval.scope)}, asked by ${named(approval).name}`"
         @click="emit('focusRow', `a:${approval.id}`)" @focusin="emit('focusRow', `a:${approval.id}`)"
       >
         <span class="mark"><AppIcon name="shield" :size="15" /></span>
@@ -110,7 +111,7 @@ defineExpose({ begin, cancel, isOpen: () => !!open.value })
           </p>
           <p class="line2">
             <button type="button" class="who" @click.stop="emit('openAgent', approval.agent_principal_id)">
-              <span v-if="asker(approval.agent_principal_id).harness" class="harness">{{ asker(approval.agent_principal_id).harness }}</span>{{ asker(approval.agent_principal_id).name }}
+              <span v-if="named(approval).harness" class="harness">{{ named(approval).harness }}</span>{{ named(approval).name }}
             </button>
             <!-- Two phrases that wrap as wholes: "asks for scope" and "on KEY Title". -->
             <span class="phrase"><span class="asks">asks for</span><code class="scope">{{ approval.scope }}</code></span>
@@ -193,7 +194,7 @@ defineExpose({ begin, cancel, isOpen: () => !!open.value })
         <li v-for="approval in history.slice(0, 20)" :key="approval.id" class="past" :class="outcome(approval).toLowerCase()">
           <AppIcon :name="outcome(approval) === 'Approved' ? 'check' : outcome(approval) === 'Expired' ? 'clock' : 'close'" :size="13" class="past-icon" />
           <span class="past-what">{{ scopeLabel(approval.scope) }}</span>
-          <span class="past-who">{{ asker(approval.agent_principal_id).name }}</span>
+          <span class="past-who">{{ named(approval).name }}</span>
           <span class="past-outcome">{{ outcome(approval) }}</span>
           <time class="past-time" :datetime="approval.proposed_at">{{ relativeTime(approval.proposed_at, { now }) }}</time>
           <button v-if="approval.decision === 'approved' && !revoked.has(approval.id) && canRevoke" type="button" class="btn sm ghost revoke" @click="revoke(approval)">Revoke</button>
