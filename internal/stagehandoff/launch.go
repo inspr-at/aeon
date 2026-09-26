@@ -2,8 +2,13 @@
 package stagehandoff
 
 import (
+	"bytes"
 	"context"
+	"crypto/sha256"
+	"encoding/hex"
+	"encoding/json"
 	"errors"
+	"io"
 	"net/http"
 	"time"
 
@@ -59,9 +64,111 @@ type LaunchAdmission struct {
 func NewService(pool *pgxpool.Pool, registry *plugins.Registry, checks LaunchChecks) *Module {
 	return &Module{pool: pool, registry: registry, launchChecks: checks}
 }
-func (m *Module) AdmitLaunch(ctx context.Context, p tenant.Principal, authorization, handoffID string, a Artifact) (LaunchAdmission, error) {
+
+func (m *Module) clock() time.Time {
+	if m.now != nil {
+		return m.now()
+	}
+	return time.Now()
+}
+
+// canonicalBodyDigest hashes sorted-key JSON from the request's decoded values.
+// The launch bodies have only strings and one integral release_sequence; using
+// json.Number preserves the latter without binary floating-point conversion.
+func canonicalBodyDigest(raw []byte) (string, error) {
+	dec := json.NewDecoder(bytes.NewReader(raw))
+	dec.UseNumber()
+	var body map[string]any
+	if err := dec.Decode(&body); err != nil || body == nil {
+		return "", fail(400, "invalid request")
+	}
+	var extra any
+	if err := dec.Decode(&extra); !errors.Is(err, io.EOF) {
+		return "", fail(400, "invalid request")
+	}
+	canonical, err := json.Marshal(body)
+	if err != nil {
+		return "", err
+	}
+	sum := sha256.Sum256(canonical)
+	return hex.EncodeToString(sum[:]), nil
+}
+
+func launchRequestBody(w http.ResponseWriter, r *http.Request, dst any) (string, error) {
+	raw, err := io.ReadAll(http.MaxBytesReader(w, r.Body, 64<<10))
+	if err != nil {
+		return "", fail(400, "invalid request")
+	}
+	copyRequest := *r
+	copyRequest.Body = io.NopCloser(bytes.NewReader(raw))
+	if err := decode(w, &copyRequest, dst); err != nil {
+		return "", err
+	}
+	return canonicalBodyDigest(raw)
+}
+
+func launchKey(r *http.Request) (string, error) {
+	key := r.Header.Get("Idempotency-Key")
+	if !uuidRE.MatchString(key) {
+		return "", fail(400, "Idempotency-Key must be a UUID")
+	}
+	return key, nil
+}
+
+// launchReplay runs under the handoff lock after the AEON-169 routed-principal
+// check. The original response is returned even if the handoff has since closed.
+func (m *Module) launchReplay(ctx context.Context, tx pgx.Tx, h Handoff, p tenant.Principal, action, key, bodyDigest string, dst any) (bool, error) {
+	var storedAction, storedPrincipal, storedDigest string
+	var response []byte
+	err := tx.QueryRow(ctx, `SELECT action,principal_id::text,body_digest_sha256,response FROM stage_launch_request_receipts WHERE handoff_id=$1::uuid AND idempotency_key=$2::uuid`, h.ID, key).Scan(&storedAction, &storedPrincipal, &storedDigest, &response)
+	if errors.Is(err, pgx.ErrNoRows) {
+		return false, nil
+	}
+	if err != nil {
+		return false, err
+	}
+	if storedAction != action || storedPrincipal != p.ID || storedDigest != bodyDigest {
+		return true, fail(409, "idempotency_conflict")
+	}
+	if h.Result != nil && !m.clock().Before(h.Result.CompletedAt.Add(24*time.Hour)) {
+		return true, fail(409, "idempotency_conflict")
+	}
+	if err := json.Unmarshal(response, dst); err != nil {
+		return true, err
+	}
+	return true, nil
+}
+
+func saveLaunchReceipt(ctx context.Context, tx pgx.Tx, p tenant.Principal, handoffID, action, key, bodyDigest string, response any) error {
+	raw, err := json.Marshal(response)
+	if err != nil {
+		return err
+	}
+	_, err = tx.Exec(ctx, `INSERT INTO stage_launch_request_receipts(tenant_id,handoff_id,action,principal_id,idempotency_key,body_digest_sha256,response) VALUES($1::uuid,$2::uuid,$3,$4::uuid,$5::uuid,$6,$7::jsonb)`, p.TenantID, handoffID, action, p.ID, key, bodyDigest, raw)
+	return err
+}
+
+// AdmitLaunch accepts an optional UUID key for in-process callers. HTTP always
+// supplies it; an omitted key retains the original in-process interface.
+func (m *Module) AdmitLaunch(ctx context.Context, p tenant.Principal, authorization, handoffID string, a Artifact, key ...string) (LaunchAdmission, error) {
+	body, err := json.Marshal(a)
+	if err != nil {
+		return LaunchAdmission{}, err
+	}
+	bodyDigest, err := canonicalBodyDigest(body)
+	if err != nil {
+		return LaunchAdmission{}, err
+	}
+	requestKey := ""
+	if len(key) > 0 {
+		requestKey = key[0]
+	}
+	return m.admitLaunchRequest(ctx, p, authorization, handoffID, a, requestKey, bodyDigest)
+}
+
+func (m *Module) admitLaunchRequest(ctx context.Context, p tenant.Principal, authorization, handoffID string, a Artifact, key, bodyDigest string) (LaunchAdmission, error) {
 	var out LaunchAdmission
-	if !uuidRE.MatchString(handoffID) || !hexRE.MatchString(a.DigestSHA256) || !hexRE.MatchString(a.ManifestDigestSHA256) || a.VersionScheme == "" || a.Version == "" || a.ReleaseChannel == "" || a.ReleaseSequence < 1 || a.CommitDigest == "" || a.ManifestCoordinate == "" {
+	if (key != "" && !uuidRE.MatchString(key)) || !uuidRE.MatchString(handoffID) {
 		return out, fail(400, "invalid launch artifact")
 	}
 	err := db.InTenant(tenant.WithPrincipal(ctx, p), m.pool, p.TenantID, func(tx pgx.Tx) error {
@@ -74,6 +181,18 @@ func (m *Module) AdmitLaunch(ctx context.Context, p tenant.Principal, authorizat
 		}
 		if err := requireRoutedPrincipal(ctx, tx, p, h); err != nil {
 			return err
+		}
+		if key != "" {
+			found, err := m.launchReplay(ctx, tx, h, p, "admit", key, bodyDigest, &out)
+			if found || err != nil {
+				return err
+			}
+			if h.Admission != nil {
+				return fail(409, "launch admission already exists")
+			}
+		}
+		if !hexRE.MatchString(a.DigestSHA256) || !hexRE.MatchString(a.ManifestDigestSHA256) || a.VersionScheme == "" || a.Version == "" || a.ReleaseChannel == "" || a.ReleaseSequence < 1 || a.CommitDigest == "" || a.ManifestCoordinate == "" {
+			return fail(400, "invalid launch artifact")
 		}
 		if h.Operation != "deploy" || h.PluginID != "pharos" || h.Result != nil || closedHandoff(h.State) {
 			return fail(409, "not an active Pharos deployment")
@@ -151,7 +270,10 @@ func (m *Module) AdmitLaunch(ctx context.Context, p tenant.Principal, authorizat
 		out.ArtifactDigestSHA256 = a.DigestSHA256
 		out.AuthorityEpoch = h.AuthorityEpoch
 		_, err = events.Append(ctx, tx, p, events.Change{Type: "stage_handoff.launch_admitted", NodeID: &h.ReleaseNodeID, After: map[string]any{"handoff_id": h.ID, "admission_id": out.ID}})
-		return err
+		if err != nil || key == "" {
+			return err
+		}
+		return saveLaunchReceipt(ctx, tx, p, h.ID, "admit", key, bodyDigest, out)
 	})
 	return out, err
 }
@@ -195,12 +317,18 @@ func (m *Module) admitLaunch(w http.ResponseWriter, r *http.Request) {
 		respond(w, 0, nil, fail(404, "handoff not found"))
 		return
 	}
-	var in Artifact
-	if err := decode(w, r, &in); err != nil {
+	key, err := launchKey(r)
+	if err != nil {
 		respond(w, 0, nil, err)
 		return
 	}
-	out, err := m.AdmitLaunch(r.Context(), p, r.Header.Get("Authorization"), id, in)
+	var in Artifact
+	bodyDigest, err := launchRequestBody(w, r, &in)
+	if err != nil {
+		respond(w, 0, nil, err)
+		return
+	}
+	out, err := m.admitLaunchRequest(r.Context(), p, r.Header.Get("Authorization"), id, in, key, bodyDigest)
 	respond(w, http.StatusOK, out, err)
 }
 
@@ -214,32 +342,82 @@ func (m *Module) consumeLaunch(w http.ResponseWriter, r *http.Request) {
 		respond(w, 0, nil, fail(404, "handoff not found"))
 		return
 	}
-	var in struct {
-		AdmissionID string `json:"admission_id"`
-	}
-	if err := decode(w, r, &in); err != nil {
-		respond(w, 0, nil, err)
-		return
-	}
-	err := m.ConsumeLaunch(r.Context(), p, r.Header.Get("Authorization"), id, in.AdmissionID)
+	key, err := launchKey(r)
 	if err != nil {
 		respond(w, 0, nil, err)
 		return
 	}
-	respond(w, http.StatusOK, map[string]any{"handoff_id": id, "admission_id": in.AdmissionID, "consumed": true}, nil)
+	var in struct {
+		AdmissionID string `json:"admission_id"`
+	}
+	bodyDigest, err := launchRequestBody(w, r, &in)
+	if err != nil {
+		respond(w, 0, nil, err)
+		return
+	}
+	out, err := m.consumeLaunchRequest(r.Context(), p, r.Header.Get("Authorization"), id, in.AdmissionID, key, bodyDigest)
+	respond(w, http.StatusOK, out, err)
 }
 
 func (m *Module) ConsumeLaunch(ctx context.Context, p tenant.Principal, authorization, handoffID, admissionID string) error {
-	if !uuidRE.MatchString(admissionID) || !uuidRE.MatchString(handoffID) {
-		return fail(404, "admission not found")
+	_, err := m.consumeLaunchRequest(ctx, p, authorization, handoffID, admissionID, "", "")
+	return err
+}
+
+type LaunchConsumption struct {
+	HandoffID   string    `json:"handoff_id"`
+	AdmissionID string    `json:"admission_id"`
+	Consumed    bool      `json:"consumed"`
+	ConsumedAt  time.Time `json:"consumed_at"`
+}
+
+// ConsumeLaunchWithKey gives in-process adapters the same durable receipt as
+// HTTP. The key and canonical request digest are bound in one transaction.
+func (m *Module) ConsumeLaunchWithKey(ctx context.Context, p tenant.Principal, authorization, handoffID, admissionID, key string) (LaunchConsumption, error) {
+	body, err := json.Marshal(struct {
+		AdmissionID string `json:"admission_id"`
+	}{admissionID})
+	if err != nil {
+		return LaunchConsumption{}, err
 	}
-	return db.InTenant(tenant.WithPrincipal(ctx, p), m.pool, p.TenantID, func(tx pgx.Tx) error {
+	digest, err := canonicalBodyDigest(body)
+	if err != nil {
+		return LaunchConsumption{}, err
+	}
+	return m.consumeLaunchRequest(ctx, p, authorization, handoffID, admissionID, key, digest)
+}
+
+func (m *Module) consumeLaunchRequest(ctx context.Context, p tenant.Principal, authorization, handoffID, admissionID, key, bodyDigest string) (LaunchConsumption, error) {
+	var out LaunchConsumption
+	if !uuidRE.MatchString(handoffID) {
+		return out, fail(404, "admission not found")
+	}
+	if key != "" && !uuidRE.MatchString(key) {
+		return out, fail(400, "Idempotency-Key must be a UUID")
+	}
+	err := db.InTenant(tenant.WithPrincipal(ctx, p), m.pool, p.TenantID, func(tx pgx.Tx) error {
 		if err := requireActiveAgent(ctx, tx, p); err != nil {
 			return err
 		}
+		h, err := loadHandoff(ctx, tx, handoffID, true)
+		if err != nil {
+			return err
+		}
+		if err := requireRoutedPrincipal(ctx, tx, p, h); err != nil {
+			return err
+		}
+		if key != "" {
+			found, err := m.launchReplay(ctx, tx, h, p, "consume", key, bodyDigest, &out)
+			if found || err != nil {
+				return err
+			}
+		}
+		if !uuidRE.MatchString(admissionID) {
+			return fail(404, "admission not found")
+		}
 		var id, storedBinding, storedArtifact string
 		var storedEpoch int64
-		err := tx.QueryRow(ctx, `SELECT handoff_id::text, binding_digest_sha256, artifact_digest_sha256, authority_epoch FROM stage_launch_admissions WHERE id=$1::uuid FOR UPDATE`, admissionID).Scan(&id, &storedBinding, &storedArtifact, &storedEpoch)
+		err = tx.QueryRow(ctx, `SELECT handoff_id::text, binding_digest_sha256, artifact_digest_sha256, authority_epoch FROM stage_launch_admissions WHERE id=$1::uuid FOR UPDATE`, admissionID).Scan(&id, &storedBinding, &storedArtifact, &storedEpoch)
 		if errors.Is(err, pgx.ErrNoRows) {
 			return fail(404, "admission not found")
 		}
@@ -248,13 +426,6 @@ func (m *Module) ConsumeLaunch(ctx context.Context, p tenant.Principal, authoriz
 		}
 		if id != handoffID {
 			return fail(404, "admission not found")
-		}
-		h, err := loadHandoff(ctx, tx, id, true)
-		if err != nil {
-			return err
-		}
-		if err := requireRoutedPrincipal(ctx, tx, p, h); err != nil {
-			return err
 		}
 		enabled, err := plugins.Enabled(ctx, tx, m.registry, p.TenantID, "pharos", "deploy")
 		if err != nil {
@@ -300,16 +471,23 @@ func (m *Module) ConsumeLaunch(ctx context.Context, p tenant.Principal, authoriz
 		if binding != storedBinding {
 			return fail(409, "launch binding drifted")
 		}
-		tag, err := tx.Exec(ctx, `UPDATE stage_launch_admissions SET consumed_at=now() WHERE id=$1::uuid AND handoff_id=$2::uuid AND authority_epoch=$3 AND consumed_at IS NULL AND expires_at>now()`, admissionID, id, h.AuthorityEpoch)
+		err = tx.QueryRow(ctx, `UPDATE stage_launch_admissions SET consumed_at=now(),consumed_by_principal_id=$4::uuid WHERE id=$1::uuid AND handoff_id=$2::uuid AND authority_epoch=$3 AND consumed_at IS NULL AND expires_at>now() RETURNING consumed_at`, admissionID, id, h.AuthorityEpoch, p.ID).Scan(&out.ConsumedAt)
+		if errors.Is(err, pgx.ErrNoRows) {
+			return fail(409, "launch admission is spent or expired")
+		}
 		if err != nil {
 			return err
 		}
-		if tag.RowsAffected() != 1 {
-			return fail(409, "launch admission is spent or expired")
-		}
+		out.HandoffID = h.ID
+		out.AdmissionID = admissionID
+		out.Consumed = true
 		_, err = events.Append(ctx, tx, p, events.Change{Type: "stage_handoff.launch_consumed", NodeID: &h.ReleaseNodeID, After: map[string]any{"handoff_id": h.ID, "admission_id": admissionID}})
-		return err
+		if err != nil || key == "" {
+			return err
+		}
+		return saveLaunchReceipt(ctx, tx, p, h.ID, "consume", key, bodyDigest, out)
 	})
+	return out, err
 }
 func consumedAdmission(ctx context.Context, tx pgx.Tx, h Handoff, a Artifact) error {
 	binding, err := recomputeLaunchBinding(ctx, tx, h, a.DigestSHA256, false)
