@@ -13,9 +13,9 @@ const chips = (page: Page) => sheet(page).locator('.detail .tickets')
 const TITLE = 'Connect Hetzner Cloud for managed provisioning'
 
 // The second release names AEON-74 (no such ticket here) and PHAROS-11 (a ticket here).
-async function open(page: Page) {
+async function open(page: Page, data = fixtures()) {
   const history = releaseHistory()
-  const calls = await mockWork(page, fixtures())
+  const calls = await mockWork(page, data)
   await mockReleases(page, history)
   await page.goto(`/releases/${history.releases[1].version}`)
   await expect(chips(page).getByRole('link', { name: `PHAROS-11: ${TITLE}` })).toBeVisible()
@@ -114,6 +114,73 @@ test('on a phone the ticket is a full-screen sheet over the history', async ({ p
   await panel(page).getByRole('button', { name: 'Close ticket details' }).click()
   await expect(panel(page)).toHaveCount(0)
   await expect(chip).toBeFocused()
+})
+
+// The server now answers no key (access lost, another workspace): registered last, so it wins.
+const answerNothing = (page: Page) => page.route('**/api/nodes/lookup**', route => route.fulfill({ json: { items: [] } }))
+
+test('a lost project access takes the link and the open ticket away at the next access check', async ({ page }) => {
+  const { calls } = await open(page)
+  const chip = chips(page).getByRole('link', { name: `PHAROS-11: ${TITLE}` })
+  await chip.click()
+  await expect(panel(page).getByRole('heading', { name: TITLE })).toBeVisible()
+  const before = calls.filter(call => call.path === '/api/nodes/lookup').length
+  await answerNothing(page)
+  // Window focus asks for the same person's access again (as any navigation does).
+  await page.evaluate(() => window.dispatchEvent(new Event('focus')))
+  await expect(chips(page).getByRole('link')).toHaveCount(0)
+  await expect(chips(page).getByText('PHAROS-11', { exact: true })).toHaveJSProperty('tagName', 'SPAN')
+  await expect(panel(page).getByRole('heading', { name: 'This ticket could not be opened' })).toBeVisible()
+  await expect(sheet(page).getByText(TITLE)).toHaveCount(0)
+  // Answered by the server under the new access, not from the earlier answers.
+  expect(calls.filter(call => call.path === '/api/nodes/lookup').length).toBe(before)
+})
+
+test('another person or workspace starts without the earlier answers', async ({ page }) => {
+  const { calls } = await open(page)
+  await expect(chips(page).getByRole('link')).toHaveCount(1)
+  const asked = calls.filter(call => call.path === '/api/nodes/lookup' && call.query.has('keys')).length
+  let lookups = 0
+  await page.route('**/api/nodes/lookup**', route => { lookups++; return route.fulfill({ json: { items: [] } }) })
+  await page.route('**/api/me', route => route.fulfill({ json: { principal: { id: '33333333-3333-4333-8333-333333333333', name: 'Ola Nordmann', kind: 'person', roles: ['member'] }, tenant: { id: 't2', name: 'Other Studio' } } }))
+  // Any navigation refreshes the session: j and k step away and back.
+  await page.keyboard.press('j')
+  await page.keyboard.press('k')
+  await expect(chips(page).getByText('PHAROS-11', { exact: true })).toHaveJSProperty('tagName', 'SPAN')
+  await expect(sheet(page).getByRole('link', { name: new RegExp(TITLE) })).toHaveCount(0)
+  expect(lookups).toBeGreaterThan(0)
+  expect(calls.filter(call => call.path === '/api/nodes/lookup' && call.query.has('keys')).length).toBe(asked)
+})
+
+test('a toast raised in the panel stays visible and actionable after the history closes', async ({ page }) => {
+  await page.setViewportSize({ width: 1440, height: 900 })
+  const { calls } = await open(page)
+  await chips(page).getByRole('link', { name: `PHAROS-11: ${TITLE}` }).click()
+  await panel(page).getByRole('button', { name: /Status: In progress/ }).click()
+  await page.getByRole('menuitemradio', { name: 'Done' }).click()
+  const toast = page.locator('.toast').filter({ hasText: 'PHAROS-11 is now Done' })
+  await expect(toast).toBeVisible()
+  await sheet(page).getByRole('button', { name: 'Close release history' }).click()
+  await expect(sheet(page)).toHaveCount(0)
+  await expect(toast).toBeVisible()
+  await toast.getByRole('button', { name: 'Undo' }).click()
+  await expect(toast).toHaveCount(0)
+  const patches = calls.filter(call => call.method === 'PATCH' && call.path === '/api/nodes/n-1').map(call => (call.body as { state?: string }).state)
+  expect(patches).toEqual(['done', 'in-progress'])
+})
+
+test('the status menu offers the project’s own states, as the project list does', async ({ page }) => {
+  // PHAROS spells in-progress with a hyphen; the ticket itself is in the backlog.
+  const data = fixtures()
+  data.nodes.find(n => n.key === 'PHAROS-11')!.state = 'backlog'
+  data.nodes.find(n => n.key === 'PHAROS-12')!.state = 'in-progress'
+  const { calls } = await open(page, data)
+  await chips(page).getByRole('link', { name: `PHAROS-11: ${TITLE}` }).click()
+  await panel(page).getByRole('button', { name: /Status: Backlog/ }).click()
+  await page.getByRole('menuitemradio', { name: 'In progress' }).click()
+  await expect(panel(page).getByRole('button', { name: /Status: In progress/ })).toBeVisible()
+  const patch = calls.find(call => call.method === 'PATCH' && call.path === '/api/nodes/n-1')
+  expect((patch?.body as { state?: string }).state).toBe('in-progress')
 })
 
 for (const colorScheme of ['light', 'dark'] as const) {

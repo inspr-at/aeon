@@ -22,10 +22,30 @@ type nodePreview struct {
 	ProjectID    string `json:"project_id,omitempty"`
 }
 
-// lookupKeyPattern is the node key shape (see node_key_aliases); keys are matched upper-cased.
+// lookupKeyPattern and lookupKeyMax are the stored key shape and length
+// (nodes.key and node_key_aliases.key); keys are matched upper-cased.
 var lookupKeyPattern = regexp.MustCompile(`^[A-Z][A-Z0-9]{1,9}-[1-9][0-9]*$`)
 
-const lookupLimit = 100
+const (
+	lookupKeyMax = 30
+	// lookupLimit bounds the raw inputs of each list, duplicates included.
+	lookupLimit = 100
+)
+
+// lookupParts splits repeated and comma-separated values, refusing more than
+// lookupLimit raw parts before any of them is parsed.
+func lookupParts(values []string) ([]string, bool) {
+	parts := make([]string, 0, lookupLimit)
+	for _, raw := range values {
+		for _, part := range strings.Split(raw, ",") {
+			if len(parts) == lookupLimit {
+				return nil, false
+			}
+			parts = append(parts, strings.TrimSpace(part))
+		}
+	}
+	return parts, true
+}
 
 // handleLookupNodes resolves relation chips and ticket keys (release notes)
 // with bounded queries. It returns only live nodes visible in the caller's
@@ -41,41 +61,39 @@ func (m *Module) handleLookupNodes(w http.ResponseWriter, r *http.Request) {
 		writeErr(w, badRequest("ids or keys are required"))
 		return
 	}
-	ids := make([]string, 0, lookupLimit)
+	idParts, ok := lookupParts(values)
+	if !ok {
+		writeErr(w, badRequest("too many ids"))
+		return
+	}
+	keyParts, ok := lookupParts(keyValues)
+	if !ok {
+		writeErr(w, badRequest("too many keys"))
+		return
+	}
+	ids := make([]string, 0, len(idParts))
 	seen := make(map[string]bool)
-	for _, raw := range values {
-		for _, part := range strings.Split(raw, ",") {
-			id, valid := parseUUID(strings.TrimSpace(part))
-			if !valid {
-				writeErr(w, badRequest("invalid ids"))
-				return
-			}
-			if !seen[id] {
-				ids = append(ids, id)
-				seen[id] = true
-				if len(ids) > lookupLimit {
-					writeErr(w, badRequest("too many ids"))
-					return
-				}
-			}
+	for _, part := range idParts {
+		id, valid := parseUUID(part)
+		if !valid {
+			writeErr(w, badRequest("invalid ids"))
+			return
+		}
+		if !seen[id] {
+			ids = append(ids, id)
+			seen[id] = true
 		}
 	}
-	keys := make([]string, 0, lookupLimit)
-	for _, raw := range keyValues {
-		for _, part := range strings.Split(raw, ",") {
-			key := strings.ToUpper(strings.TrimSpace(part))
-			if !lookupKeyPattern.MatchString(key) {
-				writeErr(w, badRequest("invalid keys"))
-				return
-			}
-			if !seen[key] {
-				keys = append(keys, key)
-				seen[key] = true
-				if len(keys) > lookupLimit {
-					writeErr(w, badRequest("too many keys"))
-					return
-				}
-			}
+	keys := make([]string, 0, len(keyParts))
+	for _, part := range keyParts {
+		key := strings.ToUpper(part)
+		if len(key) > lookupKeyMax || !lookupKeyPattern.MatchString(key) {
+			writeErr(w, badRequest("invalid keys"))
+			return
+		}
+		if !seen[key] {
+			keys = append(keys, key)
+			seen[key] = true
 		}
 	}
 	items := make([]nodePreview, 0, len(ids)+len(keys))

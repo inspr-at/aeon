@@ -890,17 +890,17 @@ paths:
   /nodes/lookup:
     get:
       operationId: lookupNodes
-      description: Resolve up to 100 live node previews by ID and up to 100 by key in one tenant-scoped request (ids, keys or both). Missing or deleted nodes are omitted.
+      description: Resolve up to 100 live node previews by ID and up to 100 by key in one tenant-scoped request (ids, keys or both). Missing, deleted and invisible nodes (outside the caller's projects) are omitted alike.
       security: *auth
       parameters:
         - name: ids
           in: query
-          description: Comma-separated node UUIDs.
+          description: Comma-separated or repeated node UUIDs; at most 100 values, duplicates included, or 400.
           schema: {type: array, minItems: 1, maxItems: 100, items: {type: string, format: uuid}}
         - name: keys
           in: query
-          description: Comma-separated node keys (case-insensitive). A current key wins; an earlier key (left by a project move) resolves to the node that carried it.
-          schema: {type: array, minItems: 1, maxItems: 100, items: {type: string, pattern: '^[A-Za-z][A-Za-z0-9]{1,9}-[1-9][0-9]*$'}}
+          description: Comma-separated or repeated node keys (case-insensitive, at most 30 characters, the stored key limit); at most 100 values, duplicates included, or 400. A current key wins; an earlier key (left by a project move) resolves to the node that carried it.
+          schema: {type: array, minItems: 1, maxItems: 100, items: {type: string, maxLength: 30, pattern: '^[A-Za-z][A-Za-z0-9]{1,9}-[1-9][0-9]*$'}}
       responses:
         '200':
           description: ID previews in request order, then key previews in request order.

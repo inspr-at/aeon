@@ -8,10 +8,10 @@ export const TICKET_PEEK: InjectionKey<TicketPeek> = Symbol('ticket-peek')
 </script>
 
 <script setup lang="ts">
-import { computed, inject, watch } from 'vue'
+import { computed, inject, onBeforeUnmount, watchEffect } from 'vue'
 import { useRouter } from 'vue-router'
 import { brand } from '../../lib/brand'
-import { normalKey, ticketRef, wantTicketKey } from '../../lib/ticketLinks'
+import { normalKey, showingTicketKeys, ticketRef, wantTicketKey } from '../../lib/ticketLinks'
 import { useProjects } from '../../stores/projects'
 
 // One ticket key in release notes: a link to the ticket when this workspace has
@@ -22,7 +22,9 @@ void projects.load()
 const router = useRouter()
 const peek = inject(TICKET_PEEK, null)
 
-watch(() => props.ticketKey, key => wantTicketKey(key), { immediate: true })
+// Asks for its key, and again after an access change dropped the answer.
+watchEffect(() => { if (ticketRef(props.ticketKey) === undefined) wantTicketKey(props.ticketKey) })
+onBeforeUnmount(showingTicketKeys())
 const ticket = computed(() => ticketRef(props.ticketKey))
 const href = computed(() => {
   const project = ticket.value ? projects.byId(ticket.value.projectId) : undefined

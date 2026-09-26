@@ -11,6 +11,7 @@ import (
 
 	"github.com/inspr-at/aeon/internal/db"
 	"github.com/inspr-at/aeon/internal/dbtest"
+	"github.com/inspr-at/aeon/internal/tenant"
 	"github.com/jackc/pgx/v5"
 )
 
@@ -83,18 +84,86 @@ func TestLookupNodesByKeyResolvesProjectAndEarlierKeys(t *testing.T) {
 	if len(mixed.Items) != 2 || mixed.Items[0].ID != project.ID || mixed.Items[0].RequestedKey != "" || mixed.Items[1].RequestedKey != ticket.Key {
 		t.Fatalf("mixed lookup: %+v", mixed.Items)
 	}
-	for _, suffix := range []string{"?keys=", "?keys=REL", "?keys=REL-0", "?keys=" + url.QueryEscape("REL-1,x y")} {
+	// Keys longer than the stored limit (30) are refused, however well formed.
+	long := "REL-" + strings.Repeat("9", 27)
+	for _, suffix := range []string{"?keys=", "?keys=REL", "?keys=REL-0", "?keys=" + url.QueryEscape("REL-1,x y"), "?keys=" + long} {
 		status, _ := call(t, &p, http.MethodGet, "/api/nodes/lookup"+suffix, "")
 		if status != http.StatusBadRequest {
 			t.Fatalf("%q returned %d", suffix, status)
 		}
 	}
+	if status, _ := call(t, &p, http.MethodGet, "/api/nodes/lookup?keys="+long[:30], ""); status != http.StatusOK {
+		t.Fatalf("a 30-character key returned %d", status)
+	}
 	many := make([]string, 101)
 	for i := range many {
 		many[i] = fmt.Sprintf("REL-%d", i+1)
 	}
-	status, _ = call(t, &p, http.MethodGet, "/api/nodes/lookup?keys="+strings.Join(many, ","), "")
-	if status != http.StatusBadRequest {
-		t.Fatalf("101 keys returned %d", status)
+	// 101 raw inputs are refused whether distinct, repeated, or split over parameters.
+	repeated := strings.TrimSuffix(strings.Repeat(ticket.Key+",", 101), ",")
+	for name, query := range map[string]string{
+		"distinct keys":   "keys=" + strings.Join(many, ","),
+		"duplicate keys":  "keys=" + repeated,
+		"repeated params": "keys=" + strings.Join(many[:60], ",") + "&keys=" + strings.Join(many[60:], ","),
+		"duplicate ids":   "ids=" + strings.TrimSuffix(strings.Repeat(project.ID+",", 101), ","),
+	} {
+		if status, _ := call(t, &p, http.MethodGet, "/api/nodes/lookup?"+query, ""); status != http.StatusBadRequest {
+			t.Fatalf("101 %s returned %d", name, status)
+		}
+	}
+	if status, _ := call(t, &p, http.MethodGet, "/api/nodes/lookup?keys="+strings.Join(many[:100], ","), ""); status != http.StatusOK {
+		t.Fatalf("100 keys returned %d", status)
+	}
+}
+
+// A caller in the same tenant who cannot see a project (a guest bound to
+// another one) gets the same answer for that project's current and earlier
+// keys as for keys that exist nowhere: no existence leak.
+func TestLookupNodesByKeyHidesProjectsTheCallerCannotSee(t *testing.T) {
+	member := newPrincipal(t, "lookup-keys-visibility")
+	projectKind := kindBySlug(t, member, "project")
+	ticketKind := kindBySlug(t, member, "ticket")
+	open := mustNode(t, member, `{"kind_id":"`+projectKind.ID+`","title":"Open","fields":{"project_key":"OPN"}}`)
+	closed := mustNode(t, member, `{"kind_id":"`+projectKind.ID+`","title":"Closed","fields":{"project_key":"HID"}}`)
+	shown := mustNode(t, member, `{"kind_id":"`+ticketKind.ID+`","title":"Shown","parent_id":"`+open.ID+`","key_prefix":"OPN"}`)
+	hidden := mustNode(t, member, `{"kind_id":"`+ticketKind.ID+`","title":"Hidden","parent_id":"`+closed.ID+`","key_prefix":"HID"}`)
+	if err := db.InTenant(dbtest.Seed(t.Context()), appPool, member.TenantID, func(tx pgx.Tx) error {
+		_, err := tx.Exec(t.Context(), `INSERT INTO node_key_aliases(tenant_id,key,node_id) VALUES($1::uuid,'GONE-3',$2::uuid)`, member.TenantID, hidden.ID)
+		return err
+	}); err != nil {
+		t.Fatal(err)
+	}
+	guest := tenant.Principal{TenantID: member.TenantID, Kind: tenant.Person, Name: "Guest"}
+	if err := testDB.Admin.QueryRow(t.Context(), `INSERT INTO principals(tenant_id,kind,name) VALUES($1,'person','Guest') RETURNING id::text`, member.TenantID).Scan(&guest.ID); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := testDB.Admin.Exec(t.Context(), `INSERT INTO role_bindings(tenant_id,principal_id,role_id,scope_type,scope_id) SELECT $1,$2,id,'project',$3 FROM roles WHERE tenant_id=$1 AND key='guest'`, member.TenantID, guest.ID, open.ID); err != nil {
+		t.Fatal(err)
+	}
+	lookup := func(who tenant.Principal, keys string) (int, string) {
+		t.Helper()
+		status, body := call(t, &who, http.MethodGet, "/api/nodes/lookup?keys="+url.QueryEscape(keys), "")
+		return status, strings.TrimSpace(string(body))
+	}
+	// The member sees both, so the hidden key and alias really exist.
+	if _, body := lookup(member, hidden.Key+",GONE-3"); !strings.Contains(body, hidden.ID) || !strings.Contains(body, `"requested_key":"GONE-3"`) {
+		t.Fatalf("member lookup: %s", body)
+	}
+	unknownStatus, unknown := lookup(guest, "NOPE-41,NOPE-42")
+	for _, keys := range []string{hidden.Key + ",GONE-3", "GONE-3," + hidden.Key} {
+		if status, body := lookup(guest, keys); status != unknownStatus || body != unknown {
+			t.Fatalf("hidden %s: %d %s, unknown keys: %d %s", keys, status, body, unknownStatus, unknown)
+		}
+	}
+	if unknownStatus != http.StatusOK || unknown != `{"items":[]}` {
+		t.Fatalf("unknown keys: %d %s", unknownStatus, unknown)
+	}
+	// Mixed with a visible key, only the visible one answers.
+	status, body := call(t, &guest, http.MethodGet, "/api/nodes/lookup?keys="+url.QueryEscape(hidden.Key+","+shown.Key+",GONE-3"), "")
+	page := decode[struct {
+		Items []nodePreview `json:"items"`
+	}](t, status, body, http.StatusOK)
+	if len(page.Items) != 1 || page.Items[0].ID != shown.ID || page.Items[0].ProjectID != open.ID {
+		t.Fatalf("guest mixed lookup: %+v", page.Items)
 	}
 }

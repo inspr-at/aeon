@@ -57,20 +57,30 @@ async function resolve() {
   }
 }
 watch(current, resolve, { immediate: true })
+// Access changed (another person or workspace, a lost project): the cached key
+// went or now answers differently, so the ticket is resolved again from scratch.
+watch(() => ticketRef(current.value)?.id ?? null, (id, before) => { if (id !== before && !resolving.value) void resolve() })
 
 // ---------- Who may do what, and to whom ----------
 const scope = computed(() => projectId.value ?? undefined)
 const me = computed(() => session.identity ? { id: session.identity.principal.id, name: session.identity.principal.name } : null)
 const people = ref<{ id: string; name: string }[]>([])
+// The states the project's work uses, as the project list offers them (a workspace
+// spelling in-progress keeps it in the status menu).
+const projectStates = ref<string[]>([])
+const knownStates = computed(() => [...new Set([...projectStates.value, ...(item.value ? [item.value.state] : [])])])
 watch(projectId, async id => {
   people.value = []
+  projectStates.value = []
   if (!id) return
   try {
-    const page = await listNodes({ within: id, kind: WORK_KINDS, facets: ['assignee'], limit: 1 })
+    const page = await listNodes({ within: id, kind: WORK_KINDS, facets: ['assignee', 'state'], limit: 1 })
+    if (projectId.value !== id) return
+    projectStates.value = Object.keys(page.facets?.state ?? {})
     const ids = Object.keys(page.facets?.assignee ?? {}).filter(value => value !== 'none')
     await list.resolveNames(ids)
     if (projectId.value === id) people.value = ids.map(person => ({ id: person, name: list.names.get(person) ?? 'Someone' }))
-  } catch { /* the menu still offers you and Unassigned */ }
+  } catch { /* the menus still offer you, Unassigned and the usual states */ }
 }, { immediate: true })
 
 // ---------- Actions ----------
@@ -138,7 +148,7 @@ defineExpose({
       @close="requestClose" @expand="expand" @new-tab="newTab" @open-key="openKey" @trail-back="trailBack" @retry="resolve"
       @status="anchor => { statusAnchor = anchor }" @removed="emit('close')"
     />
-    <StatusMenu v-if="statusAnchor && item" :anchor="statusAnchor" :current="item.state" :known-states="[item.state]" :ticket-key="item.key" @choose="chooseStatus" @close="closeStatus" />
+    <StatusMenu v-if="statusAnchor && item" :anchor="statusAnchor" :current="item.state" :known-states="knownStates" :ticket-key="item.key" @choose="chooseStatus" @close="closeStatus" />
   </div>
 </template>
 

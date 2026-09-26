@@ -55,12 +55,20 @@ function ask(projectId?: string): Promise<void> {
   return request
 }
 
-export function clearPermissions(): void { epoch++; revoked = false; cache.clear(); requests.clear(); asked.clear(); revision.value++ }
+// Caches derived from what the caller may see (ticket keys in release notes)
+// follow the permissions: 'reset' when the person, workspace or session changes
+// (drop everything now), 'refresh' when the same person's access is asked again.
+type AccessListener = (change: 'reset' | 'refresh') => void
+const accessListeners = new Set<AccessListener>()
+export function onAccessChange(listener: AccessListener): () => void { accessListeners.add(listener); return () => accessListeners.delete(listener) }
+function notifyAccess(change: 'reset' | 'refresh') { for (const listener of accessListeners) listener(change) }
+
+export function clearPermissions(): void { epoch++; revoked = false; cache.clear(); requests.clear(); asked.clear(); revision.value++; notifyAccess('reset') }
 // The session ended (a 401): nothing is granted any more and nothing is asked
 // until the session is refreshed, so the page keeps its drafts without a request
 // loop. Every answer in flight is dropped.
 let revoked = false
-export function revokePermissions(): void { epoch++; revoked = true; requests.clear(); for (const key of cache.keys()) cache.set(key, null); revision.value++ }
+export function revokePermissions(): void { epoch++; revoked = true; requests.clear(); for (const key of cache.keys()) cache.set(key, null); revision.value++; notifyAccess('reset') }
 export function permissionsRevoked(): boolean { revision.value; return revoked }
 // Every Access, Settings and permission request that meets a 401 ends up here:
 // grants go at once, and the shell offers sign-in (App.vue).
@@ -73,6 +81,7 @@ export async function accessChanged(): Promise<void> {
   // Scopes still in flight are asked again too: their older answers must not land.
   // A revoked state stays until one of these answers with a 200.
   const keys = new Set(['', ...cache.keys(), ...requests.keys()])
+  notifyAccess('refresh')
   await Promise.all([...keys].map(key => ask(key || undefined)))
 }
 

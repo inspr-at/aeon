@@ -1,15 +1,26 @@
 <!-- SPDX-License-Identifier: AGPL-3.0-only -->
 <script setup lang="ts">
-import { ref, watch } from 'vue'
+import { onBeforeUnmount, ref, watch } from 'vue'
 import { dismiss, toasts } from '../lib/toast'
 import AppIcon from './AppIcon.vue'
 function act(id: number, run: () => void) { dismiss(id); run() }
 // While a modal dialog is open the page under it is inert and hidden behind the
-// top layer: a toast raised then shows inside the topmost modal instead.
+// top layer: toasts show inside the topmost modal instead, and follow it as
+// modals open and close (an Undo stays reachable after its dialog closes).
 const layer = ref<HTMLElement | null>(null)
-watch(() => toasts.length, () => {
+function place() {
   try { layer.value = [...document.querySelectorAll<HTMLElement>('dialog:modal')].at(-1) ?? null } catch { layer.value = null }
+}
+// Watched only while a toast is up: dialogs opening or closing, or leaving the page.
+let dialogs: MutationObserver | null = null
+watch(() => toasts.length, count => {
+  place()
+  if (count && !dialogs && typeof MutationObserver !== 'undefined') {
+    dialogs = new MutationObserver(place)
+    dialogs.observe(document.body, { subtree: true, childList: true, attributes: true, attributeFilter: ['open'] })
+  } else if (!count) { dialogs?.disconnect(); dialogs = null }
 }, { flush: 'pre' })
+onBeforeUnmount(() => dialogs?.disconnect())
 </script>
 
 <template>
