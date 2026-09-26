@@ -1906,6 +1906,7 @@ paths:
   /approvals:
     get:
       operationId: listApprovals
+      description: Workspace readers see their tenant's approvals. Project-only readers see approvals in projects where they hold approvals.read; workspace-level approvals require a workspace binding. agent_name is conditional as documented on Approval.
       security: *auth
       parameters: [{$ref: '#/components/parameters/Limit'}]
       responses:
@@ -4733,11 +4734,11 @@ components:
       allOf:
         - {$ref: '#/components/schemas/ApprovalProposal'}
         - type: object
-          required: [id, agent_principal_id, agent_name, proposed_at, decision, risk]
+          required: [id, agent_principal_id, proposed_at, decision, risk]
           properties:
             id: {type: string, format: uuid}
             agent_principal_id: {type: string, format: uuid}
-            agent_name: {type: [string, 'null'], description: "Display name of the proposing agent principal, joined in the same tenant. Null when that principal is not visible. Does not widen who can see the approval."}
+            agent_name: {type: string, description: "Present only when the caller holds members.read or harness.read at the approval's workspace or project scope and the proposing agent is visible; otherwise omitted."}
             risk: {type: string, enum: [low, medium, high], readOnly: true, description: "Tenant resource or control/deploy/delete scope segments are high; read-only scopes are low; others medium"}
             proposed_at: {type: string, format: date-time}
             decision: {type: [string, 'null'], enum: [approved, denied, null]}

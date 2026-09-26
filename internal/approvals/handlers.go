@@ -20,9 +20,10 @@ import (
 // Revocation stays on the grant and in approval.revoked; this object keeps the
 // contract shape, which has no revoked field.
 type Approval struct {
-	ID                   string    `json:"id"`
-	AgentPrincipalID     string    `json:"agent_principal_id"`
-	AgentName            *string   `json:"agent_name"`
+	ID                   string  `json:"id"`
+	AgentPrincipalID     string  `json:"agent_principal_id"`
+	AgentName            *string `json:"agent_name,omitempty"`
+	projectID            *string
 	Risk                 string    `json:"risk"`
 	Scope                string    `json:"scope"`
 	ResourceKind         string    `json:"resource_kind"`
