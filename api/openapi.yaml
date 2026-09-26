@@ -1622,7 +1622,7 @@ paths:
     post:
       operationId: sendInboxMessage
       summary: Send one durable message to a principal
-      description: Requires inbox.send scope for agents. Idempotency key is unique per sender and must replay the same body, recipient and reply target. Reply target must be visible to the sender. One inbox.sent event is written in the same transaction, without message body in event snapshots.
+      description: Requires inbox.send scope for agents. Idempotency key is unique per sender and must replay the same body, recipient and reply target; an exact retry returns the same message id. Reply target must be visible to the sender. One inbox.sent event is written in the same transaction, without message body in event snapshots.
       security: *auth
       requestBody: {required: true, content: {application/json: {schema: {$ref: '#/components/schemas/InboxSend'}}}}
       responses:
@@ -1643,6 +1643,17 @@ paths:
       responses:
         '200': {description: Inbox event stream, content: {text/event-stream: {schema: {type: string}}}}
         '400': {$ref: '#/components/responses/Error'}
+  /inbox/messages/{messageId}/receipt:
+    get:
+      operationId: getInboxReceipt
+      summary: Read the sender's hand-off receipt
+      description: Sender principal only, with inbox.receipt permission in the workspace or the message's project; agents also require the inbox.receipt key scope. Every authenticated caller without access receives the same 404 as a missing message. Messages created before receipt recording have no receipt and return 404; their historical delivery state is not inferred. New receipts are queued on acceptance. Direct inbox acknowledgement by the recipient, or explicit confirmation by a managed receiver adapter, advances a receipt to handed_off. Acceptance and wake hints do not confirm hand-off. handed_off and failed are terminal; handed_off_at is RFC3339 and is set once at confirmation. An exact idempotent send replay retains its message_id and receipt.
+      security: *auth
+      parameters: [{name: messageId, in: path, required: true, schema: {type: string, format: uuid}}]
+      responses:
+        '200': {description: Hand-off receipt, content: {application/json: {schema: {$ref: '#/components/schemas/InboxReceipt'}}}}
+        '401': {$ref: '#/components/responses/Error'}
+        '404': {$ref: '#/components/responses/Error'}
   /inbox/messages/{messageId}/ack:
     post:
       operationId: ackInboxMessage
@@ -4444,6 +4455,24 @@ components:
         idempotency_key: {type: string, minLength: 1, maxLength: 128}
         reply_to_id: {type: string, format: uuid}
         expires_at: {type: string, format: date-time}
+    InboxReceipt:
+      type: object
+      additionalProperties: false
+      required: [message_id, idempotency_key, tenant, sender_principal_id, recipient_principal_id, target_id, target_version, adapter, address, effective_level, state, handed_off_at, failure_reason]
+      properties:
+        message_id: {type: string, format: uuid}
+        idempotency_key: {type: string}
+        tenant: {type: string, description: Tenant slug}
+        sender_principal_id: {type: string, format: uuid}
+        recipient_principal_id: {type: string, format: uuid}
+        target_id: {type: [string, 'null'], format: uuid, description: Receiver target, null for direct inbox messages}
+        target_version: {type: [integer, 'null'], minimum: 1}
+        adapter: {type: string, description: Receiver adapter, for example grok_bot_routine}
+        address: {type: string}
+        effective_level: {type: string, description: Empty for a direct inbox acknowledgement; simple or steer for a managed adapter hand-off}
+        state: {type: string, enum: [queued, handed_off, failed]}
+        handed_off_at: {type: [string, 'null'], format: date-time, description: RFC3339, set once when the direct recipient acknowledges or the managed adapter confirms}
+        failure_reason: {type: string}
     InboxMessage:
       allOf:
         - {$ref: '#/components/schemas/InboxSend'}

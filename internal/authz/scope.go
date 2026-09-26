@@ -80,6 +80,8 @@ func routeTarget(pattern string, values map[string]string) (kind, id string) {
 		return "relation", values["relationId"]
 	case values["eventId"] != "":
 		return "event", values["eventId"]
+	case pattern == "GET /api/inbox/messages/{messageId}/receipt":
+		return "inbox_receipt", values["messageId"]
 	case strings.HasSuffix(pattern, " /api/node-keys/{key}"):
 		return "node_key", values["key"]
 	}
@@ -133,7 +135,7 @@ func targetProject(ctx context.Context, pool *pgxpool.Pool, kind, id string) (st
 		return "", nil
 	}
 	var query string
-	var arg any = id
+	args := []any{id}
 	switch kind {
 	case "node":
 		if !uuidPattern.MatchString(id) {
@@ -162,14 +164,26 @@ func targetProject(ctx context.Context, pool *pgxpool.Pool, kind, id string) (st
 		if err != nil || n < 1 {
 			return "", nil
 		}
-		arg = n
+		args = []any{n}
 		query = `SELECT n.project_id::text FROM events e JOIN nodes n ON n.tenant_id=e.tenant_id AND n.id=e.node_id WHERE e.id=$1`
+	case "inbox_receipt":
+		if !uuidPattern.MatchString(id) {
+			return "", nil
+		}
+		// A project grant may authorize only the sender's existing receipt.
+		// Keep the lookup inside caller-scoped RLS and let the permission
+		// decision below verify the resolved project binding.
+		query = `SELECT c.project_id::text FROM inbox_compat_messages c
+		  JOIN inbox_receipts r ON r.tenant_id=c.tenant_id AND r.message_id=c.inbox_message_id
+		  JOIN nodes n ON n.tenant_id=c.tenant_id AND n.id=c.project_id
+		  WHERE c.inbox_message_id=$1::uuid AND c.sender_principal_id=$2::uuid`
+		args = []any{id, p.ID}
 	default:
 		return "", nil
 	}
 	var project *string
 	err := db.InTenant(ctx, pool, p.TenantID, func(tx pgx.Tx) error {
-		return tx.QueryRow(ctx, query, arg).Scan(&project)
+		return tx.QueryRow(ctx, query, args...).Scan(&project)
 	})
 	if errors.Is(err, pgx.ErrNoRows) || project == nil {
 		return "", nil

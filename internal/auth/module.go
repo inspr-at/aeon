@@ -121,7 +121,11 @@ func (m *Module) Middleware(next http.Handler) http.Handler {
 		}
 		if kind == credAgent {
 			if scope, controlled := coreAgentScope(r); !controlled || scope == "" || r.URL.Path == "/api/me" && !agentHasScope(p.Scopes, scope) {
-				httpapi.WriteError(w, http.StatusForbidden, "agent key scope required")
+				if receiptRoute(r) {
+					writeReceiptNotFound(w)
+				} else {
+					httpapi.WriteError(w, http.StatusForbidden, "agent key scope required")
+				}
 				return
 			}
 		}
@@ -153,7 +157,11 @@ func (m *Module) Middleware(next http.Handler) http.Handler {
 				}
 				if err := permissionErr; err != nil {
 					if errors.Is(err, authz.ErrForbidden) {
-						httpapi.WriteJSON(w, http.StatusForbidden, map[string]any{"error": "permission denied", "code": "forbidden", "reason": "This action needs a permission you do not hold"})
+						if receiptRoute(r) {
+							writeReceiptNotFound(w)
+						} else {
+							httpapi.WriteJSON(w, http.StatusForbidden, map[string]any{"error": "permission denied", "code": "forbidden", "reason": "This action needs a permission you do not hold"})
+						}
 					} else {
 						writeInternal(w)
 					}
@@ -164,6 +172,18 @@ func (m *Module) Middleware(next http.Handler) http.Handler {
 		}
 		next.ServeHTTP(w, r)
 	})
+}
+
+func receiptRoute(r *http.Request) bool {
+	return r.Pattern == "GET /api/inbox/messages/{messageId}/receipt"
+}
+
+func writeReceiptNotFound(w http.ResponseWriter) {
+	w.Header().Set("Cache-Control", "no-store")
+	httpapi.WriteJSON(w, http.StatusNotFound, struct {
+		Code    string `json:"code"`
+		Message string `json:"message"`
+	}{"not_found", "not found"})
 }
 
 func projectScope(r *http.Request) authz.Scope {
@@ -308,6 +328,10 @@ func coreAgentScope(r *http.Request) (string, bool) {
 			}
 		}
 	case "inbox":
+		// Hand-off proof is narrower than reading the recipient inbox.
+		if read && len(parts) >= 4 && parts[1] == "messages" && parts[3] == "receipt" {
+			return "inbox.receipt", true
+		}
 		if read {
 			return "inbox.read", true
 		}

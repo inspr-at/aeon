@@ -7,11 +7,26 @@
 //	srv.Modules = append(srv.Modules, inbox.New(pool))
 //	go inbox.NewWorker(pool, inbox.WorkerOptions{}).Run(ctx)
 //
-// New returns an httpapi.Module for /api/inbox/messages, /api/inbox/stream
-// and /api/inbox/targets. NewWorker posts webhook wake hints. Both use the
-// server pool. Auth middleware must leave the bearer token on the request:
-// agent sends are allowed only when that token's agent_keys row includes
-// inbox.send. Person sessions are not scope-gated.
+// New returns an httpapi.Module for /api/inbox/messages, /api/inbox/stream,
+// /api/inbox/targets and GET /api/inbox/messages/{messageId}/receipt.
+// NewWorker posts webhook wake hints. Both use the server pool. Auth
+// middleware must leave the bearer token on the request: agent sends are
+// allowed only when that token's agent_keys row includes inbox.send. The
+// receipt route is inbox.receipt (agent-grantable). Person sessions are not
+// scope-gated. MessagingPlugin remains the plugin manifest; the receipt does
+// not add another one. The coordinator mounts New and MessagingPlugin and
+// does not edit this package to wire them.
+//
+// The receipt is the sender's proof of hand-off. Only that sender principal
+// can read it; every other principal, including a tenant admin, gets 404,
+// whether or not the message exists. Acceptance records state queued.
+// handed_off is recorded only when the receiver adapter confirms: a
+// grok_bot_routine webhook 2xx completed by the routine dispatcher, or a
+// local adapter's delivery-complete. A terminal adapter failure records
+// failed and failure_reason. handed_off and failed never move backward, and
+// handed_off_at is set once, in RFC3339. A webhook wake is not confirmation.
+// POST /api/inbox/messages with the same idempotency key and body from the
+// same sender returns the original message id.
 //
 // Project messaging wiring: mount NewMessaging(pool, encryptionKey) alongside
 // New and register MessagingPlugin in the coordinator's compiled registry.

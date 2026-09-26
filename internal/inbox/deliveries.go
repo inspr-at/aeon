@@ -244,6 +244,11 @@ func (m *messaging) commitMessage(ctx context.Context, p tenant.Principal, proje
 			return err
 		}
 		if !in.ActionRequest {
+			if err := recordAcceptanceReceipt(ctx, tx, p, id); err != nil {
+				return err
+			}
+		}
+		if !in.ActionRequest {
 			if err := enqueueWakes(ctx, tx, p, Message{ID: id, SenderPrincipalID: p.ID, RecipientPrincipalID: recipient, SentEventID: ev.ID}); err != nil {
 				return err
 			}
