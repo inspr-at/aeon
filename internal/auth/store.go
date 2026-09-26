@@ -25,6 +25,7 @@ import (
 var (
 	errNotMember        = errors.New("not a member")
 	errNotFound         = errors.New("not found")
+	errNotAgent         = errors.New("not an agent")
 	errServicePrincipal = errors.New("agent keys cannot be issued for service principals")
 )
 
@@ -55,7 +56,7 @@ func (m *Module) tenantBySlug(ctx context.Context, slug string) (string, error) 
 // resolveOIDCPerson resolves issuer+subject only within the signed target
 // tenant. A bootstrap email may create the original tenant admin, but cannot
 // enroll itself in any additional tenant.
-func (m *Module) resolveOIDCPerson(ctx context.Context, tenantID, slug, issuer, subject, email, name string) (tenant.Principal, string, error) {
+func (m *Module) resolveOIDCPerson(ctx context.Context, tenantID, slug, issuer, subject, email, name string, emailVerified bool, inviteToken string) (tenant.Principal, string, error) {
 	var p tenant.Principal
 	var identityID string
 	err := m.inTenant(ctx, m.pool, tenantID, func(tx pgx.Tx) error {
@@ -100,6 +101,18 @@ func (m *Module) resolveOIDCPerson(ctx context.Context, tenantID, slug, issuer, 
 			return err
 		}
 		if slug != m.cfg.BootstrapTenantSlug || !adminEmail(email, m.cfg.BootstrapAdminEmail) {
+			// An invite enrolls only a verified email. The token may select which
+			// invite, but it never substitutes for that address.
+			if emailVerified {
+				invited, accErr := authz.AcceptInvite(ctx, tx, tenantID, identityID, email, name, inviteToken)
+				if accErr == nil {
+					p = invited
+					return nil
+				}
+				if !errors.Is(accErr, authz.ErrNoInvite) {
+					return accErr
+				}
+			}
 			return errNotMember
 		}
 		p, err = scanPrincipal(tx.QueryRow(ctx, `INSERT INTO principals(tenant_id,kind,identity_id,name,roles)
@@ -426,7 +439,7 @@ type keyRecord struct {
 	Token       string
 }
 
-func (m *Module) createAgentKey(ctx context.Context, p tenant.Principal, name string, scopes []string, expires *time.Time) (keyRecord, error) {
+func (m *Module) createAgentKey(ctx context.Context, p tenant.Principal, name, principalID string, scopes []string, expires *time.Time) (keyRecord, error) {
 	if scopes == nil {
 		scopes = []string{}
 	}
@@ -436,43 +449,65 @@ func (m *Module) createAgentKey(ctx context.Context, p tenant.Principal, name st
 		if err := tx.QueryRow(ctx, `SELECT id::text FROM tenants WHERE id=$1::uuid FOR UPDATE`, p.TenantID).Scan(&tenantLock); err != nil {
 			return err
 		}
-		var principalID string
-		rows, err := tx.Query(ctx, `
-			SELECT id::text,kind,roles && ARRAY['system','importer','operator','embedding','quote_public_service','quote_confirmation_service']::text[]
-			FROM principals WHERE name=$1 ORDER BY created_at,id FOR UPDATE`, name)
-		if err != nil {
-			return err
-		}
-		service := false
-		for rows.Next() {
-			var id, kind string
+		var err error
+		if principalID != "" {
+			var kind, agentName string
 			var reserved bool
-			if err := rows.Scan(&id, &kind, &reserved); err != nil {
-				rows.Close()
+			err = tx.QueryRow(ctx, `SELECT kind,name,roles && ARRAY['system','importer','operator','embedding','quote_public_service','quote_confirmation_service']::text[]
+				FROM principals WHERE tenant_id=$1::uuid AND id=$2::uuid FOR UPDATE`, p.TenantID, principalID).Scan(&kind, &agentName, &reserved)
+			if errors.Is(err, pgx.ErrNoRows) {
+				return errNotFound
+			}
+			if err != nil {
 				return err
 			}
-			service = service || reserved
-			if kind == string(tenant.Agent) && principalID == "" {
-				principalID = id
+			if kind != string(tenant.Agent) {
+				return errNotAgent
 			}
-		}
-		err = rows.Err()
-		rows.Close()
-		if err != nil {
-			return err
-		}
-		if service {
-			return errServicePrincipal
-		}
-		if principalID == "" {
-			err = tx.QueryRow(ctx, `
+			if reserved {
+				return errServicePrincipal
+			}
+			if name == "" {
+				name = agentName
+			}
+		} else {
+			rows, err := tx.Query(ctx, `
+			SELECT id::text,kind,roles && ARRAY['system','importer','operator','embedding','quote_public_service','quote_confirmation_service']::text[]
+			FROM principals WHERE name=$1 ORDER BY created_at,id FOR UPDATE`, name)
+			if err != nil {
+				return err
+			}
+			service := false
+			for rows.Next() {
+				var id, kind string
+				var reserved bool
+				if err := rows.Scan(&id, &kind, &reserved); err != nil {
+					rows.Close()
+					return err
+				}
+				service = service || reserved
+				if kind == string(tenant.Agent) && principalID == "" {
+					principalID = id
+				}
+			}
+			err = rows.Err()
+			rows.Close()
+			if err != nil {
+				return err
+			}
+			if service {
+				return errServicePrincipal
+			}
+			if principalID == "" {
+				err = tx.QueryRow(ctx, `
 				INSERT INTO principals (tenant_id, kind, name, roles)
 				VALUES ($1::uuid, 'agent', $2, '{}')
 				RETURNING id::text
 			`, p.TenantID, name).Scan(&principalID)
-		}
-		if err != nil {
-			return err
+			}
+			if err != nil {
+				return err
+			}
 		}
 		if err := ensureAgentBinding(ctx, tx, p, principalID, name, scopes); err != nil {
 			return err
@@ -527,7 +562,7 @@ func (m *Module) createAgentKey(ctx context.Context, p tenant.Principal, name st
 				actorID = principalID
 			}
 			_, err = events.Append(ctx, tx, tenant.Principal{ID: actorID, TenantID: p.TenantID}, events.Change{
-				Type: "authz.key_created", After: map[string]any{"key_id": id, "principal_id": principalID, "scopes": scopes},
+				Type: "agent_key.created", After: map[string]any{"key_id": id, "principal_id": principalID, "name": name, "prefix": prefix, "scopes": scopes},
 			})
 			if err != nil {
 				return err
@@ -655,9 +690,9 @@ func (m *Module) listAgentKeys(ctx context.Context, tenantID string) ([]keyRecor
 
 func (m *Module) revokeAgentKey(ctx context.Context, p tenant.Principal, id string) error {
 	return m.inTenant(ctx, m.pool, p.TenantID, func(tx pgx.Tx) error {
-		var principalID string
+		var principalID, keyName, prefix string
 		var revokedAt *time.Time
-		if err := tx.QueryRow(ctx, `SELECT principal_id::text,revoked_at FROM agent_keys WHERE id=$1::uuid FOR UPDATE`, id).Scan(&principalID, &revokedAt); err != nil {
+		if err := tx.QueryRow(ctx, `SELECT principal_id::text,name,prefix,revoked_at FROM agent_keys WHERE id=$1::uuid FOR UPDATE`, id).Scan(&principalID, &keyName, &prefix, &revokedAt); err != nil {
 			if errors.Is(err, pgx.ErrNoRows) {
 				return errNotFound
 			}
@@ -676,7 +711,7 @@ func (m *Module) revokeAgentKey(ctx context.Context, p tenant.Principal, id stri
 			via = "operator"
 		}
 		_, err := events.Append(ctx, tx, tenant.Principal{ID: actorID, TenantID: p.TenantID}, events.Change{
-			Type: "authz.key_revoked", After: map[string]any{"key_id": id, "principal_id": principalID, "via": via},
+			Type: "agent_key.revoked", After: map[string]any{"key_id": id, "principal_id": principalID, "name": keyName, "prefix": prefix, "via": via},
 		})
 		return err
 	})

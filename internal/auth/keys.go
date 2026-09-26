@@ -6,6 +6,7 @@ import (
 	"errors"
 	"net/http"
 	"regexp"
+	"slices"
 	"strings"
 	"time"
 
@@ -128,15 +129,21 @@ func (m *Module) handleCreateAgentKey(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	var body struct {
-		Name      string     `json:"name"`
-		Scopes    []string   `json:"scopes"`
-		ExpiresAt *time.Time `json:"expires_at"`
+		Name        string     `json:"name"`
+		PrincipalID string     `json:"principal_id"`
+		Scopes      []string   `json:"scopes"`
+		ExpiresAt   *time.Time `json:"expires_at"`
 	}
 	if !readJSON(w, r, &body) {
 		return
 	}
 	name := strings.TrimSpace(body.Name)
-	if name == "" || len(name) > 200 || strings.ContainsRune(name, 0) {
+	principalID := strings.TrimSpace(body.PrincipalID)
+	if principalID != "" && !uuidRe.MatchString(principalID) {
+		writeBadRequest(w, "principal_id must be a UUID")
+		return
+	}
+	if (principalID == "" && name == "") || len(name) > 200 || strings.ContainsRune(name, 0) {
 		writeBadRequest(w, "name is required")
 		return
 	}
@@ -149,8 +156,16 @@ func (m *Module) handleCreateAgentKey(w http.ResponseWriter, r *http.Request) {
 		writeBadRequest(w, "expires_at must be in the future")
 		return
 	}
-	rec, err := m.createAgentKey(r.Context(), p, name, scopes, body.ExpiresAt)
+	rec, err := m.createAgentKey(r.Context(), p, name, principalID, scopes, body.ExpiresAt)
 	if err != nil {
+		if errors.Is(err, errNotFound) {
+			writeJSON(w, http.StatusNotFound, errorJSON{Error: "agent not found"})
+			return
+		}
+		if errors.Is(err, errNotAgent) {
+			writeBadRequest(w, "principal_id must be an agent")
+			return
+		}
 		if errors.Is(err, errServicePrincipal) || errors.Is(err, authz.ErrForbidden) {
 			writeForbidden(w)
 			return
@@ -212,10 +227,19 @@ func cleanScopes(in []string) ([]string, error) {
 		if s == "" || len(s) > 128 || strings.ContainsAny(s, " \t\r\n") {
 			return nil, errors.New("bad scope")
 		}
-		if _, ok := authz.Lookup(strings.ReplaceAll(s, ":", ".")); !ok {
+		key := strings.ReplaceAll(s, ":", ".")
+		perm, ok := authz.Lookup(key)
+		if !ok || !perm.AgentGrantable {
 			return nil, errors.New("unknown scope")
 		}
-		out = append(out, s)
+		if slices.Contains(out, key) {
+			continue
+		}
+		out = append(out, key)
 	}
 	return out, nil
 }
+
+// NormalizeScopes converts colon scopes to dot notation and rejects unknown
+// or non-agent-grantable permissions.
+func NormalizeScopes(in []string) ([]string, error) { return cleanScopes(in) }
