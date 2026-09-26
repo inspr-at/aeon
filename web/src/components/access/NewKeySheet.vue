@@ -16,6 +16,7 @@ import { problem } from './accessText'
 const props = defineProps<{ agent: Agent; rotateKey?: AgentKey }>()
 const emit = defineEmits<{ close: []; created: [] }>()
 const LIFETIMES = [{ days: 30, label: '30 days' }, { days: 90, label: '90 days' }, { days: 365, label: '365 days' }, { days: 0, label: 'Never' }]
+const expiryAfter = (lifetimeDays: number) => new Date(Math.floor(Date.now() / 1000) * 1000 + lifetimeDays * 86_400_000).toISOString()
 const days = ref(90)
 const busy = ref(false)
 const error = ref('')
@@ -67,7 +68,7 @@ async function create() {
   busy.value = true
   error.value = ''
   try {
-    const expires = days.value ? new Date(Date.now() + days.value * 86_400_000).toISOString() : null
+    const expires = days.value ? expiryAfter(days.value) : null
     created.value = props.rotateKey ? await rotateAgentKey(props.rotateKey.id, expires) : await createAgentKey(props.agent, expires, [...scopes.value])
     emit('created')
     await nextTick()
@@ -91,7 +92,7 @@ async function copy() { if (!created.value) return; try { await navigator.clipbo
           <button v-for="l in LIFETIMES" :key="l.days" type="button" role="radio" :aria-checked="days === l.days" :tabindex="days === l.days ? 0 : -1" :disabled="busy" @keydown="chooseLifetime" :data-autofocus="days === l.days ? '' : undefined" @click="days = l.days">{{ l.label }}</button>
         </div>
       </fieldset>
-      <p class="expiry-note">Keys do not rotate automatically. {{ days ? `This key expires ${absoluteTime(new Date(Date.now() + days * 86_400_000).toISOString())}. Rotate it before expiry and update its consumers.` : 'This key works until you revoke or rotate it.' }}</p>
+      <p class="expiry-note">Keys do not rotate automatically. {{ days ? `This key expires ${absoluteTime(expiryAfter(days))}. Rotate it before expiry and update its consumers.` : 'This key works until you revoke or rotate it.' }}</p>
       <div v-if="rotateKey" class="rotation-scopes">
         <p class="label">Scopes kept</p>
         <ul v-if="rotateKey.scopes.length"><li v-for="scope in rotateKey.scopes" :key="scope" class="mono">{{ scope }}</li></ul>

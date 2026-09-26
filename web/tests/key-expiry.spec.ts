@@ -15,7 +15,7 @@ const row = (page: Page, prefix: string) => agent(page).locator('tbody tr').filt
 const posts = (world: ReturnType<typeof accessWorld>) => world.calls.filter(c => c.method === 'POST' && c.path === '/api/agent-keys')
 
 async function open(page: Page, variants = false) {
-  await page.clock.setSystemTime(new Date(NOW))
+  await page.clock.setFixedTime(new Date(NOW))
   await mockWork(page, fixtures())
   const world = accessWorld()
   world.keys.find(k => k.id === 'k2')!.expires_at = expiry(10)
