@@ -1,9 +1,10 @@
 <!-- SPDX-License-Identifier: AGPL-3.0-only -->
 <script setup lang="ts">
-import { computed, nextTick, onBeforeUnmount, onMounted, reactive, ref, watch } from 'vue'
+import { computed, nextTick, onBeforeUnmount, onMounted, provide, reactive, ref, watch } from 'vue'
 import mark from '../../assets/brand/aeon-mark.svg'
 import { brand, generationLabel, setOverlayTitle } from '../../lib/brand'
 import { displayHeadline, groupByDay, groupChanges, matches, releasedAt, stats as statsOf, ticketsOf, type Release } from '../../lib/releases'
+import { normalKey } from '../../lib/ticketLinks'
 import { relativeTime } from '../../lib/work'
 import { isCalendar, useReleases } from '../../stores/releases'
 import { useVersion } from '../../stores/version'
@@ -12,13 +13,16 @@ import CalendarVersion from '../CalendarVersion.vue'
 import ReleaseCompare from './ReleaseCompare.vue'
 import ReleaseDetail from './ReleaseDetail.vue'
 import ReleaseStats from './ReleaseStats.vue'
+import ReleaseTicketPanel from './ReleaseTicketPanel.vue'
+import { TICKET_PEEK } from './TicketLink.vue'
 
 // The release history: a full-screen sheet over the page. Releases by day on the
 // left, the selected one (or a comparison of two) on the right; on phones the
 // detail replaces the list. j/k move, / searches, c compares, Enter opens,
 // e shows the evidence, ? lists the keys, Esc steps back and finally closes.
+// A ticket key opens that ticket in the app's side panel beside the history.
 const props = defineProps<{ target: string | null }>()
-const emit = defineEmits<{ select: [version: string]; close: []; home: [] }>()
+const emit = defineEmits<{ select: [version: string]; close: []; home: []; navigate: [path: string] }>()
 const store = useReleases()
 const version = useVersion()
 
@@ -142,18 +146,54 @@ function marked(text: string) {
   return i === -1 ? [{ text, hit: false }] : [{ text: text.slice(0, i), hit: false }, { text: text.slice(i, i + q.length), hit: true }, { text: text.slice(i + q.length), hit: false }]
 }
 
+// ---------- A ticket beside the history ----------
+const peekKey = ref<string | null>(null)
+const peekPanel = ref<InstanceType<typeof ReleaseTicketPanel>>()
+const peekPane = ref<HTMLElement>()
+let peekOpener: HTMLElement | null = null
+async function openPeek(key: string, from: HTMLElement) {
+  peekOpener = from
+  help.value = false
+  peekKey.value = normalKey(key)
+  await nextTick()
+  void peekPanel.value?.focus()
+}
+// Focus goes back to the key that opened the panel (or the list when it is gone).
+function closePeek() {
+  peekKey.value = null
+  void nextTick(() => {
+    if (peekOpener?.isConnected && peekOpener.getClientRects().length) peekOpener.focus({ preventScroll: true })
+    else listbox.value?.focus({ preventScroll: true })
+    peekOpener = null
+  })
+}
+provide(TICKET_PEEK, { open: (key, from) => void openPeek(key, from), openKey: peekKey })
+// On phones the ticket is a full-screen sheet: the history under it is inert.
+const covered = computed(() => phone.value && !!peekKey.value)
+const inPeek = (target: EventTarget | null) => target instanceof Node && !!peekPane.value?.contains(target)
+// The side panel's own keys, as beside a project list.
+function peekKeys(event: KeyboardEvent) {
+  const panel = peekPanel.value
+  if (!panel) return
+  const run: Record<string, () => void> = { e: panel.startEdit, s: panel.openStatus, p: panel.openPriority, a: panel.openAssignee, r: panel.openLink, c: panel.focusComposer }
+  const action = run[event.key]
+  if (action) { event.preventDefault(); action() }
+}
+
 // ---------- Keys ----------
 const typing = (target: EventTarget | null) => target instanceof HTMLElement && (target.tagName === 'INPUT' || target.tagName === 'TEXTAREA' || target.isContentEditable)
 function keydown(event: KeyboardEvent) {
   if (event.key === 'Escape') {
     event.preventDefault()
     if (help.value) help.value = false
+    else if (peekKey.value) void peekPanel.value?.requestClose()
     else if (mode.value === 'compare') exitCompare()
     else if (showDetail.value && phone.value) { showDetail.value = false; void nextTick(() => listbox.value?.focus({ preventScroll: true })) }
     else emit('close')
     return
   }
   if (typing(event.target) || event.metaKey || event.ctrlKey || event.altKey) return
+  if (inPeek(event.target)) { peekKeys(event); return }
   const onControl = event.target instanceof HTMLElement && !!event.target.closest('button, a') && event.target !== listbox.value
   switch (event.key) {
     case 'j': case 'ArrowDown': event.preventDefault(); step(1); break
@@ -218,8 +258,8 @@ const KINDS = [
 
 <template>
   <dialog ref="dialog" class="releases" aria-labelledby="releases-title" tabindex="-1" @cancel.prevent @keydown="keydown">
-    <div class="shell" :class="{ 'show-detail': showDetail, compare: mode === 'compare' }">
-      <header class="head">
+    <div class="shell" :class="{ 'show-detail': showDetail, compare: mode === 'compare', peeking: !!peekKey }">
+      <header class="head" :inert="covered">
         <div class="title-row">
           <!-- The mark leaves the release history for the home page, like the app header's mark. -->
           <a class="mark-backing" href="/" :aria-label="`${brand.wordmark} home`" data-tip="Home" @click.prevent="emit('home')"><img :src="mark" width="24" height="24" alt="" /></a>
@@ -254,7 +294,7 @@ const KINDS = [
       </header>
 
       <div class="body">
-        <section class="list-pane" aria-label="Releases">
+        <section class="list-pane" aria-label="Releases" :inert="covered">
           <!-- Phones: the stats scroll away with the list, inside the gutter. -->
           <ReleaseStats v-if="releases.length && phone" compact class="stats" :stats="stats" :current="current" :live-since="history?.live_since ?? null" :now="now" />
           <div class="filters">
@@ -335,7 +375,7 @@ const KINDS = [
           </div>
         </section>
 
-        <section ref="detailPane" class="detail-pane" :aria-label="mode === 'compare' ? 'Comparison' : 'Release'">
+        <section ref="detailPane" class="detail-pane" :aria-label="mode === 'compare' ? 'Comparison' : 'Release'" :inert="covered">
           <button v-if="phone" type="button" class="btn sm ghost back" @click="showDetail = false"><AppIcon name="arrow-left" :size="13" />All releases</button>
           <ReleaseCompare
             v-if="mode === 'compare' && compareFrom" key="compare" :releases="releases" :from="compareFrom" :to="compareTo"
@@ -348,6 +388,10 @@ const KINDS = [
           />
           <div v-else-if="store.loading" class="detail-loading skeleton-body" role="status" aria-label="Loading release"><span class="skeleton" /><span class="skeleton" /><span class="skeleton" /></div>
         </section>
+
+        <div v-if="peekKey" ref="peekPane" class="peek-pane">
+          <ReleaseTicketPanel ref="peekPanel" :ticket-key="peekKey" :now="now" @close="closePeek" @navigate="path => emit('navigate', path)" />
+        </div>
       </div>
 
       <div v-if="help" class="help-scrim" @click.self="help = false">
@@ -476,6 +520,11 @@ const KINDS = [
 .empty p { font-size: 13.5px; }
 .empty-icon { display: grid; place-items: center; width: 40px; height: 40px; border-radius: 12px; background: var(--surface-2); color: var(--ink-2); }
 
+/* ---------- A ticket beside the history ---------- */
+.peek-pane { display: flex; min-width: 0; min-height: 0; }
+.peek-pane > * { flex: 1; }
+@media (min-width: 1280px) { .peeking .body { grid-template-columns: minmax(300px, 380px) minmax(0, 1fr) clamp(440px, 34vw, 580px); gap: 24px; } }
+
 /* ---------- Keys ---------- */
 .help-scrim { position: absolute; inset: 0; z-index: 5; display: grid; place-items: center; padding: 24px; background: var(--palette-scrim); }
 .help { width: min(460px, 100%); padding: 18px 22px 16px; border-radius: var(--radius); border: 1px solid var(--glass-edge); background: var(--surface-raised); box-shadow: var(--shadow-pop), var(--shadow); }
@@ -504,6 +553,11 @@ const KINDS = [
 @media (max-width: 1100px) {
   .body { grid-template-columns: minmax(320px, 380px) minmax(0, 1fr); gap: 20px; }
   .search { width: min(280px, 30vw); }
+}
+/* Too narrow for three columns: the release and its ticket side by side. */
+@media (max-width: 1279px) and (min-width: 761px) {
+  .peeking .body { grid-template-columns: minmax(0, 1fr) minmax(400px, 48%); gap: 20px; }
+  .peeking .list-pane, .peeking .stats { display: none; }
 }
 @media (max-width: 760px) {
   .shell { padding: 0 16px; }

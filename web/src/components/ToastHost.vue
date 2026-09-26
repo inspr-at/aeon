@@ -1,11 +1,19 @@
 <!-- SPDX-License-Identifier: AGPL-3.0-only -->
 <script setup lang="ts">
+import { ref, watch } from 'vue'
 import { dismiss, toasts } from '../lib/toast'
 import AppIcon from './AppIcon.vue'
 function act(id: number, run: () => void) { dismiss(id); run() }
+// While a modal dialog is open the page under it is inert and hidden behind the
+// top layer: a toast raised then shows inside the topmost modal instead.
+const layer = ref<HTMLElement | null>(null)
+watch(() => toasts.length, () => {
+  try { layer.value = [...document.querySelectorAll<HTMLElement>('dialog:modal')].at(-1) ?? null } catch { layer.value = null }
+}, { flush: 'pre' })
 </script>
 
 <template>
+  <Teleport :to="layer ?? 'body'" :disabled="!layer">
   <div class="toast-host" aria-live="polite">
     <TransitionGroup name="toast">
       <div v-for="item in toasts" :key="item.id" class="toast" :class="[item.tone, { sticky: item.sticky }]">
@@ -16,6 +24,7 @@ function act(id: number, run: () => void) { dismiss(id); run() }
       </div>
     </TransitionGroup>
   </div>
+  </Teleport>
 </template>
 
 <style scoped>

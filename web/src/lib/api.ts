@@ -204,6 +204,9 @@ export const getRelations = (nodeId: string) => json<{ items: Relation[]; next_c
 // spells out by key); callers show error.message as it stands.
 export const createRelation = (body: { source_node_id: string; target_node_id: string; type: RelationType }) => json<Relation>('/relations', 'POST', body)
 export const deleteRelation = (id: string) => json<void>(`/relations/${idPath(id)}`, 'DELETE')
-export interface NodePreview { id: string; key: string; title: string; state: string }
+// Key lookups also name the key asked for (a current or earlier key) and the node's project.
+export interface NodePreview { id: string; key: string; title: string; state: string; requested_key?: string; project_id?: string }
 export const lookupNodes = (ids: string[]) => json<{ items: NodePreview[] }>(`/nodes/lookup${query({ ids })}`)
+// At most 100 keys per request; absent keys are left out of the answer.
+export const lookupNodeKeys = (keys: string[]) => json<{ items: NodePreview[] }>(`/nodes/lookup${query({ keys: keys.join(',') })}`)
 

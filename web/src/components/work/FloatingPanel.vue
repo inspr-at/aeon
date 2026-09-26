@@ -39,9 +39,14 @@ function scrolled(event: Event) {
   if (panel.value?.contains(event.target as Node)) return
   emit('close', false)
 }
-// Escape closes the popover wherever focus is, before any page shortcut sees it.
+// Inside a modal dialog (the release history's ticket panel) the popover moves
+// into it: everything outside the top layer is inert while the modal is open.
+// (Context menus anchor to a point, not an element: those stay in <body>.)
+const layer = (props.anchor instanceof Element ? props.anchor.closest<HTMLElement>('dialog[open]') : null) ?? 'body'
+// Escape closes the popover wherever focus is, before any page shortcut sees it;
+// another dialog open above the popover's own layer handles its Escape itself.
 function escape(event: KeyboardEvent) {
-  if (event.key !== 'Escape' || document.querySelector('dialog[open]')) return
+  if (event.key !== 'Escape' || [...document.querySelectorAll('dialog[open]')].some(dialog => dialog !== layer)) return
   event.preventDefault(); event.stopImmediatePropagation()
   emit('close', true)
 }
@@ -86,7 +91,7 @@ defineExpose({ place })
 </script>
 
 <template>
-  <Teleport to="body">
+  <Teleport :to="layer">
     <div ref="panel" class="floating pop" :class="{ above }" role="dialog" :aria-label="label" :style="{ transform: `translate(${x}px, ${y}px)`, width: `${Math.min(width, 9999)}px`, maxHeight: `${maxHeight}px`, '--floating-max': `${maxHeight}px` }" @keydown="keydown">
       <slot />
     </div>

@@ -3,6 +3,7 @@
 import { computed } from 'vue'
 import { plainSubject, shortCommit, type ChangeGroup, type ReleaseChange } from '../../lib/releases'
 import AppIcon, { type IconName } from '../AppIcon.vue'
+import TicketLink from './TicketLink.vue'
 
 // A release's changes, grouped: features, fixes, and everything else.
 const props = defineProps<{ groups: Record<ChangeGroup, ReleaseChange[]>; repository: string; query?: string }>()
@@ -40,7 +41,7 @@ function parts(text: string) {
           <p class="subject"><template v-for="(p, i) in parts(plainSubject(c.subject, c.tickets))" :key="i"><mark v-if="p.hit">{{ p.text }}</mark><template v-else>{{ p.text }}</template></template></p>
           <p class="meta">
             <span v-if="g.key === 'other' && TYPE_LABEL[c.type]" class="type">{{ TYPE_LABEL[c.type] }}</span>
-            <span v-for="t in c.tickets" :key="t" class="mono ticket">{{ t }}</span>
+            <TicketLink v-for="t in c.tickets" :key="t" :ticket-key="t" variant="inline" />
             <a v-if="commitUrl(c.commit)" class="mono commit" :href="commitUrl(c.commit)" target="_blank" rel="noopener" :aria-label="`Commit ${shortCommit(c.commit)} on GitHub`">{{ shortCommit(c.commit) }}</a>
             <span v-else class="mono commit">{{ shortCommit(c.commit) }}</span>
           </p>
@@ -63,7 +64,6 @@ li { padding: 6px 10px 7px; margin-left: -10px; border-radius: 9px; }
 .subject { color: var(--ink); font-size: 13.5px; line-height: 1.45; overflow-wrap: anywhere; }
 .meta { display: flex; flex-wrap: wrap; align-items: center; gap: 4px 10px; margin-top: 1px; font-size: 11.5px; color: var(--ink-3); }
 .type { font-size: 11px; text-transform: lowercase; }
-.ticket { font-size: 11px; color: var(--teal-ink); }
 .commit { font-size: 11px; color: var(--ink-3); border-radius: 4px; }
 @media (max-width: 600px) { a.commit { display: inline-flex; align-items: center; min-height: 44px; } }
 @media (hover: hover) { a.commit:hover { color: var(--teal-ink); text-decoration: underline; text-underline-offset: 2px; } }
