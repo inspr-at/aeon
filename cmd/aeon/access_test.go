@@ -59,7 +59,16 @@ func TestOperatorCLIKeyCreateAndAccess(t *testing.T) {
 	if _, err := os.Stat(badFile); !os.IsNotExist(err) {
 		t.Fatalf("invalid role created a key file: %v", err)
 	}
-	if err := agentKeyCommand([]string{"create", "--tenant", "ab1-cli", "--name", "janus-worker", "--out-file", file, "--scopes", "nodes:read", "--project", "JANUS-1", "--project-role", "guest"}, &stdout); err != nil {
+	for _, role := range []string{"owner", "guest"} {
+		badFile = filepath.Join(t.TempDir(), "invalid-workspace-key")
+		if err := agentKeyCommand([]string{"create", "--tenant", "ab1-cli", "--name", "invalid-worker", "--out-file", badFile, "--workspace-role", role}, &stdout); err == nil {
+			t.Fatalf("workspace %s accepted", role)
+		}
+		if _, err := os.Stat(badFile); !os.IsNotExist(err) {
+			t.Fatalf("invalid workspace role created key file: %v", err)
+		}
+	}
+	if err := agentKeyCommand([]string{"create", "--tenant", "ab1-cli", "--name", "janus-worker", "--out-file", file, "--scopes", "nodes:read", "--workspace-role", "member", "--project", "JANUS-1", "--project-role", "guest"}, &stdout); err != nil {
 		t.Fatal(err)
 	}
 	var created struct {
@@ -75,11 +84,11 @@ func TestOperatorCLIKeyCreateAndAccess(t *testing.T) {
 	if err != nil || info.Mode().Perm() != 0o600 {
 		t.Fatalf("key file mode: %v %v", info, err)
 	}
-	var bound int
+	var bound, workspaceBound int
 	if err := db.InTenant(dbtest.Seed(ctx), d.App, tid, func(tx pgx.Tx) error {
-		return tx.QueryRow(ctx, `SELECT count(*) FROM role_bindings WHERE principal_id=$1::uuid AND scope_type='project'`, created.PrincipalID).Scan(&bound)
-	}); err != nil || bound != 1 {
-		t.Fatalf("key project binding: %d %v", bound, err)
+		return tx.QueryRow(ctx, `SELECT count(*) FILTER (WHERE scope_type='project'),count(*) FILTER (WHERE scope_type='workspace') FROM role_bindings WHERE principal_id=$1::uuid`, created.PrincipalID).Scan(&bound, &workspaceBound)
+	}); err != nil || bound != 1 || workspaceBound != 1 {
+		t.Fatalf("key bindings: project=%d workspace=%d err=%v", bound, workspaceBound, err)
 	}
 	stdout.Reset()
 	if err := accessCommand([]string{"bind", "--tenant", "ab1-cli", "--principal", "janus-worker", "--project", "JANUS-1", "--role", "guest"}, &stdout); err != nil {
@@ -89,6 +98,19 @@ func TestOperatorCLIKeyCreateAndAccess(t *testing.T) {
 	if err := accessCommand([]string{"unbind", "--tenant", "ab1-cli", "--principal", created.PrincipalID, "--project", "JANUS-1"}, &stdout); err != nil {
 		t.Fatal(err)
 	}
+	stdout.Reset()
+	if err := accessCommand([]string{"bind", "--tenant", "ab1-cli", "--principal", created.PrincipalID, "--workspace-role", "member"}, &stdout); err != nil {
+		t.Fatal(err)
+	}
+	if err := accessCommand([]string{"unbind", "--tenant", "ab1-cli", "--principal", created.PrincipalID, "--workspace-role"}, &stdout); err != nil {
+		t.Fatal(err)
+	}
+	if err := accessCommand([]string{"unbind", "--tenant", "ab1-cli", "--principal", created.PrincipalID, "--workspace-role"}, &stdout); err != nil {
+		t.Fatal(err)
+	}
+	if err := accessCommand([]string{"bind", "--tenant", "ab1-cli", "--principal", created.PrincipalID, "--workspace-role", "owner"}, &stdout); err == nil {
+		t.Fatal("operator granted owner")
+	}
 	var setEvents, removeEvents int
 	if err := db.InTenant(dbtest.Seed(ctx), d.App, tid, func(tx pgx.Tx) error {
 		return tx.QueryRow(ctx, `SELECT count(*) FILTER (WHERE e.type='binding.set'), count(*) FILTER (WHERE e.type='binding.removed')
@@ -96,5 +118,12 @@ func TestOperatorCLIKeyCreateAndAccess(t *testing.T) {
 			WHERE e.tenant_id=$1::uuid AND p.name='Access operator' AND p.kind='agent' AND p.roles=ARRAY['operator']::text[]`, tid).Scan(&setEvents, &removeEvents)
 	}); err != nil || setEvents != 1 || removeEvents != 1 {
 		t.Fatalf("binding events set=%d removed=%d err=%v", setEvents, removeEvents, err)
+	}
+	var workspaceEvents int
+	if err := db.InTenant(dbtest.Seed(ctx), d.App, tid, func(tx pgx.Tx) error {
+		return tx.QueryRow(ctx, `SELECT count(*) FROM events e JOIN principals p ON p.tenant_id=e.tenant_id AND p.id=e.actor_principal_id
+			WHERE e.tenant_id=$1::uuid AND e.type='authz.workspace_role_changed' AND p.name='Access operator'`, tid).Scan(&workspaceEvents)
+	}); err != nil || workspaceEvents != 2 {
+		t.Fatalf("workspace events=%d err=%v", workspaceEvents, err)
 	}
 }

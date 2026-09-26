@@ -21,6 +21,75 @@ type ProjectRolePair struct {
 	Role    string
 }
 
+// OperatorValidateWorkspaceRole checks a key-creation request before issuing
+// a credential. The bind repeats the check inside its write transaction.
+func OperatorValidateWorkspaceRole(ctx context.Context, pool *pgxpool.Pool, tenantID, roleKey string) error {
+	if roleKey == "" {
+		return nil
+	}
+	ctx = db.NoProjects(ctx, "operator workspace binding preflight")
+	return db.InTenant(ctx, pool, tenantID, func(tx pgx.Tx) error {
+		_, err := operatorWorkspaceRoleTx(ctx, tx, roleKey)
+		return err
+	})
+}
+
+func operatorWorkspaceRoleTx(ctx context.Context, tx pgx.Tx, roleKey string) (string, error) {
+	roleID, err := operatorRoleTx(ctx, tx, roleKey)
+	if err != nil {
+		return "", err
+	}
+	role, err := roleTx(ctx, tx, roleID)
+	if err != nil {
+		return "", err
+	}
+	if role.Key == "owner" {
+		return "", errOperatorOwner
+	}
+	if role.Builtin && role.Key == "guest" {
+		return "", errGuestWorkspace
+	}
+	return roleID, nil
+}
+
+// OperatorBindWorkspaceRole grants one workspace role by key to an existing
+// principal, using the HTTP binding store and the per-tenant Access actor.
+func OperatorBindWorkspaceRole(ctx context.Context, pool *pgxpool.Pool, tenantID, principal, roleKey string) error {
+	ctx = db.NoProjects(ctx, "operator workspace binding")
+	return db.InTenant(ctx, pool, tenantID, func(tx pgx.Tx) error {
+		principalID, err := operatorPrincipalTx(ctx, tx, principal)
+		if err != nil {
+			return err
+		}
+		roleID, err := operatorWorkspaceRoleTx(ctx, tx, roleKey)
+		if err != nil {
+			return err
+		}
+		actorID, err := operatoractor.Ensure(ctx, tx, tenantID)
+		if err != nil {
+			return err
+		}
+		return (&Module{pool: pool}).setWorkspaceRoleTx(ctx, tx, tenant.Principal{ID: actorID, TenantID: tenantID}, principalID, &roleID, true)
+	})
+}
+
+// OperatorUnbindWorkspaceRole removes one workspace binding. A repeated
+// removal is a no-op; the database still protects the last active owner.
+func OperatorUnbindWorkspaceRole(ctx context.Context, pool *pgxpool.Pool, tenantID, principal string) error {
+	ctx = db.NoProjects(ctx, "operator workspace binding")
+	return db.InTenant(ctx, pool, tenantID, func(tx pgx.Tx) error {
+		principalID, err := operatorPrincipalTx(ctx, tx, principal)
+		if err != nil {
+			return err
+		}
+		actorID, err := operatoractor.Ensure(ctx, tx, tenantID)
+		if err != nil {
+			return err
+		}
+		return (&Module{pool: pool}).setWorkspaceRoleTx(ctx, tx, tenant.Principal{ID: actorID, TenantID: tenantID}, principalID, nil, true)
+	})
+}
+
 // OperatorValidateProjectRoles checks a key-creation request before issuing a
 // credential. The later bind repeats these checks inside its write transaction.
 func OperatorValidateProjectRoles(ctx context.Context, pool *pgxpool.Pool, tenantID string, pairs []ProjectRolePair) error {

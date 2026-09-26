@@ -93,9 +93,11 @@ printf 'CR1: reconcile delta %s -> 0 after aeon import paimos --delta\n' "$first
 # CLI uses the same argv[0]=paimos path as the eventual compatibility binary.
 # Keys exist only in this disposable database and private temporary directory.
 "$tmp/aeon" agent-key create --tenant cr1rehearsal --name cr1worker \
-    --scopes inbox.send --out-file "$tmp/worker-key" > "$tmp/worker.json"
+    --scopes nodes.read,nodes.write,comments.write,events.read,knowledge.read,knowledge.write,models.read,inbox.send \
+    --workspace-role member --out-file "$tmp/worker-key" > "$tmp/worker.json"
 "$tmp/aeon" agent-key create --tenant cr1rehearsal --name cr1peer \
-    --scopes inbox.send --out-file "$tmp/peer-key" > "$tmp/peer.json"
+    --scopes nodes.read,inbox.read,inbox.send --workspace-role member \
+    --out-file "$tmp/peer-key" > "$tmp/peer.json"
 peer_id=$(jq -r '.principal_id' "$tmp/peer.json")
 [[ "$peer_id" =~ ^[0-9a-f-]{36}$ ]] || exit 1
 peer_address=codex:cr1peer

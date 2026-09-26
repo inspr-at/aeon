@@ -20,14 +20,14 @@ import (
 
 // agentKeyCommand runs the operator-only agent key commands:
 //
-//	aeon agent-key create --tenant SLUG --name AGENT --out-file PATH [--scopes a,b] [--expires 720h]
+//	aeon agent-key create --tenant SLUG --name AGENT --out-file PATH [--scopes a,b] [--expires 720h] [--workspace-role ROLEKEY]
 //	aeon agent-key create --tenant SLUG --principal-id UUID --out-file PATH [--name LABEL] [--scopes a,b]
 //	aeon agent-key revoke --tenant SLUG --id KEY_ID
 //
 // The token is written only to --out-file (created with mode 0600, never
 // overwritten) and is never printed.
 func agentKeyCommand(args []string, stdout io.Writer) error {
-	const usage = "usage: aeon agent-key create --tenant SLUG (--name AGENT | --principal-id UUID) --out-file PATH [--scopes a,b] [--expires DURATION] [--project KEY --project-role ROLEKEY]... | aeon agent-key revoke --tenant SLUG --id KEY_ID"
+	const usage = "usage: aeon agent-key create --tenant SLUG (--name AGENT | --principal-id UUID) --out-file PATH [--scopes a,b] [--expires DURATION] [--workspace-role ROLEKEY] [--project KEY --project-role ROLEKEY]... | aeon agent-key revoke --tenant SLUG --id KEY_ID"
 	if len(args) == 0 || (args[0] != "create" && args[0] != "revoke") {
 		return errors.New(usage)
 	}
@@ -39,6 +39,7 @@ func agentKeyCommand(args []string, stdout io.Writer) error {
 	outFile := flags.String("out-file", "", "file to write the key to (0600, must not exist)")
 	scopes := flags.String("scopes", "", "comma-separated scopes")
 	expires := flags.Duration("expires", 0, "lifetime, e.g. 720h (default: no expiry)")
+	workspaceRole := flags.String("workspace-role", "", "workspace role key for the agent")
 	id := flags.String("id", "", "key id (revoke)")
 	var projects, roles projectFlags
 	flags.Var(&projects, "project", "project key (repeat with --project-role, or KEY=ROLE[,KEY=ROLE])")
@@ -50,7 +51,7 @@ func agentKeyCommand(args []string, stdout io.Writer) error {
 		return errors.New(usage)
 	}
 	pairs, err := agentProjectRoles(projects, roles)
-	if err != nil || args[0] == "revoke" && len(pairs) > 0 {
+	if err != nil || args[0] == "revoke" && (len(pairs) > 0 || *workspaceRole != "") {
 		return errors.New(usage)
 	}
 	return withPool(func(ctx context.Context, pool *pgxpool.Pool) error {
@@ -65,6 +66,9 @@ func agentKeyCommand(args []string, stdout io.Writer) error {
 			return json.NewEncoder(stdout).Encode(map[string]string{"revoked": *id})
 		}
 		if err := authz.OperatorValidateProjectRoles(ctx, pool, tenantID, pairs); err != nil {
+			return err
+		}
+		if err := authz.OperatorValidateWorkspaceRole(ctx, pool, tenantID, *workspaceRole); err != nil {
 			return err
 		}
 		f, err := os.OpenFile(*outFile, os.O_WRONLY|os.O_CREATE|os.O_EXCL, 0o600)
@@ -109,6 +113,11 @@ func agentKeyCommand(args []string, stdout io.Writer) error {
 				return fmt.Errorf("key %s created in %s, but project binding failed: %w", keyID, *outFile, err)
 			}
 		}
-		return json.NewEncoder(stdout).Encode(map[string]any{"id": keyID, "principal_id": agentID, "name": *name, "scopes": list, "file": *outFile})
+		if *workspaceRole != "" {
+			if err := authz.OperatorBindWorkspaceRole(ctx, pool, tenantID, agentID, *workspaceRole); err != nil {
+				return fmt.Errorf("key %s created in %s, but workspace binding failed: %w", keyID, *outFile, err)
+			}
+		}
+		return json.NewEncoder(stdout).Encode(map[string]any{"id": keyID, "principal_id": agentID, "name": *name, "scopes": list, "file": *outFile, "workspace_role": *workspaceRole})
 	})
 }
