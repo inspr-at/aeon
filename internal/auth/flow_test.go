@@ -399,7 +399,7 @@ func TestDevLoginAndAgentKeys(t *testing.T) {
 	if err := json.Unmarshal(body, &list); err != nil {
 		t.Fatal(err)
 	}
-	if len(list.Keys) != 1 || list.Keys[0].LastUsedAt == nil || len(list.Keys[0].Scopes) != 2 || list.Keys[0].Scopes[0] != "events:read" || list.Keys[0].Scopes[1] != "account.manage" {
+	if len(list.Keys) != 1 || list.Keys[0].LastUsedAt == nil || len(list.Keys[0].Scopes) != 2 || list.Keys[0].Scopes[0] != "events.read" || list.Keys[0].Scopes[1] != "account.manage" {
 		t.Fatalf("list %+v", list.Keys)
 	}
 
@@ -576,7 +576,7 @@ func TestAgentKeyRLS(t *testing.T) {
 		t.Fatalf("original bearer %d", status)
 	}
 
-	other, err := mod.createAgentKey(t.Context(), tenant.Principal{TenantID: tenantB, Roles: []string{"admin"}}, "b", nil, nil)
+	other, err := mod.createAgentKey(t.Context(), tenant.Principal{TenantID: tenantB, Roles: []string{"admin"}}, "b", "", nil, nil)
 	if err != nil {
 		t.Fatal(err)
 	}

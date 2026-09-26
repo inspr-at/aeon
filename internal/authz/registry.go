@@ -9,11 +9,12 @@ import (
 )
 
 type Permission struct {
-	Key         string   `json:"key"`
-	Group       string   `json:"group"`
-	Description string   `json:"description"`
-	Risk        string   `json:"risk"`
-	GrantableAt []string `json:"grantable_at"`
+	Key            string   `json:"key"`
+	Group          string   `json:"group"`
+	Description    string   `json:"description"`
+	Risk           string   `json:"risk"`
+	GrantableAt    []string `json:"grantable_at"`
+	AgentGrantable bool     `json:"agent_grantable"`
 }
 
 // Registry is the versioned permission catalog. Each key is unique and uses
@@ -58,12 +59,26 @@ func makeRegistry() []Permission {
 			case "kinds", "models", "plugins", "imports", "profile", "settings", "members", "roles", "keys", "audit", "authz":
 				at = []string{"workspace"}
 			}
-			out = append(out, Permission{Key: g.group + "." + action, Group: groupLabel(g.group), Description: fmt.Sprintf("%s %s", strings.Title(strings.ReplaceAll(action, "_", " ")), strings.ReplaceAll(g.group, "_", " ")), Risk: risk, GrantableAt: at})
+			key := g.group + "." + action
+			out = append(out, Permission{Key: key, Group: groupLabel(g.group), Description: fmt.Sprintf("%s %s", strings.Title(strings.ReplaceAll(action, "_", " ")), strings.ReplaceAll(g.group, "_", " ")), Risk: risk, GrantableAt: at, AgentGrantable: agentGrantable(key)})
 		}
 	}
-	out = append(out, Permission{Key: "ownership.transfer", Group: "Ownership", Description: "Transfer workspace ownership", Risk: "high", GrantableAt: []string{"workspace"}})
+	out = append(out, Permission{Key: "ownership.transfer", Group: "Ownership", Description: "Transfer workspace ownership", Risk: "high", GrantableAt: []string{"workspace"}, AgentGrantable: false})
 	sort.Slice(out, func(i, j int) bool { return out[i].Key < out[j].Key })
 	return out
+}
+
+// agentGrantable is false for human governance, approval decisions and the
+// customer portal. Those permissions never belong on an agent key.
+func agentGrantable(key string) bool {
+	switch key {
+	case "members.manage", "roles.manage", "keys.manage", "keys.read", "settings.manage", "audit.read",
+		"approvals.decide", "approvals.decide_high",
+		"profile.portal_read", "profile.portal_write", "quotes.portal_read", "quotes.portal_accept":
+		return false
+	default:
+		return true
+	}
 }
 
 func groupLabel(resource string) string {

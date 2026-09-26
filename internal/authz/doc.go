@@ -22,7 +22,8 @@
 // in the same db.InTenant transaction as the changed rows.
 //
 // New returns an httpapi.Module for /api/authz/permissions, /api/roles,
-// /api/members and /api/me/permissions. The coordinator mounts it; this
+// /api/members (including invites, deactivation and aliases), /api/audit and
+// /api/me/permissions. The coordinator mounts it; this
 // package does not edit cmd/aeon, web/src/router.ts or plugins/builtin.go.
 // Every authorizing route must use Handle or Require with a declared registry
 // permission. RoutePermissions names the permission for every current API

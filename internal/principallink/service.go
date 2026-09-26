@@ -9,8 +9,7 @@ import (
 	"strings"
 
 	"github.com/inspr-at/aeon/internal/db"
-	"github.com/inspr-at/aeon/internal/events"
-	"github.com/inspr-at/aeon/internal/tenant"
+	"github.com/inspr-at/aeon/internal/principallink/apply"
 	"github.com/inspr-at/aeon/internal/tenantbootstrap"
 	"github.com/jackc/pgx/v5"
 	"github.com/jackc/pgx/v5/pgxpool"
@@ -42,32 +41,6 @@ func Resolve(ctx context.Context, tx pgx.Tx, tenantID, id string) (string, strin
 	return canonical, name, err
 }
 
-func lookup(ctx context.Context, tx pgx.Tx, tenantID, ref string) (Person, error) {
-	var p Person
-	rows, err := tx.Query(ctx, `SELECT id::text,name,email,linked_to::text FROM principals
- WHERE tenant_id=$1 AND kind='person' AND (id::text=$2 OR name=$2) ORDER BY id LIMIT 2`, tenantID, ref)
-	if err != nil {
-		return p, err
-	}
-	defer rows.Close()
-	count := 0
-	for rows.Next() {
-		count++
-		if err := rows.Scan(&p.ID, &p.Name, &p.Email, &p.LinkedTo); err != nil {
-			return p, err
-		}
-	}
-	if err := rows.Err(); err != nil {
-		return p, err
-	}
-	if count == 0 {
-		return p, errors.New("person not found in tenant")
-	}
-	if count != 1 {
-		return p, errors.New("ambiguous principal name; use an ID")
-	}
-	return p, nil
-}
 func (s *Service) Link(ctx context.Context, slug, from, to string) (Result, error) {
 	if strings.TrimSpace(to) == "" {
 		return Result{}, errors.New("to is required")
@@ -77,6 +50,30 @@ func (s *Service) Link(ctx context.Context, slug, from, to string) (Result, erro
 func (s *Service) Unlink(ctx context.Context, slug, from string) (Result, error) {
 	return s.change(ctx, slug, from, "")
 }
+
+// LinkTx links or unlinks inside the caller's tenant transaction. from and to
+// are principal ids or unique names. An empty to unlinks. actorID is stored on
+// the event; eventLinked and eventUnlinked select the event type. Linking
+// deletes the source's role bindings.
+func LinkTx(ctx context.Context, tx pgx.Tx, tenantID, from, to, actorID, eventLinked, eventUnlinked string) (Result, error) {
+	out, err := apply.Apply(ctx, tx, tenantID, from, to)
+	if err != nil {
+		return Result{}, err
+	}
+	result := Result{Person: Person{ID: out.Person.ID, Name: out.Person.Name, Email: out.Person.Email, LinkedTo: out.Person.LinkedTo}, Changed: out.Changed}
+	if !out.Changed {
+		return result, nil
+	}
+	typ := eventLinked
+	if to == "" {
+		typ = eventUnlinked
+	}
+	if err := appendRaw(ctx, tx, tenantID, actorID, typ, out.Before, out.After); err != nil {
+		return Result{}, err
+	}
+	return result, nil
+}
+
 func (s *Service) change(ctx context.Context, slug, from, to string) (Result, error) {
 	var result Result
 	if strings.TrimSpace(from) == "" {
@@ -87,59 +84,12 @@ func (s *Service) change(ctx context.Context, slug, from, to string) (Result, er
 		return result, err
 	}
 	err = db.InTenant(ctx, s.pool, tid, func(tx pgx.Tx) error {
-		if _, err := tx.Exec(ctx, `SELECT pg_advisory_xact_lock(hashtextextended($1,532))`, tid); err != nil {
-			return err
-		}
-		source, err := lookup(ctx, tx, tid, from)
-		if err != nil {
-			return err
-		}
-		var target *string
-		if to != "" {
-			dest, err := lookup(ctx, tx, tid, to)
-			if err != nil {
-				return err
-			}
-			if dest.ID == source.ID || dest.LinkedTo != nil {
-				return errors.New("self-links, chains and cycles are forbidden")
-			}
-			target = &dest.ID
-			if source.LinkedTo != nil && *source.LinkedTo != dest.ID {
-				return errors.New("principal already linked; unlink first")
-			}
-		}
-		result.Person = source
-		if (source.LinkedTo == nil && target == nil) || (source.LinkedTo != nil && target != nil && *source.LinkedTo == *target) {
-			return nil
-		}
-		var before, after json.RawMessage
-		if err := tx.QueryRow(ctx, `SELECT to_jsonb(p) FROM principals p WHERE tenant_id=$1 AND id=$2`, tid, source.ID).Scan(&before); err != nil {
-			return err
-		}
-		if err := tx.QueryRow(ctx, `UPDATE principals SET linked_to=$3 WHERE tenant_id=$1 AND id=$2 RETURNING to_jsonb(principals)`, tid, source.ID, target).Scan(&after); err != nil {
-			return err
-		}
 		actor, err := operator(ctx, tx, tid)
 		if err != nil {
 			return err
 		}
-		typ := "principal.linked"
-		if target == nil {
-			typ = "principal.unlinked"
-		}
-		if _, err := events.Append(ctx, tx, tenant.Principal{TenantID: tid, ID: actor}, events.Change{Type: typ, Before: before, After: after}); err != nil {
-			return err
-		}
-		if target == nil {
-			// An unlinked person needs their own workspace role again; while
-			// linked, authorization comes from the canonical person's binding.
-			if _, err := tx.Exec(ctx, `SELECT aeon_bind_legacy_principal($1::uuid,$2::uuid)`, tid, source.ID); err != nil {
-				return err
-			}
-		}
-		result.Person.LinkedTo = target
-		result.Changed = true
-		return nil
+		result, err = LinkTx(ctx, tx, tid, from, to, actor, "principal.linked", "principal.unlinked")
+		return err
 	})
 	if err != nil {
 		return Result{}, fmt.Errorf("principal link: %w", err)
@@ -157,8 +107,26 @@ func operator(ctx context.Context, tx pgx.Tx, tid string) (string, error) {
 	if err != nil {
 		return "", err
 	}
-	_, err = events.Append(ctx, tx, tenant.Principal{TenantID: tid, ID: id}, events.Change{Type: "principal.created", After: after})
+	err = appendRaw(ctx, tx, tid, id, "principal.created", nil, after)
 	return id, err
+}
+
+// appendRaw writes one event without importing internal/events. That import
+// would cycle through authz, which calls LinkTx.
+func appendRaw(ctx context.Context, tx pgx.Tx, tenantID, actorID, typ string, before, after json.RawMessage) error {
+	if len(before) == 0 && len(after) == 0 {
+		return errors.New("principal link event needs a snapshot")
+	}
+	var old, next any
+	if len(before) > 0 {
+		old = []byte(before)
+	}
+	if len(after) > 0 {
+		next = []byte(after)
+	}
+	_, err := tx.Exec(ctx, `INSERT INTO events(tenant_id,actor_principal_id,type,before,after,at)
+		VALUES($1::uuid,$2::uuid,$3,$4::jsonb,$5::jsonb,clock_timestamp())`, tenantID, actorID, typ, old, next)
+	return err
 }
 
 type Suggestion struct {
