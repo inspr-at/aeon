@@ -48,7 +48,7 @@ function toggle(id: string) {
       <p class="j-note">Opening release 1 lets you tick the tickets that form it; the rest stay here.</p>
       <div v-for="group in groups" :key="group.id" class="group">
         <p class="group-head">
-          <span class="group-title">{{ group.epic ? group.epic.title : 'Not tied to an epic' }}</span>
+          <span class="group-title" :title="group.epic?.title">{{ group.epic ? group.epic.title : 'Not tied to an epic' }}</span>
           <span v-if="group.epic" class="mono group-key">{{ group.epic.key }}</span>
           <span class="group-count">{{ group.tickets.length }}</span>
         </p>
@@ -56,7 +56,7 @@ function toggle(id: string) {
           <li v-for="ticket in expanded.has(group.id) ? group.tickets : group.tickets.slice(0, PER_GROUP)" :key="ticket.id">
             <StatusIcon :state="ticket.state" :size="12" />
             <span class="mono key">{{ ticket.key }}</span>
-            <button type="button" class="grow row-title" :data-tip="`Open ${ticket.key}`" @click="ctx.open(ticket.key)">{{ ticket.title }}</button>
+            <button type="button" class="grow row-title" :data-tip="`Open ${ticket.key}\n${ticket.title}`" @click="ctx.open(ticket.key)">{{ ticket.title }}</button>
           </li>
         </ul>
         <button v-if="group.tickets.length > PER_GROUP" type="button" class="btn sm ghost more" :aria-expanded="expanded.has(group.id)" @click="toggle(group.id)">
@@ -74,6 +74,10 @@ function toggle(id: string) {
 .group-title { min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; font-weight: 600; color: var(--ink); }
 .group-key { flex-shrink: 0; font-size: 10.5px; color: var(--ink-3); font-variant-ligatures: none; }
 .group-count { margin-left: auto; flex-shrink: 0; font-size: 12px; color: var(--ink-3); font-variant-numeric: tabular-nums; }
+/* Bound the list's track as well as its flex rows: an implicit auto track
+   otherwise grows to the title's intrinsic width, including the separators. */
+.j-rows { grid-template-columns: minmax(0, 1fr); min-width: 0; }
+.j-rows > li { min-width: 0; }
 .key { flex-shrink: 0; width: 76px; }
 .row-title { align-self: stretch; padding: 0; border: 0; background: transparent; color: var(--ink); font: inherit; text-align: left; cursor: pointer; }
 .row-title:hover { color: var(--teal-ink); text-decoration: underline; }

@@ -31,7 +31,7 @@ const emit = defineEmits<{ act: [] }>()
 
 <style scoped>
 .gate-card {
-  position: relative; display: grid; gap: 12px; padding: 16px 18px 16px; border-radius: var(--radius); isolation: isolate;
+  position: relative; display: grid; grid-template-columns: minmax(0, 1fr); min-width: 0; gap: 12px; padding: 16px 18px 16px; border-radius: var(--radius); isolation: isolate;
   background: radial-gradient(120% 90% at 100% 0%, color-mix(in oklab, var(--aqua-2) 70%, transparent), transparent 55%), var(--glass);
   box-shadow: var(--shadow), 0 0 70px -24px rgba(164, 229, 223, .9);
   -webkit-backdrop-filter: blur(18px); backdrop-filter: blur(18px);
@@ -47,7 +47,7 @@ const emit = defineEmits<{ act: [] }>()
   border: 1.5px solid var(--gold); background: radial-gradient(circle, var(--teal) 0 3px, var(--surface) 4px, color-mix(in oklab, var(--gold-2) 40%, var(--surface)));
   box-shadow: 0 0 12px -2px rgba(214, 155, 49, .6);
 }
-.gh { display: flex; align-items: flex-start; gap: 12px; padding-right: 38px; }
+.gh { display: flex; align-items: flex-start; gap: 12px; min-width: 0; padding-right: 38px; }
 .record .gh, .blocked .gh { padding-right: 0; }
 .gh-text { flex: 1; min-width: 0; }
 .gate-eyebrow { display: inline-flex; align-items: center; gap: 6px; color: var(--teal-ink); }
@@ -56,7 +56,7 @@ const emit = defineEmits<{ act: [] }>()
 .gh h2 { margin-top: 4px; font-size: 22px; font-weight: 300; letter-spacing: -.01em; overflow-wrap: anywhere; }
 .gate-btn { flex-shrink: 0; gap: 8px; }
 .gate-btn[aria-disabled="true"] { cursor: not-allowed; }
-.gate-body { display: grid; gap: 10px; font-size: 13.5px; color: var(--ink-2); }
+.gate-body { display: grid; grid-template-columns: minmax(0, 1fr); min-width: 0; gap: 10px; font-size: 13.5px; color: var(--ink-2); overflow-wrap: anywhere; }
 .gate-body:empty { display: none; }
 @media (max-width: 720px) {
   .gh { flex-wrap: wrap; }

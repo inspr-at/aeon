@@ -33,7 +33,7 @@ const stateOf = (ticket: WalkerTicket) => props.workById.get(ticket.ticket_node_
         />
         <span v-else-if="editable" class="fcb-ph" aria-hidden="true" />
         <span v-if="group.feature" class="rid mono">F{{ featureNumber(group) }}</span>
-        <span class="ft">{{ group.feature ? group.feature.title : 'Not tied to a feature' }}</span>
+        <span class="ft" :title="group.feature?.title">{{ group.feature ? group.feature.title : 'Not tied to a feature' }}</span>
         <a v-if="group.feature" class="ekey mono" :href="epicHref(group.feature.key)" target="_blank" rel="noopener" :data-tip="`Epic ${group.feature.key} · opens in a new window`">{{ group.feature.key }}<AppIcon name="external" :size="10" /></a>
       </header>
       <p v-if="!group.tickets.length" class="empty">No tickets yet · ask Aithema to break this feature down</p>
@@ -48,7 +48,7 @@ const stateOf = (ticket: WalkerTicket) => props.workById.get(ticket.ticket_node_
           <StatusIcon v-else-if="stateOf(ticket)" :state="stateOf(ticket)" :size="13" class="st" />
           <span v-else class="st-ph" aria-hidden="true" />
           <span class="key mono">{{ ticket.key }}</span>
-          <button type="button" class="title" :data-tip="`Walk through ${ticket.key} with its screens`" @click.stop="emit('walk', ticket)">{{ ticket.title }}</button>
+          <button type="button" class="title" :data-tip="`Walk through ${ticket.key} with its screens\n${ticket.title}`" @click.stop="emit('walk', ticket)">{{ ticket.title }}</button>
           <span v-if="ticket.estimated_hours != null" class="est mono">{{ hours(ticket.estimated_hours) }}</span>
           <button type="button" class="icon-btn sm flat open" :aria-label="`Open ${ticket.key}`" data-tip="Open the ticket" @click.stop="emit('open', ticket.key)"><AppIcon name="arrow" :size="13" /></button>
         </li>
@@ -59,6 +59,7 @@ const stateOf = (ticket: WalkerTicket) => props.workById.get(ticket.ticket_node_
 
 <style scoped>
 .release-tickets { display: grid; grid-template-columns: minmax(0, 1fr); gap: 10px; }
+.release-tickets, .grp, .tks, .tk { min-width: 0; }
 .grp { display: grid; grid-template-columns: minmax(0, 1fr); gap: 2px; }
 .grp-h { display: flex; align-items: center; gap: 8px; min-width: 0; padding: 6px 4px 6px 6px; border-bottom: 1px solid color-mix(in oklab, var(--gold) 45%, transparent); font-size: 12.5px; color: var(--ink-2); }
 .fcb-ph { width: 16px; flex-shrink: 0; }

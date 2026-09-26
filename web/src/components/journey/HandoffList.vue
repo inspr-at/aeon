@@ -27,3 +27,10 @@ const icon = (h: Handoff) => h.state === 'succeeded' ? 'check' : h.state === 'fa
   </ol>
   <p v-else class="j-note">{{ empty }}</p>
 </template>
+
+<style scoped>
+/* Deploy and Access share this list; provider names must fit beside the time. */
+.j-timeline, .what { grid-template-columns: minmax(0, 1fr); min-width: 0; }
+.j-timeline > li { min-width: 0; }
+.what { overflow-wrap: anywhere; }
+</style>
