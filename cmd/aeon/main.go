@@ -93,6 +93,13 @@ func main() {
 		}
 		return
 	}
+	if len(os.Args) > 1 && os.Args[1] == "access" {
+		if err := accessCommand(os.Args[2:], os.Stdout); err != nil {
+			fmt.Fprintln(os.Stderr, "access:", err)
+			os.Exit(1)
+		}
+		return
+	}
 	if len(os.Args) > 1 && os.Args[1] == "principal" {
 		if err := withPool(func(ctx context.Context, pool *pgxpool.Pool) error {
 			return principallink.Run(ctx, pool, os.Args[2:], os.Stdout)
