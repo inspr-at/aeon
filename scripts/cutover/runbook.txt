@@ -117,7 +117,13 @@ Required evidence before the window (AEON operator, consumer owners):
    Traefik label traefik.http.routers.ppm.rule=Host(`pm.barta.cm`) (csb1
    compose spec) in the same change, or classic and AEON both claim
    pm.barta.cm; classic stays reachable only through pml.barta.cm (GET/HEAD
-   guard). Verify OIDC callback, old
+   guard). Classic's live public URL is flow.inspr.at/paimos (shared Flow
+   active), which also moves to AEON here, so the same change sets classic's
+   BRAND_WEBSITE_URL/BRAND_PUBLIC_URL to https://pml.barta.cm in both
+   branches, OIDC_REDIRECT_URL to
+   https://pml.barta.cm/paimos/api/auth/oidc/callback (keep
+   PAIMOS_PUBLIC_BASE_PATH=/paimos) and the redirect URI on the paimos_ppm
+   Zitadel client (OPS authors it in the window, list on OPS-231). Verify OIDC callback, old
    bookmarks, API routes and each release pin. Review and merge the naming
    sweep branch; the coordinator alone performs the separately approved
    GitHub repository renames. brand.json retains the AEON product brand.
