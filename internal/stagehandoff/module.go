@@ -5,6 +5,7 @@
 package stagehandoff
 
 import (
+	"context"
 	"crypto/sha256"
 	"encoding/hex"
 	"encoding/json"
@@ -17,6 +18,7 @@ import (
 	"strings"
 	"time"
 
+	"github.com/inspr-at/aeon/internal/authz"
 	"github.com/inspr-at/aeon/internal/db"
 	"github.com/inspr-at/aeon/internal/httpapi"
 	"github.com/inspr-at/aeon/internal/plugins"
@@ -44,7 +46,11 @@ var _ httpapi.Module = (*Module)(nil)
 
 // New exposes the handoff routes. Use plugins.Builtin for the shared registry,
 // then mount this module and plugins.NewWithRegistry from cmd/aeon.
-// A LaunchChecks provider is required before Pharos can admit a host change.
+// Pass ClosedLaunchChecks, or a provider that independently observes a fresh
+// reviewed artifact, backup and host readiness. A nil provider fails closed.
+// GET /api/stage-handoffs/{handoffId} returns prerequisite_seal_sha256.
+// POST /api/stage-handoffs/{handoffId}/launch/admit and /launch/consume are
+// the remote one-use launch fence.
 func New(pool *pgxpool.Pool, registry *plugins.Registry, checks ...LaunchChecks) httpapi.Module {
 	var guard LaunchChecks
 	if len(checks) > 0 {
@@ -58,6 +64,8 @@ func (m *Module) Mount(mux *http.ServeMux) {
 	mux.HandleFunc("POST /api/stage-handoffs/{handoffId}/classic-batch-alias", m.bindClassicBatchAlias)
 	mux.HandleFunc("POST /api/projects/{projectId}/baseline-batches/batches/{batchId}/built-receipt", m.reportClassicBuilt)
 	mux.HandleFunc("POST /api/stage-handoffs/{handoffId}/evidence", m.evidence)
+	mux.HandleFunc("POST /api/stage-handoffs/{handoffId}/launch/admit", m.admitLaunch)
+	mux.HandleFunc("POST /api/stage-handoffs/{handoffId}/launch/consume", m.consumeLaunch)
 	mux.HandleFunc("POST /api/stage-handoffs/{handoffId}/result", m.result)
 }
 
@@ -225,8 +233,68 @@ func (m *Module) get(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	var out Handoff
-	err := db.InTenant(r.Context(), m.pool, p.TenantID, func(tx pgx.Tx) error { var err error; out, err = loadHandoff(r.Context(), tx, id, false); return err })
+	err := db.InTenant(r.Context(), m.pool, p.TenantID, func(tx pgx.Tx) error {
+		var err error
+		out, err = loadHandoff(r.Context(), tx, id, false)
+		if err != nil {
+			return err
+		}
+		return authorizeHandoffRead(r.Context(), tx, p, out)
+	})
 	respond(w, 200, out, err)
+}
+
+// authorizeHandoffRead allows stage_handoffs.read, or the handoff's own
+// operation scope when the caller is the active agent the operation routes to.
+// route maps deploy and verify to pharos, and prepare and apply to janus.
+// The principal name must be that plugin id. Every other caller is refused.
+func authorizeHandoffRead(ctx context.Context, tx pgx.Tx, p tenant.Principal, h Handoff) error {
+	scope := authz.Scope{ProjectID: h.ProjectNodeID}
+	err := authz.RequireTx(ctx, tx, p, "stage_handoffs.read", scope)
+	if err == nil {
+		return nil
+	}
+	if !errors.Is(err, authz.ErrForbidden) {
+		return err
+	}
+	plugin, _, _, ok := route(h.Stage, h.Operation)
+	if !ok || plugin != h.PluginID {
+		return fail(403, "permission denied")
+	}
+	routed, err := principalRoutedTo(ctx, tx, p, plugin)
+	if err != nil {
+		return err
+	}
+	if !routed {
+		return fail(403, "permission denied")
+	}
+	op := "stage." + h.Operation
+	if _, known := authz.Lookup(op); !known {
+		return fail(403, "permission denied")
+	}
+	err = authz.RequireTx(ctx, tx, p, op, scope)
+	if err == nil {
+		return nil
+	}
+	if errors.Is(err, authz.ErrForbidden) {
+		return fail(403, "permission denied")
+	}
+	return err
+}
+
+func principalRoutedTo(ctx context.Context, tx pgx.Tx, p tenant.Principal, plugin string) (bool, error) {
+	var name, kind, status string
+	err := tx.QueryRow(ctx, `SELECT name, kind, status FROM principals WHERE id=$1::uuid`, p.ID).Scan(&name, &kind, &status)
+	if errors.Is(err, pgx.ErrNoRows) {
+		return false, nil
+	}
+	if err != nil {
+		return false, err
+	}
+	if status != "active" || kind != string(tenant.Agent) || p.Kind != tenant.Agent {
+		return false, nil
+	}
+	return strings.EqualFold(strings.TrimSpace(name), plugin), nil
 }
 func (m *Module) evidence(w http.ResponseWriter, r *http.Request) {
 	p, ok := principal(w, r)

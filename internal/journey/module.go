@@ -41,7 +41,9 @@ func uuidOK(s string) bool { return uuidPattern.MatchString(s) }
 //	PUT  /projects/{projectId}/journey/profile
 //	POST /projects/{projectId}/journey/actions
 //
-// Stage and the single next action are derived. GET is read-only; the first
+// Stage and the single next action are derived. GET also returns the project
+// node's immutable key and the tenant slug, both read from those rows, so a
+// consumer can verify its configured binding. GET is read-only; the first
 // person action initializes a missing projection and records imported-stage
 // derivation once. Human gates are live R2 approvals (journey.shape, the
 // projection's revision-and-digest-bound requirements_approval_scope, journey.build,

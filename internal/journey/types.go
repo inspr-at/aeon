@@ -27,6 +27,8 @@ const (
 // (description, epics, tickets) instead of intake and gates.
 type Journey struct {
 	ProjectNodeID        string            `json:"project_node_id"`
+	ProjectKey           string            `json:"project_key"`
+	TenantSlug           string            `json:"tenant_slug"`
 	Profile              string            `json:"profile"`
 	Revision             int64             `json:"revision"`
 	Stage                string            `json:"stage"`

@@ -235,8 +235,9 @@ func serveListener(ctx context.Context, cfg config.Config, ln net.Listener) erro
 			releases.New(pool),
 			intake.New(pool),
 			plugins.NewWithRegistry(pool, pluginRegistry),
-			// No LaunchChecks provider yet: stage launch admission fails closed.
-			stagehandoff.New(pool, pluginRegistry),
+			// ClosedLaunchChecks refuses every admission until an observation
+			// source reports a fresh reviewed artifact, backup and host readiness.
+			stagehandoff.New(pool, pluginRegistry, stagehandoff.ClosedLaunchChecks{}),
 			// R4: business plugins
 			costunits.New(pool, pluginRegistry),
 			crm.New(pool, pluginRegistry),

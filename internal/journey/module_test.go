@@ -40,6 +40,13 @@ func TestJourneyActions(t *testing.T) {
 	if view.StageSource != "journey" || view.Stage != "inspire" || view.NextAction.Key != "continue_intake" || !view.NextAction.Available || view.Revision != 1 {
 		t.Fatalf("init %+v", view.NextAction)
 	}
+	if view.ProjectNodeID != project || view.ProjectKey != "PRJ-1" || view.TenantSlug != "journey-a" {
+		t.Fatalf("binding id=%s key=%s slug=%s", view.ProjectNodeID, view.ProjectKey, view.TenantSlug)
+	}
+	spoofed := f.journey(t, f.person, http.MethodGet, "/api/projects/"+project+"/journey?project_key=EVIL&tenant_slug=evil&project_node_id=00000000-0000-4000-8000-000000000099", "")
+	if spoofed.ProjectNodeID != project || spoofed.ProjectKey != "PRJ-1" || spoofed.TenantSlug != "journey-a" {
+		t.Fatalf("client binding accepted: %+v", spoofed)
+	}
 	if view.Imported {
 		t.Fatal("a project started here is not imported")
 	}
