@@ -8,10 +8,24 @@
 // quote portal and profile permissions. Custom roles hold registry keys in
 // role_permissions. No mutation may grant keys its actor lacks.
 //
-// A principal's active workspace binding supplies P1 access. Project bindings
-// are represented in the schema for P2; effective project access is the union
-// of its workspace and project grants. At most one binding exists per scope.
-// Agent key scopes narrow this set; an empty scope list grants no API access.
+// A principal's active workspace binding supplies workspace access. A project
+// binding (P2) adds its role's project-grantable permissions on that project,
+// so effective access on a project is the union of both. At most one binding
+// exists per scope. Guest is a project-only role; Owner and Customer are
+// workspace-only. Agent key scopes narrow this set; an empty scope list grants
+// no API access.
+//
+// Visibility (P2) is enforced by row-level security, not here: db.InTenant
+// sets the caller's visible projects once per transaction ("*" for a
+// workspace role holding nodes.read, else the projects of bindings whose role
+// holds it, else none). The middleware decides a route in the workspace first;
+// a caller without the workspace permission may act through a project binding
+// in the project the route targets: the path's project, the project of the
+// node, attachment, relation or event it names (read under the caller's own
+// visibility), or any bound project for ProjectFilteredRoutes, whose data RLS
+// confines. ProjectDecidedRoutes create items named in the body; their
+// handlers require the permission in the item's project. RouteScope carries
+// the decision to handlers that recheck.
 // Deactivated principals have no effective permissions. Database triggers
 // revoke their sessions and keys and protect the last active workspace owner.
 // Service principals have no binding and use explicit internal call paths.
@@ -22,8 +36,10 @@
 // in the same db.InTenant transaction as the changed rows.
 //
 // New returns an httpapi.Module for /api/authz/permissions, /api/roles,
-// /api/members and /api/me/permissions. The coordinator mounts it; this
-// package does not edit cmd/aeon, web/src/router.ts or plugins/builtin.go.
+// /api/members, /api/me/permissions and /api/projects/{id}/members; cmd/aeon
+// mounts it. Project binding changes append authz.binding_set and
+// authz.binding_removed events on the project node (audit binding.set and
+// binding.removed), so they are visible exactly with the project.
 // Every authorizing route must use Handle or Require with a declared registry
 // permission. RoutePermissions names the permission for every current API
 // pattern, including explicit public paths; RequirePattern denies an unknown

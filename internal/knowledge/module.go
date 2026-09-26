@@ -395,7 +395,8 @@ func parseCreate(raw map[string]json.RawMessage) (createInput, error) {
 }
 
 func create(ctx context.Context, tx pgx.Tx, p tenant.Principal, in createInput) (Entry, error) {
-	if !canWrite(ctx, tx, p, "knowledge.write") {
+	// A new entry is decided in the project it joins (ADR-003 P2).
+	if !validUUID(in.ProjectID) || authz.RequireTx(ctx, tx, p, "knowledge.write", authz.Scope{ProjectID: in.ProjectID}) != nil {
 		return Entry{}, fail(http.StatusForbidden, "forbidden", "you can read knowledge but not change it")
 	}
 	var projectOK bool

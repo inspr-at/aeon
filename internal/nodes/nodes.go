@@ -239,6 +239,9 @@ func (m *Module) createNode(ctx context.Context, p tenant.Principal, in nodeCrea
 				return err
 			}
 		}
+		if err := requireCreateTarget(ctx, tx, p, kind.Slug, parentID); err != nil {
+			return err
+		}
 		key := explicit
 		if key == "" {
 			usePrefix := kind.ShortPrefix
@@ -700,6 +703,29 @@ func requireMoveTarget(ctx context.Context, tx pgx.Tx, p tenant.Principal, nodeI
 		scope.ProjectID = *target
 	}
 	if authz.RequireTx(ctx, tx, p, "nodes.move", scope) != nil {
+		return &httpError{status: http.StatusForbidden, msg: "permission denied"}
+	}
+	return nil
+}
+
+// requireCreateTarget decides node creation in the project the new node joins
+// (ADR-003 P2): its parent's project, or the workspace for a new project or a
+// node outside every project.
+func requireCreateTarget(ctx context.Context, tx pgx.Tx, p tenant.Principal, kindSlug string, parentID *string) error {
+	scope := authz.Scope{}
+	if kindSlug != "project" && parentID != nil {
+		var project *string
+		if err := tx.QueryRow(ctx, `SELECT project_id::text FROM nodes WHERE id=$1::uuid`, *parentID).Scan(&project); err != nil {
+			if errors.Is(err, pgx.ErrNoRows) {
+				return notFound("parent not found")
+			}
+			return err
+		}
+		if project != nil {
+			scope.ProjectID = *project
+		}
+	}
+	if authz.RequireTx(ctx, tx, p, "nodes.write", scope) != nil {
 		return &httpError{status: http.StatusForbidden, msg: "permission denied"}
 	}
 	return nil

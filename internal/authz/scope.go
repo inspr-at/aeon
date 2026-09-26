@@ -50,6 +50,22 @@ var ProjectFilteredRoutes = map[string]bool{
 	"PUT /api/preferences/{key}":                  true,
 }
 
+// ProjectDecidedRoutes create project data named in the request body. The
+// middleware lets a permission from any project binding through; the handler
+// then requires it in the target project (RequireTx with that project), inside
+// the transaction that writes. POST /api/nodes/bulk stays workspace-only.
+var ProjectDecidedRoutes = map[string]bool{
+	"POST /api/nodes":     true,
+	"POST /api/relations": true,
+	"POST /api/knowledge": true,
+}
+
+// Product release notes are the same for everyone; they are not tenant data.
+var publicProductRoutes = map[string]bool{
+	"GET /api/releases":           true,
+	"GET /api/releases/{version}": true,
+}
+
 // Routes whose path names one node-scoped resource. The resource's project,
 // read under the caller's own visibility, is the scope of the decision.
 func routeTarget(pattern string, values map[string]string) (kind, id string) {
@@ -105,7 +121,7 @@ func ResolveRouteScope(ctx context.Context, pool *pgxpool.Pool, pattern, path st
 		}
 		return Scope{ProjectID: project}, true, nil
 	}
-	if ProjectFilteredRoutes[pattern] {
+	if ProjectFilteredRoutes[pattern] || ProjectDecidedRoutes[pattern] || publicProductRoutes[pattern] {
 		return Scope{AnyProject: true}, true, nil
 	}
 	return Scope{}, false, nil

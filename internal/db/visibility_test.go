@@ -86,9 +86,7 @@ type visibleCounts struct {
 	nodes, relations, nodeEvents, workspaceEvents, attachments, embeddingJobs int
 }
 
-func countVisible(t *testing.T, ctx context.Context, pool interface {
-	Begin(context.Context) (pgx.Tx, error)
-}, f *visibilityFixture) visibleCounts {
+func countVisible(t *testing.T, ctx context.Context, f *visibilityFixture) visibleCounts {
 	t.Helper()
 	var c visibleCounts
 	err := db.InTenant(ctx, f.d.App, f.tenant, func(tx pgx.Tx) error {
@@ -111,7 +109,7 @@ func TestProjectVisibilityFailsClosed(t *testing.T) {
 	f := newVisibilityFixture(t, d, "p2-closed")
 	ctx := t.Context()
 
-	none := countVisible(t, ctx, d.App, f)
+	none := countVisible(t, ctx, f)
 	if none.nodes != 0 || none.relations != 0 || none.nodeEvents != 0 || none.attachments != 0 || none.embeddingJobs != 0 {
 		t.Fatalf("unset visibility shows project data: %+v", none)
 	}
@@ -120,20 +118,20 @@ func TestProjectVisibilityFailsClosed(t *testing.T) {
 	if none.workspaceEvents == 0 {
 		t.Fatalf("unset visibility hides workspace events: %+v", none)
 	}
-	if got := countVisible(t, db.NoProjects(ctx, "test"), d.App, f); got != none {
+	if got := countVisible(t, db.NoProjects(ctx, "test"), f); got != none {
 		t.Fatalf("NoProjects %+v, unset %+v", got, none)
 	}
-	all := countVisible(t, db.AllProjects(ctx, "test"), d.App, f)
+	all := countVisible(t, db.AllProjects(ctx, "test"), f)
 	if all.nodes != 5 || all.relations != 1 || all.nodeEvents != 2 || all.attachments != 2 || all.embeddingJobs != 5 {
 		t.Fatalf("all projects: %+v", all)
 	}
-	onlyA := countVisible(t, db.OnlyProjects(ctx, f.projectA), d.App, f)
+	onlyA := countVisible(t, db.OnlyProjects(ctx, f.projectA), f)
 	// Project A and its ticket; not B, not the workspace-level organisation;
 	// the relation to B is hidden because one end is invisible.
 	if onlyA.nodes != 2 || onlyA.relations != 0 || onlyA.nodeEvents != 1 || onlyA.attachments != 1 || onlyA.embeddingJobs != 2 {
 		t.Fatalf("only project A: %+v", onlyA)
 	}
-	if got := countVisible(t, db.OnlyProjects(ctx), d.App, f); got.nodes != 0 || got.nodeEvents != 0 {
+	if got := countVisible(t, db.OnlyProjects(ctx), f); got.nodes != 0 || got.nodeEvents != 0 {
 		t.Fatalf("empty project list: %+v", got)
 	}
 

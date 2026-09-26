@@ -101,6 +101,7 @@ func TestProjectAccessOverHTTP(t *testing.T) {
 		"/api/search?q=zebra", "/api/events", "/api/events?limit=200", "/api/knowledge",
 		"/api/knowledge/graph?project_id=" + w.ids["A"],
 		"/api/relations?node_id=" + w.ids["TA"], "/api/nodes/" + w.ids["TA"], "/api/nodes/" + w.ids["TA"] + "/activity",
+		"/api/events?node_id=" + w.ids["TA"],
 		"/api/nodes/" + w.ids["TA"] + "/attachments", "/api/views", "/api/kinds", "/api/me", "/api/me/profile",
 	} {
 		body := w.expect(guest, "GET", path, "", 200)
@@ -110,6 +111,7 @@ func TestProjectAccessOverHTTP(t *testing.T) {
 		{"/api/projects", w.ids["A"]}, {"/api/nodes", "TA-1"}, {"/api/search?q=zebra", "TA-1"},
 		{"/api/knowledge", "GA-1"}, {"/api/nodes/" + w.ids["TA"] + "/activity", "guest-visible comment"},
 		{"/api/relations?node_id=" + w.ids["TA"], w.ids["GA"]},
+		{"/api/events?node_id=" + w.ids["TA"], "GA-1"}, {"/api/events?node_id=" + w.ids["TA"], w.ids["GA"]},
 	} {
 		if body := w.expect(guest, "GET", want.path, "", 200); !strings.Contains(body, want.needle) {
 			t.Errorf("guest %s: missing its own project's %s", want.path, want.needle)
@@ -135,9 +137,11 @@ func TestProjectAccessOverHTTP(t *testing.T) {
 	// Workspace-wide areas stay closed to a project-only principal.
 	for _, path := range []string{"/api/members", "/api/quotes", "/api/crm/organisations", "/api/time-entries",
 		"/api/work-orders", "/api/harness-sessions", "/api/approvals", "/api/business/principals", "/api/roles",
-		"/api/agent-keys", "/api/project-groups", "/api/releases", "/api/inbox/messages", "/api/runs", "/api/imports"} {
+		"/api/agent-keys", "/api/project-groups", "/api/inbox/messages", "/api/runs", "/api/imports"} {
 		w.expect(guest, "GET", path, "", 403)
 	}
+	// Product release notes are not tenant data; the app shows them to all.
+	w.expect(guest, "GET", "/api/releases", "", 200)
 	// Guest writes: comment in A only; no edits anywhere.
 	w.expect(guest, "POST", "/api/nodes/"+w.ids["TA"]+"/comments", `{"body_markdown":"from the guest"}`, 201)
 	w.expect(guest, "POST", "/api/nodes/"+w.ids["TB"]+"/comments", `{"body_markdown":"sneaky"}`, 403)
@@ -187,6 +191,16 @@ func TestProjectAccessOverHTTP(t *testing.T) {
 	w.expect("mixed", "POST", "/api/nodes/"+w.ids["TA2"]+"/project-move", `{"project_id":"`+w.ids["B"]+`"}`, 403)
 	w.expect("mixed", "POST", "/api/nodes/"+w.ids["TA2"]+"/move", `{"parent_id":"`+w.ids["B"]+`"}`, 403)
 	w.expect("mixed", "POST", "/api/nodes/"+w.ids["TB"]+"/comments", `{"body_markdown":"as guest"}`, 201)
+	// Creation is decided in the project the new item joins.
+	w.expect("mixed", "POST", "/api/nodes", `{"kind_id":"`+w.ids["ticketKind"]+`","parent_id":"`+w.ids["A"]+`","title":"member ticket"}`, 201)
+	w.expect("mixed", "POST", "/api/nodes", `{"kind_id":"`+w.ids["ticketKind"]+`","parent_id":"`+w.ids["B"]+`","title":"guest ticket"}`, 403)
+	w.expect("mixed", "POST", "/api/nodes", `{"kind_id":"`+w.ids["ticketKind"]+`","title":"workspace ticket"}`, 403)
+	w.expect("mixed", "POST", "/api/relations", `{"source_node_id":"`+w.ids["TA2"]+`","target_node_id":"`+w.ids["GA"]+`","type":"cites"}`, 201)
+	w.expect("mixed", "POST", "/api/relations", `{"source_node_id":"`+w.ids["TA2"]+`","target_node_id":"`+w.ids["TB"]+`","type":"cites"}`, 403)
+	w.expect("mixed", "POST", "/api/knowledge", `{"project_id":"`+w.ids["A"]+`","type":"runbook","slug":"mixed-a","title":"Runbook A"}`, 201)
+	w.expect("mixed", "POST", "/api/knowledge", `{"project_id":"`+w.ids["B"]+`","type":"runbook","slug":"mixed-b","title":"Runbook B"}`, 403)
+	w.expect(guest, "POST", "/api/knowledge", `{"project_id":"`+w.ids["A"]+`","type":"runbook","slug":"guest-a","title":"Runbook"}`, 403)
+	w.expect(guest, "POST", "/api/relations", `{"source_node_id":"`+w.ids["TA"]+`","target_node_id":"`+w.ids["GA"]+`","type":"relates"}`, 403)
 
 	// Project members: one row per person, the reason and the role.
 	var members []struct {
@@ -289,6 +303,17 @@ func (w *accessWorld) seed() {
 		}
 		for _, c := range [][2]string{{"TA", "guest-visible comment"}, {"TB", "secret comment of B"}} {
 			if _, err := tx.Exec(ctx, `INSERT INTO events(tenant_id,actor_principal_id,node_id,type,after) VALUES($1,$2,$3,'comment.created',jsonb_build_object('body_markdown',$4::text))`, w.tid, writer, w.ids[c[0]], c[1]); err != nil {
+				return err
+			}
+		}
+		// History on a visible ticket that names a ticket of project B: a
+		// relation event and a classic relation import with key and title.
+		for _, target := range []string{"TB", "GA"} {
+			if _, err := tx.Exec(ctx, `INSERT INTO events(tenant_id,actor_principal_id,node_id,type,after) VALUES($1,$2,$3::uuid,'relation.created',jsonb_build_object('source_node_id',$3::text,'target_node_id',$4::text,'type','cites'))`, w.tid, writer, w.ids["TA"], w.ids[target]); err != nil {
+				return err
+			}
+			key := map[string]string{"TB": "TB-1", "GA": "GA-1"}[target]
+			if _, err := tx.Exec(ctx, `INSERT INTO events(tenant_id,actor_principal_id,node_id,type,after) VALUES($1,$2,$3,'import.relation',jsonb_build_object('classic_ref','fixture:'||$4,'record',jsonb_build_object('target_key',$4::text,'target_title','zebra '||$4,'type','relates')))`, w.tid, writer, w.ids["TA"], key); err != nil {
 				return err
 			}
 		}
