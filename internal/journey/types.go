@@ -37,6 +37,7 @@ type Journey struct {
 	Stage                string            `json:"stage"`
 	StageSource          string            `json:"stage_source"`
 	Imported             bool              `json:"imported"`
+	Disposable           bool              `json:"disposable"`
 	Stages               []JourneyStage    `json:"stages"`
 	NextAction           JourneyNextAction `json:"next_action"`
 	RequirementsRevision int64             `json:"requirements_revision"`

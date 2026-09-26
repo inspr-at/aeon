@@ -26,6 +26,7 @@ type eventSnap struct {
 	Revision                   int64    `json:"revision"`
 	Decision                   string   `json:"decision"`
 	BriefConfirmed             bool     `json:"brief_confirmed"`
+	Disposable                 bool     `json:"disposable"`
 	RequirementsRevision       int64    `json:"requirements_revision"`
 	AgreedRequirementsRevision int64    `json:"agreed_requirements_revision"`
 	CurrentReleaseID           *string  `json:"current_release_id"`
@@ -267,6 +268,9 @@ func loadFacts(ctx context.Context, tx pgx.Tx, projectID string, lockRelease boo
 	}
 	if f.NodeKey == "" || f.ProjectKey == "" || f.TenantSlug == "" {
 		return facts{}, fail(404, "project not found")
+	}
+	if err := tx.QueryRow(ctx, `SELECT EXISTS(SELECT 1 FROM journey_disposable_projects WHERE project_node_id=$1::uuid)`, projectID).Scan(&f.Disposable); err != nil {
+		return facts{}, err
 	}
 	return f, nil
 }
@@ -821,6 +825,7 @@ func snapFrom(f facts, view Journey, action, approvalID, cap, reason string, sup
 		Revision:                   f.Revision,
 		Decision:                   f.Decision,
 		BriefConfirmed:             f.BriefConfirmed,
+		Disposable:                 f.Disposable,
 		RequirementsRevision:       f.RequirementsRevision,
 		AgreedRequirementsRevision: f.AgreedRequirementsRevision,
 		CurrentReleaseID:           view.CurrentReleaseID,

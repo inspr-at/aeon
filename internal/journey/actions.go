@@ -91,6 +91,13 @@ func (m *Module) setProfile(ctx context.Context, p tenant.Principal, projectID s
 }
 
 func (m *Module) act(ctx context.Context, p tenant.Principal, projectID string, in actionWrite) (Journey, error) {
+	return m.actWithMode(ctx, p, projectID, in, false)
+}
+
+// actWithMode keeps operator seeding on the same revision, receipt, projection
+// and event path as person actions. The seed mode is reachable only from the
+// host CLI after the disposable and development guards.
+func (m *Module) actWithMode(ctx context.Context, p tenant.Principal, projectID string, in actionWrite, seed bool) (Journey, error) {
 	if err := validateAction(in); err != nil {
 		return Journey{}, err
 	}
@@ -100,8 +107,21 @@ func (m *Module) act(ctx context.Context, p tenant.Principal, projectID string, 
 	}
 	var out Journey
 	err = m.inTenant(ctx, m.pool, p.TenantID, func(tx pgx.Tx) error {
-		if err := requirePerson(ctx, tx, p); err != nil {
-			return err
+		if seed {
+			if in.Action != "open_first_release" && in.Action != "start_build" && in.Action != "mark_candidate" {
+				return fail(http.StatusForbidden, "operator seed cannot perform a person decision")
+			}
+			var operator bool
+			if err := tx.QueryRow(ctx, `SELECT EXISTS(SELECT 1 FROM principals WHERE id=$1::uuid AND kind='agent' AND 'operator'=ANY(roles))`, p.ID).Scan(&operator); err != nil {
+				return err
+			}
+			if !operator {
+				return fail(http.StatusForbidden, "operator principal required")
+			}
+		} else {
+			if err := requirePerson(ctx, tx, p); err != nil {
+				return err
+			}
 		}
 		if err := ensureJourney(ctx, tx, p, projectID); err != nil {
 			return err
@@ -128,6 +148,9 @@ func (m *Module) act(ctx context.Context, p tenant.Principal, projectID string, 
 		if err != nil {
 			return err
 		}
+		if seed && !before.Disposable {
+			return fail(http.StatusForbidden, "project is not disposable")
+		}
 		if before.Revision != in.ExpectedRevision {
 			return fail(http.StatusConflict, "journey revision is stale")
 		}
@@ -143,14 +166,16 @@ func (m *Module) act(ctx context.Context, p tenant.Principal, projectID string, 
 				return err
 			}
 		}
-		if in.Action != "reject_candidate" && !view.NextAction.Available {
+		seedGate := seed && (in.Action == "start_build" && view.NextAction.Reason == reasonBuildGate ||
+			in.Action == "mark_candidate" && view.NextAction.Reason == reasonCompletionGate)
+		if in.Action != "reject_candidate" && !view.NextAction.Available && !seedGate {
 			msg := view.NextAction.Reason
 			if msg == "" {
 				msg = "that action is not available"
 			}
 			return fail(http.StatusConflict, msg)
 		}
-		cap, superseded, err := applyAction(ctx, tx, p, before, in)
+		cap, superseded, err := applyAction(ctx, tx, p, before, in, seed)
 		if err != nil {
 			return err
 		}
@@ -160,9 +185,13 @@ func (m *Module) act(ctx context.Context, p tenant.Principal, projectID string, 
 		}
 		adjustFacts(&after, in.Action)
 		next := derive(after)
-		eventID, err := writeEvent(ctx, tx, p, projectID, eventType(in.Action),
+		kind, action := eventType(in.Action), in.Action
+		if seed {
+			kind, action = "journey.seed_"+in.Action, "seed:"+in.Action
+		}
+		eventID, err := writeEvent(ctx, tx, p, projectID, kind,
 			snapFrom(before, view, "", "", "", "", nil),
-			snapFrom(after, next, in.Action, ptrVal(in.ApprovalRequestID), cap, ptrVal(in.Reason), superseded))
+			snapFrom(after, next, action, ptrVal(in.ApprovalRequestID), cap, ptrVal(in.Reason), superseded))
 		if err != nil {
 			return err
 		}
@@ -244,7 +273,7 @@ func pinRelease(f facts, in actionWrite) error {
 	return nil
 }
 
-func applyAction(ctx context.Context, tx pgx.Tx, p tenant.Principal, f facts, in actionWrite) (string, []string, error) {
+func applyAction(ctx context.Context, tx pgx.Tx, p tenant.Principal, f facts, in actionWrite, seed bool) (string, []string, error) {
 	switch in.Action {
 	case "confirm_brief":
 		return "", nil, confirmBrief(ctx, tx, f, in)
@@ -254,11 +283,11 @@ func applyAction(ctx context.Context, tx pgx.Tx, p tenant.Principal, f facts, in
 	case "reopen":
 		return "", nil, reopen(ctx, tx, p, f, in)
 	case "start_build":
-		return "", nil, startBuild(ctx, tx, p, f, in)
+		return "", nil, startBuild(ctx, tx, p, f, in, seed)
 	case "open_first_release":
 		return "", nil, openFirstRelease(ctx, tx, p, f, in)
 	case "mark_candidate":
-		return "", nil, markCandidate(ctx, tx, p, f, in)
+		return "", nil, markCandidate(ctx, tx, p, f, in, seed)
 	case "approve_candidate":
 		return "", nil, decideCandidate(ctx, tx, p, f, in, "deploying")
 	case "reject_candidate":
@@ -349,12 +378,14 @@ func reopen(ctx context.Context, tx pgx.Tx, p tenant.Principal, f facts, in acti
 	return insertGate(ctx, tx, p.TenantID, f.ProjectID, "", GateShape, ptrVal(in.ApprovalRequestID))
 }
 
-func startBuild(ctx context.Context, tx pgx.Tx, p tenant.Principal, f facts, in actionWrite) error {
+func startBuild(ctx context.Context, tx pgx.Tx, p tenant.Principal, f facts, in actionWrite, seed bool) error {
 	if f.Release == nil {
 		return fail(http.StatusConflict, reasonNoRelease)
 	}
-	if err := requireGate(ctx, tx, p.ID, ptrVal(in.ApprovalRequestID), ScopeBuild, f.Release.ID); err != nil {
-		return err
+	if !seed {
+		if err := requireGate(ctx, tx, p.ID, ptrVal(in.ApprovalRequestID), ScopeBuild, f.Release.ID); err != nil {
+			return err
+		}
 	}
 	tag, err := tx.Exec(ctx, `
 		UPDATE journey_releases
@@ -370,6 +401,9 @@ func startBuild(ctx context.Context, tx pgx.Tx, p tenant.Principal, f facts, in 
 	}
 	if _, err := bumpProject(ctx, tx, f.ProjectID, f.Revision); err != nil {
 		return err
+	}
+	if seed {
+		return nil
 	}
 	return insertGate(ctx, tx, p.TenantID, f.ProjectID, f.Release.ID, GateBuild, ptrVal(in.ApprovalRequestID))
 }
@@ -392,12 +426,14 @@ func openFirstRelease(ctx context.Context, tx pgx.Tx, p tenant.Principal, f fact
 	return err
 }
 
-func markCandidate(ctx context.Context, tx pgx.Tx, p tenant.Principal, f facts, in actionWrite) error {
+func markCandidate(ctx context.Context, tx pgx.Tx, p tenant.Principal, f facts, in actionWrite, seed bool) error {
 	if f.Release == nil {
 		return fail(http.StatusConflict, reasonNoRelease)
 	}
-	if err := requireGate(ctx, tx, p.ID, ptrVal(in.ApprovalRequestID), ScopeBuild, f.Release.ID); err != nil {
-		return err
+	if !seed {
+		if err := requireGate(ctx, tx, p.ID, ptrVal(in.ApprovalRequestID), ScopeBuild, f.Release.ID); err != nil {
+			return err
+		}
 	}
 	rows, err := tx.Query(ctx, `SELECT n.id FROM journey_tickets t JOIN nodes n ON n.tenant_id=t.tenant_id AND n.id=t.ticket_node_id WHERE t.release_node_id=$1::uuid AND n.deleted_at IS NULL ORDER BY n.id FOR SHARE OF n`, f.Release.ID)
 	if err != nil {
@@ -432,6 +468,9 @@ func markCandidate(ctx context.Context, tx pgx.Tx, p tenant.Principal, f facts, 
 	}
 	if _, err := bumpProject(ctx, tx, f.ProjectID, f.Revision); err != nil {
 		return err
+	}
+	if seed {
+		return nil
 	}
 	return insertGate(ctx, tx, p.TenantID, f.ProjectID, f.Release.ID, GateBuild, ptrVal(in.ApprovalRequestID))
 }

@@ -185,4 +185,17 @@
 // writer, R2 approvals and httpapi.Module. Each module tests tenant isolation,
 // authorization, optimistic revision, idempotency, event atomicity and stale
 // evidence. The coordinator alone mounts modules and conducts release QA.
+//
+// AEON-188 adds an explicit read-only disposable flag to the Journey document.
+// The coordinator wires RunOperator into `aeon journey`; the host-only commands
+// are `mark-disposable --tenant SLUG --project KEY` and
+// `seed --tenant SLUG --project KEY --to-stage build|candidate|deploy`.
+// Both require AEON_ENV=dev. MarkDisposable appends an operator event and
+// refuses deployed or released projects. SeedDisposable uses the normal
+// journey revision, receipt and transition path for release opening, build
+// start and candidate marking, with an explicit audited build-gate waiver on
+// disposable projects. It cannot create requirements, complete tickets or
+// decide candidate/deploy gates. A person still approves those gates through
+// the normal UI. An unmet work prerequisite rolls the seed transaction back;
+// a pending human gate commits preparation and reports the pending action.
 package journey
