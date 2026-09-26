@@ -47,6 +47,27 @@ async function ready(page: Page) {
   await expect(page.locator('.kg-state')).toHaveCount(0)
 }
 
+async function holdNextSessionCheck(page: Page) {
+  let entered!: () => void, release!: () => void
+  const requested = new Promise<void>(resolve => { entered = resolve })
+  const allowed = new Promise<void>(resolve => { release = resolve })
+  let held = false
+  await page.route('**/api/me', async route => {
+    if (!held) { held = true; entered(); await allowed }
+    await route.fallback()
+  })
+  return { requested, release }
+}
+
+async function recordCancelledNavigations(page: Page) {
+  await page.evaluate(async () => {
+    const { router } = await import('/src/router.ts')
+    const failures: number[] = []
+    Object.assign(window, { navigationFailures: failures })
+    router.afterEach((_to, _from, failure) => { if (failure) failures.push(failure.type) })
+  })
+}
+
 test('graph toggle and filters preserve the URL; selection, keyboard open and history work', async ({ page }) => {
   const loaded: string[] = []
   page.on('request', request => loaded.push(new URL(request.url()).pathname))
@@ -113,6 +134,37 @@ test('below the docking width the graph keeps its own selection card', async ({ 
   await toggle(page, 'Entries').click()
   await expect(page).toHaveURL(/\/knowledge$/)
   await expect(page.locator('.k-row')).toHaveCount(8)
+})
+
+test('a competing graph selection cannot cancel the switch to Entries on a narrow screen', async ({ page }) => {
+  await page.setViewportSize({ width: 1100, height: 800 })
+  await setup(page)
+  await page.goto('/p/PHAROS/knowledge?mode=graph'); await ready(page)
+  await recordCancelledNavigations(page)
+  const check = await holdNextSessionCheck(page)
+  await page.evaluate(() => document.querySelector<HTMLButtonElement>('[aria-label="Knowledge display"] [aria-label="Entries"]')!.click())
+  await check.requested
+  await page.evaluate(() => document.querySelector<HTMLElement>('.kg-canvas')!.dispatchEvent(new KeyboardEvent('keydown', { key: 'ArrowRight', bubbles: true })))
+  check.release()
+  await expect(page).toHaveURL('/p/PHAROS/knowledge')
+  await expect(page.locator('.k-row')).toHaveCount(8)
+  await expect(canvas(page)).toHaveCount(0)
+  expect(await page.evaluate(() => (window as unknown as { navigationFailures: number[] }).navigationFailures)).toContain(8)
+})
+
+test('a cancelled filter write follows a graph selection without losing the filter', async ({ page }) => {
+  await page.setViewportSize({ width: 1100, height: 800 })
+  await setup(page)
+  await page.goto('/p/PHAROS/knowledge?mode=graph'); await ready(page)
+  await recordCancelledNavigations(page)
+  const check = await holdNextSessionCheck(page)
+  await page.getByRole('searchbox', { name: 'Search knowledge in Pharos' }).fill('Deploy')
+  await check.requested
+  await page.evaluate(() => document.querySelector<HTMLElement>('.kg-canvas')!.dispatchEvent(new KeyboardEvent('keydown', { key: 'ArrowRight', bubbles: true })))
+  check.release()
+  await expect(page).toHaveURL(/\/knowledge\?(?=.*mode=graph)(?=.*q=Deploy)(?=.*entry=)/)
+  await expect(page.locator('.kg-results')).toContainText('1 match')
+  expect(await page.evaluate(() => (window as unknown as { navigationFailures: number[] }).navigationFailures)).toContain(8)
 })
 
 test('selection deep links survive reload, retheme, and dimension changes', async ({ page }) => {

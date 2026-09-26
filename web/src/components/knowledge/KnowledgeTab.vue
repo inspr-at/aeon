@@ -6,6 +6,7 @@ import { brand } from '../../lib/brand'
 import { DOCK_MEDIA, SORTS, TYPES, entryParam, entryPath, highlightWords, kindToken, statusLabel, type KnowledgeEntry, type KnowledgeItem, type KnowledgeStatus, type KnowledgeType, type SortBy } from '../../lib/knowledge'
 import { STATUS_VIEWS, type KnowledgeFilters, type KnowledgeState, type StatusView } from '../../lib/useKnowledge'
 import { toast } from '../../lib/toast'
+import { settledNavigation } from '../../lib/navigation'
 import { absoluteTime, plural, relativeTime } from '../../lib/work'
 import AppIcon from '../AppIcon.vue'
 import FloatingPanel from '../work/FloatingPanel.vue'
@@ -32,18 +33,27 @@ const graphMode = computed(() => route.query.mode === 'graph')
 const graph = ref<{ focus: () => void }>()
 // A selection carries over between the two displays where the pane can show it; on a narrow
 // screen going back to Entries drops it, which would otherwise open the entry's own page.
-function setMode(graph: boolean) {
+let modeIntent = 0
+async function setMode(graph: boolean) {
+  const intent = ++modeIntent
   // Width at the click, not the last resize event: a stale "wide" flag keeps
   // ?entry= on a narrow screen, and the route guard then opens the entry page.
   const go = () => {
     const wide = window.matchMedia(DOCK_MEDIA).matches
     return router.replace({ query: { ...route.query, mode: graph ? 'graph' : undefined, entry: graph || wide ? route.query.entry : undefined } })
   }
-  void go().then(failure => {
-    // A selection replace can cancel this one. Retry once, still on the list.
-    if (!isNavigationFailure(failure, NavigationFailureType.aborted) || !route.path.endsWith('/knowledge')) return
-    void go()
-  })
+  let retriedAbort = false
+  while (intent === modeIntent && route.path.endsWith('/knowledge')) {
+    const settled = settledNavigation(router)
+    let failure
+    try { failure = await go() } catch (error) { settled.stop(); throw error }
+    if (isNavigationFailure(failure, NavigationFailureType.cancelled)) await settled.promise
+    else settled.stop()
+    if (intent !== modeIntent || !route.path.endsWith('/knowledge')) return
+    if (isNavigationFailure(failure, NavigationFailureType.cancelled)) continue
+    if (isNavigationFailure(failure, NavigationFailureType.aborted) && !retriedAbort) { retriedAbort = true; continue }
+    return
+  }
 }
 // The page keeps the display (?mode=graph) and the docked entry (?entry=) while filters change.
 function updateFilters(patch: Partial<KnowledgeFilters>) { emit('update', patch) }

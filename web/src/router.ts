@@ -4,6 +4,8 @@ import { createRouter, createWebHistory } from 'vue-router'
 import { setPageTitle } from './lib/brand'
 import { useProjects } from './stores/projects'
 import { useSession } from './stores/session'
+import { sessionEnded } from './lib/api'
+import { takeSignInReturn } from './lib/signInReturn'
 import ProjectsView from './views/ProjectsView.vue'
 import SignInView from './views/SignInView.vue'
 import NotFoundView from './views/NotFoundView.vue'
@@ -90,6 +92,18 @@ export const router = createRouter({
   ],
 })
 
+sessionEnded.handler = path => {
+  const session = useSession()
+  session.invalidate()
+  // A /me check in the guard owns its redirect, including the destination that
+  // was being attempted. Other API calls can arrive from raw api() consumers.
+  if (path === '/me') return
+  const current = router.currentRoute.value
+  if (current.path !== '/signin') {
+    void router.replace({ path: '/signin', query: { error: 'expired', return: current.fullPath } })
+  }
+}
+
 // Overlapping checks would race each other and the later failure could clear a
 // session the earlier one had just confirmed.
 let refreshing: Promise<void> | null = null
@@ -100,16 +114,21 @@ function refreshSession() {
 router.beforeEach(async (to, from) => {
   if (to.meta.public) return true
   const session = useSession()
+  // A 401 or sign-out is authoritative for this tab until an explicit sign-in.
+  // A later /me response must not silently reauthorize a revoked page.
+  if (session.requiresSignIn) return to.path === '/signin' ? true : { path: '/signin', query: { error: 'expired', return: to.fullPath } }
   const wasSignedIn = !!session.identity
-  // The page is already showing, so the session was checked to get here. Another
-  // round trip blocks the address until it returns; under load that return loses
-  // to a later navigation, or times out and replaces the page.
-  if (wasSignedIn && from.matched.length > 0) return
   await refreshSession()
   if (session.error) return true // The shell shows a retry screen, never protected content.
   // Losing a session without signing out means it expired; say so on the sign-in page.
-  if (!session.identity && to.path !== '/signin') return wasSignedIn ? { path: '/signin', query: { error: 'expired' } } : '/signin'
+  if (!session.identity && to.path !== '/signin') return wasSignedIn
+    ? { path: '/signin', query: { error: 'expired', return: to.fullPath } }
+    : '/signin'
   if (session.identity && to.path === '/signin') return '/'
+  if (session.identity && to.path === '/' && !from.matched.length) {
+    const returnPath = takeSignInReturn()
+    if (returnPath !== '/') return returnPath
+  }
 })
 // A new page names the tab; a query change (filters, the release sheet) keeps the page's own title.
 router.afterEach((to, from) => { if (to.path !== from.path || !from.matched.length) setPageTitle(String(to.meta.title ?? '')) })

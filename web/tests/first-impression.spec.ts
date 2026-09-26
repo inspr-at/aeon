@@ -94,7 +94,7 @@ test.describe('sign-in', () => {
     await expect(page.getByRole('list', { name: 'Projects' })).toBeVisible()
     await page.route('**/api/me', route => route.fulfill({ status: 401, json: { error: 'unauthorized', dev_mode: false } }))
     await page.getByRole('link', { name: /Pharos/ }).first().click()
-    await expect(page).toHaveURL('/signin?error=expired')
+    await expect(page).toHaveURL('/signin?error=expired&return=/p/PHAROS')
     await expect(page.getByRole('alert')).toContainText('Your session ended')
   })
 

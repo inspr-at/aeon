@@ -475,6 +475,7 @@ function beforeUnload(event: BeforeUnloadEvent) {
   event.returnValue = ''
 }
 onBeforeRouteLeave(async to => {
+  if (to.path === '/signin' && identity.requiresSignIn) return true
   const sameQuote = to.path === `/business/quotes/${props.quoteId}` || (to.path === '/business/quotes' && to.query.quote === props.quoteId)
   if (sameQuote || !hasLocalWork()) return true
   const quote = live.value
