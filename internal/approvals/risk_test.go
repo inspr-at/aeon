@@ -17,7 +17,7 @@ func TestApprovalRiskProjection(t *testing.T) {
 	f := newFixture(t)
 	// Expand only this fixture key; requests still pass the real scope ceiling.
 	err := db.InTenant(dbtest.Seed(t.Context()), f.db.App, f.tenantA, func(tx pgx.Tx) error {
-		_, err := tx.Exec(t.Context(), `UPDATE agent_keys SET scopes=ARRAY['nodes','harness','release','run','journey'] WHERE principal_id=$1::uuid AND scopes=ARRAY['run','nodes.read']::text[]`, f.agentA.ID)
+		_, err := tx.Exec(t.Context(), `UPDATE agent_keys SET scopes=ARRAY['nodes','harness','release','run','journey','approvals.read'] WHERE principal_id=$1::uuid AND scopes=ARRAY['run','nodes.read','approvals.read','harness.read']::text[]`, f.agentA.ID)
 		return err
 	})
 	if err != nil {

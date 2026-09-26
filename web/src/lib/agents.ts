@@ -41,7 +41,7 @@ export interface AgentRun {
   started_at?: string | null; ended_at?: string | null; created_at: string
 }
 export interface Approval {
-  id: string; agent_principal_id: string; scope: string; resource_kind: 'tenant' | 'node' | 'run'
+  id: string; agent_principal_id: string; agent_name?: string | null; scope: string; resource_kind: 'tenant' | 'node' | 'run'
   resource_id?: string | null; run_id?: string | null; rationale: string; expires_at: string; proposed_at: string
   decision: 'approved' | 'denied' | null; decided_by_principal_id?: string | null
   risk?: 'low' | 'medium' | 'high'

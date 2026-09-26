@@ -55,7 +55,7 @@ export function agentData(world: AgentWorld) {
   ]
   // Risk as the server computes it (B7): tenant-wide or control/deploy/delete is high, reads low, the rest medium.
   const risk = (scope: string, kind: string) => kind === 'tenant' || /control|deploy|delete/.test(scope) ? 'high' : /\.read$/.test(scope) ? 'low' : 'medium'
-  const approval = (n: number, fields: Record<string, unknown>) => ({ id: id('a9', n), resource_id: null, run_id: null, decision: null, decided_by_principal_id: null, ...fields, risk: risk(String(fields.scope), String(fields.resource_kind)) })
+  const approval = (n: number, fields: Record<string, unknown>) => ({ id: id('a9', n), agent_name: null as string | null, resource_id: null, run_id: null, decision: null, decided_by_principal_id: null, ...fields, risk: risk(String(fields.scope), String(fields.resource_kind)) })
   const approvals = world.empty ? [] : [
     approval(1, { agent_principal_id: agent(1), scope: 'harness.control', resource_kind: 'node', resource_id: pharos, rationale: 'Stop the Grok scout on csb1: it lost its heartbeat and still holds the fleet list lock.', expires_at: ahead(8), proposed_at: ago(4) }),
     approval(2, { agent_principal_id: agent(2), scope: 'run.claim', resource_kind: 'run', resource_id: id('70', 2), run_id: id('70', 2), rationale: 'Claim the restore run on the Codex Pro account; the Claude window is ahead of pace.', expires_at: ahead(38), proposed_at: ago(3) }),

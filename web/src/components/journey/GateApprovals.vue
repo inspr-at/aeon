@@ -46,7 +46,7 @@ function keys(event: KeyboardEvent, approval: Approval) {
   if (event.key === 'Enter' && !event.shiftKey) { event.preventDefault(); void submit(approval) }
   else if (event.key === 'Escape') { event.preventDefault(); event.stopPropagation(); cancel() }
 }
-const who = (approval: Approval) => agents.askerName(approval.agent_principal_id)
+const who = (approval: Approval) => agents.askerName(approval.agent_principal_id, approval.agent_name)
 const decidedBy = (approval: Approval) => approval.decided_by_principal_id && approval.decided_by_principal_id === props.me ? 'you' : 'someone else'
 </script>
 

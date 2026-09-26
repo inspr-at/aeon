@@ -199,12 +199,15 @@ export const useAgents = defineStore('agents', () => {
   const byAgent = (principalId: string) => views.value.filter(v => v.session.agent_principal_id === principalId)
   const forTicket = (nodeId: string) => views.value.filter(v => v.session.ticket_node_id === nodeId && v.status.group !== 'stopped')
   const recentRuns = (principalId: string) => (agentRuns.value[principalId] ?? []).map(id => runs.value[id]).filter(Boolean)
-  // Who asks: the agent's name from a session or message address, else a short id.
-  function askerName(principalId: string) {
+  // Who asks: a live session, then a message address, then the caller's fallback
+  // (the approval's agent_name), then a short id.
+  function askerName(principalId: string, fallbackName?: string | null) {
     const session = sessions.value.find(s => s.agent_principal_id === principalId)
     if (session) return { name: agentName(session, addresses.value), harness: harnessLabel(session.harness), sessionId: session.id }
     const address = addresses.value[principalId]
     if (address) { const [harness, name] = address.split(':'); return { name, harness: harnessLabel(harness), sessionId: '' } }
+    const fallback = fallbackName?.trim()
+    if (fallback) return { name: fallback, harness: '', sessionId: '' }
     return { name: `Agent ${principalId.slice(0, 8)}`, harness: '', sessionId: '' }
   }
   // Oldest first for reading; the server returns the newest 200.

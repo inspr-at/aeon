@@ -25,6 +25,11 @@
 // read-only operations (including dotted read refinements) are low; all other
 // requests are medium. Risk is presentation metadata and grants no authority.
 //
+// AEON-171 adds agent_name to approval responses only when the caller has
+// members.read or harness.read at the approval's workspace or project scope.
+// The field is omitted otherwise. Project-scoped readers see only approvals
+// in projects where they hold approvals.read; event snapshots omit the name.
+//
 // Every read and write runs inside db.InTenant. The mutation and its event
 // share that transaction via events.Append. LiveGrant checks expiry,
 // revocation and the acting key's ceiling; callers use it inside the
