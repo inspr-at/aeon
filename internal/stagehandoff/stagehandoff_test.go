@@ -5,8 +5,10 @@ import (
 	"context"
 	"crypto/sha256"
 	"encoding/hex"
+	"encoding/json"
 	"errors"
 	"net/http"
+	"net/http/httptest"
 	"sync"
 	"testing"
 	"time"
@@ -21,6 +23,45 @@ import (
 )
 
 const emptyDigest = "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855"
+
+func TestHandoffCreateAndGetUseStoredExpiry(t *testing.T) {
+	m, agent, project, release, _ := fixture(t)
+	base := time.Now().UTC().Truncate(time.Second).Add(1477845 * time.Nanosecond)
+	m.now = func() time.Time { return base }
+	handler := (&httpapi.Server{Modules: []httpapi.Module{m}}).Handler()
+	created := routedTestRequest(t, handler, agent, "", "/api/stage-handoffs", RequestWrite{
+		ProjectNodeID: project, ReleaseNodeID: release, Stage: "access", Operation: "prepare",
+		ExpectedJourneyRevision: 1, IdempotencyKey: "timestamp-roundtrip",
+	})
+	if created.Code != http.StatusCreated {
+		t.Fatalf("create: %d %s", created.Code, created.Body.String())
+	}
+	var handoff Handoff
+	if err := json.Unmarshal(created.Body.Bytes(), &handoff); err != nil {
+		t.Fatal(err)
+	}
+	read := httptest.NewRequest(http.MethodGet, "/api/stage-handoffs/"+handoff.ID, nil).
+		WithContext(tenant.WithPrincipal(t.Context(), fixturePerson(t, m, agent.TenantID)))
+	got := httptest.NewRecorder()
+	handler.ServeHTTP(got, read)
+	if got.Code != http.StatusOK {
+		t.Fatalf("get: %d %s", got.Code, got.Body.String())
+	}
+	var createFields, getFields map[string]json.RawMessage
+	if err := json.Unmarshal(created.Body.Bytes(), &createFields); err != nil {
+		t.Fatal(err)
+	}
+	if err := json.Unmarshal(got.Body.Bytes(), &getFields); err != nil {
+		t.Fatal(err)
+	}
+	if string(createFields["expires_at"]) != string(getFields["expires_at"]) {
+		t.Fatalf("create expires_at %s differs from GET %s", createFields["expires_at"], getFields["expires_at"])
+	}
+	want := base.Add(30 * time.Minute).Truncate(time.Microsecond)
+	if !handoff.ExpiresAt.Equal(want) || handoff.ExpiresAt.Nanosecond()%1000 != 0 {
+		t.Fatalf("stored expires_at = %s, want %s", handoff.ExpiresAt, want)
+	}
+}
 
 func TestHandoffInstallationBoundary(t *testing.T) {
 	m, p, project, release, _ := fixture(t)
