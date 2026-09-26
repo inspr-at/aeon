@@ -99,15 +99,25 @@ Required evidence before the window (AEON operator, consumer owners):
    stage/reporter adapters and pins by PR/check path. Exercise one safe stage
    evidence roundtrip each. Record request IDs and resulting AEON events.
    A failed consumer roundtrip closes the switch gate.
-   Before step 5, every consumer's classic rollback config (Janus Flow host
-   classic v1 on csb1, the Janus reporter, Pharos, OPS hostd) must name the
-   read-only classic origin https://pml.barta.cm, not https://pm.barta.cm:
-   after the route change pm.barta.cm answers from AEON, so a rollback to
-   pm.barta.cm would not reach classic. The Janus runbook is JANUS-481
-   comment 12656.
+   Before step 5, split consumer rollback by direction (paths on OPS-231):
+   - Classic readers (e.g. Janus Flow host classic v1, csb1
+     janus-flow-host.nix paimosOrigin; confirm GET/HEAD only) must name the
+     read-only classic origin https://pml.barta.cm: after the route change
+     pm.barta.cm answers from AEON.
+   - Classic writers cannot roll back to pml.barta.cm (GET/HEAD only by
+     design, OPS-233): the hostd classic notifier (POST
+     /api/machine-notifier/messages, pm.barta.cm hard-coded in
+     notification_delivery.py) and the agentd report URL on mbp2607. Their
+     rollback is reverting step 5 (pm.barta.cm back to classic, freeze
+     lifted) or their AEON path (OPS-232).
+   The Janus runbook is JANUS-481 comment 12656.
 
 5. Routing operator + site owner — after steps 2–4 pass, change only the
-   approved DNS/Flow routes and site links. Verify OIDC callback, old
+   approved DNS/Flow routes and site links. Remove or rebind classic's own
+   Traefik label traefik.http.routers.ppm.rule=Host(`pm.barta.cm`) (csb1
+   compose spec) in the same change, or classic and AEON both claim
+   pm.barta.cm; classic stays reachable only through pml.barta.cm (GET/HEAD
+   guard). Verify OIDC callback, old
    bookmarks, API routes and each release pin. Review and merge the naming
    sweep branch; the coordinator alone performs the separately approved
    GitHub repository renames. brand.json retains the AEON product brand.
