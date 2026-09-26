@@ -210,6 +210,14 @@ attachment = call('POST', f"/api/nodes/{project['id']}/attachments", body, conte
 assert call('GET', f"/api/attachments/{attachment['id']}/content") == content
 print('dev: attachment upload and download OK')
 
+# Every web action is gated by can(), which reads /api/me/permissions. If the
+# authz module is not mounted the whole UI turns read-only (P1, 2026-09-26).
+perms = call('GET', '/api/me/permissions')
+assert 'nodes.write' in perms['workspace']['permissions'], perms
+members = call('GET', '/api/members')
+assert members['people'], members
+print('dev: permissions and members served OK')
+
 body, content_type = multipart({'file': ('avatar.png', 'image/png', png()),
     'crop': ('', 'application/json', b'{"x":0,"y":0,"size":2}')})
 # The runtime image must resolve IANA time zones (tzdata is embedded in the binary).
