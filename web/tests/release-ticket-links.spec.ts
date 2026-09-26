@@ -137,15 +137,18 @@ test('a lost project access takes the link and the open ticket away at the next 
 })
 
 test('another person or workspace starts without the earlier answers', async ({ page }) => {
-  const { calls } = await open(page)
+  const { calls, history } = await open(page)
   await expect(chips(page).getByRole('link')).toHaveCount(1)
   const asked = calls.filter(call => call.path === '/api/nodes/lookup' && call.query.has('keys')).length
   let lookups = 0
   await page.route('**/api/nodes/lookup**', route => { lookups++; return route.fulfill({ json: { items: [] } }) })
   await page.route('**/api/me', route => route.fulfill({ json: { principal: { id: '33333333-3333-4333-8333-333333333333', name: 'Ola Nordmann', kind: 'person', roles: ['member'] }, tenant: { id: 't2', name: 'Other Studio' } } }))
-  // Any navigation refreshes the session: j and k step away and back.
-  await page.keyboard.press('j')
-  await page.keyboard.press('k')
+  // Any navigation refreshes the session: step to the next release and back, one settled step at a time.
+  const rows = sheet(page).getByRole('listbox', { name: 'Releases, newest first' }).getByRole('option')
+  await rows.nth(2).click()
+  await expect(page).toHaveURL(`/releases/${history.releases[2].version}`)
+  await rows.nth(1).click()
+  await expect(page).toHaveURL(`/releases/${history.releases[1].version}`)
   await expect(chips(page).getByText('PHAROS-11', { exact: true })).toHaveJSProperty('tagName', 'SPAN')
   await expect(sheet(page).getByRole('link', { name: new RegExp(TITLE) })).toHaveCount(0)
   expect(lookups).toBeGreaterThan(0)
