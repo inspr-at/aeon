@@ -58,6 +58,86 @@ func (r *Remote) Node(ctx context.Context, id string) (Node, error) {
 	return node, err
 }
 
+// ProjectForNode resolves the work order's current project through the public
+// key lookup. Registration then validates the same binding on the server.
+func (r *Remote) ProjectForNode(ctx context.Context, key string) (string, error) {
+	var page struct {
+		Items []struct {
+			Key       string `json:"key"`
+			ProjectID string `json:"project_id"`
+		} `json:"items"`
+	}
+	if err := r.Client.Do(ctx, "GET", "/api/nodes/lookup?keys="+url.QueryEscape(key), nil, &page); err != nil {
+		return "", err
+	}
+	if len(page.Items) != 1 || page.Items[0].Key != key || page.Items[0].ProjectID == "" {
+		return "", errors.New("work order project unavailable")
+	}
+	return page.Items[0].ProjectID, nil
+}
+
+func harnessPath(s HarnessSession) string {
+	return "/api/projects/" + url.PathEscape(s.ProjectID) + "/harness-sessions/" + url.PathEscape(s.ID)
+}
+
+func (r *Remote) RegisterHarness(ctx context.Context, s HarnessSession, agentID, runID, orderID, harness, host string, caps []string) (HarnessSession, error) {
+	var result HarnessSession
+	err := r.Client.Do(ctx, "POST", "/api/projects/"+url.PathEscape(s.ProjectID)+"/harness-sessions", map[string]any{
+		"agent_principal_id": agentID, "run_id": runID, "ticket_node_id": orderID,
+		"work_order_id": orderID, "harness": harness, "host": host,
+		"management_mode": "managed", "role": "worker", "work_shape": "ship",
+		"advertised_capabilities": caps, "harness_session_ref": s.ID, "worker_lease": s.Lease,
+	}, &result)
+	if err != nil {
+		return HarnessSession{}, err
+	}
+	if result.ID == "" || result.ProjectID != s.ProjectID {
+		return HarnessSession{}, errors.New("harness registration binding mismatch")
+	}
+	result.Lease = s.Lease
+	return result, nil
+}
+
+func (r *Remote) harnessWorker(ctx context.Context, s HarnessSession, suffix string, body, dest any) error {
+	return r.Client.DoWithHeaders(ctx, "POST", harnessPath(s)+suffix, body, dest,
+		map[string]string{"X-Aeon-Worker-Lease": s.Lease})
+}
+
+func (r *Remote) HeartbeatHarness(ctx context.Context, s HarnessSession, phase string) error {
+	return r.harnessWorker(ctx, s, "/heartbeat", map[string]any{
+		"phase": phase, "activity": "busy", "activity_sequence": 1,
+	}, nil)
+}
+
+func (r *Remote) YieldHarness(ctx context.Context, s HarnessSession) ([]HarnessControl, error) {
+	var result struct {
+		Controls []HarnessControl `json:"controls"`
+	}
+	err := r.harnessWorker(ctx, s, "/yield", struct{}{}, &result)
+	return result.Controls, err
+}
+
+func (r *Remote) DrainHarness(ctx context.Context, s HarnessSession) ([]HarnessDelivery, error) {
+	var result []HarnessDelivery
+	err := r.harnessWorker(ctx, s, "/drain", struct{}{}, &result)
+	return result, err
+}
+
+func (r *Remote) CompleteHarnessControl(ctx context.Context, s HarnessSession, id, outcome, reason string) error {
+	return r.harnessWorker(ctx, s, "/controls/"+url.PathEscape(id)+"/complete",
+		map[string]string{"outcome": outcome, "reason": reason}, nil)
+}
+
+func (r *Remote) CompleteHarnessDelivery(ctx context.Context, s HarnessSession, d HarnessDelivery) error {
+	return r.harnessWorker(ctx, s, "/complete-delivery", map[string]any{
+		"delivery_id": d.ID, "cursor": d.Cursor, "effective_level": "simple",
+	}, nil)
+}
+
+func (r *Remote) StopHarness(ctx context.Context, s HarnessSession, reason string) error {
+	return r.harnessWorker(ctx, s, "/stop", map[string]string{"reason": reason}, nil)
+}
+
 func (r *Remote) WorkOrder(ctx context.Context, id string) (WorkOrder, error) {
 	var order WorkOrder
 	err := r.Client.Do(ctx, "GET", "/api/work-orders/"+url.PathEscape(id), nil, &order)
