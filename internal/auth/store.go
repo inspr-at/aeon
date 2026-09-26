@@ -587,21 +587,26 @@ func (m *Module) createAgentKey(ctx context.Context, p tenant.Principal, name, p
 	return rec, err
 }
 
-func (m *Module) grantJourneyScopes(ctx context.Context, tenantID, keyID, principalID string) error {
+func (m *Module) grantJourneyScopes(ctx context.Context, tenantID, keyID, principalID string, scopes []string) error {
 	return m.inTenant(ctx, m.pool, tenantID, func(tx pgx.Tx) error {
 		actorID, err := operatoractor.Ensure(ctx, tx, tenantID)
 		if err != nil {
 			return err
 		}
 		var before []string
-		if err := tx.QueryRow(ctx, `SELECT scopes FROM agent_keys WHERE id=$1::uuid AND principal_id=$2::uuid AND revoked_at IS NULL FOR UPDATE`, keyID, principalID).Scan(&before); err != nil {
+		var actualPrincipalID string
+		var expectedPrincipal any
+		if principalID != "" {
+			expectedPrincipal = principalID
+		}
+		if err := tx.QueryRow(ctx, `SELECT principal_id::text,scopes FROM agent_keys WHERE tenant_id=$1::uuid AND id=$2::uuid AND ($3::uuid IS NULL OR principal_id=$3::uuid) AND revoked_at IS NULL FOR UPDATE`, tenantID, keyID, expectedPrincipal).Scan(&actualPrincipalID, &before); err != nil {
 			if errors.Is(err, pgx.ErrNoRows) {
 				return errNotFound
 			}
 			return err
 		}
 		after := slices.Clone(before)
-		for _, scope := range []string{"journey.requirements", "journey.build"} {
+		for _, scope := range scopes {
 			if !slices.Contains(after, scope) {
 				after = append(after, scope)
 			}
@@ -609,13 +614,13 @@ func (m *Module) grantJourneyScopes(ctx context.Context, tenantID, keyID, princi
 		if slices.Equal(before, after) {
 			return nil
 		}
-		if _, err := tx.Exec(ctx, `UPDATE agent_keys SET scopes=$3::text[] WHERE id=$1::uuid AND principal_id=$2::uuid`, keyID, principalID, after); err != nil {
+		if _, err := tx.Exec(ctx, `UPDATE agent_keys SET scopes=$3::text[] WHERE id=$1::uuid AND principal_id=$2::uuid`, keyID, actualPrincipalID, after); err != nil {
 			return err
 		}
 		_, err = events.Append(ctx, tx, tenant.Principal{ID: actorID, TenantID: tenantID}, events.Change{
 			Type:   "agent_key.scopes_extended",
-			Before: map[string]any{"key_id": keyID, "principal_id": principalID, "scopes": before},
-			After:  map[string]any{"key_id": keyID, "principal_id": principalID, "scopes": after},
+			Before: map[string]any{"key_id": keyID, "principal_id": actualPrincipalID, "scopes": before},
+			After:  map[string]any{"key_id": keyID, "principal_id": actualPrincipalID, "scopes": after},
 		})
 		return err
 	})
